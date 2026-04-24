@@ -1,35 +1,70 @@
-// Stage 0 placeholder. Real chrome ports from designs/wallet-*.jsx in Stage 2.
-// Liquid-glass charcoal background per designs/design_handoff_monarch/README.md.
+// Stage 2 app shell.
+// Sidebar + topbar + page outlet, wrapped in <OperationsProvider> so any
+// page can route a write action through preview → auth → executing → done.
 
-const shellStyle: React.CSSProperties = {
-  minHeight: "100vh",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  background:
-    "radial-gradient(120% 120% at 50% 0%, rgba(168, 64, 220, 0.18) 0%, rgba(20, 18, 28, 1) 60%)",
-  color: "#F4F1FA",
-  fontFamily:
-    '"IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
-  fontSize: 18,
-  letterSpacing: "0.01em",
-};
+import { useEffect, useState } from "react";
+import { Sidebar } from "./components/Sidebar";
+import { Topbar } from "./components/Topbar";
+import { Activity } from "./pages/Activity";
+import { Home } from "./pages/Home";
+import { Settings } from "./pages/Settings";
+import { Tokens } from "./pages/Tokens";
+import { OperationsProvider } from "./operations/context";
+import "./styles/tokens.css";
+import "./styles/wallet.css";
+import type { Denom } from "./data/fixtures";
+import type { Route } from "./components/types";
 
-const cardStyle: React.CSSProperties = {
-  padding: "32px 40px",
-  borderRadius: 18,
-  background: "rgba(28, 24, 38, 0.55)",
-  border: "1px solid rgba(244, 241, 250, 0.08)",
-  backdropFilter: "blur(18px)",
-  WebkitBackdropFilter: "blur(18px)",
-  boxShadow:
-    "0 24px 60px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.04)",
-};
+const ROUTE_KEY = "wallet.route";
+const DENOM_KEY = "wallet.denom";
+
+function readRoute(): Route {
+  try {
+    const v = localStorage.getItem(ROUTE_KEY);
+    if (v === "home" || v === "tokens" || v === "activity" || v === "settings") return v;
+  } catch {
+    // localStorage unavailable — fall through.
+  }
+  return "home";
+}
+
+function readDenom(): Denom {
+  try {
+    const v = localStorage.getItem(DENOM_KEY);
+    if (v === "public" || v === "private") return v;
+  } catch {
+    // localStorage unavailable — fall through.
+  }
+  return "public";
+}
 
 export function App() {
+  const [route, setRoute] = useState<Route>(() => readRoute());
+  const [denom, setDenom] = useState<Denom>(() => readDenom());
+
+  useEffect(() => {
+    try { localStorage.setItem(ROUTE_KEY, route); } catch { /* ignore */ }
+  }, [route]);
+
+  useEffect(() => {
+    document.body.dataset.denom = denom;
+    try { localStorage.setItem(DENOM_KEY, denom); } catch { /* ignore */ }
+    // Tokens-only route: bounce out if user flipped to private.
+    if (denom === "private" && route === "tokens") setRoute("home");
+  }, [denom, route]);
+
   return (
-    <div style={shellStyle}>
-      <div style={cardStyle}>Monolythium Wallet — Desktop — scaffold v0.0.1</div>
-    </div>
+    <OperationsProvider>
+      <div className="w-app">
+        <Sidebar denom={denom} setDenom={setDenom} route={route} setRoute={setRoute} />
+        <Topbar route={route} />
+        <main className="w-main">
+          {route === "home" ? <Home denom={denom} goto={setRoute} /> : null}
+          {route === "tokens" ? <Tokens /> : null}
+          {route === "activity" ? <Activity denom={denom} /> : null}
+          {route === "settings" ? <Settings /> : null}
+        </main>
+      </div>
+    </OperationsProvider>
   );
 }
