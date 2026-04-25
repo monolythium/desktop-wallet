@@ -1,8 +1,17 @@
-// Stage 2 app shell.
+// Stage 3 app shell.
 // Sidebar + topbar + page outlet, wrapped in <OperationsProvider> so any
 // page can route a write action through preview → auth → executing → done.
+//
+// Boot order:
+//   1. Probe the OS keychain for PRIMARY_ACCOUNT.
+//   2. If `not_found` → render <Onboarding>; on completion, retry the probe.
+//   3. Otherwise → render the wallet shell.
+//
+// We tolerate non-Tauri runtimes (browser preview via `pnpm dev`) by
+// skipping the probe entirely and treating the wallet as already set up.
 
 import { useEffect, useState } from "react";
+import { Onboarding } from "./components/Onboarding";
 import { Sidebar } from "./components/Sidebar";
 import { Topbar } from "./components/Topbar";
 import { Activity } from "./pages/Activity";
@@ -10,6 +19,7 @@ import { Home } from "./pages/Home";
 import { Settings } from "./pages/Settings";
 import { Tokens } from "./pages/Tokens";
 import { OperationsProvider } from "./operations/context";
+import { KeychainCallError, PRIMARY_ACCOUNT, unlock } from "./sdk/keychain";
 import "./styles/tokens.css";
 import "./styles/wallet.css";
 import type { Denom } from "./data/fixtures";
@@ -17,6 +27,12 @@ import type { Route } from "./components/types";
 
 const ROUTE_KEY = "wallet.route";
 const DENOM_KEY = "wallet.denom";
+
+type BootState =
+  | { kind: "probing" }
+  | { kind: "needs_onboarding" }
+  | { kind: "ready" }
+  | { kind: "error"; message: string };
 
 function readRoute(): Route {
   try {
@@ -38,9 +54,46 @@ function readDenom(): Denom {
   return "public";
 }
 
+/**
+ * True iff we're running inside Tauri. The plain `pnpm dev` browser preview
+ * has no `__TAURI_INTERNALS__`; in that case we can't talk to the keychain
+ * and we skip the probe to keep the design preview viewable.
+ */
+function isTauri(): boolean {
+  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+}
+
 export function App() {
   const [route, setRoute] = useState<Route>(() => readRoute());
   const [denom, setDenom] = useState<Denom>(() => readDenom());
+  const [boot, setBoot] = useState<BootState>(() =>
+    isTauri() ? { kind: "probing" } : { kind: "ready" },
+  );
+
+  useEffect(() => {
+    if (boot.kind !== "probing") return;
+    let cancelled = false;
+    (async () => {
+      try {
+        await unlock(PRIMARY_ACCOUNT);
+        if (!cancelled) setBoot({ kind: "ready" });
+      } catch (cause) {
+        if (cancelled) return;
+        if (cause instanceof KeychainCallError && cause.cause.code === "not_found") {
+          setBoot({ kind: "needs_onboarding" });
+          return;
+        }
+        // Any other failure (locked keychain, missing libsecret) is
+        // recoverable by retrying — we still let the user into the shell
+        // because read-only views don't need a key. The OperationsDrawer
+        // re-runs the probe on every authorize.
+        setBoot({ kind: "ready" });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [boot.kind]);
 
   useEffect(() => {
     try { localStorage.setItem(ROUTE_KEY, route); } catch { /* ignore */ }
@@ -52,6 +105,16 @@ export function App() {
     // Tokens-only route: bounce out if user flipped to private.
     if (denom === "private" && route === "tokens") setRoute("home");
   }, [denom, route]);
+
+  if (boot.kind === "probing") {
+    return <BootSplash label="Checking keychain…" />;
+  }
+  if (boot.kind === "needs_onboarding") {
+    return <Onboarding onDone={() => setBoot({ kind: "ready" })} />;
+  }
+  if (boot.kind === "error") {
+    return <BootSplash label={boot.message} />;
+  }
 
   return (
     <OperationsProvider>
@@ -66,5 +129,16 @@ export function App() {
         </main>
       </div>
     </OperationsProvider>
+  );
+}
+
+function BootSplash({ label }: { label: string }) {
+  return (
+    <div className="w-onboarding">
+      <div className="w-onboarding__card" style={{ textAlign: "center" }}>
+        <div className="w-spin" style={{ margin: "0 auto 12px" }} />
+        <div style={{ color: "var(--w-text-2)", fontSize: 13 }}>{label}</div>
+      </div>
+    </div>
   );
 }

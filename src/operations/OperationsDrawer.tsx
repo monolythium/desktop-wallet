@@ -13,6 +13,7 @@
 // in `sdk/` and the keychain logic in Tauri commands, where they belong.
 
 import { useEffect, useState } from "react";
+import { KeychainCallError, PRIMARY_ACCOUNT, unlock } from "../sdk/keychain";
 import type {
   OperationDescriptor,
   OperationResult,
@@ -43,6 +44,12 @@ export function OperationsDrawer({ descriptor, onClose }: Props) {
   const [stage, setStage] = useState<OperationStage>("preview");
   const [result, setResult] = useState<OperationResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Auth-specific error state. We keep this separate from the global
+  // `error` so the Auth pane can show a "try again" hint without dropping
+  // the user into the terminal Error stage. Only `runExecute` failures
+  // promote into the Error stage.
+  const [authError, setAuthError] = useState<KeychainCallError | null>(null);
+  const [authBusy, setAuthBusy] = useState(false);
 
   // Esc closes the drawer except mid-execute (don't let users abandon a tx
   // we may have already broadcast).
@@ -61,10 +68,36 @@ export function OperationsDrawer({ descriptor, onClose }: Props) {
       void runExecute();
       return;
     }
+    setAuthError(null);
     setStage("auth");
   };
 
-  const advanceFromAuth = () => {
+  const advanceFromAuth = async () => {
+    // Stage 3 only wires the keychain path. Hardware + passkey panes stay
+    // banner-only for now — they bounce straight to executing so the
+    // existing demo descriptors keep working until Stage 4 lands.
+    if (descriptor.auth === "keychain") {
+      setAuthBusy(true);
+      setAuthError(null);
+      try {
+        // The drawer doesn't *use* the secret here — it just verifies the
+        // keychain unlock succeeded. The descriptor's `execute()` is the
+        // one that actually signs/broadcasts. That separation keeps key
+        // material out of React state entirely.
+        await unlock(PRIMARY_ACCOUNT);
+      } catch (cause) {
+        if (cause instanceof KeychainCallError) {
+          setAuthError(cause);
+        } else {
+          setAuthError(
+            new KeychainCallError({ code: "backend", message: String(cause) }),
+          );
+        }
+        setAuthBusy(false);
+        return;
+      }
+      setAuthBusy(false);
+    }
     void runExecute();
   };
 
@@ -112,7 +145,7 @@ export function OperationsDrawer({ descriptor, onClose }: Props) {
 
         <div className="w-drawer__body">
           {stage === "preview" ? <PreviewPane descriptor={descriptor} /> : null}
-          {stage === "auth" ? <AuthPane descriptor={descriptor} /> : null}
+          {stage === "auth" ? <AuthPane descriptor={descriptor} authError={authError} /> : null}
           {stage === "executing" ? <ExecutingPane descriptor={descriptor} /> : null}
           {stage === "done" && result ? <DonePane descriptor={descriptor} result={result} /> : null}
           {stage === "error" ? <ErrorPane error={error ?? "Unknown error"} /> : null}
@@ -129,9 +162,24 @@ export function OperationsDrawer({ descriptor, onClose }: Props) {
           ) : null}
           {stage === "auth" ? (
             <>
-              <button className="btn btn--ghost" onClick={() => setStage("preview")}>Back</button>
-              <button className="btn btn--primary" style={{ marginLeft: "auto" }} onClick={advanceFromAuth}>
-                {descriptor.auth === "hardware" ? "Confirm on device" : "Authorize"}
+              <button
+                className="btn btn--ghost"
+                onClick={() => setStage("preview")}
+                disabled={authBusy}
+              >
+                Back
+              </button>
+              <button
+                className="btn btn--primary"
+                style={{ marginLeft: "auto" }}
+                onClick={() => void advanceFromAuth()}
+                disabled={authBusy}
+              >
+                {authBusy
+                  ? "Unlocking…"
+                  : descriptor.auth === "hardware"
+                    ? "Confirm on device"
+                    : "Authorize"}
               </button>
             </>
           ) : null}
@@ -225,11 +273,20 @@ function PreviewPane({ descriptor }: { descriptor: OperationDescriptor }) {
   );
 }
 
-function AuthPane({ descriptor }: { descriptor: OperationDescriptor }) {
+function AuthPane({
+  descriptor,
+  authError,
+}: {
+  descriptor: OperationDescriptor;
+  authError: KeychainCallError | null;
+}) {
   if (descriptor.auth === "hardware") {
     return (
       <div className="w-banner">
         Confirm on your hardware device. The drawer will continue automatically when the device returns a signature.
+        <div style={{ marginTop: 6, fontSize: 11.5, color: "var(--w-text-3)" }}>
+          (Stage 4 wires the Ledger transport. This pane is banner-only for now.)
+        </div>
       </div>
     );
   }
@@ -237,13 +294,52 @@ function AuthPane({ descriptor }: { descriptor: OperationDescriptor }) {
     return (
       <div className="w-banner">
         A platform passkey prompt will open. Approve to continue.
+        <div style={{ marginTop: 6, fontSize: 11.5, color: "var(--w-text-3)" }}>
+          (Stage 4 wires the WebAuthn signer. This pane is banner-only for now.)
+        </div>
       </div>
     );
   }
+  if (authError) {
+    return <AuthErrorBanner error={authError} />;
+  }
   return (
     <div className="w-banner">
-      Click <b>Authorize</b> to release the signing key from the OS keychain. Stage 3 will wire the real
-      Tauri command; Stage 2 stops here in mock-mode.
+      Click <b>Authorize</b> to release the signing key from the OS keychain.
+      Your OS may prompt for Touch ID or your login password.
+    </div>
+  );
+}
+
+function AuthErrorBanner({ error }: { error: KeychainCallError }) {
+  // Each branch renders the same banner shell with a code-specific call to
+  // action. Keeping these in one place means the strings stay consistent
+  // when more error codes land.
+  const cause = error.cause;
+  let headline: string;
+  let detail: string;
+  switch (cause.code) {
+    case "not_found":
+      headline = "Wallet not set up on this device";
+      detail = `No keychain entry for ${cause.account}. Run onboarding to derive and store a signing key.`;
+      break;
+    case "user_cancelled":
+      headline = "Cancelled at the OS prompt";
+      detail = "The OS keychain prompt was dismissed. Click Authorize to retry.";
+      break;
+    case "invalid_argument":
+      headline = "Invalid keychain request";
+      detail = cause.message;
+      break;
+    case "backend":
+      headline = "Keychain unavailable";
+      detail = cause.message;
+      break;
+  }
+  return (
+    <div className="w-banner error">
+      <div style={{ fontWeight: 600, marginBottom: 4 }}>{headline}</div>
+      <div style={{ fontSize: 12, color: "var(--w-text-2)" }}>{detail}</div>
     </div>
   );
 }

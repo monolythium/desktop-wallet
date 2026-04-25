@@ -597,3 +597,44 @@ body[data-denom="private"] .w-nav__item.is-active::before {
   from { transform: translate(-50%, 8px); opacity: 0; }
   to   { transform: translate(-50%, 0);   opacity: 1; }
 }
+
+/* ============ Onboarding / boot splash ============ */
+.w-onboarding {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: var(--w-bg);
+}
+.w-onboarding__card {
+  width: 100%;
+  max-width: 440px;
+  padding: 28px;
+  border-radius: 16px;
+  border: 1px solid var(--w-line);
+  background: rgba(20, 20, 28, 0.72);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  box-shadow: var(--shadow-2);
+}
+.w-onboarding__field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+.w-onboarding__field input {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--w-line);
+  background: var(--w-bg);
+  color: var(--fg-100);
+  font-size: 13.5px;
+  font-family: var(--f-sans);
+}
+.w-onboarding__field input:focus {
+  outline: none;
+  border-color: rgba(var(--gold-glow), 0.45);
+}
