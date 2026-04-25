@@ -12,13 +12,19 @@
 // `descriptor.execute()` once auth completes. That keeps the chain logic
 // in `sdk/` and the keychain logic in Tauri commands, where they belong.
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   KeychainCallError,
   PRIMARY_ACCOUNT,
   fetchAndUnlockVault,
 } from "../sdk/keychain";
 import { VaultCallError } from "../sdk/vault";
+import {
+  LedgerCallError,
+  enumerateDevices,
+  getAddress as ledgerGetAddress,
+  type LedgerDeviceInfo,
+} from "../sdk/ledger";
 import type {
   OperationDescriptor,
   OperationResult,
@@ -54,7 +60,21 @@ const STAGE_LABEL: Record<OperationStage, string> = {
  */
 type AuthError =
   | { kind: "keychain"; cause: KeychainCallError }
-  | { kind: "vault"; cause: VaultCallError };
+  | { kind: "vault"; cause: VaultCallError }
+  | { kind: "ledger"; cause: LedgerCallError };
+
+/**
+ * Hardware-signer mini state machine. The Ledger flow has more visible
+ * steps than the password flow, so we surface them as an explicit FSM
+ * the user can watch tick over: scanning → connected → awaiting-approval
+ * → approved → (drawer advances to executing).
+ */
+type LedgerFlow =
+  | { kind: "idle" }
+  | { kind: "scanning" }
+  | { kind: "connected"; device: LedgerDeviceInfo }
+  | { kind: "awaiting_approval"; device: LedgerDeviceInfo }
+  | { kind: "approved"; device: LedgerDeviceInfo; address: string };
 
 export function OperationsDrawer({ descriptor, onClose }: Props) {
   const [stage, setStage] = useState<OperationStage>("preview");
@@ -67,6 +87,11 @@ export function OperationsDrawer({ descriptor, onClose }: Props) {
   const [authError, setAuthError] = useState<AuthError | null>(null);
   const [authBusy, setAuthBusy] = useState(false);
   const [password, setPassword] = useState("");
+  const [ledgerFlow, setLedgerFlow] = useState<LedgerFlow>({ kind: "idle" });
+  // Cancellation token for the in-flight hardware flow. We bump this
+  // every time the user retries / steps back so a stale enumeration
+  // resolving late doesn't clobber a fresh attempt.
+  const ledgerAttempt = useRef(0);
 
   // Esc closes the drawer except mid-execute (don't let users abandon a tx
   // we may have already broadcast).
@@ -100,9 +125,8 @@ export function OperationsDrawer({ descriptor, onClose }: Props) {
   };
 
   const advanceFromAuth = async () => {
-    // Stage 4 wires the keychain-vault path. Hardware + passkey panes
-    // stay banner-only — they bounce straight to executing so existing
-    // demo descriptors keep working until those signers land.
+    // Stage 4 wires the keychain-vault path AND the Ledger hardware path.
+    // Passkey stays banner-only until that signer lands.
     if (descriptor.auth === "keychain") {
       if (!password) {
         setAuthError({
@@ -132,8 +156,89 @@ export function OperationsDrawer({ descriptor, onClose }: Props) {
       setAuthBusy(false);
       // Clear the password from state immediately on success.
       setPassword("");
+      void runExecute();
+      return;
     }
+    if (descriptor.auth === "hardware") {
+      // The hardware flow is its own stepper — see runLedgerFlow. The
+      // Authorize button reuses this entry point; the flow ends by
+      // calling runExecute() once the device confirms.
+      void runLedgerFlow();
+      return;
+    }
+    // Passkey + none → straight through.
     void runExecute();
+  };
+
+  /**
+   * Walk the Ledger flow:
+   *   scanning → connected → awaiting_approval → approved → execute.
+   * On each error we drop back to `idle` and surface the typed cause via
+   * `authError` so the user sees a code-specific call to action (retry vs
+   * unlock-and-retry) without leaving the auth stage.
+   */
+  const runLedgerFlow = async () => {
+    const attempt = ++ledgerAttempt.current;
+    const isStale = () => ledgerAttempt.current !== attempt;
+    const hdPath = descriptor.ledger?.hdPath ?? "m/44'/60'/0'/0/0";
+    const expected = descriptor.ledger?.expectedAddress?.toLowerCase();
+
+    setAuthBusy(true);
+    setAuthError(null);
+    setLedgerFlow({ kind: "scanning" });
+    try {
+      const devices = await enumerateDevices();
+      if (isStale()) return;
+      const device = devices[0];
+      if (!device) {
+        setAuthError({
+          kind: "ledger",
+          cause: new LedgerCallError({ code: "no_device" }),
+        });
+        setLedgerFlow({ kind: "idle" });
+        setAuthBusy(false);
+        return;
+      }
+      setLedgerFlow({ kind: "connected", device });
+
+      setLedgerFlow({ kind: "awaiting_approval", device });
+      const address = await ledgerGetAddress(device.deviceId, hdPath);
+      if (isStale()) return;
+      const lower = address.toLowerCase();
+      if (expected && lower !== expected) {
+        // Wrong device or wrong derivation path — bail with a typed error
+        // rather than letting the user sign with the wrong key.
+        setAuthError({
+          kind: "ledger",
+          cause: new LedgerCallError({
+            code: "invalid_argument",
+            message: `device address ${lower} doesn't match ${expected}`,
+          }),
+        });
+        setLedgerFlow({ kind: "idle" });
+        setAuthBusy(false);
+        return;
+      }
+      setLedgerFlow({ kind: "approved", device, address: lower });
+      setAuthBusy(false);
+      // Tiny delay so the user actually sees the "approved" tick; not a
+      // semantic delay, just a beat for the eye.
+      await new Promise((r) => setTimeout(r, 200));
+      if (isStale()) return;
+      void runExecute();
+    } catch (cause) {
+      if (isStale()) return;
+      if (cause instanceof LedgerCallError) {
+        setAuthError({ kind: "ledger", cause });
+      } else {
+        setAuthError({
+          kind: "ledger",
+          cause: new LedgerCallError({ code: "transport", message: String(cause) }),
+        });
+      }
+      setLedgerFlow({ kind: "idle" });
+      setAuthBusy(false);
+    }
   };
 
   const runExecute = async () => {
@@ -188,6 +293,7 @@ export function OperationsDrawer({ descriptor, onClose }: Props) {
               setPassword={setPassword}
               onSubmit={() => void advanceFromAuth()}
               busy={authBusy}
+              ledgerFlow={ledgerFlow}
             />
           ) : null}
           {stage === "executing" ? <ExecutingPane descriptor={descriptor} /> : null}
@@ -210,6 +316,11 @@ export function OperationsDrawer({ descriptor, onClose }: Props) {
                 className="btn btn--ghost"
                 onClick={() => {
                   setPassword("");
+                  // Bump the attempt counter so an in-flight Ledger
+                  // enumeration that resolves late doesn't poke the UI
+                  // after the user stepped back.
+                  ledgerAttempt.current++;
+                  setLedgerFlow({ kind: "idle" });
                   setStage("preview");
                 }}
                 disabled={authBusy}
@@ -222,11 +333,12 @@ export function OperationsDrawer({ descriptor, onClose }: Props) {
                 onClick={() => void advanceFromAuth()}
                 disabled={authBusy || (descriptor.auth === "keychain" && !password)}
               >
-                {authBusy
-                  ? "Unlocking…"
-                  : descriptor.auth === "hardware"
-                    ? "Confirm on device"
-                    : "Authorize"}
+                {hardwareButtonLabel({
+                  authMethod: descriptor.auth,
+                  busy: authBusy,
+                  ledgerFlow,
+                  hasError: authError !== null,
+                })}
               </button>
             </>
           ) : null}
@@ -327,6 +439,7 @@ interface AuthPaneProps {
   setPassword: (next: string) => void;
   onSubmit: () => void;
   busy: boolean;
+  ledgerFlow: LedgerFlow;
 }
 
 function AuthPane({
@@ -336,17 +449,10 @@ function AuthPane({
   setPassword,
   onSubmit,
   busy,
+  ledgerFlow,
 }: AuthPaneProps) {
   if (descriptor.auth === "hardware") {
-    // TODO: wire Ledger transport via @ledgerhq/hw-transport.
-    return (
-      <div className="w-banner">
-        Confirm on your hardware device. The drawer will continue automatically when the device returns a signature.
-        <div style={{ marginTop: 6, fontSize: 11.5, color: "var(--w-text-3)" }}>
-          (Hardware signer wiring is not yet implemented. This pane is banner-only for now.)
-        </div>
-      </div>
-    );
+    return <LedgerAuthPane ledgerFlow={ledgerFlow} authError={authError} />;
   }
   if (descriptor.auth === "passkey") {
     // TODO: wire WebAuthn / platform passkey signer.
@@ -410,7 +516,7 @@ function AuthErrorBanner({ error }: { error: AuthError }) {
         detail = cause.message;
         break;
     }
-  } else {
+  } else if (error.kind === "vault") {
     const cause = error.cause.cause;
     switch (cause.code) {
       case "wrong_password":
@@ -426,12 +532,151 @@ function AuthErrorBanner({ error }: { error: AuthError }) {
         detail = cause.message;
         break;
     }
+  } else {
+    const cause = error.cause.cause;
+    switch (cause.code) {
+      case "no_device":
+        headline = "No Ledger detected";
+        detail = "Plug in your Ledger and click Connect to scan again.";
+        break;
+      case "user_cancelled":
+        headline = "Cancelled on device";
+        detail = "You rejected the prompt on the Ledger. Click Connect to retry.";
+        break;
+      case "device_locked":
+        headline = "Device locked";
+        detail = "Unlock your Ledger and reopen the Ethereum app, then retry.";
+        break;
+      case "transport":
+        headline = "Ledger connection lost";
+        detail = `Transport error: ${cause.message}. Reconnect the device and retry.`;
+        break;
+      case "invalid_argument":
+        headline = "Wrong device or path";
+        detail = cause.message;
+        break;
+      case "device_error":
+        headline = "Device returned an error";
+        detail = `0x${cause.sw.toString(16).padStart(4, "0")}: ${cause.message}`;
+        break;
+      case "malformed_response":
+        headline = "Unexpected response";
+        detail = `${cause.message}. Update the Ethereum app on the device and retry.`;
+        break;
+    }
   }
   return (
     <div className="w-banner error" style={{ marginTop: 12 }}>
       <div style={{ fontWeight: 600, marginBottom: 4 }}>{headline}</div>
       <div style={{ fontSize: 12, color: "var(--w-text-2)" }}>{detail}</div>
     </div>
+  );
+}
+
+/**
+ * Pick the Authorize-button label given current state. Plain function so
+ * we can keep the JSX terse — and so the label transitions match the
+ * mini state machine without spaghetti ternaries.
+ */
+function hardwareButtonLabel(args: {
+  authMethod: OperationDescriptor["auth"];
+  busy: boolean;
+  ledgerFlow: LedgerFlow;
+  hasError: boolean;
+}): string {
+  if (args.authMethod !== "hardware") {
+    return args.busy ? "Unlocking…" : "Authorize";
+  }
+  if (args.hasError && !args.busy) {
+    return "Retry";
+  }
+  switch (args.ledgerFlow.kind) {
+    case "idle":
+      return "Connect Ledger";
+    case "scanning":
+      return "Scanning…";
+    case "connected":
+      return "Reading address…";
+    case "awaiting_approval":
+      return "Awaiting approval…";
+    case "approved":
+      return "Approved";
+  }
+}
+
+/**
+ * The Ledger auth pane. Renders the four-step pipeline (scan → connect →
+ * approve → approved) as a vertical checklist and keeps the spinner
+ * pointed at the in-flight step. Errors come through `authError` and
+ * render under the checklist via the shared banner.
+ */
+function LedgerAuthPane({
+  ledgerFlow,
+  authError,
+}: {
+  ledgerFlow: LedgerFlow;
+  authError: AuthError | null;
+}) {
+  const stages: ReadonlyArray<{ key: LedgerFlow["kind"]; label: string }> = [
+    { key: "scanning", label: "Scanning for device" },
+    { key: "connected", label: "Device connected" },
+    { key: "awaiting_approval", label: "Confirm address on device" },
+    { key: "approved", label: "Address approved" },
+  ];
+  const order = ["idle", "scanning", "connected", "awaiting_approval", "approved"] as const;
+  const currentIdx = order.indexOf(ledgerFlow.kind);
+  return (
+    <>
+      <div className="w-banner">
+        Connect your Ledger and unlock the Ethereum app. The drawer will
+        ask the device to confirm the signing address before broadcasting
+        anything.
+      </div>
+      <ol style={{ listStyle: "none", padding: 0, margin: "16px 0 0", fontSize: 12.5 }}>
+        {stages.map((s) => {
+          const idx = order.indexOf(s.key);
+          const isOn = ledgerFlow.kind === s.key;
+          const isDone = currentIdx > idx && ledgerFlow.kind !== "idle";
+          const symbol = isOn ? "→" : isDone ? "✓" : "·";
+          const color = isOn
+            ? "var(--w-text-1)"
+            : isDone
+              ? "var(--w-text-2)"
+              : "var(--w-text-3)";
+          return (
+            <li
+              key={s.key}
+              style={{
+                color,
+                padding: "6px 0",
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+              }}
+            >
+              <span
+                style={{
+                  fontFamily: "var(--f-mono)",
+                  width: 16,
+                  textAlign: "center",
+                  fontWeight: isOn ? 700 : 400,
+                }}
+              >
+                {symbol}
+              </span>
+              <span>{s.label}</span>
+              {isOn ? <span className="w-spin" style={{ width: 10, height: 10, marginLeft: 6 }} /> : null}
+            </li>
+          );
+        })}
+      </ol>
+      {ledgerFlow.kind === "approved" ? (
+        <div className="w-banner" style={{ marginTop: 12, fontSize: 11.5 }}>
+          Address: <span className="mono">{ledgerFlow.address}</span>
+        </div>
+      ) : null}
+      {authError ? <AuthErrorBanner error={authError} /> : null}
+    </>
   );
 }
 

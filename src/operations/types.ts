@@ -36,6 +36,23 @@ export interface OperationEffect {
  */
 export type AuthMethod = "keychain" | "hardware" | "passkey" | "none";
 
+/**
+ * Optional Ledger context. Only relevant when `auth === "hardware"`.
+ * `hdPath` defaults to `m/44'/60'/0'/0/0` if not provided. The drawer uses
+ * `expectedAddress` to confirm the user picked the right device — when
+ * present, the address read from the device must match (lowercase).
+ */
+export interface LedgerContext {
+  /** BIP-44 derivation path. Defaults to `m/44'/60'/0'/0/0` if absent. */
+  hdPath?: string;
+  /**
+   * Lowercase 0x-prefixed address that the drawer expects to see on the
+   * device. If supplied and the device returns something different, the
+   * drawer surfaces a hard error (wrong device or wrong path).
+   */
+  expectedAddress?: string;
+}
+
 export interface OperationDescriptor {
   /** Short title shown in the drawer head — e.g. `Send LYTH`. */
   title: string;
@@ -47,6 +64,8 @@ export interface OperationDescriptor {
   effects: OperationEffect[];
   /** Auth method required to advance from `preview` to `executing`. */
   auth: AuthMethod;
+  /** Hardware-signer context (only used when `auth === "hardware"`). */
+  ledger?: LedgerContext;
   /**
    * The actual work. Resolves with an arbitrary "result" payload (tx hash,
    * RPC echo, etc.); throws to land the drawer in `error`. Implementations
