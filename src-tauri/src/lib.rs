@@ -1,12 +1,14 @@
-// Stage 3 entry point.
+// Stage 4 entry point.
 //
 // Registers the Tauri command surface for the wallet:
 // - `keychain_unlock` / `keychain_store` — OS keychain bridge.
+// - `vault_create`   / `vault_unlock`    — Argon2id + AES-GCM seed vault.
 //
-// Stage 4 will extend with `monolythium-core-sdk` RPC wrappers + hardware
-// signer commands (Ledger).
+// Stage 5 will extend with `monolythium-core-sdk` RPC wrappers + hardware
+// signer commands (Ledger / passkey).
 
 mod keychain;
+mod vault;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -15,6 +17,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             keychain::keychain_unlock,
             keychain::keychain_store,
+            vault::vault_create,
+            vault::vault_unlock,
         ])
         .setup(|_app| Ok(()))
         .run(tauri::generate_context!())

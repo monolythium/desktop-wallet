@@ -13,7 +13,12 @@
 // in `sdk/` and the keychain logic in Tauri commands, where they belong.
 
 import { useEffect, useState } from "react";
-import { KeychainCallError, PRIMARY_ACCOUNT, unlock } from "../sdk/keychain";
+import {
+  KeychainCallError,
+  PRIMARY_ACCOUNT,
+  fetchAndUnlockVault,
+} from "../sdk/keychain";
+import { VaultCallError } from "../sdk/vault";
 import type {
   OperationDescriptor,
   OperationResult,
@@ -40,6 +45,17 @@ const STAGE_LABEL: Record<OperationStage, string> = {
   error: "Error",
 };
 
+/**
+ * Auth-pane error union. The keychain branches reuse the existing
+ * `KeychainCallError`; the password-mismatch branch comes from the
+ * vault module. We surface them with the same banner shell so the user
+ * sees a consistent visual error language regardless of which layer
+ * complained.
+ */
+type AuthError =
+  | { kind: "keychain"; cause: KeychainCallError }
+  | { kind: "vault"; cause: VaultCallError };
+
 export function OperationsDrawer({ descriptor, onClose }: Props) {
   const [stage, setStage] = useState<OperationStage>("preview");
   const [result, setResult] = useState<OperationResult | null>(null);
@@ -48,8 +64,9 @@ export function OperationsDrawer({ descriptor, onClose }: Props) {
   // `error` so the Auth pane can show a "try again" hint without dropping
   // the user into the terminal Error stage. Only `runExecute` failures
   // promote into the Error stage.
-  const [authError, setAuthError] = useState<KeychainCallError | null>(null);
+  const [authError, setAuthError] = useState<AuthError | null>(null);
   const [authBusy, setAuthBusy] = useState(false);
+  const [password, setPassword] = useState("");
 
   // Esc closes the drawer except mid-execute (don't let users abandon a tx
   // we may have already broadcast).
@@ -63,6 +80,16 @@ export function OperationsDrawer({ descriptor, onClose }: Props) {
     return () => window.removeEventListener("keydown", handler);
   }, [onClose, stage]);
 
+  // Drop the password from React state the moment the drawer leaves the
+  // auth stage (executing/done/error). Best-effort hygiene — React state
+  // is still in heap, but this minimizes the window where an inadvertent
+  // dump (devtools, error overlay) could capture it.
+  useEffect(() => {
+    if (stage !== "auth" && stage !== "preview" && password) {
+      setPassword("");
+    }
+  }, [stage, password]);
+
   const advanceFromPreview = () => {
     if (descriptor.auth === "none") {
       void runExecute();
@@ -73,30 +100,38 @@ export function OperationsDrawer({ descriptor, onClose }: Props) {
   };
 
   const advanceFromAuth = async () => {
-    // Stage 3 only wires the keychain path. Hardware + passkey panes stay
-    // banner-only for now — they bounce straight to executing so the
-    // existing demo descriptors keep working until Stage 4 lands.
+    // Stage 4 wires the keychain-vault path. Hardware + passkey panes
+    // stay banner-only — they bounce straight to executing so existing
+    // demo descriptors keep working until those signers land.
     if (descriptor.auth === "keychain") {
+      if (!password) {
+        setAuthError({
+          kind: "vault",
+          cause: new VaultCallError({ code: "invalid_argument", message: "Enter your password." }),
+        });
+        return;
+      }
       setAuthBusy(true);
       setAuthError(null);
       try {
-        // The drawer doesn't *use* the secret here — it just verifies the
-        // keychain unlock succeeded. The descriptor's `execute()` is the
-        // one that actually signs/broadcasts. That separation keeps key
-        // material out of React state entirely.
-        await unlock(PRIMARY_ACCOUNT);
+        await fetchAndUnlockVault(PRIMARY_ACCOUNT, password);
       } catch (cause) {
         if (cause instanceof KeychainCallError) {
-          setAuthError(cause);
+          setAuthError({ kind: "keychain", cause });
+        } else if (cause instanceof VaultCallError) {
+          setAuthError({ kind: "vault", cause });
         } else {
-          setAuthError(
-            new KeychainCallError({ code: "backend", message: String(cause) }),
-          );
+          setAuthError({
+            kind: "keychain",
+            cause: new KeychainCallError({ code: "backend", message: String(cause) }),
+          });
         }
         setAuthBusy(false);
         return;
       }
       setAuthBusy(false);
+      // Clear the password from state immediately on success.
+      setPassword("");
     }
     void runExecute();
   };
@@ -145,7 +180,16 @@ export function OperationsDrawer({ descriptor, onClose }: Props) {
 
         <div className="w-drawer__body">
           {stage === "preview" ? <PreviewPane descriptor={descriptor} /> : null}
-          {stage === "auth" ? <AuthPane descriptor={descriptor} authError={authError} /> : null}
+          {stage === "auth" ? (
+            <AuthPane
+              descriptor={descriptor}
+              authError={authError}
+              password={password}
+              setPassword={setPassword}
+              onSubmit={() => void advanceFromAuth()}
+              busy={authBusy}
+            />
+          ) : null}
           {stage === "executing" ? <ExecutingPane descriptor={descriptor} /> : null}
           {stage === "done" && result ? <DonePane descriptor={descriptor} result={result} /> : null}
           {stage === "error" ? <ErrorPane error={error ?? "Unknown error"} /> : null}
@@ -164,7 +208,10 @@ export function OperationsDrawer({ descriptor, onClose }: Props) {
             <>
               <button
                 className="btn btn--ghost"
-                onClick={() => setStage("preview")}
+                onClick={() => {
+                  setPassword("");
+                  setStage("preview");
+                }}
                 disabled={authBusy}
               >
                 Back
@@ -173,7 +220,7 @@ export function OperationsDrawer({ descriptor, onClose }: Props) {
                 className="btn btn--primary"
                 style={{ marginLeft: "auto" }}
                 onClick={() => void advanceFromAuth()}
-                disabled={authBusy}
+                disabled={authBusy || (descriptor.auth === "keychain" && !password)}
               >
                 {authBusy
                   ? "Unlocking…"
@@ -273,71 +320,115 @@ function PreviewPane({ descriptor }: { descriptor: OperationDescriptor }) {
   );
 }
 
+interface AuthPaneProps {
+  descriptor: OperationDescriptor;
+  authError: AuthError | null;
+  password: string;
+  setPassword: (next: string) => void;
+  onSubmit: () => void;
+  busy: boolean;
+}
+
 function AuthPane({
   descriptor,
   authError,
-}: {
-  descriptor: OperationDescriptor;
-  authError: KeychainCallError | null;
-}) {
+  password,
+  setPassword,
+  onSubmit,
+  busy,
+}: AuthPaneProps) {
   if (descriptor.auth === "hardware") {
+    // TODO: wire Ledger transport via @ledgerhq/hw-transport.
     return (
       <div className="w-banner">
         Confirm on your hardware device. The drawer will continue automatically when the device returns a signature.
         <div style={{ marginTop: 6, fontSize: 11.5, color: "var(--w-text-3)" }}>
-          (Stage 4 wires the Ledger transport. This pane is banner-only for now.)
+          (Hardware signer wiring is not yet implemented. This pane is banner-only for now.)
         </div>
       </div>
     );
   }
   if (descriptor.auth === "passkey") {
+    // TODO: wire WebAuthn / platform passkey signer.
     return (
       <div className="w-banner">
         A platform passkey prompt will open. Approve to continue.
         <div style={{ marginTop: 6, fontSize: 11.5, color: "var(--w-text-3)" }}>
-          (Stage 4 wires the WebAuthn signer. This pane is banner-only for now.)
+          (Passkey signer wiring is not yet implemented. This pane is banner-only for now.)
         </div>
       </div>
     );
   }
-  if (authError) {
-    return <AuthErrorBanner error={authError} />;
-  }
   return (
-    <div className="w-banner">
-      Click <b>Authorize</b> to release the signing key from the OS keychain.
-      Your OS may prompt for Touch ID or your login password.
-    </div>
+    <>
+      <div className="w-banner">
+        Enter your wallet password. The vault decrypts in-process via
+        Argon2id + AES-256-GCM; the password never touches disk.
+      </div>
+      <label className="w-onboarding__field" style={{ marginTop: 12 }}>
+        <span className="cap">Password</span>
+        <input
+          type="password"
+          autoFocus
+          autoComplete="current-password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !busy && password) onSubmit();
+          }}
+          disabled={busy}
+        />
+      </label>
+      {authError ? <AuthErrorBanner error={authError} /> : null}
+    </>
   );
 }
 
-function AuthErrorBanner({ error }: { error: KeychainCallError }) {
+function AuthErrorBanner({ error }: { error: AuthError }) {
   // Each branch renders the same banner shell with a code-specific call to
   // action. Keeping these in one place means the strings stay consistent
   // when more error codes land.
-  const cause = error.cause;
   let headline: string;
   let detail: string;
-  switch (cause.code) {
-    case "not_found":
-      headline = "Wallet not set up on this device";
-      detail = `No keychain entry for ${cause.account}. Run onboarding to derive and store a signing key.`;
-      break;
-    case "user_cancelled":
-      headline = "Cancelled at the OS prompt";
-      detail = "The OS keychain prompt was dismissed. Click Authorize to retry.";
-      break;
-    case "invalid_argument":
-      headline = "Invalid keychain request";
-      detail = cause.message;
-      break;
-    case "backend":
-      headline = "Keychain unavailable";
-      detail = cause.message;
-      break;
+  if (error.kind === "keychain") {
+    const cause = error.cause.cause;
+    switch (cause.code) {
+      case "not_found":
+        headline = "Wallet not set up on this device";
+        detail = `No keychain entry for ${cause.account}. Run onboarding to create the vault.`;
+        break;
+      case "user_cancelled":
+        headline = "Cancelled at the OS prompt";
+        detail = "The OS keychain prompt was dismissed. Click Authorize to retry.";
+        break;
+      case "invalid_argument":
+        headline = "Invalid keychain request";
+        detail = cause.message;
+        break;
+      case "backend":
+        headline = "Keychain unavailable";
+        detail = cause.message;
+        break;
+    }
+  } else {
+    const cause = error.cause.cause;
+    switch (cause.code) {
+      case "wrong_password":
+        headline = "Wrong password";
+        detail = "The password didn't unlock the vault. Try again.";
+        break;
+      case "invalid_argument":
+        headline = "Password required";
+        detail = cause.message;
+        break;
+      case "backend":
+        headline = "Vault unavailable";
+        detail = cause.message;
+        break;
+    }
   }
   return (
-    <div className="w-banner error">
+    <div className="w-banner error" style={{ marginTop: 12 }}>
       <div style={{ fontWeight: 600, marginBottom: 4 }}>{headline}</div>
       <div style={{ fontSize: 12, color: "var(--w-text-2)" }}>{detail}</div>
     </div>

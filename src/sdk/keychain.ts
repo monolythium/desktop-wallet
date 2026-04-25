@@ -1,16 +1,18 @@
 // OS keychain bridge — typed wrapper around the Tauri commands defined in
-// `src-tauri/src/keychain.rs`. Stage 3 ships software-bound entries; Stage 4
-// will add hardware-bound paths (Secure Enclave on macOS, TPM on Windows).
+// `src-tauri/src/keychain.rs`. Stage 4 wires this together with the vault
+// commands (`src-tauri/src/vault.rs`): the keychain stores the
+// AES-GCM-encrypted blob, never raw seed material.
 //
 // The two callable surfaces:
 //
-//   unlock(account)         → secret bytes
-//   store(account, secret)  → ok
+//   unlock(account)         → vault blob bytes
+//   store(account, blob)    → ok
 //
 // Errors are typed (`KeychainError`) so the OperationsDrawer can decide
 // whether to retry, bounce into onboarding, or render a hard error.
 
 import { invoke } from "@tauri-apps/api/core";
+import { createVault, unlockVault, VaultCallError } from "./vault";
 
 /** The canonical identity slot for the primary signing key. */
 export const PRIMARY_ACCOUNT = "kc:lyth:primary:v1";
@@ -61,8 +63,10 @@ function normalizeError(raw: unknown): KeychainCallError {
 }
 
 /**
- * Retrieve the secret bytes for `account`. Throws `KeychainCallError`
- * with a typed `cause` on failure.
+ * Retrieve the vault blob stored under `account`. Throws
+ * `KeychainCallError` with a typed `cause` on failure. The bytes are
+ * handed straight to `unlockVault` — the wallet never reads cleartext
+ * seed material on the JS side.
  */
 export async function unlock(account: string): Promise<Uint8Array> {
   try {
@@ -89,18 +93,26 @@ export async function store(account: string, secret: Uint8Array): Promise<void> 
 }
 
 /**
- * Onboarding helper: derive a 32-byte seed from a user-entered password
- * via SHA-256, then store it under `account`.
- *
- * NOTE — Stage 3 keeps derivation deliberately minimal. Stage 4 will swap
- * SHA-256 for Argon2id and add a per-install salt; the function shape is
- * stable so call sites won't move.
+ * Onboarding helper: build a fresh Argon2id-protected vault from
+ * `password` and persist it under `account`. The seed is generated
+ * inside Rust via `OsRng` and AES-GCM-encrypted before it ever leaves
+ * the Rust side.
  */
-export async function deriveAndStorePassword(account: string, password: string): Promise<void> {
-  if (!password) {
-    throw new KeychainCallError({ code: "invalid_argument", message: "password is empty" });
-  }
-  const enc = new TextEncoder().encode(password);
-  const digest = await crypto.subtle.digest("SHA-256", enc);
-  await store(account, new Uint8Array(digest));
+export async function createAndStoreVault(account: string, password: string): Promise<void> {
+  const blob = await createVault(password);
+  await store(account, blob);
 }
+
+/**
+ * Auth helper: fetch the vault blob for `account` and verify `password`
+ * decrypts it. Throws `KeychainCallError` if the keychain lookup fails
+ * (including `not_found` → onboarding cue), or `VaultCallError` with
+ * `cause.code === "wrong_password"` if the password is wrong / blob is
+ * tampered.
+ */
+export async function fetchAndUnlockVault(account: string, password: string): Promise<void> {
+  const blob = await unlock(account);
+  await unlockVault(password, blob);
+}
+
+export { VaultCallError };

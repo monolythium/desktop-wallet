@@ -1,21 +1,24 @@
-// Onboarding — first-run wallet setup. Prompts for a password, derives a
-// 32-byte seed via SHA-256, and stores it in the OS keychain.
+// Onboarding — first-run wallet setup. Prompts for a password, builds an
+// Argon2id + AES-256-GCM vault wrapping a fresh 32-byte seed, and stores
+// the encrypted blob in the OS keychain.
 //
-// Stage 3 keeps this minimal on purpose. Stage 4+ will:
-// - Replace SHA-256 derivation with Argon2id + per-install salt.
+// Stage 4 keeps this UI minimal on purpose. Future passes will:
 // - Show a 24-word BIP-39 mnemonic and confirm-back step.
 // - Add hardware-bound storage (Secure Enclave / TPM).
+// - Add password-strength meter once we settle on a heuristic that's
+//   honest (zxcvbn-ts) rather than performative.
 //
 // The contract for now: this screen only renders if `keychain_unlock`
-// returns `not_found` for the primary account. Once `store` succeeds, the
-// caller flips `done` and the main shell takes over.
+// returns `not_found` for the primary account. Once the vault is stored,
+// the caller flips `done` and the main shell takes over.
 
 import { useState } from "react";
 import {
   KeychainCallError,
   PRIMARY_ACCOUNT,
-  deriveAndStorePassword,
+  createAndStoreVault,
 } from "../sdk/keychain";
+import { VaultCallError } from "../sdk/vault";
 
 interface Props {
   onDone: () => void;
@@ -35,10 +38,10 @@ export function Onboarding({ onDone }: Props) {
     setBusy(true);
     setError(null);
     try {
-      await deriveAndStorePassword(PRIMARY_ACCOUNT, password);
+      await createAndStoreVault(PRIMARY_ACCOUNT, password);
       onDone();
     } catch (cause) {
-      if (cause instanceof KeychainCallError) {
+      if (cause instanceof KeychainCallError || cause instanceof VaultCallError) {
         setError(cause.message);
       } else {
         setError(String(cause));
@@ -53,8 +56,9 @@ export function Onboarding({ onDone }: Props) {
         <div className="cap" style={{ marginBottom: 8 }}>First-run setup</div>
         <h1 style={{ margin: "0 0 8px" }}>Set a wallet password</h1>
         <p style={{ margin: "0 0 24px", color: "var(--w-text-2)", fontSize: 13 }}>
-          The password derives a signing key that lives in your OS keychain.
-          We never store it elsewhere. Pick at least 8 characters.
+          The password unwraps a signing key encrypted with Argon2id and
+          AES-256-GCM. We never store the password itself, only the
+          encrypted vault. Pick at least 8 characters.
         </p>
 
         <label className="w-onboarding__field">
@@ -107,7 +111,7 @@ export function Onboarding({ onDone }: Props) {
             disabled={!canSubmit}
             onClick={() => void submit()}
           >
-            {busy ? "Storing…" : "Store in keychain"}
+            {busy ? "Sealing vault…" : "Create vault"}
           </button>
         </div>
       </div>
