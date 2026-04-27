@@ -5,7 +5,10 @@
 import { useOperations } from "../operations/context";
 import { loadChainSnapshot } from "../sdk/client";
 import { useChainSnapshot } from "../sdk/useChainSnapshot";
-import { BALANCES, IDENTITY, TOKENS, TXS_PRIVATE, TXS_PUBLIC } from "../data/fixtures";
+import { sendLyth } from "../sdk/send";
+import { makeLedgerSigner } from "../sdk/signer";
+import { enumerateDevices, getAddress as ledgerGetAddress } from "../sdk/ledger";
+import { BALANCES, IDENTITY, SEND_DEMO, TOKENS, TXS_PRIVATE, TXS_PUBLIC } from "../data/fixtures";
 import type { Denom } from "../data/fixtures";
 import { TokenRow } from "../components/TokenRow";
 import { TxRow } from "../components/TxRow";
@@ -28,25 +31,62 @@ export function Home({ denom, goto }: Props) {
   // a Home revisit refreshes the chain snapshot.
   const chain = useChainSnapshot(IDENTITY.address);
 
+  // Send LYTH — hardware-signer path. The drawer's hardware flow already
+  // enumerates the device + confirms the address; once the user approves,
+  // `descriptor.execute()` builds a live TransactionRequest and broadcasts
+  // through `MonolythiumProvider`. The keychain (software-signer) path is
+  // deferred until the vault widens to return a usable seed (see
+  // `src-tauri/src/vault.rs:222`).
   const openSend = () => {
     ops.open({
-      title: "Send LYTH",
-      subtitle: `From ${IDENTITY.handle}`,
-      auth: "keychain",
+      title: `Send ${SEND_DEMO.amountLyth} LYTH`,
+      subtitle: `From ${IDENTITY.handle} via Ledger`,
+      auth: "hardware",
+      ledger: {
+        // Default Ethereum HD path; the drawer surfaces a hard error if
+        // the device-derived address doesn't match `expectedAddress`.
+        // We don't pin `expectedAddress` here yet because the demo
+        // identity address is a fixture — once Stage 5 binds an address
+        // from the unlocked vault, we'll wire that in.
+      },
       diff: [
-        { k: "From",   v: IDENTITY.address },
-        { k: "Token",  v: "LYTH" },
-        { k: "Amount", v: "12.50 LYTH" },
-        { k: "Fee",    v: "0.0008 LYTH", kind: "fee" },
+        { k: "From",      v: IDENTITY.address },
+        { k: "To",        v: SEND_DEMO.to },
+        { k: "Token",     v: "LYTH" },
+        { k: "Amount",    v: `${SEND_DEMO.amountLyth} LYTH` },
+        { k: "Network",   v: chain.snapshot ? `chain ${chain.snapshot.chainId}` : "(querying)" },
+        { k: "Endpoint",  v: chain.snapshot?.endpoint ?? "(unknown)" },
       ],
       effects: [
-        { text: "Releases 12.50 LYTH from the public denomination." },
-        { text: "Charges 0.0008 LYTH in fees from the same balance." },
+        { text: `Releases ${SEND_DEMO.amountLyth} LYTH from the public denomination.` },
+        { text: "Reads sender nonce + EIP-1559 fee data via @monolythium/core-sdk." },
+        { text: "Signs on Ledger device, broadcasts via MonolythiumProvider." },
       ],
-      execute: () => Promise.resolve({
-        headline: "Sent 12.50 LYTH",
-        detail: "Stage 2 mock — Stage 3 wires this to the SDK eth_sendRawTransaction path.",
-      }),
+      execute: async () => {
+        // Enumerate the device the drawer already negotiated, then
+        // build a real ethers Signer over our HID bridge.
+        const devices = await enumerateDevices();
+        const device = devices[0];
+        if (!device) {
+          throw new Error("Ledger detached between auth and execute — reconnect and retry");
+        }
+        const hdPath = "m/44'/60'/0'/0/0";
+        const address = await ledgerGetAddress(device.deviceId, hdPath);
+        const signer = makeLedgerSigner({
+          deviceId: device.deviceId,
+          hdPath,
+          address: address.toLowerCase(),
+        });
+        const result = await sendLyth(signer, {
+          from: address,
+          to: SEND_DEMO.to,
+          amountLyth: SEND_DEMO.amountLyth,
+        });
+        return {
+          headline: `Broadcast ${SEND_DEMO.amountLyth} LYTH`,
+          detail: result.txHash,
+        };
+      },
     });
   };
 
@@ -150,7 +190,7 @@ export function Home({ denom, goto }: Props) {
 
         <ChainStatusLine
           status={chain.status}
-          chainId={chain.snapshot?.chainId ?? 0}
+          chainId={chain.snapshot?.chainId ?? 0n}
           height={chain.snapshot?.blockHeight ?? null}
           error={chain.snapshot?.error?.message ?? null}
         />
@@ -203,8 +243,8 @@ function ChainStatusLine({
   error,
 }: {
   status: "loading" | "ok" | "error";
-  chainId: number;
-  height: number | null;
+  chainId: bigint;
+  height: bigint | null;
   error: string | null;
 }) {
   if (status === "loading") {
@@ -223,9 +263,9 @@ function ChainStatusLine({
   }
   return (
     <div style={{ marginTop: 12, fontFamily: "var(--f-mono)", fontSize: 11, color: "var(--w-text-3)" }}>
-      chain id <b style={{ color: "var(--w-text)" }}>{chainId}</b>
+      chain id <b style={{ color: "var(--w-text)" }}>{chainId.toString()}</b>
       {" · "}
-      height <b style={{ color: "var(--w-text)" }}>{height ?? "?"}</b>
+      height <b style={{ color: "var(--w-text)" }}>{height === null ? "?" : height.toString()}</b>
     </div>
   );
 }

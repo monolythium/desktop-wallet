@@ -1,6 +1,7 @@
 // React hook for the chain-snapshot SDK call.
 // Caller passes the address it wants a balance for; the hook does the
-// `eth_chainId` + `eth_blockNumber` + `eth_getBalance` round trip.
+// `eth_chainId` + `eth_blockNumber` + `eth_getBalance` round trip via
+// `MonolythiumProvider`.
 
 import { useEffect, useState } from "react";
 import { loadChainSnapshot } from "./client";
