@@ -1,20 +1,23 @@
 // SDK seam — every chain I/O the wallet performs goes through here.
-// Stage 2 wires `@monolythium/core-sdk` for read-side calls; signing
-// flows arrive in Stage 3 alongside Tauri keychain commands.
+//
+// We construct a single `MonolythiumProvider` (the ethers v6 shim that
+// `@monolythium/core-sdk` ships as of Stage 3) so every chain read and
+// every signed broadcast share one transport, one network registration,
+// and one error-shape contract. Ethers callers (`provider.getBlockNumber`,
+// `provider.broadcastTransaction`) flow straight through; native callers
+// can still reach `lyth_*` methods via `provider.rpcClient.call(...)`.
 
-import { RpcClient, parseQuantity, SdkError } from "@monolythium/core-sdk";
-import type {
-  AccountProofResponse,
-  BlockSelector,
-} from "@monolythium/core-sdk";
+import { MonolythiumProvider, SdkError } from "@monolythium/core-sdk";
+import type { MonolythiumProviderOptions } from "@monolythium/core-sdk";
 
 /**
  * Default RPC endpoint. Honors `VITE_MONO_RPC_URL` at build time so the
  * Tauri release bundle can pin to a specific endpoint without a code change.
  *
- * The fallback points at the live LythiumDAG-BFT testnet (chain id 6940).
- * Until the testnet RPC has a stable public URL the wallet falls back to
- * a localhost node — that keeps `pnpm dev` usable without a network.
+ * The fallback points at the live LythiumDAG-BFT testnet (chain id 69420
+ * per Law §13.1). Until the testnet RPC has a stable public URL the wallet
+ * falls back to a localhost node — that keeps `pnpm dev` usable without a
+ * network.
  */
 function defaultEndpoint(): string {
   const fromEnv = import.meta.env.VITE_MONO_RPC_URL;
@@ -22,24 +25,47 @@ function defaultEndpoint(): string {
   return "http://localhost:8548";
 }
 
-let _client: RpcClient | null = null;
+let _provider: MonolythiumProvider | null = null;
 
-export function getRpcClient(): RpcClient {
-  if (_client === null) {
-    _client = new RpcClient(defaultEndpoint());
+/**
+ * Lazily-constructed singleton ethers `MonolythiumProvider`. The shim
+ * registers the `monolythium-v2-testnet` network with ethers' global
+ * registry on first use; subsequent calls reuse the same instance and
+ * the same underlying `RpcClient` transport.
+ */
+export function getProvider(options: MonolythiumProviderOptions = {}): MonolythiumProvider {
+  if (_provider === null) {
+    _provider = new MonolythiumProvider(defaultEndpoint(), options);
   }
-  return _client;
+  return _provider;
+}
+
+/**
+ * Reset the singleton — used by tests so each case can stand up its own
+ * provider with a stub `fetch`. Production code never calls this.
+ */
+export function resetProviderForTest(): void {
+  _provider = null;
+}
+
+/**
+ * Inject a fully-constructed `MonolythiumProvider` as the singleton.
+ * Test-only; production code goes through `getProvider()` and lets the
+ * lazy initializer pick up `VITE_MONO_RPC_URL`.
+ */
+export function setProviderForTest(provider: MonolythiumProvider): void {
+  _provider = provider;
 }
 
 export type ChainSnapshot = {
   endpoint: string;
-  chainId: number;
+  chainId: bigint;
   /** decimal balance of the bound address as a JS number; for display only. */
   balanceLyth: number;
   /** raw `0x`-quantity string straight off the wire. */
   balanceWei: string;
   /** `null` while loading, otherwise the latest committed block height. */
-  blockHeight: number | null;
+  blockHeight: bigint | null;
   /** Errors are stringified for UI consumption; the original SdkError is preserved. */
   error: { kind: string; message: string } | null;
 };
@@ -49,35 +75,33 @@ export type ChainSnapshot = {
  * `eth_chainId` + `eth_blockNumber` + `eth_getBalance` for the bound address.
  * Returns a discriminated value rather than throwing so the caller can render
  * an offline state without unwinding.
+ *
+ * Round-trips through `MonolythiumProvider`, which delegates to the SDK's
+ * `RpcClient.call` under the hood — same transport as a direct ethers caller.
  */
-export async function loadChainSnapshot(
-  address: string,
-  block: BlockSelector = "latest",
-): Promise<ChainSnapshot> {
-  const client = getRpcClient();
-  const endpoint = client.endpoint;
+export async function loadChainSnapshot(address: string): Promise<ChainSnapshot> {
+  const provider = getProvider();
+  const endpoint = provider.rpcClient.endpoint;
   try {
-    const [chainId, blockHeight, balance] = await Promise.all([
-      client.ethChainId(),
-      client.ethBlockNumber(),
-      client.ethGetBalance(address, block),
+    const [network, blockHeight, balanceWei] = await Promise.all([
+      provider.getNetwork(),
+      provider.getBlockNumber(),
+      provider.getBalance(address),
     ]);
-    const wei = extractValue(balance);
+    const wei = `0x${balanceWei.toString(16)}`;
     return {
       endpoint,
-      chainId,
-      blockHeight,
+      chainId: network.chainId,
+      blockHeight: BigInt(blockHeight),
       balanceWei: wei,
       balanceLyth: weiToLyth(wei),
       error: null,
     };
   } catch (cause) {
-    const err = cause instanceof SdkError
-      ? { kind: cause.kind, message: cause.message }
-      : { kind: "unknown", message: (cause as Error)?.message ?? String(cause) };
+    const err = unwrapError(cause);
     return {
       endpoint,
-      chainId: 0,
+      chainId: 0n,
       blockHeight: null,
       balanceWei: "0x0",
       balanceLyth: 0,
@@ -86,8 +110,25 @@ export async function loadChainSnapshot(
   }
 }
 
-function extractValue(resp: AccountProofResponse): string {
-  return resp.value ?? "0x0";
+/**
+ * Normalize whatever the ethers/SDK transport surfaced into a plain
+ * `{ kind, message }` pair the UI can render. Ethers wraps SDK errors in
+ * its own envelope, so we unwrap one level (`error.error.error.error` is
+ * a known ethers idiom for transport stacks); we don't try to be smarter
+ * than that.
+ */
+function unwrapError(cause: unknown): { kind: string; message: string } {
+  if (cause instanceof SdkError) {
+    return { kind: cause.kind, message: cause.message };
+  }
+  if (cause && typeof cause === "object" && "error" in cause) {
+    const inner = (cause as { error?: unknown }).error;
+    if (inner instanceof SdkError) {
+      return { kind: inner.kind, message: inner.message };
+    }
+  }
+  const message = (cause as Error)?.message ?? String(cause);
+  return { kind: "unknown", message };
 }
 
 /** Convert a `0x`-quantity wei string to a LYTH JS number (1 LYTH = 1e18 wei). */
@@ -101,8 +142,8 @@ export function weiToLyth(hex: string): number {
     const lythFrac = wei % 1_000_000_000_000_000_000n;
     return Number(lythWhole) + Number(lythFrac) / 1e18;
   } catch {
-    return parseQuantity(hex);
+    return 0;
   }
 }
 
-export { parseQuantity, SdkError };
+export { SdkError };

@@ -1,3 +1,4 @@
+/// <reference types="vitest" />
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
@@ -16,5 +17,12 @@ export default defineConfig({
     target: "es2022",
     sourcemap: true,
     outDir: "dist",
+  },
+  test: {
+    // jsdom keeps DOM globals (`window`, `document`) available for any
+    // future component test; the SDK-only tests under src/sdk/__tests__/
+    // don't need it but the cost is negligible.
+    environment: "jsdom",
+    include: ["src/**/__tests__/**/*.test.ts", "src/**/*.test.ts"],
   },
 });
