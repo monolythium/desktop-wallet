@@ -12,8 +12,14 @@ interface Props {
 
 const TITLES: Record<Route, string> = {
   home: "Home",
-  tokens: "Tokens",
   activity: "Activity",
+  wallets: "Wallets",
+  tokens: "Tokens",
+  stake: "Stake",
+  contacts: "Contacts",
+  trade: "Trade",
+  "ai-trade": "AI Trading",
+  news: "News",
   settings: "Settings",
 };
 
