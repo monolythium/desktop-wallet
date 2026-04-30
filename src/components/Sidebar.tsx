@@ -1,6 +1,6 @@
 // Sidebar — port of designs wallet-app.jsx WSidebar.
-// Stage 2 ships the consumer-only routes; node-ops screens (operator,
-// keys, audit, alerts, ask, chat) belong to Monarch Desktop, not here.
+// Stage 2 ships the full consumer NAV; pages are stubs (TodoSection)
+// until their RPC seams land. Node-ops screens live in Monarch Desktop.
 
 import type { ReactElement } from "react";
 import { IDENTITY } from "../data/fixtures";
@@ -12,18 +12,23 @@ interface NavItem {
   label: string;
   icon: () => ReactElement;
   publicOnly?: boolean;
-}
-
-interface Props {
-  denom: Denom;
-  setDenom: (d: Denom) => void;
-  route: Route;
-  setRoute: (r: Route) => void;
+  badge?: string;
 }
 
 const ICON_HOME = () => (
   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="m3 12 9-9 9 9v9a2 2 0 0 1-2 2h-4v-7H10v7H6a2 2 0 0 1-2-2v-9Z" />
+  </svg>
+);
+const ICON_ACTIVITY = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
+  </svg>
+);
+const ICON_WALLETS = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M21 12V7a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-1" />
+    <path d="M16 12h6v4h-6a2 2 0 0 1 0-4Z" />
   </svg>
 );
 const ICON_TOKENS = () => (
@@ -32,9 +37,39 @@ const ICON_TOKENS = () => (
     <path d="M2 10h20" />
   </svg>
 );
-const ICON_ACTIVITY = () => (
+const ICON_STAKE = () => (
   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
+    <circle cx="6" cy="12" r="2.5" />
+    <circle cx="18" cy="6" r="2.5" />
+    <circle cx="18" cy="18" r="2.5" />
+    <path d="M8.2 11.2l7.6-3.8M8.2 12.8l7.6 3.8" />
+  </svg>
+);
+const ICON_CONTACTS = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+    <circle cx="9" cy="7" r="4" />
+    <path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" />
+  </svg>
+);
+const ICON_TRADE = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M3 17l6-6 4 4 8-8" />
+    <path d="M14 7h7v7" />
+  </svg>
+);
+const ICON_AI = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="4" y="4" width="16" height="16" rx="3" />
+    <circle cx="9" cy="10" r="1" />
+    <circle cx="15" cy="10" r="1" />
+    <path d="M8 15h8" />
+  </svg>
+);
+const ICON_NEWS = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="3" y="4" width="18" height="16" rx="2" />
+    <path d="M7 8h10M7 12h10M7 16h6" />
   </svg>
 );
 const ICON_SETTINGS = () => (
@@ -44,14 +79,32 @@ const ICON_SETTINGS = () => (
   </svg>
 );
 
+interface Props {
+  denom: Denom;
+  setDenom: (d: Denom) => void;
+  route: Route;
+  setRoute: (r: Route) => void;
+}
+
 const NAV: NavItem[] = [
-  { id: "home",     label: "Home",     icon: ICON_HOME },
-  { id: "tokens",   label: "Tokens",   icon: ICON_TOKENS, publicOnly: true },
+  { id: "home", label: "Home", icon: ICON_HOME },
   { id: "activity", label: "Activity", icon: ICON_ACTIVITY },
+  { id: "wallets", label: "Wallets", icon: ICON_WALLETS },
+  { id: "tokens", label: "Tokens", icon: ICON_TOKENS, publicOnly: true },
+  { id: "stake", label: "Stake", icon: ICON_STAKE, publicOnly: true },
+  { id: "contacts", label: "Contacts", icon: ICON_CONTACTS },
+  { id: "trade", label: "Trade", icon: ICON_TRADE, publicOnly: true },
+  { id: "ai-trade", label: "AI Trading", icon: ICON_AI, publicOnly: true, badge: "beta" },
+  { id: "news", label: "News", icon: ICON_NEWS },
+];
+
+const NAV_FOOTER: NavItem[] = [
   { id: "settings", label: "Settings", icon: ICON_SETTINGS },
 ];
 
 export function Sidebar({ denom, setDenom, route, setRoute }: Props) {
+  const visible = NAV.filter((n) => !n.publicOnly || denom === "public");
+
   return (
     <aside className="w-side">
       <div className="w-brand">
@@ -75,8 +128,8 @@ export function Sidebar({ denom, setDenom, route, setRoute }: Props) {
         ))}
       </div>
 
-      <div style={{ marginTop: 4, display: "flex", flexDirection: "column", gap: 2 }}>
-        {NAV.filter((n) => !n.publicOnly || denom === "public").map((n) => {
+      <div style={{ marginTop: 4, display: "flex", flexDirection: "column", gap: 2, flex: 1 }}>
+        {visible.map((n) => {
           const Icon = n.icon;
           return (
             <button
@@ -86,7 +139,25 @@ export function Sidebar({ denom, setDenom, route, setRoute }: Props) {
               onClick={() => setRoute(n.id)}
             >
               <span className="w-nav__item__icon"><Icon /></span>
-              <span>{n.label}</span>
+              <span style={{ flex: 1, textAlign: "left" }}>{n.label}</span>
+              {n.badge ? <span className="w-nav__item__badge">{n.badge}</span> : null}
+            </button>
+          );
+        })}
+      </div>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 2, marginTop: 12 }}>
+        {NAV_FOOTER.map((n) => {
+          const Icon = n.icon;
+          return (
+            <button
+              key={n.id}
+              type="button"
+              className={`w-nav__item ${route === n.id ? "is-active" : ""}`}
+              onClick={() => setRoute(n.id)}
+            >
+              <span className="w-nav__item__icon"><Icon /></span>
+              <span style={{ flex: 1, textAlign: "left" }}>{n.label}</span>
             </button>
           );
         })}

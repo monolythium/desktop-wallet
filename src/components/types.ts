@@ -1,4 +1,27 @@
 // Cross-component shared types. Kept tiny on purpose — keep nav routing
 // here so any page can import a typed `Route` without importing App.tsx.
 
-export type Route = "home" | "tokens" | "activity" | "settings";
+export type Route =
+  | "home"
+  | "activity"
+  | "wallets"
+  | "tokens"
+  | "stake"
+  | "contacts"
+  | "trade"
+  | "ai-trade"
+  | "news"
+  | "settings";
+
+export const ALL_ROUTES: Route[] = [
+  "home",
+  "activity",
+  "wallets",
+  "tokens",
+  "stake",
+  "contacts",
+  "trade",
+  "ai-trade",
+  "news",
+  "settings",
+];

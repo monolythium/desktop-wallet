@@ -15,15 +15,21 @@ import { Onboarding } from "./components/Onboarding";
 import { Sidebar } from "./components/Sidebar";
 import { Topbar } from "./components/Topbar";
 import { Activity } from "./pages/Activity";
+import { AiTrading } from "./pages/AiTrading";
+import { Contacts } from "./pages/Contacts";
 import { Home } from "./pages/Home";
+import { News } from "./pages/News";
 import { Settings } from "./pages/Settings";
+import { Stake } from "./pages/Stake";
 import { Tokens } from "./pages/Tokens";
+import { Trade } from "./pages/Trade";
+import { Wallets } from "./pages/Wallets";
 import { OperationsProvider } from "./operations/context";
 import { KeychainCallError, PRIMARY_ACCOUNT, unlock } from "./sdk/keychain";
 import "./styles/tokens.css";
 import "./styles/wallet.css";
 import type { Denom } from "./data/fixtures";
-import type { Route } from "./components/types";
+import { ALL_ROUTES, type Route } from "./components/types";
 
 const ROUTE_KEY = "wallet.route";
 const DENOM_KEY = "wallet.denom";
@@ -37,7 +43,7 @@ type BootState =
 function readRoute(): Route {
   try {
     const v = localStorage.getItem(ROUTE_KEY);
-    if (v === "home" || v === "tokens" || v === "activity" || v === "settings") return v;
+    if (v && (ALL_ROUTES as string[]).includes(v)) return v as Route;
   } catch {
     // localStorage unavailable — fall through.
   }
@@ -103,7 +109,10 @@ export function App() {
     document.body.dataset.denom = denom;
     try { localStorage.setItem(DENOM_KEY, denom); } catch { /* ignore */ }
     // Tokens-only route: bounce out if user flipped to private.
-    if (denom === "private" && route === "tokens") setRoute("home");
+    // Public-only routes bounce out when user flips to private denomination.
+    if (denom === "private" && (route === "tokens" || route === "stake" || route === "trade" || route === "ai-trade")) {
+      setRoute("home");
+    }
   }, [denom, route]);
 
   if (boot.kind === "probing") {
@@ -123,8 +132,14 @@ export function App() {
         <Topbar route={route} />
         <main className="w-main">
           {route === "home" ? <Home denom={denom} goto={setRoute} /> : null}
-          {route === "tokens" ? <Tokens /> : null}
           {route === "activity" ? <Activity denom={denom} /> : null}
+          {route === "wallets" ? <Wallets /> : null}
+          {route === "tokens" ? <Tokens /> : null}
+          {route === "stake" ? <Stake /> : null}
+          {route === "contacts" ? <Contacts denom={denom} /> : null}
+          {route === "trade" ? <Trade /> : null}
+          {route === "ai-trade" ? <AiTrading /> : null}
+          {route === "news" ? <News /> : null}
           {route === "settings" ? <Settings /> : null}
         </main>
       </div>
