@@ -46,7 +46,7 @@ export const TOKENS: Token[] = [
   { sym: "USDL",  name: "USD-Lyth stable", amount:  612.18, priceUsd: 1.00,  chg24h:  0.0, note: "stablecoin · 1:1 USD" },
   { sym: "CZN",   name: "Coinzen",         amount:  240.00, priceUsd: 1.74,  chg24h: -1.1, note: "exchange token" },
   { sym: "ORBT",  name: "Orbital",         amount: 1820.0,  priceUsd: 0.082, chg24h:  8.7, note: "perps protocol" },
-  { sym: "STAR",  name: "Starfish Labs",   amount:   12.50, priceUsd: 42.10, chg24h: -0.8, note: "validator DAO" },
+  { sym: "STAR",  name: "Starfish Labs",   amount:   12.50, priceUsd: 42.10, chg24h: -0.8, note: "operator DAO" },
 ];
 
 const tx = (over: Partial<Tx>): Tx => ({

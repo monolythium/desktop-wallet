@@ -262,6 +262,93 @@ body[data-denom="private"] .w-nav__item.is-active::before {
 .w-card__head__spacer { flex: 1; }
 .w-card__body { padding: 8px 18px 14px; }
 
+/* ============ Live SDK panels ============ */
+.w-live-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 20px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(126, 227, 193, 0.34);
+  background: rgba(126, 227, 193, 0.10);
+  color: var(--ok);
+  font-family: var(--f-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.w-live-pill.is-muted {
+  color: var(--fg-400);
+  border-color: var(--w-line);
+  background: rgba(255,255,255,0.03);
+}
+.w-live-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+  margin: 8px 0 12px;
+}
+.w-live-cell {
+  min-width: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--w-line);
+  background: rgba(255,255,255,0.025);
+}
+.w-live-cell > div:last-child {
+  margin-top: 4px;
+  font-size: 13px;
+  color: var(--fg-100);
+  overflow-wrap: anywhere;
+}
+.w-live-list {
+  display: flex;
+  flex-direction: column;
+  margin-top: 10px;
+}
+.w-live-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 10px 0;
+  border-top: 1px solid rgba(255,255,255,0.04);
+}
+.w-live-right {
+  text-align: right;
+  display: flex;
+  align-items: flex-end;
+  flex-direction: column;
+  gap: 6px;
+}
+.w-live-error {
+  margin-top: 10px;
+  padding: 9px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 99, 99, 0.28);
+  background: rgba(255, 99, 99, 0.08);
+  color: var(--err);
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+}
+.w-live-form {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  align-items: center;
+  margin: 8px 0 12px;
+}
+.w-live-input {
+  min-height: 34px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--w-line);
+  background: var(--w-bg);
+  font-size: 12px;
+}
+
 /* ============ Hero ============ */
 .w-hero {
   text-align: center;

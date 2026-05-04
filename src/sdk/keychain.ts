@@ -65,8 +65,7 @@ function normalizeError(raw: unknown): KeychainCallError {
 /**
  * Retrieve the vault blob stored under `account`. Throws
  * `KeychainCallError` with a typed `cause` on failure. The bytes are
- * handed straight to `unlockVault` — the wallet never reads cleartext
- * seed material on the JS side.
+ * handed straight to `unlockVault`.
  */
 export async function unlock(account: string): Promise<Uint8Array> {
   try {
@@ -105,14 +104,15 @@ export async function createAndStoreVault(account: string, password: string): Pr
 
 /**
  * Auth helper: fetch the vault blob for `account` and verify `password`
- * decrypts it. Throws `KeychainCallError` if the keychain lookup fails
+ * decrypts it. Returns the operation-scoped 32-byte seed. Throws
+ * `KeychainCallError` if the keychain lookup fails
  * (including `not_found` → onboarding cue), or `VaultCallError` with
  * `cause.code === "wrong_password"` if the password is wrong / blob is
  * tampered.
  */
-export async function fetchAndUnlockVault(account: string, password: string): Promise<void> {
+export async function fetchAndUnlockVault(account: string, password: string): Promise<Uint8Array> {
   const blob = await unlock(account);
-  await unlockVault(password, blob);
+  return unlockVault(password, blob);
 }
 
 export { VaultCallError };

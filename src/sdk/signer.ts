@@ -5,8 +5,7 @@
 // wallet's existing Ledger HID bridge into that shim so the OperationsDrawer
 // can flow a "send LYTH" through the canonical ethers Signer surface
 // (`signTransaction` + `provider.broadcastTransaction`) without the page
-// code knowing whether the device is a Ledger, a future hardware wallet,
-// or — eventually — a software signer derived from the unlocked vault seed.
+// code knowing whether the device is a Ledger or a future hardware wallet.
 //
 // Two backends ship today:
 //
@@ -22,10 +21,8 @@
 //       address (provider.getBalance(signer.address)) without ever
 //       broadcasting.
 //
-// A software signer derived from the unlocked vault seed is intentionally
-// left for Stage 5 — see `src-tauri/src/vault.rs:222`. The vault currently
-// drops the seed at the end of `vault_unlock`; widening that surface is its
-// own change with its own threat-model write-up.
+// The native ML-DSA software path lives in `native-send.ts` because it uses
+// the SDK crypto helpers directly instead of the ethers compatibility signer.
 
 import {
   MonolythiumSigner,

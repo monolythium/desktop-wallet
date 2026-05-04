@@ -1,6 +1,9 @@
 /// <reference types="vitest" />
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import { getRpcEndpoints } from "@monolythium/core-sdk";
+
+const testnetRpc = getRpcEndpoints("testnet-69420")[0]?.url;
 
 // Tauri 2 expects the dev server on a stable port and prefers no clear screen
 // so its own logs stay visible alongside Vite's. Use the conventional 1420.
@@ -10,6 +13,15 @@ export default defineConfig({
   server: {
     port: 1420,
     strictPort: true,
+    proxy: testnetRpc
+      ? {
+          "/rpc": {
+            target: testnetRpc,
+            changeOrigin: true,
+            rewrite: () => "/",
+          },
+        }
+      : undefined,
   },
   // Don't watch src-tauri output — Tauri handles that itself.
   envPrefix: ["VITE_", "TAURI_"],
