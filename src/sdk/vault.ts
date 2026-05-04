@@ -6,8 +6,9 @@
 // What the OS keychain holds is the encrypted blob — the password itself
 // is never persisted.
 //
-//   createVault(password)         → vault blob bytes
-//   unlockVault(password, blob)   → seed | wrong_password
+//   createVault(password)             → vault blob bytes
+//   createVaultFromSeed(password, seed) → vault blob bytes
+//   unlockVault(password, blob)       → seed | wrong_password
 //
 // Onboarding calls `createVault`, then hands the bytes to the existing
 // `keychain_store` command. The OperationsDrawer auth stage calls
@@ -62,6 +63,28 @@ export async function createVault(password: string): Promise<Uint8Array> {
   }
   try {
     const bytes = await invoke<number[]>("vault_create", { password });
+    return new Uint8Array(bytes);
+  } catch (raw) {
+    throw normalizeError(raw);
+  }
+}
+
+/**
+ * Seal a caller-provided 32-byte seed. New wallet creation uses this after
+ * deriving the seed from a PQM-1 mnemonic in the TypeScript SDK.
+ */
+export async function createVaultFromSeed(password: string, seed: Uint8Array): Promise<Uint8Array> {
+  if (!password) {
+    throw new VaultCallError({ code: "invalid_argument", message: "password is empty" });
+  }
+  if (seed.length !== 32) {
+    throw new VaultCallError({ code: "invalid_argument", message: `seed must be 32 bytes, got ${seed.length}` });
+  }
+  try {
+    const bytes = await invoke<number[]>("vault_seal_seed", {
+      password,
+      seedBytes: Array.from(seed),
+    });
     return new Uint8Array(bytes);
   } catch (raw) {
     throw normalizeError(raw);

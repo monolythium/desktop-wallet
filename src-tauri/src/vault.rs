@@ -161,8 +161,9 @@ pub enum VaultError {
 /// derived from `password` via Argon2id. Returns the serialized JSON
 /// bytes the caller persists in the OS keychain.
 ///
-/// The seed itself is generated here and never returned — anything that
-/// signs reaches the seed by calling `vault_unlock` first.
+/// Kept for compatibility with older UI code. New wallet creation should
+/// generate a PQM-1 mnemonic in TypeScript, derive the ML-DSA-65 seed via
+/// `@monolythium/core-sdk/crypto`, and call `vault_seal_seed`.
 #[tauri::command]
 pub fn vault_create(password: String) -> Result<Vec<u8>, VaultError> {
     if password.is_empty() {
@@ -173,39 +174,35 @@ pub fn vault_create(password: String) -> Result<Vec<u8>, VaultError> {
 
     let params = VaultArgon2Params::recommended();
 
-    let mut salt = [0u8; SALT_LEN];
-    let mut nonce_bytes = [0u8; NONCE_LEN];
     let mut seed = [0u8; SEED_LEN];
-    OsRng.fill_bytes(&mut salt);
-    OsRng.fill_bytes(&mut nonce_bytes);
     OsRng.fill_bytes(&mut seed);
 
-    // Derive KEK and encrypt. Both `kek` and `seed` are zeroized before
-    // this function returns, so even a panic between encryption and
-    // serialization can't leave them on the heap.
-    let result = (|| -> Result<VaultBlob, VaultError> {
-        let mut kek = derive_kek(password.as_bytes(), &salt, params)?;
-        let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&kek));
-        let ct = cipher
-            .encrypt(Nonce::from_slice(&nonce_bytes), seed.as_ref())
-            .map_err(|_| VaultError::Backend {
-                message: "aes-gcm encryption failed".into(),
-            })?;
-        kek.zeroize();
-        Ok(VaultBlob {
-            version: VAULT_VERSION,
-            argon2_params: params,
-            salt: URL_SAFE_NO_PAD.encode(salt),
-            nonce: URL_SAFE_NO_PAD.encode(nonce_bytes),
-            ciphertext: URL_SAFE_NO_PAD.encode(ct),
-        })
-    })();
-
+    let result = seal_seed_with_params(password.as_bytes(), &seed, params);
     seed.zeroize();
-    let blob = result?;
-    serde_json::to_vec(&blob).map_err(|e| VaultError::Backend {
-        message: format!("vault serialize failed: {e}"),
-    })
+    result
+}
+
+/// Seal a caller-provided 32-byte seed. This is the path used by PQM-1
+/// wallet creation: TypeScript owns mnemonic generation and KDF parity
+/// with mono-core, Rust owns password encryption and OS-safe storage.
+#[tauri::command]
+pub fn vault_seal_seed(password: String, seed_bytes: Vec<u8>) -> Result<Vec<u8>, VaultError> {
+    if password.is_empty() {
+        return Err(VaultError::InvalidArgument {
+            message: "password is empty".into(),
+        });
+    }
+    if seed_bytes.len() != SEED_LEN {
+        return Err(VaultError::InvalidArgument {
+            message: format!("seed must be {SEED_LEN} bytes"),
+        });
+    }
+    let mut seed = [0u8; SEED_LEN];
+    seed.copy_from_slice(&seed_bytes);
+    let result =
+        seal_seed_with_params(password.as_bytes(), &seed, VaultArgon2Params::recommended());
+    seed.zeroize();
+    result
 }
 
 /// Verify that `password` decrypts the on-disk vault `blob_bytes` and
@@ -279,6 +276,39 @@ fn derive_kek(
             message: format!("argon2id derive failed: {e}"),
         })?;
     Ok(kek)
+}
+
+fn seal_seed_with_params(
+    password: &[u8],
+    seed: &[u8; SEED_LEN],
+    params: VaultArgon2Params,
+) -> Result<Vec<u8>, VaultError> {
+    let mut salt = [0u8; SALT_LEN];
+    let mut nonce_bytes = [0u8; NONCE_LEN];
+    OsRng.fill_bytes(&mut salt);
+    OsRng.fill_bytes(&mut nonce_bytes);
+
+    let blob = (|| -> Result<VaultBlob, VaultError> {
+        let mut kek = derive_kek(password, &salt, params)?;
+        let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&kek));
+        let ct = cipher
+            .encrypt(Nonce::from_slice(&nonce_bytes), seed.as_ref())
+            .map_err(|_| VaultError::Backend {
+                message: "aes-gcm encryption failed".into(),
+            })?;
+        kek.zeroize();
+        Ok(VaultBlob {
+            version: VAULT_VERSION,
+            argon2_params: params,
+            salt: URL_SAFE_NO_PAD.encode(salt),
+            nonce: URL_SAFE_NO_PAD.encode(nonce_bytes),
+            ciphertext: URL_SAFE_NO_PAD.encode(ct),
+        })
+    })()?;
+
+    serde_json::to_vec(&blob).map_err(|e| VaultError::Backend {
+        message: format!("vault serialize failed: {e}"),
+    })
 }
 
 #[cfg(test)]

@@ -2,7 +2,7 @@
 //
 // Registers the Tauri command surface for the wallet:
 // - `keychain_unlock` / `keychain_store` — OS keychain bridge.
-// - `vault_create`   / `vault_unlock`    — Argon2id + AES-GCM seed vault.
+// - `vault_create` / `vault_seal_seed` / `vault_unlock` — seed vault.
 // - `ledger_*`                           — HID hardware signer (Stage 4).
 //
 // Stage 5 will extend with `monolythium-core-sdk` RPC wrappers + passkey
@@ -26,6 +26,7 @@ pub fn run() {
             keychain::keychain_unlock,
             keychain::keychain_store,
             vault::vault_create,
+            vault::vault_seal_seed,
             vault::vault_unlock,
             ledger::ledger_enumerate_devices,
             ledger::ledger_get_address,
