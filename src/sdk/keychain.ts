@@ -12,7 +12,11 @@
 // whether to retry, bounce into onboarding, or render a hard error.
 
 import { invoke } from "@tauri-apps/api/core";
-import { createVault, unlockVault, VaultCallError } from "./vault";
+import {
+  generatePqm1Mnemonic,
+  pqm1MnemonicToMlDsa65Seed,
+} from "@monolythium/core-sdk/crypto";
+import { createVaultFromSeed, unlockVault, VaultCallError } from "./vault";
 
 /** The canonical identity slot for the primary signing key. */
 export const PRIMARY_ACCOUNT = "kc:lyth:primary:v1";
@@ -92,14 +96,16 @@ export async function store(account: string, secret: Uint8Array): Promise<void> 
 }
 
 /**
- * Onboarding helper: build a fresh Argon2id-protected vault from
- * `password` and persist it under `account`. The seed is generated
- * inside Rust via `OsRng` and AES-GCM-encrypted before it ever leaves
- * the Rust side.
+ * Onboarding helper: generate a fresh PQM-1 mnemonic, derive the ML-DSA-65
+ * seed in the TypeScript SDK, then persist an Argon2id-protected vault.
  */
-export async function createAndStoreVault(account: string, password: string): Promise<void> {
-  const blob = await createVault(password);
+export async function createAndStoreVault(account: string, password: string): Promise<{ mnemonic: string }> {
+  const mnemonic = generatePqm1Mnemonic();
+  const seed = pqm1MnemonicToMlDsa65Seed(mnemonic);
+  const blob = await createVaultFromSeed(password, seed);
+  seed.fill(0);
   await store(account, blob);
+  return { mnemonic };
 }
 
 /**

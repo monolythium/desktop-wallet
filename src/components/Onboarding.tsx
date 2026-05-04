@@ -1,9 +1,9 @@
-// Onboarding — first-run wallet setup. Prompts for a password, builds an
-// Argon2id + AES-256-GCM vault wrapping a fresh 32-byte seed, and stores
-// the encrypted blob in the OS keychain.
+// Onboarding — first-run wallet setup. Prompts for a password, mints a
+// PQM-1 24-word recovery phrase, derives the ML-DSA-65 seed with the
+// TypeScript SDK, and stores only the encrypted seed in the OS keychain.
 //
 // Stage 4 keeps this UI minimal on purpose. Future passes will:
-// - Show a 24-word BIP-39 mnemonic and confirm-back step.
+// - Add a confirm-back step.
 // - Add hardware-bound storage (Secure Enclave / TPM).
 // - Add password-strength meter once we settle on a heuristic that's
 //   honest (zxcvbn-ts) rather than performative.
@@ -29,6 +29,7 @@ export function Onboarding({ onDone }: Props) {
   const [confirm, setConfirm] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [mnemonic, setMnemonic] = useState<string | null>(null);
 
   const canSubmit =
     !busy && password.length >= 8 && password === confirm;
@@ -38,8 +39,9 @@ export function Onboarding({ onDone }: Props) {
     setBusy(true);
     setError(null);
     try {
-      await createAndStoreVault(PRIMARY_ACCOUNT, password);
-      onDone();
+      const result = await createAndStoreVault(PRIMARY_ACCOUNT, password);
+      setMnemonic(result.mnemonic);
+      setBusy(false);
     } catch (cause) {
       if (cause instanceof KeychainCallError || cause instanceof VaultCallError) {
         setError(cause.message);
@@ -53,6 +55,46 @@ export function Onboarding({ onDone }: Props) {
   return (
     <div className="w-onboarding">
       <div className="w-onboarding__card">
+        {mnemonic ? (
+          <>
+            <div className="cap" style={{ marginBottom: 8 }}>Recovery phrase</div>
+            <h1 style={{ margin: "0 0 8px" }}>Write this down</h1>
+            <p style={{ margin: "0 0 18px", color: "var(--w-text-2)", fontSize: 13 }}>
+              This PQM-1 phrase is the only recovery path for the encrypted
+              local vault. It will not be shown again.
+            </p>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr",
+                gap: "8px 14px",
+                padding: 14,
+                border: "1px solid var(--w-border)",
+                borderRadius: 8,
+                background: "rgba(255,255,255,0.035)",
+                fontFamily: "var(--w-mono)",
+                fontSize: 12,
+              }}
+            >
+              {mnemonic.split(/\s+/).map((word, i) => (
+                <div key={`${word}-${i}`} style={{ display: "grid", gridTemplateColumns: "28px 1fr", gap: 8 }}>
+                  <span style={{ color: "var(--w-text-3)", textAlign: "right" }}>{i + 1}</span>
+                  <span>{word}</span>
+                </div>
+              ))}
+            </div>
+            <div style={{ display: "flex", marginTop: 24 }}>
+              <button
+                className="btn btn--primary"
+                style={{ marginLeft: "auto" }}
+                onClick={onDone}
+              >
+                I have backed it up
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
         <div className="cap" style={{ marginBottom: 8 }}>First-run setup</div>
         <h1 style={{ margin: "0 0 8px" }}>Set a wallet password</h1>
         <p style={{ margin: "0 0 24px", color: "var(--w-text-2)", fontSize: 13 }}>
@@ -114,6 +156,8 @@ export function Onboarding({ onDone }: Props) {
             {busy ? "Sealing vault…" : "Create vault"}
           </button>
         </div>
+          </>
+        )}
       </div>
     </div>
   );
