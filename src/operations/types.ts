@@ -71,7 +71,12 @@ export interface OperationDescriptor {
    * RPC echo, etc.); throws to land the drawer in `error`. Implementations
    * are responsible for the chain side; the drawer owns UI state only.
    */
-  execute: () => Promise<OperationResult>;
+  execute: (ctx?: OperationExecutionContext) => Promise<OperationResult>;
+}
+
+export interface OperationExecutionContext {
+  /** Present only after `auth: "keychain"` succeeds. */
+  vaultSeed?: Uint8Array;
 }
 
 export interface OperationResult {

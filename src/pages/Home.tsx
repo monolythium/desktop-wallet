@@ -2,10 +2,12 @@
 // Public denom: hero balance + token preview + activity preview.
 // Private denom: hero with amount-hidden disclosure + activity preview.
 
+import { useEffect, useState } from "react";
 import { useOperations } from "../operations/context";
 import { loadChainSnapshot } from "../sdk/client";
 import { useChainSnapshot } from "../sdk/useChainSnapshot";
 import { sendLyth } from "../sdk/send";
+import { sendNativeLyth } from "../sdk/native-send";
 import { makeLedgerSigner } from "../sdk/signer";
 import { enumerateDevices, getAddress as ledgerGetAddress } from "../sdk/ledger";
 import { BALANCES, IDENTITY, SEND_DEMO, TOKENS, TXS_PRIVATE, TXS_PUBLIC } from "../data/fixtures";
@@ -14,6 +16,13 @@ import { TokenRow } from "../components/TokenRow";
 import { TxRow } from "../components/TxRow";
 import { fmt } from "../components/format";
 import type { Route } from "../components/types";
+import {
+  loadLiveAddressActivity,
+  loadLiveTokenStatus,
+  type LiveAddressActivityRow,
+  type LiveTokenStatus,
+  type RpcOutcome,
+} from "../sdk/live";
 
 interface Props {
   denom: Denom;
@@ -25,18 +34,34 @@ export function Home({ denom, goto }: Props) {
   const isPub = denom === "public";
   const bal = BALANCES[denom];
   const totalUsd = TOKENS.reduce((a, t) => a + t.amount * t.priceUsd, 0);
+  const [liveTokens, setLiveTokens] = useState<LiveTokenStatus | null>(null);
+  const [liveActivity, setLiveActivity] = useState<RpcOutcome<LiveAddressActivityRow[]> | null>(null);
 
   // Live SDK call: chain id + balance for the bound address. The result is
   // surfaced through the topbar (see Topbar.tsx); the hook is mounted here so
   // a Home revisit refreshes the chain snapshot.
   const chain = useChainSnapshot(IDENTITY.address);
 
-  // Send LYTH — hardware-signer path. The drawer's hardware flow already
+  useEffect(() => {
+    if (!isPub) return;
+    let cancelled = false;
+    void Promise.all([
+      loadLiveTokenStatus(IDENTITY.address),
+      loadLiveAddressActivity(IDENTITY.address),
+    ]).then(([tokens, activity]) => {
+      if (cancelled) return;
+      setLiveTokens(tokens);
+      setLiveActivity(activity);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [isPub]);
+
+  // Send LYTH — existing hardware-signer path. The drawer's hardware flow
   // enumerates the device + confirms the address; once the user approves,
   // `descriptor.execute()` builds a live TransactionRequest and broadcasts
-  // through `MonolythiumProvider`. The keychain (software-signer) path is
-  // deferred until the vault widens to return a usable seed (see
-  // `src-tauri/src/vault.rs:222`).
+  // through `MonolythiumProvider`.
   const openSend = () => {
     ops.open({
       title: `Send ${SEND_DEMO.amountLyth} LYTH`,
@@ -85,6 +110,41 @@ export function Home({ denom, goto }: Props) {
         return {
           headline: `Broadcast ${SEND_DEMO.amountLyth} LYTH`,
           detail: result.txHash,
+        };
+      },
+    });
+  };
+
+  const openNativeSend = () => {
+    ops.open({
+      title: `Send ${SEND_DEMO.amountLyth} LYTH`,
+      subtitle: "Native ML-DSA encrypted Sprintnet send",
+      auth: "keychain",
+      diff: [
+        { k: "From",      v: "Unlocked vault address" },
+        { k: "To",        v: SEND_DEMO.to },
+        { k: "Token",     v: "LYTH" },
+        { k: "Amount",    v: `${SEND_DEMO.amountLyth} LYTH` },
+        { k: "Network",   v: chain.snapshot ? `chain ${chain.snapshot.chainId}` : "Sprintnet" },
+        { k: "Endpoint",  v: chain.snapshot?.endpoint ?? "(default RPC)" },
+      ],
+      effects: [
+        { text: "Unlocks the local vault for this operation only." },
+        { text: "Derives an ML-DSA-65 signer with @monolythium/core-sdk/crypto." },
+        { text: "Wraps the native transaction in an encrypted envelope and submits lyth_submitEncrypted." },
+      ],
+      execute: async (ctx) => {
+        if (!ctx?.vaultSeed) {
+          throw new Error("vault seed unavailable after keychain authorization");
+        }
+        const result = await sendNativeLyth({
+          seed: ctx.vaultSeed,
+          to: SEND_DEMO.to,
+          amountLyth: SEND_DEMO.amountLyth,
+        });
+        return {
+          headline: `Broadcast ${SEND_DEMO.amountLyth} LYTH`,
+          detail: `${result.txHash} · from ${result.from}`,
         };
       },
     });
@@ -173,6 +233,14 @@ export function Home({ denom, goto }: Props) {
             </svg>
             <span>Send</span>
           </button>
+          <button className="w-hbtn" onClick={openNativeSend}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 2v20" />
+              <path d="m17 5-5-3-5 3" />
+              <path d="m17 19-5 3-5-3" />
+            </svg>
+            <span>Native</span>
+          </button>
           <button className="w-hbtn" onClick={openReceive}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M12 5v14M5 12l7 7 7-7" />
@@ -205,7 +273,21 @@ export function Home({ denom, goto }: Props) {
               <button className="btn btn--sm btn--ghost" onClick={() => goto("tokens")}>View all</button>
             </div>
             <div className="w-card__body">
-              {TOKENS.slice(0, 4).map((t) => <TokenRow key={t.sym} token={t} />)}
+              {liveTokens?.tokenBalances.ok && liveTokens.tokenBalances.value && liveTokens.tokenBalances.value.length > 0 ? (
+                <div className="w-live-list">
+                  {liveTokens.tokenBalances.value.slice(0, 4).map((row) => (
+                    <div className="w-live-row" key={row.tokenId}>
+                      <div>
+                        <div className="row-label mono">{shortHex(row.tokenId)}</div>
+                        <div className="row-help">updated at block {row.updatedAtBlock.toString()}</div>
+                      </div>
+                      <div className="w-live-right mono">{row.balance}</div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                TOKENS.slice(0, 4).map((t) => <TokenRow key={t.sym} token={t} />)
+              )}
             </div>
           </div>
 
@@ -216,7 +298,21 @@ export function Home({ denom, goto }: Props) {
               <button className="btn btn--sm btn--ghost" onClick={() => goto("activity")}>View all</button>
             </div>
             <div className="w-card__body">
-              {TXS_PUBLIC.slice(0, 4).map((tx) => <TxRow key={tx.id} tx={tx} />)}
+              {liveActivity?.ok && liveActivity.value && liveActivity.value.length > 0 ? (
+                <div className="w-live-list">
+                  {liveActivity.value.slice(0, 4).map((row) => (
+                    <div className="w-live-row" key={`${row.blockHeight}-${row.txIndex}-${row.logIndex}`}>
+                      <div>
+                        <div className="row-label mono">{formatLiveActivity(row)}</div>
+                        <div className="row-help">block {row.blockHeight.toString()} · tx {row.txIndex}</div>
+                      </div>
+                      <span className="w-live-pill">{formatLiveAmount(row)}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                TXS_PUBLIC.slice(0, 4).map((tx) => <TxRow key={tx.id} tx={tx} />)
+              )}
             </div>
           </div>
         </div>
@@ -234,6 +330,23 @@ export function Home({ denom, goto }: Props) {
       )}
     </div>
   );
+}
+
+function shortHex(value: string): string {
+  return value.length > 28 ? `${value.slice(0, 18)}…${value.slice(-8)}` : value;
+}
+
+function formatLiveActivity(row: LiveAddressActivityRow): string {
+  const kind = row.subKind ? `${row.kind} · ${row.subKind}` : row.kind;
+  if (row.counterparty) return `${kind} · ${shortHex(row.counterparty)}`;
+  if (row.cluster !== null) return `${kind} · C-${String(row.cluster + 1).padStart(3, "0")}`;
+  return kind;
+}
+
+function formatLiveAmount(row: LiveAddressActivityRow): string {
+  if (row.amount) return `${row.direction === "out" ? "-" : "+"}${row.amount}`;
+  if (row.weightBps !== null) return `${row.weightBps} bps`;
+  return "indexed";
 }
 
 function ChainStatusLine({

@@ -26,6 +26,7 @@ import {
   type LedgerDeviceInfo,
 } from "../sdk/ledger";
 import type {
+  OperationExecutionContext,
   OperationDescriptor,
   OperationResult,
   OperationStage,
@@ -137,8 +138,9 @@ export function OperationsDrawer({ descriptor, onClose }: Props) {
       }
       setAuthBusy(true);
       setAuthError(null);
+      let vaultSeed: Uint8Array;
       try {
-        await fetchAndUnlockVault(PRIMARY_ACCOUNT, password);
+        vaultSeed = await fetchAndUnlockVault(PRIMARY_ACCOUNT, password);
       } catch (cause) {
         if (cause instanceof KeychainCallError) {
           setAuthError({ kind: "keychain", cause });
@@ -156,7 +158,7 @@ export function OperationsDrawer({ descriptor, onClose }: Props) {
       setAuthBusy(false);
       // Clear the password from state immediately on success.
       setPassword("");
-      void runExecute();
+      void runExecute({ vaultSeed });
       return;
     }
     if (descriptor.auth === "hardware") {
@@ -241,17 +243,19 @@ export function OperationsDrawer({ descriptor, onClose }: Props) {
     }
   };
 
-  const runExecute = async () => {
+  const runExecute = async (ctx: OperationExecutionContext = {}) => {
     setStage("executing");
     setError(null);
     try {
-      const r = await descriptor.execute();
+      const r = await descriptor.execute(ctx);
       setResult(r);
       setStage("done");
     } catch (cause) {
       const message = (cause as Error)?.message ?? String(cause);
       setError(message);
       setStage("error");
+    } finally {
+      ctx.vaultSeed?.fill(0);
     }
   };
 

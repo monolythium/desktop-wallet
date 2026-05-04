@@ -33,8 +33,9 @@
 // vaults stay decryptable on whichever device they were created on.
 //
 // Security notes:
-// - The seed never leaves Rust except through the existing keychain
-//   commands; the frontend only sees it as opaque bytes.
+// - `vault_create` never returns clear seed material; `vault_unlock`
+//   returns the seed only for the operation the user just approved, so
+//   the JS caller must zero/drop it as soon as signing material is built.
 // - WrongPassword is a single error code regardless of which check failed
 //   (KDF, GCM tag, JSON shape) so timing/error-shape can't fingerprint
 //   which guess was closer.
@@ -207,15 +208,15 @@ pub fn vault_create(password: String) -> Result<Vec<u8>, VaultError> {
     })
 }
 
-/// Verify that `password` decrypts the on-disk vault `blob_bytes`. Used
-/// by the OperationsDrawer auth stage to gate write operations.
+/// Verify that `password` decrypts the on-disk vault `blob_bytes` and
+/// return the decrypted 32-byte seed to the caller.
 ///
-/// The decrypted seed is currently dropped here — the next stage (Ledger
-/// + signing) will widen this surface to return the seed wrapped in a
-/// short-lived in-process handle. For now, success means "password OK,
-/// drawer may advance to executing".
+/// The frontend immediately hands this to `@monolythium/core-sdk/crypto`
+/// to derive an ML-DSA-65 backend for the operation being approved. The
+/// drawer clears its password state before executing; callers must also
+/// zero or drop the returned seed once their operation has built.
 #[tauri::command]
-pub fn vault_unlock(password: String, blob_bytes: Vec<u8>) -> Result<(), VaultError> {
+pub fn vault_unlock(password: String, blob_bytes: Vec<u8>) -> Result<Vec<u8>, VaultError> {
     if password.is_empty() {
         return Err(VaultError::InvalidArgument {
             message: "password is empty".into(),
@@ -260,9 +261,7 @@ pub fn vault_unlock(password: String, blob_bytes: Vec<u8>) -> Result<(), VaultEr
         seed.zeroize();
         return Err(VaultError::WrongPassword);
     }
-    // Drop the seed immediately; Stage 5 will widen the surface.
-    seed.zeroize();
-    Ok(())
+    Ok(seed)
 }
 
 fn derive_kek(
@@ -326,7 +325,8 @@ mod tests {
     #[test]
     fn round_trip_correct_password() {
         let bytes = fast_create("correct horse battery staple");
-        assert!(vault_unlock("correct horse battery staple".into(), bytes).is_ok());
+        let seed = vault_unlock("correct horse battery staple".into(), bytes).unwrap();
+        assert_eq!(seed.len(), SEED_LEN);
     }
 
     #[test]

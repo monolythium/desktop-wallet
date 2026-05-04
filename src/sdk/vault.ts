@@ -7,12 +7,12 @@
 // is never persisted.
 //
 //   createVault(password)         → vault blob bytes
-//   unlockVault(password, blob)   → ok | wrong_password
+//   unlockVault(password, blob)   → seed | wrong_password
 //
 // Onboarding calls `createVault`, then hands the bytes to the existing
 // `keychain_store` command. The OperationsDrawer auth stage calls
 // `keychain_unlock` to fetch the blob, then `unlockVault(password, blob)`
-// to verify the password before advancing.
+// to recover the seed for the operation being approved.
 
 import { invoke } from "@tauri-apps/api/core";
 
@@ -69,19 +69,20 @@ export async function createVault(password: string): Promise<Uint8Array> {
 }
 
 /**
- * Verify `password` decrypts `blob`. Throws `VaultCallError` with
- * `cause.code === "wrong_password"` on either bad password or tampered
- * blob. Other codes mean the call itself failed (e.g. backend bug).
+ * Verify `password` decrypts `blob` and return the 32-byte seed. Throws
+ * `VaultCallError` with `cause.code === "wrong_password"` on either bad
+ * password or tampered blob. Other codes mean the call itself failed.
  */
-export async function unlockVault(password: string, blob: Uint8Array): Promise<void> {
+export async function unlockVault(password: string, blob: Uint8Array): Promise<Uint8Array> {
   if (!password) {
     throw new VaultCallError({ code: "invalid_argument", message: "password is empty" });
   }
   try {
-    await invoke<void>("vault_unlock", {
+    const seed = await invoke<number[]>("vault_unlock", {
       password,
       blobBytes: Array.from(blob),
     });
+    return new Uint8Array(seed);
   } catch (raw) {
     throw normalizeError(raw);
   }

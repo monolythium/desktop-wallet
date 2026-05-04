@@ -7,22 +7,22 @@
 // `provider.broadcastTransaction`) flow straight through; native callers
 // can still reach `lyth_*` methods via `provider.rpcClient.call(...)`.
 
-import { MonolythiumProvider, SdkError } from "@monolythium/core-sdk";
+import { MonolythiumProvider, SdkError, getRpcEndpoints } from "@monolythium/core-sdk";
 import type { MonolythiumProviderOptions } from "@monolythium/core-sdk";
 
 /**
  * Default RPC endpoint. Honors `VITE_MONO_RPC_URL` at build time so the
  * Tauri release bundle can pin to a specific endpoint without a code change.
  *
- * The fallback points at the live LythiumDAG-BFT testnet (chain id 69420
- * per Law §13.1). Until the testnet RPC has a stable public URL the wallet
- * falls back to a localhost node — that keeps `pnpm dev` usable without a
- * network.
+ * The fallback points at the SDK-bundled chain-registry testnet endpoint
+ * (chain id 69420), not localhost. Local/private nodes still override with
+ * `VITE_MONO_RPC_URL`.
  */
 function defaultEndpoint(): string {
   const fromEnv = import.meta.env.VITE_MONO_RPC_URL;
   if (typeof fromEnv === "string" && fromEnv.length > 0) return fromEnv;
-  return "http://localhost:8548";
+  if (import.meta.env.DEV) return "/rpc";
+  return getRpcEndpoints("testnet-69420")[0]?.url ?? "http://localhost:8548";
 }
 
 let _provider: MonolythiumProvider | null = null;
