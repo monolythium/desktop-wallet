@@ -1,4 +1,4 @@
-// Trade page — native CLOB + perp surface. Public denom only.
+// Trade page — native CLOB spot surface. Public denom only.
 // Stage 2 placeholder; live wiring lands when CLOB precompile RPCs surface.
 
 import { TodoSection } from "../components/TodoSection";
@@ -16,7 +16,7 @@ export function Trade() {
         items={[
           "TODO — market list with last · 24h change · 24h volume",
           "TODO — favorites / watchlist (persisted)",
-          "TODO — search + category filter (spot · perp)",
+          "TODO — search + category filter (spot pairs only)",
         ]}
       />
 
@@ -41,10 +41,10 @@ export function Trade() {
       />
 
       <TodoSection
-        title="My positions"
+        title="My orders"
         items={[
           "TODO — open orders (cancel · modify)",
-          "TODO — open perp positions with margin / liq price",
+          "TODO — settled spot balances by pair",
           "TODO — fills history (CSV export)",
         ]}
       />

@@ -96,7 +96,7 @@ export function Stake() {
       <TodoSection
         title="My stakes"
         items={[
-          "TODO — list of clusters this wallet has stake in (multi-vote up to 10)",
+          "TODO — list of clusters this wallet has stake in (up to 10 cluster allocations)",
           "TODO — per-cluster amount + earned (30d) + unlock window; current bps + event history are live",
           "TODO — auto-compound toggle per stake (OperationsDrawer write)",
           "TODO — claim rewards (OperationsDrawer write)",
@@ -107,7 +107,7 @@ export function Stake() {
       <TodoSection
         title="Cluster marketplace"
         items={[
-          "TODO — full cluster list (lyth_listClusters when surfaced)",
+          "TODO — full cluster list (lyth_clusterDirectory live data plus indexer APY/reliability enrichment)",
           "TODO — filter by region · APR · reliability · diversity score",
           "TODO — cluster detail: members, slot fill (live/total), TVS, slashing history",
           "TODO — stake to cluster (OperationsDrawer write)",
