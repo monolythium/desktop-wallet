@@ -29,7 +29,7 @@ let _provider: MonolythiumProvider | null = null;
 
 /**
  * Lazily-constructed singleton ethers `MonolythiumProvider`. The shim
- * registers the `monolythium-v2-testnet` network with ethers' global
+ * registers the `monolythium-testnet` network with ethers' global
  * registry on first use; subsequent calls reuse the same instance and
  * the same underlying `RpcClient` transport.
  */
