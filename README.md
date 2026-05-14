@@ -8,7 +8,7 @@ Monolythium desktop wallet (macOS, Windows, Linux)
 
 ## What this is
 
-A native desktop wallet for Monolythium, built on Tauri 2 with a Rust backend and a React 19 frontend. It is designed to be small, signed, and OS-keychain-first: no Electron, no browser extension surface, no embedded password vaults. Stage 0 ships only the scaffold — the full feature set lands incrementally.
+A native desktop wallet for Monolythium, built on Tauri 2 with a Rust backend and a React 19 frontend. It is designed to be small, signed, and OS-keychain-first: no Electron, no browser extension surface, no embedded password vaults. The current build is live-first for chain status, balances, sends, token balances, address activity, account policy, cluster directory, and delegation reads through `@monolythium/core-sdk`.
 
 ## Who this is for
 
@@ -26,7 +26,7 @@ Until the first signed release ships, run from source (see "Building from source
 
 ## Getting started
 
-The wallet currently boots a placeholder window. Once a release lands, install it, open it, and follow the in-app onboarding to create or import a wallet.
+For local testing, run the Tauri dev target and point `VITE_MONO_RPC_URL` at the testnet RPC you want to use. If unset, the wallet uses the SDK-bundled testnet endpoint from the chain registry.
 
 ## Documentation
 

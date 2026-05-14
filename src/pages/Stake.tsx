@@ -34,7 +34,7 @@ export function Stake() {
     <div className="w-page">
       <div className="w-page__header">
         <h1>Stake</h1>
-        <div className="sub">DVT clusters · 100 operators × 7 slots = 700 seats.</div>
+        <div className="sub">DVT clusters · 100 clusters · 7 or 10 operators per cluster.</div>
       </div>
 
       <div className="w-card">
@@ -57,13 +57,15 @@ export function Stake() {
           {clusters.length > 0 ? (
             <div className="w-live-list">
               {clusters.slice(0, 6).map((cluster) => (
-                <div className="w-live-row" key={cluster.id}>
+                <div className="w-live-row" key={cluster.clusterId}>
                   <div>
-                    <div className="row-label">Cluster #{cluster.id}</div>
-                    <div className="row-help mono">{cluster.pubkey.slice(0, 18)}…{cluster.pubkey.slice(-10)}</div>
+                    <div className="row-label">Cluster #{cluster.clusterId}</div>
+                    <div className="row-help mono">
+                      {cluster.threshold}-of-{cluster.size} · {cluster.aggregateHealth}
+                    </div>
                   </div>
                   <div className="w-live-right">
-                    <div className="mono">{cluster.stake}</div>
+                    <div className="mono">{cluster.size} operators</div>
                     <span className={`w-live-pill ${cluster.active ? "" : "is-muted"}`}>
                       {cluster.active ? "active" : "inactive"}
                     </span>
