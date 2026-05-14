@@ -23,11 +23,20 @@ export interface LiveNetworkStatus {
   activePrecompiles: RpcOutcome<Array<{ name: string; address: string; gateable: boolean; enabled: boolean }>>;
 }
 
+export interface LiveClusterRow {
+  clusterId: number;
+  size: number;
+  threshold: number;
+  aggregateHealth: string;
+  regionDiversity: string[] | null;
+  active: boolean;
+}
+
 export interface LiveStakeStatus {
   endpoint: string;
-  clusters: RpcOutcome<Array<{ id: number; pubkey: string; stake: string; active: boolean }>>;
-  activeClusters: RpcOutcome<Array<{ id: number; pubkey: string; stake: string; active: boolean }>>;
-  healthyClusters: RpcOutcome<Array<{ id: number; pubkey: string; stake: string; active: boolean }>>;
+  clusters: RpcOutcome<LiveClusterRow[]>;
+  activeClusters: RpcOutcome<LiveClusterRow[]>;
+  healthyClusters: RpcOutcome<LiveClusterRow[]>;
   delegationCap: RpcOutcome<unknown>;
   delegations: RpcOutcome<{ wallet: string; rows: Array<{ cluster: number; weightBps: number }>; totalBps: number; block: unknown }>;
   delegationHistory: RpcOutcome<Array<{ blockHeight: bigint; txIndex: number; logIndex: number; cluster: number; toCluster: number | null; kind: string; weightBps: number; walletTotalBps: number | null }>>;
@@ -46,7 +55,7 @@ export interface LiveAddressActivityRow {
   txIndex: number;
   logIndex: number;
   kind: string;
-  direction: "in" | "out" | null;
+  direction: string | null;
   counterparty: string | null;
   tokenId: string | null;
   amount: string | null;
@@ -101,7 +110,7 @@ export async function loadLiveNetworkStatus(): Promise<LiveNetworkStatus> {
     capture(() => client.lythSyncStatus()),
     capture(() => client.lythIndexerStatus()),
     capture(() => client.lythMempoolStatus()),
-    capture(() => client.lythListActivePrecompiles()),
+    capture(() => client.lythListActivePrecompiles().then((catalogue) => catalogue.precompiles)),
   ]);
   return {
     endpoint: client.endpoint,
@@ -121,22 +130,20 @@ export async function loadLiveNetworkStatus(): Promise<LiveNetworkStatus> {
 
 export async function loadLiveStakeStatus(wallet: string): Promise<LiveStakeStatus> {
   const client = getProvider().rpcClient;
-  const clusterSet = client[`lyth${"Val" + "idator"}Set` as keyof typeof client] as () => Promise<Array<{ id: number; pubkey: string; stake: string; active: boolean }>>;
-  const activeClusterSet = client[`lythListActive${"Val" + "idators"}` as keyof typeof client] as () => Promise<Array<{ id: number; pubkey: string; stake: string; active: boolean }>>;
-  const healthyClusterSet = client[`lythListHealthy${"Val" + "idators"}` as keyof typeof client] as () => Promise<Array<{ id: number; pubkey: string; stake: string; active: boolean }>>;
-  const [clusters, activeClusters, healthyClusters, delegationCap, delegations, delegationHistory] = await Promise.all([
-    capture(() => clusterSet.call(client)),
-    capture(() => activeClusterSet.call(client)),
-    capture(() => healthyClusterSet.call(client)),
+  const clusterPage = await capture(() => client.lythClusterDirectory(0, 100));
+  const clusterRows = clusterPage.ok ? clusterPage.value?.clusters ?? [] : [];
+  const activeClusterRows = clusterRows.filter((cluster) => cluster.active);
+  const healthyClusterRows = activeClusterRows.filter((cluster) => cluster.aggregateHealth === "ok");
+  const [delegationCap, delegations, delegationHistory] = await Promise.all([
     capture(() => client.lythGetDelegationCap()),
     capture(() => client.lythGetDelegations(wallet)),
     capture(() => client.lythGetDelegationHistory(wallet, 25)),
   ]);
   return {
     endpoint: client.endpoint,
-    clusters,
-    activeClusters,
-    healthyClusters,
+    clusters: clusterPage.ok ? { ok: true, value: clusterRows } : { ok: false, error: clusterPage.error },
+    activeClusters: clusterPage.ok ? { ok: true, value: activeClusterRows } : { ok: false, error: clusterPage.error },
+    healthyClusters: clusterPage.ok ? { ok: true, value: healthyClusterRows } : { ok: false, error: clusterPage.error },
     delegationCap,
     delegations,
     delegationHistory,
