@@ -5,6 +5,7 @@
 import { useState } from "react";
 import { TodoSection } from "../components/TodoSection";
 import { useOperations } from "../operations/context";
+import { formatAddress } from "../components/format";
 import { enumerateDevices, type LedgerDeviceInfo } from "../sdk/ledger";
 import { deriveLiveWalletIdentity, errorMessage, loadLiveWalletBalance, type LiveWalletBalance, type LiveWalletIdentity } from "../sdk/live";
 import { PRIMARY_ACCOUNT } from "../sdk/keychain";
@@ -48,7 +49,7 @@ export function Wallets() {
         }
         return {
           headline: "Wallet identity loaded",
-          detail: nextIdentity.address,
+          detail: formatAddress(nextIdentity.address),
         };
       },
     });
@@ -84,7 +85,7 @@ export function Wallets() {
         <div className="w-card__body">
           <LiveLine k="Vault slot" v={PRIMARY_ACCOUNT} mono />
           <LiveLine k="Algorithm" v="ML-DSA-65" />
-          <LiveLine k="Address" v={identity?.address ?? "Unlock to derive from vault"} mono />
+          <LiveLine k="Address" v={identity ? formatAddress(identity.address) : "Unlock to derive from vault"} mono />
           <LiveLine k="Public key" v={identity ? `${identity.publicKeyBytes} bytes · ${identity.publicKeyHex.slice(0, 18)}…${identity.publicKeyHex.slice(-12)}` : "locked"} mono={Boolean(identity)} />
           <LiveLine k="Nonce" v={balance ? balance.nonce.toString() : "unavailable until unlock + RPC"} mono />
           <LiveLine k="Balance" v={balance ? `${balance.balanceLyth} LYTH` : "unavailable until unlock + RPC"} mono />
