@@ -8,8 +8,8 @@
 //     is unmistakable at a glance
 
 import { describe, expect, it } from "vitest";
-import { formatAddress, formatAddressShort } from "../format";
-import { TEST_ADDRESS, TEST_BECH32M } from "../../__tests__/helpers/fixtures";
+import { formatAddress, formatAddressShort, parseRecipient } from "../format";
+import { BURN_ADDRESS, TEST_ADDRESS, TEST_BECH32M } from "../../__tests__/helpers/fixtures";
 
 describe("formatAddress", () => {
   it("converts 0x hex to mono1 bech32m (zero address)", () => {
@@ -50,6 +50,88 @@ describe("formatAddress", () => {
     expect(formatAddress("mvk:mira:p2p:10aa…77fc")).toBe(
       "mvk:mira:p2p:10aa…77fc",
     );
+  });
+});
+
+describe("parseRecipient", () => {
+  it("accepts a clean hex address and returns canonical lowercase hex", () => {
+    const r = parseRecipient(TEST_ADDRESS);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.hex).toBe(TEST_ADDRESS.toLowerCase());
+  });
+
+  it("accepts a mono1 bech32m address and returns the underlying hex", () => {
+    const r = parseRecipient(TEST_BECH32M.anvil0.bech32);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.hex).toBe(TEST_ADDRESS.toLowerCase());
+  });
+
+  it("accepts the burn address hex", () => {
+    const r = parseRecipient(BURN_ADDRESS);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.hex).toBe(BURN_ADDRESS);
+  });
+
+  it("trims surrounding whitespace", () => {
+    const r = parseRecipient(`   ${TEST_BECH32M.anvil0.bech32}   `);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.hex).toBe(TEST_ADDRESS.toLowerCase());
+  });
+
+  it("accepts uppercase 0X prefix", () => {
+    const r = parseRecipient("0X" + TEST_ADDRESS.slice(2));
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.hex).toBe(TEST_ADDRESS.toLowerCase());
+  });
+
+  it("rejects empty input with a required-field message", () => {
+    const cases: Array<string | null | undefined> = ["", "   ", null, undefined];
+    for (const c of cases) {
+      const r = parseRecipient(c);
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.error).toBe("Recipient is required");
+    }
+  });
+
+  it("rejects input with no recognised prefix", () => {
+    for (const c of ["alice", "eth1abcdef"]) {
+      const r = parseRecipient(c);
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.error).toBe("Address must start with 'mono1' or '0x'");
+    }
+  });
+
+  it("rejects malformed hex (wrong length)", () => {
+    for (const c of ["0xdead", "0x" + "f".repeat(50)]) {
+      const r = parseRecipient(c);
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.error).toBe("Invalid address");
+    }
+  });
+
+  it("rejects hex with non-hex characters", () => {
+    const r = parseRecipient("0x" + "z".repeat(40));
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toBe("Invalid address");
+  });
+
+  it("rejects mono1 input with a bad checksum", () => {
+    // Flip the last char to corrupt the checksum.
+    const good = TEST_BECH32M.anvil0.bech32;
+    const corrupted = good.slice(0, -1) + (good.at(-1) === "y" ? "z" : "y");
+    const r = parseRecipient(corrupted);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toBe("Invalid mono1 address");
+  });
+
+  it("rejects bech32m input with the wrong HRP", () => {
+    // Replace `mono1` with `xxxx1` while keeping body intact — still
+    // shaped like bech32m but the SDK's HRP guard fails.
+    const wrongHrp = "xxxx1" + TEST_BECH32M.anvil0.bech32.slice(5);
+    const r = parseRecipient(wrongHrp);
+    expect(r.ok).toBe(false);
+    // Doesn't start with mono1 / 0x → caught by the prefix gate.
+    if (!r.ok) expect(r.error).toBe("Address must start with 'mono1' or '0x'");
   });
 });
 

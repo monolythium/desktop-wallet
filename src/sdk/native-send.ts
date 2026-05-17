@@ -16,11 +16,17 @@ import {
   submitEncryptedEnvelope,
 } from "@monolythium/core-sdk/crypto";
 import { getProvider } from "./client";
+import { parseRecipient } from "../components/format";
 
 const SPRINTNET_TRANSFER_GAS_LIMIT = 30_000n;
 
 export interface SendNativeLythArgs {
   seed: Uint8Array;
+  /**
+   * Recipient — accepts either 0x-prefixed hex or bech32m `mono1…`
+   * per whitepaper §22.7. The composer normalizes to hex before
+   * building the encrypted envelope.
+   */
   to: string;
   amountLyth: string;
   gasLimit?: bigint;
@@ -34,6 +40,12 @@ export interface SendNativeLythResult {
 }
 
 export async function sendNativeLyth(args: SendNativeLythArgs): Promise<SendNativeLythResult> {
+  const parsed = parseRecipient(args.to);
+  if (!parsed.ok) {
+    throw new Error(`recipient: ${parsed.error}`);
+  }
+  const toHex = parsed.hex;
+
   const backend = MlDsa65Backend.fromSeed(args.seed);
   const provider = getProvider();
   const client = new RpcClient(provider.rpcClient.endpoint);
@@ -54,7 +66,7 @@ export async function sendNativeLyth(args: SendNativeLythArgs): Promise<SendNati
       maxFeePerGas: gasPrice,
       maxPriorityFeePerGas: gasPrice,
       gasLimit: args.gasLimit ?? SPRINTNET_TRANSFER_GAS_LIMIT,
-      to: args.to,
+      to: toHex,
       value: parseEther(args.amountLyth),
       input: "0x",
     },

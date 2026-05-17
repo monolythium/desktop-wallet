@@ -21,11 +21,17 @@ import { parseEther } from "ethers";
 import type { TransactionRequest } from "ethers";
 import type { MonolythiumSigner } from "@monolythium/core-sdk";
 import { getProvider } from "./client";
+import { parseRecipient } from "../components/format";
 
 export interface SendLythArgs {
   /** EIP-55 lowercase address to debit. Must match the signer's address. */
   from: string;
-  /** EIP-55 lowercase recipient. */
+  /**
+   * Recipient — accepts either a 0x-prefixed hex address (EIP-55 ok)
+   * or a bech32m `mono1…` string per whitepaper §22.7. The composer
+   * normalizes to lowercase hex before building the EIP-1559
+   * envelope.
+   */
   to: string;
   /** Decimal LYTH string, e.g. "12.5". 1 LYTH = 1e18 wei. */
   amountLyth: string;
@@ -61,6 +67,15 @@ export async function sendLyth(
 ): Promise<SendLythResult> {
   const provider = getProvider();
 
+  // 0. Recipient parse — accepts hex or mono1; surfaces a typed error
+  //    string for any malformed input so the OperationsDrawer can
+  //    promote the drawer to its error state with a usable message.
+  const parsed = parseRecipient(args.to);
+  if (!parsed.ok) {
+    throw new Error(`recipient: ${parsed.error}`);
+  }
+  const toHex = parsed.hex;
+
   // 1. Sender nonce + fee data + chain id, in parallel.
   const [nonce, feeData, network] = await Promise.all([
     provider.getTransactionCount(args.from, "pending"),
@@ -82,7 +97,7 @@ export async function sendLyth(
     chainId,
     nonce,
     from: args.from,
-    to: args.to,
+    to: toHex,
     value: parseEther(args.amountLyth),
     data: args.data ?? "0x",
     gasLimit: args.gasLimit ?? 21_000n,
