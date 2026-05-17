@@ -32,14 +32,18 @@ interface Props {
 export function Home({ denom, goto }: Props) {
   const ops = useOperations();
   const isPub = denom === "public";
+  // Staking / APR live-data is Phase 2 (Stake + autovote). The numbers
+  // come from `BALANCES[denom]` for now so the hero stays visually
+  // populated; the `is-mock` className tags every mocked figure so the
+  // user can tell what's real and what isn't.
   const bal = BALANCES[denom];
-  const totalUsd = TOKENS.reduce((a, t) => a + t.amount * t.priceUsd, 0);
   const [liveTokens, setLiveTokens] = useState<LiveTokenStatus | null>(null);
   const [liveActivity, setLiveActivity] = useState<RpcOutcome<LiveAddressActivityRow[]> | null>(null);
 
   // Live SDK call: chain id + balance for the bound address. The result is
   // surfaced through the topbar (see Topbar.tsx); the hook is mounted here so
-  // a Home revisit refreshes the chain snapshot.
+  // a Home revisit refreshes the chain snapshot. The hero balance below is
+  // derived from `chain.snapshot.balanceLyth` once the snapshot lands.
   const chain = useChainSnapshot(IDENTITY.address);
 
   useEffect(() => {
@@ -203,10 +207,7 @@ export function Home({ denom, goto }: Props) {
         </div>
 
         {isPub ? (
-          <div className="w-hero__amount">
-            ${totalUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-            <span className="tok">USD</span>
-          </div>
+          <PublicHeroAmount chain={chain} />
         ) : (
           <div className="w-hero__amount" style={{ color: "var(--w-text-2)" }}>
             — <span className="tok" style={{ fontStyle: "italic" }}>amount hidden by design</span>
@@ -216,9 +217,9 @@ export function Home({ denom, goto }: Props) {
         <div className="w-hero__meta">
           {isPub ? (
             <>
-              <span>Available <b>{fmt(bal.stakable, 0)} LYTH</b></span>
-              <span>Staked <b>{fmt(bal.staked, 0)} LYTH</b></span>
-              <span>Earning <b className="up">{bal.apr.toFixed(2)}%</b> APR</span>
+              <span>Available <b>{fmt(bal.stakable, 0)} LYTH</b> <span className="w-mock-tag" title="Fixture preview — replaced in Phase 2 (Stake reads)">[mock]</span></span>
+              <span>Staked <b>{fmt(bal.staked, 0)} LYTH</b> <span className="w-mock-tag" title="Fixture preview — replaced in Phase 2 (Stake reads)">[mock]</span></span>
+              <span>Earning <b className="up">{bal.apr.toFixed(2)}%</b> APR <span className="w-mock-tag" title="Fixture preview — replaced in Phase 2 (Stake reads)">[mock]</span></span>
             </>
           ) : (
             <span>Only you and your recipients can read the amount.</span>
@@ -269,6 +270,13 @@ export function Home({ denom, goto }: Props) {
           <div className="w-card">
             <div className="w-card__head">
               <h3>Your tokens</h3>
+              {/* Mock badge appears only when we're falling back to the
+                  fixture list — once `lyth_tokenBalances` returns rows
+                  this disappears. Phase 5 replaces the fallback with a
+                  proper ERC-20/721/1155 reader. */}
+              {liveTokens?.tokenBalances.ok && liveTokens.tokenBalances.value && liveTokens.tokenBalances.value.length > 0
+                ? null
+                : <span className="w-mock-tag" title="Fixture preview — replaced in Phase 5 (NFT + token reads)">[mock]</span>}
               <div className="w-card__head__spacer" />
               <button className="btn btn--sm btn--ghost" onClick={() => goto("tokens")}>View all</button>
             </div>
@@ -288,7 +296,9 @@ export function Home({ denom, goto }: Props) {
                   ))}
                 </div>
               ) : (
-                TOKENS.slice(0, 4).map((t) => <TokenRow key={t.sym} token={t} />)
+                <div data-mock="true">
+                  {TOKENS.slice(0, 4).map((t) => <TokenRow key={t.sym} token={t} />)}
+                </div>
               )}
             </div>
           </div>
@@ -296,6 +306,10 @@ export function Home({ denom, goto }: Props) {
           <div className="w-card">
             <div className="w-card__head">
               <h3>Recent activity</h3>
+              {/* Mock badge until the indexer returns rows for this address. */}
+              {liveActivity?.ok && liveActivity.value && liveActivity.value.length > 0
+                ? null
+                : <span className="w-mock-tag" title="Fixture preview — replaced once the activity indexer returns rows">[mock]</span>}
               <div className="w-card__head__spacer" />
               <button className="btn btn--sm btn--ghost" onClick={() => goto("activity")}>View all</button>
             </div>
@@ -313,7 +327,9 @@ export function Home({ denom, goto }: Props) {
                   ))}
                 </div>
               ) : (
-                TXS_PUBLIC.slice(0, 4).map((tx) => <TxRow key={tx.id} tx={tx} />)
+                <div data-mock="true">
+                  {TXS_PUBLIC.slice(0, 4).map((tx) => <TxRow key={tx.id} tx={tx} />)}
+                </div>
               )}
             </div>
           </div>
@@ -322,11 +338,14 @@ export function Home({ denom, goto }: Props) {
         <div className="w-card">
           <div className="w-card__head">
             <h3>Recent activity</h3>
+            <span className="w-mock-tag" title="Fixture preview — private-envelope reads are Phase 12">[mock]</span>
             <div className="w-card__head__spacer" />
             <button className="btn btn--sm btn--ghost" onClick={() => goto("activity")}>View all</button>
           </div>
           <div className="w-card__body">
-            {TXS_PRIVATE.slice(0, 4).map((tx) => <TxRow key={tx.id} tx={tx} />)}
+            <div data-mock="true">
+              {TXS_PRIVATE.slice(0, 4).map((tx) => <TxRow key={tx.id} tx={tx} />)}
+            </div>
           </div>
         </div>
       )}
@@ -349,6 +368,45 @@ function formatLiveAmount(row: LiveAddressActivityRow): string {
   if (row.amount) return `${row.direction === "out" ? "-" : "+"}${row.amount}`;
   if (row.weightBps !== null) return `${row.weightBps} bps`;
   return "indexed";
+}
+
+/**
+ * Public-denomination hero amount. Renders three states off the chain
+ * snapshot: loading (querying RPC), ready (real LYTH balance), error
+ * (offline — show "—" and let the ChainStatusLine carry the detail).
+ *
+ * The number on screen is `chain.snapshot.balanceLyth`, derived from
+ * `eth_getBalance` via the SDK provider. USD-equivalent is intentionally
+ * not shown here — there is no price oracle wired in Phase 1, and
+ * fabricating a USD number from a fixture price table would mislead the
+ * user about what's real.
+ */
+function PublicHeroAmount({ chain }: { chain: ReturnType<typeof useChainSnapshot> }) {
+  if (chain.status === "loading") {
+    return (
+      <div className="w-hero__amount" style={{ color: "var(--w-text-2)" }}>
+        — <span className="tok" style={{ fontStyle: "italic" }}>loading…</span>
+      </div>
+    );
+  }
+  if (chain.status === "error" || !chain.snapshot) {
+    return (
+      <div className="w-hero__amount" style={{ color: "var(--w-text-2)" }}>
+        — <span className="tok" style={{ fontStyle: "italic" }}>offline</span>
+      </div>
+    );
+  }
+  const lyth = chain.snapshot.balanceLyth;
+  // LYTH amounts span many orders of magnitude (a dust balance is ~0.001;
+  // a treasury holding is ~millions). Use 4 fraction digits for small
+  // values so users can see micropayments, 2 for everything else.
+  const fracDigits = lyth < 100 ? 4 : 2;
+  return (
+    <div className="w-hero__amount">
+      {fmt(lyth, fracDigits)}
+      <span className="tok">LYTH</span>
+    </div>
+  );
 }
 
 function ChainStatusLine({

@@ -34,6 +34,8 @@ export interface MockState {
   baseFee: bigint;
   /** nonce returned by `eth_getTransactionCount` for any address. */
   nonce: bigint;
+  /** balance (wei) returned by `eth_getBalance` for any address. */
+  balanceWei: bigint;
   /** raw RLP envelopes seen by `eth_sendRawTransaction`, oldest first. */
   acceptedRawTxs: string[];
   /** observable call log — tests assert on method order. */
@@ -98,10 +100,7 @@ export function buildMockFetch(state: MockState): typeof fetch {
         break;
       }
       case "eth_getBalance":
-        // Tests can override per-address balances by replacing the
-        // stub; the default state model only carries one global
-        // balance assumption so this returns 0 unless overridden.
-        result = "0x0";
+        result = `0x${state.balanceWei.toString(16)}`;
         break;
       case "eth_getBlockByNumber":
         result = buildBlockShape(state);
