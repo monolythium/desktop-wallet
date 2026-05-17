@@ -3,7 +3,7 @@
 
 import { IDENTITY } from "../data/fixtures";
 import { useChainSnapshot } from "../sdk/useChainSnapshot";
-import { shortHex } from "./format";
+import { formatAddressShort } from "./format";
 import type { Route } from "./types";
 
 interface Props {
@@ -49,7 +49,9 @@ export function Topbar({ route }: Props) {
         <div className="w-top__user__avatar" />
         <div>
           <div className="w-top__user__name">{IDENTITY.handle}</div>
-          <div className="w-top__user__addr">{shortHex(IDENTITY.address)}</div>
+          <div className="w-top__user__addr" title={IDENTITY.address}>
+            {formatAddressShort(IDENTITY.address)}
+          </div>
         </div>
       </div>
     </header>

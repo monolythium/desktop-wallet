@@ -14,7 +14,7 @@ import { BALANCES, IDENTITY, SEND_DEMO, TOKENS, TXS_PRIVATE, TXS_PUBLIC } from "
 import type { Denom } from "../data/fixtures";
 import { TokenRow } from "../components/TokenRow";
 import { TxRow } from "../components/TxRow";
-import { fmt } from "../components/format";
+import { fmt, formatAddress, formatAddressShort } from "../components/format";
 import type { Route } from "../components/types";
 import {
   loadLiveAddressActivity,
@@ -75,8 +75,8 @@ export function Home({ denom, goto }: Props) {
         // from the unlocked vault, we'll wire that in.
       },
       diff: [
-        { k: "From",      v: IDENTITY.address },
-        { k: "To",        v: SEND_DEMO.to },
+        { k: "From",      v: formatAddress(IDENTITY.address) },
+        { k: "To",        v: formatAddress(SEND_DEMO.to) },
         { k: "Token",     v: "LYTH" },
         { k: "Amount",    v: `${SEND_DEMO.amountLyth} LYTH` },
         { k: "Network",   v: chain.snapshot ? `chain ${chain.snapshot.chainId}` : "(querying)" },
@@ -122,7 +122,7 @@ export function Home({ denom, goto }: Props) {
       auth: "keychain",
       diff: [
         { k: "From",      v: "Unlocked vault address" },
-        { k: "To",        v: SEND_DEMO.to },
+        { k: "To",        v: formatAddress(SEND_DEMO.to) },
         { k: "Token",     v: "LYTH" },
         { k: "Amount",    v: `${SEND_DEMO.amountLyth} LYTH` },
         { k: "Network",   v: chain.snapshot ? `chain ${chain.snapshot.chainId}` : "Sprintnet" },
@@ -155,11 +155,11 @@ export function Home({ denom, goto }: Props) {
       title: "Receive",
       subtitle: "Share your address",
       auth: "none",
-      diff: [{ k: "Address", v: IDENTITY.address }],
+      diff: [{ k: "Address", v: formatAddress(IDENTITY.address) }],
       effects: [{ text: "No on-chain action — copy and share with the sender." }],
       execute: () => Promise.resolve({
         headline: "Address ready to share",
-        detail: IDENTITY.address,
+        detail: formatAddress(IDENTITY.address),
       }),
     });
   };
@@ -171,7 +171,7 @@ export function Home({ denom, goto }: Props) {
       auth: "none",
       diff: [
         { k: "Endpoint", v: chain.snapshot?.endpoint ?? "(unknown)" },
-        { k: "Address",  v: IDENTITY.address },
+        { k: "Address",  v: formatAddress(IDENTITY.address) },
       ],
       effects: [
         { text: "Calls eth_chainId + eth_blockNumber + eth_getBalance." },
@@ -278,7 +278,9 @@ export function Home({ denom, goto }: Props) {
                   {liveTokens.tokenBalances.value.slice(0, 4).map((row) => (
                     <div className="w-live-row" key={row.tokenId}>
                       <div>
-                        <div className="row-label mono">{shortHex(row.tokenId)}</div>
+                        <div className="row-label mono" title={row.tokenId}>
+                          {formatAddressShort(row.tokenId)}
+                        </div>
                         <div className="row-help">updated at block {row.updatedAtBlock.toString()}</div>
                       </div>
                       <div className="w-live-right mono">{row.balance}</div>
@@ -332,13 +334,13 @@ export function Home({ denom, goto }: Props) {
   );
 }
 
-function shortHex(value: string): string {
-  return value.length > 28 ? `${value.slice(0, 18)}…${value.slice(-8)}` : value;
-}
-
 function formatLiveActivity(row: LiveAddressActivityRow): string {
   const kind = row.subKind ? `${row.kind} · ${row.subKind}` : row.kind;
-  if (row.counterparty) return `${kind} · ${shortHex(row.counterparty)}`;
+  // Counterparties on chain come back as 0x-shape addresses (the
+  // indexer hands them through verbatim); render them as mono1
+  // shortform so the activity feed matches the rest of the wallet's
+  // §22.7 display contract.
+  if (row.counterparty) return `${kind} · ${formatAddressShort(row.counterparty)}`;
   if (row.cluster !== null) return `${kind} · C-${String(row.cluster + 1).padStart(3, "0")}`;
   return kind;
 }

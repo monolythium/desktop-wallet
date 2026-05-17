@@ -6,13 +6,17 @@ import { normalizeAddressHex } from "@monolythium/core-sdk";
 import { TodoSection } from "../components/TodoSection";
 import { IDENTITY } from "../data/fixtures";
 import { errorMessage, loadAccountPolicy } from "../sdk/live";
+import { formatAddress } from "../components/format";
 
 interface Props {
   denom: "public" | "private";
 }
 
 export function Contacts({ denom }: Props) {
-  const [address, setAddress] = useState(IDENTITY.address);
+  // Pre-fill with the user's own address in bech32m form so the input
+  // matches what they see elsewhere in the wallet. `normalizeAddressHex`
+  // accepts either format on submit.
+  const [address, setAddress] = useState(formatAddress(IDENTITY.address));
   const [policy, setPolicy] = useState<Record<string, unknown> | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -22,8 +26,11 @@ export function Contacts({ denom }: Props) {
     setError(null);
     setPolicy(null);
     try {
+      // SDK accepts either 0x or mono1; normalize to hex for the
+      // chain-side call, then re-render bech32m back into the field so
+      // the displayed canonical stays §22.7-shaped.
       const normalized = normalizeAddressHex(address);
-      setAddress(normalized);
+      setAddress(formatAddress(normalized));
       setPolicy(await loadAccountPolicy(normalized) as Record<string, unknown>);
     } catch (cause) {
       setError(errorMessage(cause));
@@ -54,7 +61,7 @@ export function Contacts({ denom }: Props) {
               className="w-live-input mono"
               value={address}
               onChange={(event) => setAddress(event.currentTarget.value)}
-              placeholder="0x…"
+              placeholder="mono1… or 0x…"
             />
             <button className="btn btn--sm" onClick={lookupPolicy} disabled={busy}>
               {busy ? "Checking…" : "Check"}

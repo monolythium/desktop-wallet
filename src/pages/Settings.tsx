@@ -4,6 +4,7 @@
 import { useState } from "react";
 import { IDENTITY } from "../data/fixtures";
 import { useOperations } from "../operations/context";
+import { formatAddress } from "../components/format";
 
 export function Settings() {
   const ops = useOperations();
@@ -17,7 +18,7 @@ export function Settings() {
       auth: "keychain",
       diff: [
         { k: "Identity",       v: IDENTITY.handle },
-        { k: "Address",        v: IDENTITY.address },
+        { k: "Address",        v: formatAddress(IDENTITY.address) },
         { k: "Old key id",     v: "kc:lyth:primary:v1" },
         { k: "New key id",     v: "kc:lyth:primary:v2" },
       ],

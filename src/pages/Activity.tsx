@@ -5,6 +5,7 @@ import { TXS_PRIVATE, TXS_PUBLIC } from "../data/fixtures";
 import { IDENTITY } from "../data/fixtures";
 import type { Denom } from "../data/fixtures";
 import { TxRow } from "../components/TxRow";
+import { formatAddress, formatAddressShort } from "../components/format";
 import { getProvider } from "../sdk/client";
 import { capture, loadLiveAddressActivity, type LiveAddressActivityRow, type RpcOutcome } from "../sdk/live";
 
@@ -59,7 +60,7 @@ export function Activity({ denom }: Props) {
         <div className="w-card__body">
           {pending === null ? <div className="row-help">Loading lyth_mempoolPending…</div> : null}
           {pending?.ok === false ? <div className="w-live-error">{pending.error}</div> : null}
-          {pending?.ok && pending.value?.length === 0 ? <div className="row-help">No pending transactions for <span className="mono">{IDENTITY.address}</span>.</div> : null}
+          {pending?.ok && pending.value?.length === 0 ? <div className="row-help">No pending transactions for <span className="mono" title={IDENTITY.address}>{formatAddress(IDENTITY.address)}</span>.</div> : null}
           {pending?.ok && pending.value && pending.value.length > 0 ? (
             <div className="w-live-list">
               {pending.value.map((tx) => (
@@ -109,7 +110,7 @@ export function Activity({ denom }: Props) {
 
 function formatActivityTitle(row: LiveAddressActivityRow): string {
   const kind = row.subKind ? `${row.kind} · ${row.subKind}` : row.kind;
-  if (row.counterparty) return `${kind} · ${row.counterparty}`;
+  if (row.counterparty) return `${kind} · ${formatAddressShort(row.counterparty)}`;
   if (row.cluster !== null) return `${kind} · C-${String(row.cluster + 1).padStart(3, "0")}`;
   return kind;
 }

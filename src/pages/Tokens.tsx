@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { TOKENS } from "../data/fixtures";
 import { TokenRow } from "../components/TokenRow";
 import { IDENTITY } from "../data/fixtures";
+import { formatAddressShort } from "../components/format";
 import { errorMessage, loadLiveTokenStatus, type LiveTokenStatus } from "../sdk/live";
 
 export function Tokens() {
@@ -68,7 +69,9 @@ export function Tokens() {
               {live.tokenBalances.value.map((row) => (
                 <div className="w-live-row" key={row.tokenId}>
                   <div>
-                    <div className="row-label mono">{row.tokenId.slice(0, 18)}…{row.tokenId.slice(-8)}</div>
+                    <div className="row-label mono" title={row.tokenId}>
+                      {formatAddressShort(row.tokenId)}
+                    </div>
                     <div className="row-help">updated at block {row.updatedAtBlock.toString()}</div>
                   </div>
                   <div className="w-live-right mono">{row.balance}</div>
