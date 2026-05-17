@@ -284,6 +284,26 @@ body[data-denom="private"] .w-nav__item.is-active::before {
   border-color: var(--w-line);
   background: rgba(255,255,255,0.03);
 }
+/* Mock-data marker: any row or label backed by a fixture rather than
+   a live chain read gets one of these. The tag is small, muted, and
+   carries a `title` so a hover explains which phase replaces it. */
+.w-mock-tag {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  border: 1px dashed var(--w-line);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--fg-400);
+  font-family: var(--f-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+[data-mock="true"] {
+  opacity: 0.85;
+}
 .w-live-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));

@@ -41,6 +41,7 @@ describe("sendLyth", () => {
       blockNumber: 1024n,
       baseFee: 1_000_000_000n, // 1 gwei
       nonce: 7n,
+      balanceWei: 0n,
       acceptedRawTxs: [],
       observed: [],
     };

@@ -38,10 +38,10 @@ Six commits that:
 | # | Hash    | Title                                                                | Notes                                            |
 |---|---------|----------------------------------------------------------------------|--------------------------------------------------|
 | 1 | 1020301 | chore(tauri): bundle full icon set + bump @tauri-apps/api            | Unblocks `pnpm tauri dev`                        |
-| 2 | (this)  | docs(phases): add phase roadmap + Phase 1 baseline notes             | No code change                                   |
-| 3 | …       | test: extract browser-wallet-style vitest fixtures + helpers         | Refactor only; no behavior change                |
-| 4 | …       | feat(addr): bech32m display per §22.7                                | Display layer only; wire stays hex               |
-| 5 | …       | feat(home): wire real chainSnapshot, drop fixtures from balance      | Tokens list keeps mock + visible `[mock]` badge  |
+| 2 | b15d621 | docs(phases): add phase roadmap + Phase 1 baseline notes             | No code change                                   |
+| 3 | fb69c22 | test: extract browser-wallet-style vitest fixtures + helpers         | Refactor only; no behavior change                |
+| 4 | b1e3f81 | feat(addr): bech32m display per §22.7                                | Display layer only; wire stays hex               |
+| 5 | (this)  | feat(home): wire real chainSnapshot, drop fixtures from balance      | Tokens list keeps mock + visible `[mock]` badge  |
 | 6 | …       | feat(send): bech32m paste-accept                                     | Send composer accepts both formats               |
 
 ## Verification gates
@@ -55,7 +55,27 @@ Six commits that:
 
 ## GAPs
 
-(filled in as they surface)
+### GAP #D1 — Home component-level integration test deferred
+
+`src/pages/Home.tsx` renders three states off the chain snapshot
+(loading / ready / error). Phase 1 unit-tests the **data path**
+(`loadChainSnapshot` through `buildMockFetch`) at
+`src/sdk/__tests__/chainSnapshot.test.ts`, but doesn't render the
+React component because `@testing-library/react` isn't part of the
+desktop wallet's test stack.
+
+The Phase 1 task pre-prompt asked for a Home component test with
+`render(...)` calls; we declined to add the testing-library
+dependency in a baseline phase. Trade-off:
+
+- ✅ data path is tested (3 cases — happy, zero-balance, offline)
+- ❌ JSX rendering of those states is observable only via the
+  manual `pnpm tauri dev` smoke
+
+**Proposed resolution:** add `@testing-library/react` +
+`@testing-library/jest-dom` when the next UI-heavy phase needs them
+(likely Phase 2 — Stake + four-button autovote — which has more
+component-level branching to verify).
 
 ## Final report
 
