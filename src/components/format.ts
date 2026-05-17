@@ -9,7 +9,7 @@
 // `addressToBech32` so the desktop wallet, browser wallet, monoscan,
 // and any future surface share one source of truth for the codec.
 
-import { addressToBech32, AddressError } from "@monolythium/core-sdk";
+import { addressToBech32, AddressError, normalizeAddressHex } from "@monolythium/core-sdk";
 
 export function fmt(n: number | null | undefined, frac = 2): string {
   if (n === null || n === undefined) return "—";
@@ -52,6 +52,69 @@ export function formatAddress(addr: string | null | undefined): string {
     if (cause instanceof AddressError) return addr;
     return addr;
   }
+}
+
+/**
+ * Send-recipient parser.
+ *
+ * Accepts either a 0x-prefixed hex address (EIP-55 checksum honoured
+ * by the SDK's `normalizeAddressHex`) or a bech32m `mono1…` string
+ * (checksum + HRP-checked by the SDK). Returns a discriminated value
+ * so the caller doesn't have to wrap the SDK throw in a try/catch.
+ *
+ * The internal wire format is hex — every code path that hands off to
+ * a signer or RPC pipes through the `hex` field. The bech32m form
+ * exists purely as a user-input convenience.
+ *
+ * Error messages match what a paste-target field needs to display
+ * directly:
+ *
+ *   "" / null                → "Recipient is required"
+ *   not 0x / mono1            → "Address must start with 'mono1' or '0x'"
+ *   bad mono1 checksum        → "Invalid mono1 address"
+ *   bad hex shape / checksum  → "Invalid address"
+ *
+ * The discriminant is `ok: boolean` so TypeScript narrows reliably
+ * across every caller (the `ok === true` branch carries `hex`, the
+ * `ok === false` branch carries `error`).
+ */
+export type ParsedRecipient =
+  | { ok: true; hex: string }
+  | { ok: false; error: string };
+
+export function parseRecipient(input: string | null | undefined): ParsedRecipient {
+  if (input === null || input === undefined) {
+    return { ok: false, error: "Recipient is required" };
+  }
+  const trimmed = input.trim();
+  if (trimmed.length === 0) {
+    return { ok: false, error: "Recipient is required" };
+  }
+  // Format dispatch — unambiguous because bech32m's body charset
+  // (`qpzry9x8gf2tvdw0s3jn54khce6mua7l`) doesn't include the prefix
+  // characters of `0x`, and bech32m strings always carry their HRP
+  // (lowercase or uppercase, but not mixed) in front of the first `1`.
+  if (trimmed.startsWith("0x") || trimmed.startsWith("0X")) {
+    try {
+      // SDK requires lowercase 0x prefix; honour the EIP-55 checksum
+      // on mixed-case input as well.
+      const hex = normalizeAddressHex("0x" + trimmed.slice(2));
+      return { ok: true, hex };
+    } catch (cause) {
+      if (cause instanceof AddressError) return { ok: false, error: "Invalid address" };
+      return { ok: false, error: "Invalid address" };
+    }
+  }
+  if (trimmed.toLowerCase().startsWith("mono1")) {
+    try {
+      const hex = normalizeAddressHex(trimmed);
+      return { ok: true, hex };
+    } catch (cause) {
+      if (cause instanceof AddressError) return { ok: false, error: "Invalid mono1 address" };
+      return { ok: false, error: "Invalid mono1 address" };
+    }
+  }
+  return { ok: false, error: "Address must start with 'mono1' or '0x'" };
 }
 
 /**

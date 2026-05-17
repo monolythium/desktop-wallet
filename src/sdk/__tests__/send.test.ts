@@ -29,6 +29,7 @@ import { buildMockFetch, type MockState } from "../../__tests__/helpers/mockFetc
 import {
   BURN_ADDRESS,
   MONOLYTHIUM_TESTNET_CHAIN_ID,
+  TEST_BECH32M,
   TEST_PRIVKEY,
 } from "../../__tests__/helpers/fixtures";
 
@@ -173,5 +174,53 @@ describe("sendLyth", () => {
         amountLyth: "0.001",
       }),
     ).rejects.toThrow(/EIP-1559 fee data/);
+  });
+
+  it("accepts a bech32m mono1 recipient and signs against the underlying hex", async () => {
+    const fetchStub = buildMockFetch(state);
+    const provider = new MonolythiumProvider(
+      new RpcClient("http://test.invalid", { fetch: fetchStub }),
+    );
+    setProviderForTest(provider);
+
+    const wallet = new Wallet(TEST_PRIVKEY);
+    const signer = MonolythiumSigner.fromEthersWallet(wallet, provider);
+
+    // Pass the bech32m form — the composer must normalize to hex
+    // before building the EIP-1559 envelope. The on-chain destination
+    // is identical to the all-zero hex address.
+    const result = await sendLyth(signer, {
+      from: wallet.address,
+      to: TEST_BECH32M.zero.bech32,
+      amountLyth: "0.001",
+    });
+
+    // The composer's `request` snapshot carries hex, not bech32m —
+    // the wire format never sees mono1.
+    expect(result.request.to).toBe(TEST_BECH32M.zero.hex);
+    // And the transaction was actually broadcast.
+    expect(state.acceptedRawTxs).toHaveLength(1);
+  });
+
+  it("rejects a malformed recipient before any RPC call lands", async () => {
+    const fetchStub = buildMockFetch(state);
+    const provider = new MonolythiumProvider(
+      new RpcClient("http://test.invalid", { fetch: fetchStub }),
+    );
+    setProviderForTest(provider);
+
+    const wallet = new Wallet(TEST_PRIVKEY);
+    const signer = MonolythiumSigner.fromEthersWallet(wallet, provider);
+
+    await expect(
+      sendLyth(signer, {
+        from: wallet.address,
+        to: "alice", // no recognised prefix
+        amountLyth: "0.001",
+      }),
+    ).rejects.toThrow(/recipient:.*mono1.*0x/);
+
+    // No raw tx ever hit the wire — the composer failed fast.
+    expect(state.acceptedRawTxs).toHaveLength(0);
   });
 });
