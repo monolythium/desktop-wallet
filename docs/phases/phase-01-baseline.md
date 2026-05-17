@@ -41,8 +41,8 @@ Six commits that:
 | 2 | b15d621 | docs(phases): add phase roadmap + Phase 1 baseline notes             | No code change                                   |
 | 3 | fb69c22 | test: extract browser-wallet-style vitest fixtures + helpers         | Refactor only; no behavior change                |
 | 4 | b1e3f81 | feat(addr): bech32m display per §22.7                                | Display layer only; wire stays hex               |
-| 5 | (this)  | feat(home): wire real chainSnapshot, drop fixtures from balance      | Tokens list keeps mock + visible `[mock]` badge  |
-| 6 | …       | feat(send): bech32m paste-accept                                     | Send composer accepts both formats               |
+| 5 | f30c132 | feat(home): wire real chainSnapshot, drop fixtures from balance      | Tokens list keeps mock + visible `[mock]` badge  |
+| 6 | bfe0236 | feat(send): bech32m paste-accept                                     | Send composer accepts both formats               |
 
 ## Verification gates
 
@@ -79,4 +79,94 @@ component-level branching to verify).
 
 ## Final report
 
-(filled in once Commit 6 lands and end-of-phase verification clears)
+### Status at HEAD (2026-05-17, master @ bfe0236)
+
+- `pnpm typecheck`        ✅
+- `pnpm test`             ✅ — 34 passing across 4 test files
+- `cargo check`           ✅ (src-tauri)
+- `pnpm tauri dev` smoke  ✅ — Vite + cargo compile clean, binary
+  launches (no more 977-byte-icon rejection)
+
+### What works end-to-end now
+
+- Onboarding → vault stored (Tauri keychain), primary address
+  derived from PQM-1 mnemonic via the SDK.
+- Home hero shows the **real** LYTH balance for the bound address
+  via `loadChainSnapshot`. Loading / ready / error states are
+  distinct and visible.
+- Every visible address renders as bech32m (`mono1…`); hover for
+  full-precision hex via `title` attribute.
+- Operations drawer diffs (Send / Native send / Receive / Probe)
+  show bech32m everywhere.
+- Activity page, Contacts policy lookup, Settings rotate-key
+  diff, Tokens live token-id labels — all bech32m.
+- Send composer (SDK side) accepts both `0x…` and `mono1…`,
+  normalizes to hex before signing.
+- Fixture rows (token list, activity list, staked balance, APR)
+  carry visible `[mock]` tags so the user can distinguish real
+  from preview at a glance.
+
+### Files added (58 new) by directory
+
+| Directory                | New files |
+|--------------------------|-----------|
+| `src-tauri/icons/`       | 51 (full icon family + Android/iOS sets) |
+| `src/__tests__/helpers/` | 3 (mockFetch, fixtures, fixtures.test) |
+| `src/components/__tests__/` | 1 (format.test) |
+| `src/sdk/__tests__/`     | 1 (chainSnapshot.test) |
+| `docs/phases/`           | 2 (README + phase-01-baseline) |
+
+### Files modified (17) by directory
+
+| Directory          | Modified files |
+|--------------------|----------------|
+| `src/components/`  | format.ts, Sidebar.tsx, Topbar.tsx |
+| `src/pages/`       | Home, Activity, Contacts, Settings, Tokens, Wallets |
+| `src/sdk/`         | client.ts (untouched), send.ts, native-send.ts, send.test.ts |
+| `src/__tests__/`   | helpers/mockFetch.ts (extended) |
+| `src/styles/`      | wallet.css (`.w-mock-tag`) |
+| `src-tauri/`       | Cargo.toml (line-ending normalize), tauri.conf.json, icons/icon.png |
+| repo root          | package.json, pnpm-lock.yaml |
+
+### Test count progression
+
+| After Commit | Test files | Tests | Delta |
+|--------------|------------|-------|-------|
+| Pre-Phase    | 1          | 2     | —     |
+| Commit 1     | 1          | 2     | 0     |
+| Commit 2     | 1          | 2     | 0     |
+| Commit 3     | 2          | 7     | +5    |
+| Commit 4     | 3          | 18    | +11   |
+| Commit 5     | 4          | 21    | +3    |
+| Commit 6     | 4          | 34    | +13   |
+
+(Commit 4's commit message wrote "18 → 26 (+8)" — that was off; the
+actual jump was 7 → 18 (+11). Recorded here for posterity.)
+
+### GAPs surfaced
+
+#### GAP #D1 — Home component-level integration test deferred
+
+(Documented above in the GAPs section.) Phase 1 unit-tested the
+data path only; React rendering of loading/ready/error states is
+covered by manual smoke. Resolution path: add
+`@testing-library/react` when Phase 2 lands.
+
+### Phase 2 readiness
+
+Phase 1 leaves Phase 2 (Stake + four-button autovote) on a clean
+runway: the SDK seam is in place (`loadChainSnapshot`,
+`MonolythiumProvider` singleton, typed-error envelopes); the
+display-layer canonical (bech32m) is wired everywhere; test
+infrastructure (`buildMockFetch` + `MockState` + fixture pinning)
+lets Phase 2 add cluster-registry and autovote-mode tests with
+minimal boilerplate. Stake.tsx already pulls live cluster data —
+Phase 2 fills out the autovote UI surface and wires the four
+named modes (Max Yield / Max Diversity / Max Decentralization /
+Custom) against per-user-seeded sampling.
+
+### Push command
+
+```
+git push origin master
+```
