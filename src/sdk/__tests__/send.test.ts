@@ -19,125 +19,18 @@
 import { describe, expect, it, beforeEach } from "vitest";
 import { Wallet, keccak256 } from "ethers";
 import {
-  MONOLYTHIUM_TESTNET_CHAIN_ID,
   MonolythiumProvider,
   MonolythiumSigner,
   RpcClient,
 } from "@monolythium/core-sdk";
 import { sendLyth } from "../send";
 import { resetProviderForTest, setProviderForTest } from "../client";
-
-/**
- * Deterministic private key — keeps tests reproducible across runs and
- * sidesteps `Wallet.createRandom()`'s Node-Buffer interplay under jsdom.
- * The address is `0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266` (Anvil's
- * default account #0).
- */
-const TEST_PRIVKEY =
-  "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
-
-interface CapturedCall {
-  method: string;
-  params: unknown[];
-}
-
-interface MockState {
-  chainId: bigint;
-  blockNumber: bigint;
-  baseFee: bigint;
-  nonce: bigint;
-  acceptedRawTxs: string[];
-  observed: CapturedCall[];
-}
-
-function buildMockFetch(state: MockState): typeof fetch {
-  return async (_url, init) => {
-    const body = JSON.parse((init as { body: string }).body);
-    const id = body.id ?? 0;
-    const method = body.method as string;
-    const params = (body.params ?? []) as unknown[];
-    state.observed.push({ method, params });
-    let result: unknown;
-    switch (method) {
-      case "eth_chainId":
-        result = `0x${state.chainId.toString(16)}`;
-        break;
-      case "eth_blockNumber":
-        result = `0x${state.blockNumber.toString(16)}`;
-        break;
-      case "eth_getTransactionCount":
-        result = `0x${state.nonce.toString(16)}`;
-        break;
-      case "eth_gasPrice":
-        result = `0x${state.baseFee.toString(16)}`;
-        break;
-      case "eth_maxPriorityFeePerGas":
-        result = `0x${(state.baseFee / 2n).toString(16)}`;
-        break;
-      case "eth_feeHistory": {
-        // ethers' getFeeData calls feeHistory + base+priority. We return a
-        // shape that lets ethers compute (baseFeePerGas, priorityFee).
-        result = {
-          oldestBlock: `0x${state.blockNumber.toString(16)}`,
-          baseFeePerGas: [
-            `0x${state.baseFee.toString(16)}`,
-            `0x${state.baseFee.toString(16)}`,
-          ],
-          gasUsedRatio: [0.5],
-          reward: [[`0x${(state.baseFee / 2n).toString(16)}`]],
-        };
-        break;
-      }
-      case "eth_sendRawTransaction": {
-        const raw = params[0] as string;
-        state.acceptedRawTxs.push(raw);
-        // Echo the canonical tx hash: ethers cross-checks
-        // `keccak(rawTx)` against the node's reply and rejects on
-        // mismatch (defense-in-depth against MITM hash swaps).
-        result = keccak256(raw);
-        break;
-      }
-      case "eth_getBlockByNumber":
-        result = {
-          number: `0x${state.blockNumber.toString(16)}`,
-          baseFeePerGas: `0x${state.baseFee.toString(16)}`,
-          hash: `0x${"b".repeat(64)}`,
-          parentHash: `0x${"c".repeat(64)}`,
-          timestamp: "0x0",
-          // ethers v6 needs these to construct a Block — empty defaults.
-          transactions: [],
-          extraData: "0x",
-          stateRoot: `0x${"0".repeat(64)}`,
-          transactionsRoot: `0x${"0".repeat(64)}`,
-          receiptsRoot: `0x${"0".repeat(64)}`,
-          logsBloom: `0x${"0".repeat(512)}`,
-          gasLimit: "0x1c9c380",
-          gasUsed: "0x0",
-          difficulty: "0x0",
-          totalDifficulty: "0x0",
-          miner: `0x${"0".repeat(40)}`,
-          nonce: "0x0000000000000000",
-          mixHash: `0x${"0".repeat(64)}`,
-          sha3Uncles: `0x${"0".repeat(64)}`,
-          size: "0x0",
-        };
-        break;
-      default:
-        return new Response(
-          JSON.stringify({
-            jsonrpc: "2.0",
-            id,
-            error: { code: -32601, message: `unhandled: ${method}` },
-          }),
-          { status: 200, headers: { "content-type": "application/json" } },
-        );
-    }
-    return new Response(
-      JSON.stringify({ jsonrpc: "2.0", id, result }),
-      { status: 200, headers: { "content-type": "application/json" } },
-    );
-  };
-}
+import { buildMockFetch, type MockState } from "../../__tests__/helpers/mockFetch";
+import {
+  BURN_ADDRESS,
+  MONOLYTHIUM_TESTNET_CHAIN_ID,
+  TEST_PRIVKEY,
+} from "../../__tests__/helpers/fixtures";
 
 describe("sendLyth", () => {
   let state: MockState;
@@ -173,7 +66,7 @@ describe("sendLyth", () => {
 
     const result = await sendLyth(signer, {
       from: wallet.address,
-      to: "0x000000000000000000000000000000000000dead",
+      to: BURN_ADDRESS,
       amountLyth: "0.001",
     });
 
@@ -275,7 +168,7 @@ describe("sendLyth", () => {
     await expect(
       sendLyth(signer, {
         from: wallet.address,
-        to: "0x000000000000000000000000000000000000dead",
+        to: BURN_ADDRESS,
         amountLyth: "0.001",
       }),
     ).rejects.toThrow(/EIP-1559 fee data/);
