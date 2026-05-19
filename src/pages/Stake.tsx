@@ -17,7 +17,7 @@ import { ClusterPicker } from "../components/ClusterPicker";
 import { DelegationsDashboard, type DelegationAction } from "../components/DelegationsDashboard";
 import { formatAddress } from "../components/format";
 import { useOperations } from "../operations/context";
-import { encodeDelegate } from "../sdk/delegation";
+import { encodeDelegate, encodeUndelegate } from "../sdk/delegation";
 import {
   getClusters,
   getDelegationCap,
@@ -258,9 +258,11 @@ export function Stake() {
         setPickerOpen(true);
         return;
       case "unstake":
+        openUnstake(delegation);
+        return;
       case "redelegate":
       case "claim":
-        // Wired in commits 10 / 11 / 12. Surface the descriptor so
+        // Wired in commits 11 / 12. Surface the descriptor so
         // the user gets feedback that the action is recognized.
         ops.open({
           title: `${action[0]!.toUpperCase()}${action.slice(1)} (preview)`,
@@ -274,11 +276,9 @@ export function Stake() {
           effects: [
             {
               text:
-                action === "unstake"
-                  ? "Unstake flow wires in Commit 10 (this phase)."
-                  : action === "redelegate"
-                    ? "Redelegate flow wires in Commit 11 (this phase)."
-                    : "Claim flow wires in Commit 12 (this phase).",
+                action === "redelegate"
+                  ? "Redelegate flow wires in Commit 11 (this phase)."
+                  : "Claim flow wires in Commit 12 (this phase).",
               level: "info",
             },
           ],
@@ -289,6 +289,63 @@ export function Stake() {
             }),
         });
     }
+  };
+
+  /**
+   * Unstake — calls `undelegate(cluster)`, removing the wallet's entire
+   * row for that cluster. Per whitepaper §23.2 delegators have zero
+   * unbonding period — funds are available immediately. (Note: this
+   * differs from the operator self-bond, which carries a 14d+1ep
+   * cooldown per §14 cluster mobility; the operator cooldown does
+   * NOT apply to delegators.)
+   *
+   * The chain's `undelegate` primitive is all-or-nothing — no partial
+   * unstake. Partial reductions would need an `undelegate` followed
+   * by a `delegate(newWeightBps)` sequence; Phase 2 ships full-unstake
+   * only.
+   */
+  const openUnstake = (delegation: Delegation) => {
+    ops.open({
+      title: `Unstake from ${delegation.clusterName}`,
+      subtitle: `Remove all ${delegation.weightBps} bps from cluster ${delegation.clusterId}`,
+      auth: "keychain",
+      diff: [
+        { k: "From", v: formatAddress(IDENTITY.address) },
+        { k: "Cluster", v: delegation.clusterName },
+        { k: "Cluster id", v: String(delegation.clusterId) },
+        { k: "Removing", v: `${delegation.weightBps} bps (entire row)` },
+        { k: "Unbonding period", v: "none — funds available immediately (§23.2)" },
+      ],
+      effects: [
+        {
+          text:
+            "Removes your delegation row entirely. The chain's undelegate " +
+            "primitive is all-or-nothing — partial reduction would require " +
+            "undelegate followed by a fresh delegate.",
+        },
+        {
+          text:
+            "Per §23.2, delegators have no unbonding cooldown — slashing " +
+            "applies to operator self-bonds, not to delegated stake.",
+        },
+      ],
+      execute: async (ctx) => {
+        if (!ctx?.vaultSeed) {
+          throw new Error("vault seed unavailable after keychain authorization");
+        }
+        const tx = encodeUndelegate({
+          from: IDENTITY.address,
+          clusterId: delegation.clusterId,
+        });
+        const sub = await submitDelegationCall({ seed: ctx.vaultSeed, tx });
+        // Refresh delegations on completion so the row disappears.
+        void refresh();
+        return {
+          headline: `Unstaked from ${delegation.clusterName}`,
+          detail: sub.txHash,
+        };
+      },
+    });
   };
 
   const pendingByCluster = new Map<number, number | null>(
