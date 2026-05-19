@@ -31,10 +31,20 @@ export default defineConfig({
     outDir: "dist",
   },
   test: {
-    // jsdom keeps DOM globals (`window`, `document`) available for any
-    // future component test; the SDK-only tests under src/sdk/__tests__/
-    // don't need it but the cost is negligible.
+    // jsdom keeps DOM globals (`window`, `document`) available so
+    // component tests can render against a real DOM. The SDK-only
+    // tests under src/sdk/__tests__/ don't need it but the cost is
+    // negligible.
     environment: "jsdom",
-    include: ["src/**/__tests__/**/*.test.ts", "src/**/*.test.ts"],
+    // `.tsx` is included for component tests using
+    // @testing-library/react; `.ts` covers SDK/helper tests.
+    include: [
+      "src/**/__tests__/**/*.test.ts",
+      "src/**/__tests__/**/*.test.tsx",
+      "src/**/*.test.ts",
+      "src/**/*.test.tsx",
+    ],
+    // Global jest-dom matchers — see src/__tests__/helpers/setup.ts.
+    setupFiles: ["./src/__tests__/helpers/setup.ts"],
   },
 });
