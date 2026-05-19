@@ -11,8 +11,9 @@
 // chain-gap reality (no on-chain APR / reputation / uptime yet) is
 // surfaced via the ClusterPicker's [mock] tagging.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { IDENTITY } from "../data/fixtures";
+import { ClusterMobilityNotice } from "../components/ClusterMobilityNotice";
 import { ClusterPicker } from "../components/ClusterPicker";
 import { DelegationsDashboard, type DelegationAction } from "../components/DelegationsDashboard";
 import { RewardCard } from "../components/RewardCard";
@@ -463,6 +464,14 @@ export function Stake() {
     rewards?.perCluster.map((r) => [r.clusterId, r.amountLyth]) ?? [],
   );
 
+  // Cluster ids the user has delegations on — drives the mobility
+  // notice. Memoised so the notice's effect doesn't re-fire each
+  // render.
+  const delegatedClusterIds = useMemo(
+    () => (delegations ?? []).map((d) => d.clusterId),
+    [delegations],
+  );
+
   /** Returns null if the input is valid; otherwise an error string. */
   const validateBps = (): string | null => {
     const n = Number.parseInt(weightBpsInput, 10);
@@ -492,6 +501,11 @@ export function Stake() {
           every margin.
         </div>
       </div>
+
+      <ClusterMobilityNotice
+        clusterIds={delegatedClusterIds}
+        title="Recent membership changes on your clusters"
+      />
 
       {redelegateSource ? (
         <RedelegateCard
