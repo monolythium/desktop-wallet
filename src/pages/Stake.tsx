@@ -25,6 +25,11 @@ import {
   type AutovoteResult,
   runAutovote,
 } from "../sdk/autovote";
+import {
+  buildAutovoteSeed,
+  sampleClusters,
+} from "../sdk/autovote-entropy";
+import { useChainSnapshot } from "../sdk/useChainSnapshot";
 
 type ClustersState =
   | { status: "loading"; value: null; error: null }
@@ -39,6 +44,10 @@ export function Stake() {
     error: null,
   });
   const [capBps, setCapBps] = useState<number | null>(null);
+  // Chain snapshot — gives us the latest block hash for per-user
+  // autovote entropy. The hash changes each block, so consecutive
+  // autovote runs sample fresh.
+  const chain = useChainSnapshot(IDENTITY.address);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [selected, setSelected] = useState<ClusterSummary | null>(null);
   const [weightBpsInput, setWeightBpsInput] = useState("1000");
@@ -76,10 +85,21 @@ export function Stake() {
         setAutovoteResult(null);
         return;
       }
-      const result = runAutovote(mode, clusters.value, { capBps });
+      // Per-user entropy keyed by (user_address, latest_block_hash)
+      // per §23.9. blockHeight as a fallback identifier when the
+      // snapshot doesn't yet carry a hash (offline / pre-first-tick).
+      const blockMarker = chain.snapshot?.blockHeight
+        ? `0x${chain.snapshot.blockHeight.toString(16)}`
+        : "0x0";
+      const seed = buildAutovoteSeed(IDENTITY.address, blockMarker);
+      const result = runAutovote(mode, clusters.value, {
+        capBps,
+        sampleStrategy: (eligible, count) =>
+          sampleClusters(eligible, count, seed),
+      });
       setAutovoteResult(result);
     },
-    [clusters, capBps],
+    [clusters, capBps, chain.snapshot?.blockHeight],
   );
 
   /**
