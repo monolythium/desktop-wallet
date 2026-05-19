@@ -6,7 +6,7 @@ import type { ReactElement } from "react";
 import { IDENTITY } from "../data/fixtures";
 import type { Denom } from "../data/fixtures";
 import type { Route } from "./types";
-import { formatAddressShort } from "./format";
+import { Identity } from "./Identity";
 
 interface NavItem {
   id: Route;
@@ -182,7 +182,7 @@ export function Sidebar({ denom, setDenom, route, setRoute }: Props) {
 
       <div className="w-side__footer">
         <b>{IDENTITY.handle}</b>
-        <div className="addr" title={IDENTITY.address}>{formatAddressShort(IDENTITY.address)}</div>
+        <Identity addr={IDENTITY.address} className="addr" />
       </div>
     </aside>
   );
