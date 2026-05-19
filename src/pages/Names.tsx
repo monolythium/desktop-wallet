@@ -5,9 +5,10 @@
 // Pending-transfer status surfaces (Commit 8) reuse this page's
 // dashboard render.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { IDENTITY } from "../data/fixtures";
 import { NameLookup, type LookupState } from "../components/NameLookup";
+import { OwnedNamesDashboard } from "../components/OwnedNamesDashboard";
 import { useOperations } from "../operations/context";
 import { formatAddress } from "../components/format";
 import {
@@ -24,6 +25,9 @@ export function Names() {
   const [category, setCategory] = useState<RegistrationCategory>("human");
   const [parent, setParent] = useState("");
   const [lookup, setLookup] = useState<LookupState>({ kind: "idle" });
+  // Bumped after a successful registration / transfer so the
+  // OwnedNamesDashboard re-fetches.
+  const [refreshKey, setRefreshKey] = useState(0);
 
   const onLookupState = useCallback((s: LookupState) => setLookup(s), []);
 
@@ -85,6 +89,8 @@ export function Names() {
           tx,
           value: priceWei,
         });
+        // Trigger the owned-names dashboard to re-fetch.
+        setRefreshKey((k) => k + 1);
         return {
           headline: `${canonical} registration broadcast`,
           detail: sub.txHash,
@@ -162,24 +168,16 @@ export function Names() {
         </div>
       </div>
 
-      {/* Owned-names dashboard lands in Commit 6 — placeholder structure
-          so the page already has its grid skeleton. */}
-      <PlaceholderOwnedNames />
-    </div>
-  );
-}
-
-function PlaceholderOwnedNames() {
-  // Mark unused warning — replaced in Commit 6.
-  const [_unused] = useState(0);
-  useEffect(() => { void _unused; }, [_unused]);
-  return (
-    <div className="w-card" style={{ marginTop: 16 }}>
-      <div className="w-card__head">
-        <h3>Your .mono names</h3>
-      </div>
-      <div className="w-card__body" style={{ fontSize: 12.5, color: "var(--w-text-3)" }}>
-        Your owned-name dashboard renders here (Phase 3 Commit 6).
+      <div className="w-card" style={{ marginTop: 16 }}>
+        <div className="w-card__head">
+          <h3>Your .mono names</h3>
+        </div>
+        <div className="w-card__body" style={{ padding: 0 }}>
+          <OwnedNamesDashboard
+            address={IDENTITY.address}
+            refreshKey={refreshKey}
+          />
+        </div>
       </div>
     </div>
   );
