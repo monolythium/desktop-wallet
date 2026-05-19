@@ -9,10 +9,10 @@
 // can paste a .mono name (resolved via the SDK) or a bech32m / 0x
 // address directly via parseRecipient.
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Identity } from "../components/Identity";
-import { NameLookup, type LookupState } from "../components/NameLookup";
-import { formatAddress, parseRecipient } from "../components/format";
+import { RecipientInput } from "../components/RecipientInput";
+import { formatAddress } from "../components/format";
 import {
   addContact,
   deleteContact,
@@ -38,21 +38,12 @@ export function Contacts({ denom }: Props) {
 
   const onSubmit = (input: {
     nickname: string;
-    addressInput: string;
-    addressName?: string;
+    addressHex: string;
     notes: string;
   }) => {
-    // The form pre-validates; we still defensively parse before
-    // persisting to handle a mid-edit paste.
-    const parsed = parseRecipient(input.addressInput);
-    if (!parsed.ok) {
-      // eslint-disable-next-line no-alert
-      alert(parsed.error);
-      return;
-    }
     addContact({
       nickname: input.nickname,
-      addressHex: parsed.hex,
+      addressHex: input.addressHex,
       notes: input.notes,
     });
     refresh();
@@ -233,46 +224,21 @@ function ContactForm({
   onSubmit,
   onCancel,
 }: {
-  onSubmit: (args: {
-    nickname: string;
-    addressInput: string;
-    addressName?: string;
-    notes: string;
-  }) => void;
+  onSubmit: (args: { nickname: string; addressHex: string; notes: string }) => void;
   onCancel: () => void;
 }) {
   const [nickname, setNickname] = useState("");
   const [addressInput, setAddressInput] = useState("");
+  const [resolvedHex, setResolvedHex] = useState<string | null>(null);
   const [notes, setNotes] = useState("");
-  const [usingName, setUsingName] = useState(false);
-  // For .mono-name flow: stash the lookup state so we can display the
-  // resolved address before submitting.
-  const [nameLookup, setNameLookup] = useState<LookupState>({ kind: "idle" });
-  const [nameLabel, setNameLabel] = useState("");
 
-  const isAddressOk = (() => {
-    if (usingName) {
-      // .mono path: name is "taken" (i.e. resolved to an address) → ok.
-      return nameLookup.kind === "taken";
-    }
-    if (addressInput.trim() === "") return false;
-    const parsed = parseRecipient(addressInput);
-    return parsed.ok;
-  })();
+  const canSubmit = nickname.trim() !== "" && resolvedHex !== null;
 
-  const canSubmit = nickname.trim() !== "" && isAddressOk;
+  const onResolved = useCallback((hex: string | null) => setResolvedHex(hex), []);
 
   const submit = () => {
-    if (usingName && nameLookup.kind === "taken") {
-      onSubmit({
-        nickname,
-        addressInput: nameLookup.ownerAddress,
-        addressName: nameLookup.name,
-        notes,
-      });
-      return;
-    }
-    onSubmit({ nickname, addressInput, notes });
+    if (resolvedHex === null) return;
+    onSubmit({ nickname, addressHex: resolvedHex, notes });
   };
 
   return (
@@ -293,45 +259,19 @@ function ContactForm({
         placeholder="e.g. Alice (work)"
       />
 
-      <div style={{ marginBottom: 8, display: "flex", gap: 6 }}>
-        {(["address", "name"] as const).map((m) => (
-          <button
-            key={m}
-            type="button"
-            className={`btn btn--sm ${
-              (m === "name") === usingName ? "btn--primary" : "btn--ghost"
-            }`}
-            onClick={() => setUsingName(m === "name")}
-          >
-            {m === "name" ? "Pick by .mono name" : "Paste address"}
-          </button>
-        ))}
+      <label className="cap" style={{ display: "block", marginTop: 8 }}>
+        Address — bech32m, hex, or .mono name
+      </label>
+      <div style={{ marginTop: 4, marginBottom: 12 }}>
+        <RecipientInput
+          value={addressInput}
+          onChange={setAddressInput}
+          onResolved={onResolved}
+          ariaLabel="Contact address"
+        />
       </div>
 
-      {usingName ? (
-        <>
-          <label className="cap">.mono name</label>
-          <NameLookup
-            value={nameLabel}
-            onChange={setNameLabel}
-            onAvailabilityChange={setNameLookup}
-            placeholder="alice"
-          />
-        </>
-      ) : (
-        <>
-          <label className="cap">Address (mono1… or 0x…)</label>
-          <input
-            className="w-live-input mono"
-            value={addressInput}
-            onChange={(e) => setAddressInput(e.currentTarget.value)}
-            style={{ marginTop: 4, marginBottom: 12, width: "100%" }}
-            placeholder="mono1…"
-          />
-        </>
-      )}
-
-      <label className="cap" style={{ marginTop: 12, display: "block" }}>
+      <label className="cap" style={{ display: "block" }}>
         Notes (optional)
       </label>
       <input
