@@ -637,6 +637,13 @@ body[data-denom="private"] .w-nav__item.is-active::before {
 .w-operator-row__signing {
   font-size: 12px;
 }
+
+/* ── BalanceBreakdown (Phase 2) ────────────────────────────────── */
+.w-balance-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
 .w-live-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
