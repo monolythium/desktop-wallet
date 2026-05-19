@@ -14,10 +14,19 @@
 import { useCallback, useEffect, useState } from "react";
 import { IDENTITY } from "../data/fixtures";
 import { ClusterPicker } from "../components/ClusterPicker";
+import { DelegationsDashboard, type DelegationAction } from "../components/DelegationsDashboard";
 import { formatAddress } from "../components/format";
 import { useOperations } from "../operations/context";
 import { encodeDelegate } from "../sdk/delegation";
-import { getClusters, getDelegationCap, type ClusterSummary } from "../sdk/staking";
+import {
+  getClusters,
+  getDelegationCap,
+  getDelegations,
+  getRewards,
+  type ClusterSummary,
+  type Delegation,
+  type PendingRewards,
+} from "../sdk/staking";
 import { submitDelegationCall } from "../sdk/submit-delegation";
 import {
   type AutovoteAllocation,
@@ -44,6 +53,9 @@ export function Stake() {
     error: null,
   });
   const [capBps, setCapBps] = useState<number | null>(null);
+  const [delegations, setDelegations] = useState<Delegation[] | null>(null);
+  const [delegationsError, setDelegationsError] = useState<string | null>(null);
+  const [rewards, setRewards] = useState<PendingRewards | null>(null);
   // Chain snapshot — gives us the latest block hash for per-user
   // autovote entropy. The hash changes each block, so consecutive
   // autovote runs sample fresh.
@@ -58,11 +70,23 @@ export function Stake() {
 
   const refresh = useCallback(async () => {
     setClusters({ status: "loading", value: null, error: null });
-    const [clusterResult, capResult] = await Promise.all([
+    const [clusterResult, capResult, delResult, rewardResult] = await Promise.all([
       getClusters(),
       getDelegationCap(),
+      getDelegations(IDENTITY.address),
+      getRewards(IDENTITY.address),
     ]);
     if (capResult.ok) setCapBps(capResult.value ?? null);
+    if (delResult.ok) {
+      setDelegations(delResult.value ?? []);
+      setDelegationsError(null);
+    } else {
+      setDelegations(null);
+      setDelegationsError(delResult.error ?? "delegations unavailable");
+    }
+    if (rewardResult.ok) {
+      setRewards(rewardResult.value ?? null);
+    }
     if (!clusterResult.ok || !clusterResult.value) {
       setClusters({
         status: "error",
@@ -216,6 +240,61 @@ export function Stake() {
     setSelected(null);
   };
 
+  /**
+   * Action handler for the Manage menu. Unstake/Redelegate/Claim
+   * flows are wired in subsequent commits (10, 11, 12); Add stake
+   * here reuses the existing delegate composer by pre-selecting the
+   * delegation's cluster. Until those land, the unwired actions
+   * surface a transient notice via the OperationsDrawer "info"
+   * pathway rather than failing silently.
+   */
+  const handleAction = (action: DelegationAction, delegation: Delegation) => {
+    if (clusters.status !== "ok") return;
+    const cluster = clusters.value.find((c) => c.clusterId === delegation.clusterId);
+    if (!cluster) return;
+    switch (action) {
+      case "add-stake":
+        setSelected(cluster);
+        setPickerOpen(true);
+        return;
+      case "unstake":
+      case "redelegate":
+      case "claim":
+        // Wired in commits 10 / 11 / 12. Surface the descriptor so
+        // the user gets feedback that the action is recognized.
+        ops.open({
+          title: `${action[0]!.toUpperCase()}${action.slice(1)} (preview)`,
+          subtitle: `Targets ${delegation.clusterName}`,
+          auth: "none",
+          diff: [
+            { k: "Cluster", v: delegation.clusterName },
+            { k: "Weight", v: `${delegation.weightBps} bps` },
+            { k: "Action", v: action },
+          ],
+          effects: [
+            {
+              text:
+                action === "unstake"
+                  ? "Unstake flow wires in Commit 10 (this phase)."
+                  : action === "redelegate"
+                    ? "Redelegate flow wires in Commit 11 (this phase)."
+                    : "Claim flow wires in Commit 12 (this phase).",
+              level: "info",
+            },
+          ],
+          execute: () =>
+            Promise.resolve({
+              headline: `${action} preview only`,
+              detail: "Real flow ships within Phase 2.",
+            }),
+        });
+    }
+  };
+
+  const pendingByCluster = new Map<number, number | null>(
+    rewards?.perCluster.map((r) => [r.clusterId, r.amountLyth]) ?? [],
+  );
+
   /** Returns null if the input is valid; otherwise an error string. */
   const validateBps = (): string | null => {
     const n = Number.parseInt(weightBpsInput, 10);
@@ -245,6 +324,15 @@ export function Stake() {
           every margin.
         </div>
       </div>
+
+      <DelegationsDashboard
+        delegations={delegations}
+        isLoading={delegations === null && delegationsError === null}
+        error={delegationsError}
+        pendingByCluster={pendingByCluster}
+        onAction={handleAction}
+        onRefresh={() => void refresh()}
+      />
 
       <AutovoteCard
         mode={autovoteMode}
