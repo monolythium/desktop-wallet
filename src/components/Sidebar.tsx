@@ -46,6 +46,14 @@ const ICON_STAKE = () => (
     <path d="M8.2 11.2l7.6-3.8M8.2 12.8l7.6 3.8" />
   </svg>
 );
+const ICON_OPERATORS = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="3" y="6" width="18" height="4" rx="1" />
+    <rect x="3" y="14" width="18" height="4" rx="1" />
+    <circle cx="6" cy="8" r="0.5" fill="currentColor" />
+    <circle cx="6" cy="16" r="0.5" fill="currentColor" />
+  </svg>
+);
 const ICON_CONTACTS = () => (
   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
@@ -93,6 +101,7 @@ const NAV: NavItem[] = [
   { id: "wallets", label: "Wallets", icon: ICON_WALLETS },
   { id: "tokens", label: "Tokens", icon: ICON_TOKENS, publicOnly: true },
   { id: "stake", label: "Stake", icon: ICON_STAKE, publicOnly: true },
+  { id: "operators", label: "Operators", icon: ICON_OPERATORS, publicOnly: true },
   { id: "contacts", label: "Contacts", icon: ICON_CONTACTS },
   { id: "trade", label: "Trade", icon: ICON_TRADE, publicOnly: true },
   { id: "ai-trade", label: "AI Trading", icon: ICON_AI, publicOnly: true, badge: "beta" },
