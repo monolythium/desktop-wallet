@@ -18,6 +18,7 @@ import { Activity } from "./pages/Activity";
 import { AiTrading } from "./pages/AiTrading";
 import { Contacts } from "./pages/Contacts";
 import { Home } from "./pages/Home";
+import { Names } from "./pages/Names";
 import { News } from "./pages/News";
 import { Operators } from "./pages/Operators";
 import { Settings } from "./pages/Settings";
@@ -145,6 +146,7 @@ export function App() {
           {route === "tokens" ? <Tokens /> : null}
           {route === "stake" ? <Stake /> : null}
           {route === "operators" ? <Operators /> : null}
+          {route === "names" ? <Names /> : null}
           {route === "contacts" ? <Contacts denom={denom} /> : null}
           {route === "trade" ? <Trade /> : null}
           {route === "ai-trade" ? <AiTrading /> : null}
