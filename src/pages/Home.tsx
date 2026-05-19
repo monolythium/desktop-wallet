@@ -207,7 +207,14 @@ export function Home({ denom, goto }: Props) {
         </div>
 
         {isPub ? (
-          <PublicHeroAmount chain={chain} />
+          <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+            <PublicHeroAmount chain={chain} />
+            <RefreshButton
+              onClick={chain.refresh}
+              isLoading={chain.status === "loading"}
+              lastUpdated={chain.lastUpdated}
+            />
+          </div>
         ) : (
           <div className="w-hero__amount" style={{ color: "var(--w-text-2)" }}>
             — <span className="tok" style={{ fontStyle: "italic" }}>amount hidden by design</span>
@@ -407,6 +414,74 @@ function PublicHeroAmount({ chain }: { chain: ReturnType<typeof useChainSnapshot
       <span className="tok">LYTH</span>
     </div>
   );
+}
+
+/**
+ * Manual refresh + last-updated affordance for the chainSnapshot
+ * hero. Spinner during in-flight; subtle "Xs ago" hint while idle so
+ * the user knows whether the number is stale.
+ */
+function RefreshButton({
+  onClick,
+  isLoading,
+  lastUpdated,
+}: {
+  onClick: () => void;
+  isLoading: boolean;
+  lastUpdated: number | null;
+}) {
+  const [, setTick] = useState(0);
+  // Re-render every 5s so the "Xs ago" copy stays current — cheap
+  // (just bumps a counter; no fetch).
+  useEffect(() => {
+    const id = setInterval(() => setTick((v) => v + 1), 5_000);
+    return () => clearInterval(id);
+  }, []);
+  const agoLabel = lastUpdated
+    ? formatAgo(Date.now() - lastUpdated)
+    : null;
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+      <button
+        type="button"
+        className="w-hbtn"
+        aria-label="Refresh balance"
+        onClick={onClick}
+        disabled={isLoading}
+        style={{ padding: "4px 8px" }}
+      >
+        <svg
+          width="12"
+          height="12"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          style={isLoading ? { animation: "w-spin-anim 0.9s linear infinite" } : undefined}
+        >
+          <path d="M21 12a9 9 0 1 1-9-9" />
+          <polyline points="21 3 21 12 12 12" />
+        </svg>
+      </button>
+      {agoLabel ? (
+        <span style={{ fontSize: 11, color: "var(--w-text-3)" }} title={new Date(lastUpdated!).toLocaleString()}>
+          {agoLabel}
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
+function formatAgo(deltaMs: number): string {
+  const s = Math.round(deltaMs / 1000);
+  if (s < 5) return "just now";
+  if (s < 60) return `${s}s ago`;
+  const m = Math.round(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.round(m / 60);
+  return `${h}h ago`;
 }
 
 function ChainStatusLine({

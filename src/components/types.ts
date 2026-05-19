@@ -7,6 +7,7 @@ export type Route =
   | "wallets"
   | "tokens"
   | "stake"
+  | "operators"
   | "contacts"
   | "trade"
   | "ai-trade"
@@ -19,6 +20,7 @@ export const ALL_ROUTES: Route[] = [
   "wallets",
   "tokens",
   "stake",
+  "operators",
   "contacts",
   "trade",
   "ai-trade",

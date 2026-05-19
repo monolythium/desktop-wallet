@@ -1,14 +1,34 @@
-// Wallets page — manage multiple wallet identities + custody.
-// Live primary-wallet preview is wired; multi-wallet management remains a
-// visible placeholder until the keychain layer exposes account enumeration.
+// Wallets page — Phase 2 surface.
+//
+// Adds a public/staked/unbonding/pending-rewards breakdown on top of
+// the existing Live-primary-wallet + Live-hardware-discovery panels.
+// Private-LYTH section is a structural placeholder — the Phase 12
+// chain pipeline (Ferveo decryption + Rule 9 client) hasn't shipped
+// yet, so the section ships with a "coming in Phase 12" notice
+// rather than empty.
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { TodoSection } from "../components/TodoSection";
+import { BalanceBreakdown } from "../components/BalanceBreakdown";
 import { useOperations } from "../operations/context";
 import { formatAddress } from "../components/format";
 import { enumerateDevices, type LedgerDeviceInfo } from "../sdk/ledger";
-import { deriveLiveWalletIdentity, errorMessage, loadLiveWalletBalance, type LiveWalletBalance, type LiveWalletIdentity } from "../sdk/live";
+import {
+  deriveLiveWalletIdentity,
+  errorMessage,
+  loadLiveWalletBalance,
+  type LiveWalletBalance,
+  type LiveWalletIdentity,
+} from "../sdk/live";
 import { PRIMARY_ACCOUNT } from "../sdk/keychain";
+import { IDENTITY } from "../data/fixtures";
+import { useChainSnapshot } from "../sdk/useChainSnapshot";
+import {
+  getDelegations,
+  getRewards,
+  type Delegation,
+  type PendingRewards,
+} from "../sdk/staking";
 
 export function Wallets() {
   const ops = useOperations();
@@ -18,6 +38,28 @@ export function Wallets() {
   const [devices, setDevices] = useState<LedgerDeviceInfo[] | null>(null);
   const [deviceError, setDeviceError] = useState<string | null>(null);
   const [devicesBusy, setDevicesBusy] = useState(false);
+  const [delegations, setDelegations] = useState<Delegation[] | null>(null);
+  const [rewards, setRewards] = useState<PendingRewards | null>(null);
+  // Refresh wiring for the balance breakdown — pulls public balance
+  // (chain snapshot), active delegations, and pending rewards in
+  // parallel.
+  const chain = useChainSnapshot(IDENTITY.address);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const [dels, rew] = await Promise.all([
+        getDelegations(IDENTITY.address),
+        getRewards(IDENTITY.address),
+      ]);
+      if (cancelled) return;
+      setDelegations(dels.ok ? dels.value ?? [] : []);
+      setRewards(rew.ok ? rew.value ?? null : null);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const openUnlockPreview = () => {
     setIdentityError(null);
@@ -72,7 +114,48 @@ export function Wallets() {
     <div className="w-page">
       <div className="w-page__header">
         <h1>Wallets</h1>
-        <div className="sub">Identities, custody, and recovery.</div>
+        <div className="sub">Identities, custody, balance breakdown, recovery.</div>
+      </div>
+
+      <div className="w-card">
+        <div className="w-card__head">
+          <h3>Public balance breakdown</h3>
+          <span className="w-live-pill">live</span>
+          <div className="w-card__head__spacer" />
+          <button
+            className="btn btn--sm"
+            onClick={chain.refresh}
+            disabled={chain.status === "loading"}
+          >
+            {chain.status === "loading" ? "…" : "Refresh"}
+          </button>
+        </div>
+        <div className="w-card__body">
+          <BalanceBreakdown
+            chainSnapshot={chain.snapshot}
+            delegations={delegations}
+            rewards={rewards}
+            isLoading={chain.status === "loading" || delegations === null}
+          />
+        </div>
+      </div>
+
+      <div className="w-card">
+        <div className="w-card__head">
+          <h3>Private balance</h3>
+          <span className="w-mock-tag" title="Phase 12 — chain pipeline pending">
+            [mock]
+          </span>
+        </div>
+        <div className="w-card__body">
+          <div className="row-help">
+            Private LYTH (stealth + confidential, §25) requires the
+            Ferveo threshold-decryption pipeline and the Rule 9
+            caller-origin guard. The chain primitives ship in Phase 12;
+            this section is reserved structurally so the layout is
+            stable once data flows.
+          </div>
+        </div>
       </div>
 
       <div className="w-card">
