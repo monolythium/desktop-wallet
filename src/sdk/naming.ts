@@ -36,6 +36,16 @@
 //     reserved TLD) client-side; everything else is "unknown".
 
 import {
+  keccak256,
+  toUtf8Bytes,
+  zeroPadValue,
+  toBeHex,
+  hexlify,
+  concat,
+  getBytes,
+} from "ethers";
+import type { TransactionRequest } from "ethers";
+import {
   PRECOMPILE_ADDRESSES,
   SdkError,
   normalizeAddressHex,
@@ -570,9 +580,267 @@ function parseNumberField(raw: unknown): number | null {
   return null;
 }
 
-// ─── Re-exports for convenience ──────────────────────────────────
+// ─── Naming-registry precompile address ──────────────────────────
 
 /** Naming-registry precompile address; pinned in the SDK consts. */
 export const NAME_REGISTRY_PRECOMPILE = PRECOMPILE_ADDRESSES.NAME_REGISTRY;
+
+// ─── Encoders ────────────────────────────────────────────────────
+//
+// The naming-registry precompile ABI isn't pinned in the SDK yet (the
+// `naming-registry` crate stub doesn't exist under
+// `mono-core/crates/precompiles/system/`). We derive selectors from the
+// Solidity-canonical signatures that match the `lyth_*` namespace
+// convention used by every other precompile (pubkey-registry,
+// spending-policy, etc.); when the on-chain ABI lands the selectors are
+// the standard keccak-of-signature heads and will line up. If the chain
+// adopts a different signature shape these encoders flip via a single
+// table update.
+
+/** Solidity-canonical signatures for the naming-registry encoders. */
+export const NAMING_SIGNATURES = {
+  /** `register(string name, uint8 category)` — FCFS registration. */
+  register: "register(string,uint8)",
+  /** `proposeTransfer(string name, address recipient)` — owner-side. */
+  proposeTransfer: "proposeTransfer(string,address)",
+  /** `acceptTransfer(string name)` — recipient pays re-registration fee. */
+  acceptTransfer: "acceptTransfer(string)",
+  /** `cancelTransfer(string name)` — owner cancels a pending proposal. */
+  cancelTransfer: "cancelTransfer(string)",
+} as const;
+
+function selectorOf(signature: string): string {
+  const hash = keccak256(toUtf8Bytes(signature));
+  return hash.slice(0, 10);
+}
+
+/** 4-byte selectors keyed by op name. */
+export const NAMING_SELECTORS = {
+  register: selectorOf(NAMING_SIGNATURES.register),
+  proposeTransfer: selectorOf(NAMING_SIGNATURES.proposeTransfer),
+  acceptTransfer: selectorOf(NAMING_SIGNATURES.acceptTransfer),
+  cancelTransfer: selectorOf(NAMING_SIGNATURES.cancelTransfer),
+} as const;
+
+/** Numeric category id used in the chain ABI. Matches the order in the
+ *  `NameCategory` enum. Pinned here so the wire byte stays stable
+ *  across refactors. */
+const CATEGORY_CODE: Record<NameCategory, number> = {
+  human: 0,
+  agent: 1,
+  cluster: 2,
+  contract: 3,
+  system: 4,
+};
+
+/** Typed error for encoder pre-validation failures. */
+export class NamingEncoderError extends Error {
+  public readonly code:
+    | "invalid_name"
+    | "system_forbidden"
+    | "invalid_recipient"
+    | "invalid_label";
+  constructor(code: NamingEncoderError["code"], message: string) {
+    super(message);
+    this.name = "NamingEncoderError";
+    this.code = code;
+  }
+}
+
+/** ABI-encode a Solidity string as a head-tail pair (offset + (length +
+ *  data padded to 32). Naming calldata only carries one string + one
+ *  fixed-width tail field, so the head is always 0x20 for the first
+ *  arg + the second-arg word; the encoder hard-codes that layout
+ *  rather than building a generic ABI codec. */
+function encodeStringArg(s: string, secondWordOffsetHex: string): {
+  head: string;
+  tail: string;
+} {
+  // String head: offset (in bytes) to the start of the tail.
+  // For a single (string, T) tuple where T is one word, the head
+  // length is 2*32 = 64 bytes; the offset to the tail is 0x40 = 64.
+  // But the offset is measured from the start of the args block, NOT
+  // from the start of calldata — so we always emit 0x40.
+  void secondWordOffsetHex; // hint that secondary args are computed by caller
+  const head = zeroPadValue(toBeHex(64), 32);
+  const utf8 = toUtf8Bytes(s);
+  const lengthWord = zeroPadValue(toBeHex(utf8.length), 32);
+  // Pad utf8 to a multiple of 32 bytes.
+  const paddedLen = Math.ceil(utf8.length / 32) * 32 || 32;
+  const padded = new Uint8Array(paddedLen);
+  padded.set(utf8);
+  const tail = hexlify(concat([getBytes(lengthWord), padded]));
+  return { head, tail };
+}
+
+/** Single-string-arg encoder (acceptTransfer / cancelTransfer). */
+function callDataSingleString(selector: string, name: string): string {
+  // For a single-string call the head is just the offset word (0x20).
+  const offset = zeroPadValue(toBeHex(32), 32);
+  const utf8 = toUtf8Bytes(name);
+  const lengthWord = zeroPadValue(toBeHex(utf8.length), 32);
+  const paddedLen = Math.ceil(utf8.length / 32) * 32 || 32;
+  const padded = new Uint8Array(paddedLen);
+  padded.set(utf8);
+  return hexlify(
+    concat([
+      getBytes(selector),
+      getBytes(offset),
+      getBytes(lengthWord),
+      padded,
+    ]),
+  );
+}
+
+/** Two-arg encoder: (string, uint8 or address). */
+function callDataStringAndWord(
+  selector: string,
+  name: string,
+  secondWord: string,
+): string {
+  // ABI layout for (string, T) where T fits in one word:
+  //   head: [offset_to_tail = 0x40] [secondWord]
+  //   tail: [length] [utf8 bytes padded to 32-byte multiple]
+  const { head, tail } = encodeStringArg(name, secondWord);
+  return hexlify(
+    concat([
+      getBytes(selector),
+      getBytes(head),
+      getBytes(secondWord),
+      getBytes(tail),
+    ]),
+  );
+}
+
+/**
+ * Encode a `register(name, category)` TransactionRequest targeting the
+ * naming-registry precompile (`PRECOMPILE_ADDRESSES.NAME_REGISTRY`).
+ *
+ * Validates the name end-to-end via `parseName` + per-label rules. The
+ * `system` TLD is foundation-only and throws `NamingEncoderError` with
+ * `code: "system_forbidden"` rather than emit a transaction the chain
+ * will reject.
+ *
+ * `from` is required so ethers' gas-estimation pass can attribute the
+ * call before the signer sees it.
+ */
+export function encodeRegister(args: {
+  from: string;
+  name: string;
+  category: NameCategory;
+}): TransactionRequest {
+  if (args.category === "system") {
+    throw new NamingEncoderError(
+      "system_forbidden",
+      "system.* TLD is foundation-only; standard register path is rejected on chain",
+    );
+  }
+  const parsed = parseName(args.name);
+  if (parsed === null) {
+    throw new NamingEncoderError(
+      "invalid_name",
+      `'${args.name}' is not a canonical §22.8 name`,
+    );
+  }
+  if (parsed.tld !== args.category) {
+    throw new NamingEncoderError(
+      "invalid_name",
+      `name '${parsed.canonical}' belongs to TLD '${parsed.tld}', not '${args.category}'`,
+    );
+  }
+  const code = CATEGORY_CODE[args.category];
+  const word = zeroPadValue(toBeHex(code), 32);
+  return {
+    type: 2,
+    from: args.from,
+    to: NAME_REGISTRY_PRECOMPILE,
+    data: callDataStringAndWord(NAMING_SELECTORS.register, parsed.canonical, word),
+    value: 0n,
+  };
+}
+
+/**
+ * Encode `proposeTransfer(name, recipient)`. Recipient must be a 0x or
+ * bech32m address that the SDK can normalize.
+ */
+export function encodeProposeTransfer(args: {
+  from: string;
+  name: string;
+  recipient: string;
+}): TransactionRequest {
+  const parsed = parseName(args.name);
+  if (parsed === null) {
+    throw new NamingEncoderError(
+      "invalid_name",
+      `'${args.name}' is not a canonical §22.8 name`,
+    );
+  }
+  let recipientHex: string;
+  try {
+    recipientHex = normalizeAddressHex(args.recipient);
+  } catch {
+    throw new NamingEncoderError(
+      "invalid_recipient",
+      `recipient '${args.recipient}' is not a valid address`,
+    );
+  }
+  // ABI-encode address as 32-byte right-aligned word.
+  const word = zeroPadValue(recipientHex.toLowerCase(), 32);
+  return {
+    type: 2,
+    from: args.from,
+    to: NAME_REGISTRY_PRECOMPILE,
+    data: callDataStringAndWord(
+      NAMING_SELECTORS.proposeTransfer,
+      parsed.canonical,
+      word,
+    ),
+    value: 0n,
+  };
+}
+
+/** Encode `acceptTransfer(name)`. Recipient pays re-registration fee. */
+export function encodeAcceptTransfer(args: {
+  from: string;
+  name: string;
+}): TransactionRequest {
+  const parsed = parseName(args.name);
+  if (parsed === null) {
+    throw new NamingEncoderError(
+      "invalid_name",
+      `'${args.name}' is not a canonical §22.8 name`,
+    );
+  }
+  return {
+    type: 2,
+    from: args.from,
+    to: NAME_REGISTRY_PRECOMPILE,
+    data: callDataSingleString(NAMING_SELECTORS.acceptTransfer, parsed.canonical),
+    value: 0n,
+  };
+}
+
+/** Encode `cancelTransfer(name)`. */
+export function encodeCancelTransfer(args: {
+  from: string;
+  name: string;
+}): TransactionRequest {
+  const parsed = parseName(args.name);
+  if (parsed === null) {
+    throw new NamingEncoderError(
+      "invalid_name",
+      `'${args.name}' is not a canonical §22.8 name`,
+    );
+  }
+  return {
+    type: 2,
+    from: args.from,
+    to: NAME_REGISTRY_PRECOMPILE,
+    data: callDataSingleString(NAMING_SELECTORS.cancelTransfer, parsed.canonical),
+    value: 0n,
+  };
+}
+
+// ─── Re-exports for convenience ──────────────────────────────────
 
 export { SdkError };

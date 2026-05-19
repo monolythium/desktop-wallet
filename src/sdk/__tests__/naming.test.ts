@@ -11,7 +11,16 @@
 
 import { beforeEach, describe, expect, it } from "vitest";
 import { MonolythiumProvider, RpcClient } from "@monolythium/core-sdk";
+import { keccak256, toUtf8Bytes } from "ethers";
 import {
+  NAME_REGISTRY_PRECOMPILE,
+  NAMING_SELECTORS,
+  NAMING_SIGNATURES,
+  NamingEncoderError,
+  encodeAcceptTransfer,
+  encodeCancelTransfer,
+  encodeProposeTransfer,
+  encodeRegister,
   getNameDetails,
   isNameAvailable,
   listOwnedNames,
@@ -392,5 +401,151 @@ describe("naming · isNameAvailable", () => {
     const out = await isNameAvailable("fresh-handle.mono");
     expect(out.ok).toBe(true);
     expect(out.value).toMatchObject({ available: true });
+  });
+});
+
+describe("naming · selectors", () => {
+  it("derives the 4-byte selector from the keccak of each signature", () => {
+    for (const [op, sig] of Object.entries(NAMING_SIGNATURES)) {
+      const expected = keccak256(toUtf8Bytes(sig)).slice(0, 10);
+      expect(NAMING_SELECTORS[op as keyof typeof NAMING_SELECTORS]).toBe(expected);
+    }
+  });
+});
+
+describe("naming · encodeRegister", () => {
+  it("builds a register tx for a human name", () => {
+    const tx = encodeRegister({
+      from: TEST_ADDRESS,
+      name: "alice.mono",
+      category: "human",
+    });
+    expect(tx.to).toBe(NAME_REGISTRY_PRECOMPILE);
+    expect(tx.value).toBe(0n);
+    expect(tx.from).toBe(TEST_ADDRESS);
+    const data = tx.data as string;
+    expect(data.startsWith(NAMING_SELECTORS.register)).toBe(true);
+    // The category byte is the last byte of the second 32-byte head word.
+    // Selector(4) + head(64) + tail. We grab the byte at offset 4 + 32 + 32 - 1.
+    const categoryWord = data.slice(2 + (4 + 32) * 2, 2 + (4 + 64) * 2);
+    expect(parseInt(categoryWord.slice(-2), 16)).toBe(0); // human = 0
+  });
+
+  it("emits the correct category byte for agent", () => {
+    const tx = encodeRegister({
+      from: TEST_ADDRESS,
+      name: "bot.agent.alice.mono",
+      category: "agent",
+    });
+    const data = tx.data as string;
+    const categoryWord = data.slice(2 + (4 + 32) * 2, 2 + (4 + 64) * 2);
+    expect(parseInt(categoryWord.slice(-2), 16)).toBe(1); // agent = 1
+  });
+
+  it("rejects the system TLD", () => {
+    expect(() =>
+      encodeRegister({
+        from: TEST_ADDRESS,
+        name: "foundation.system.mono",
+        category: "system",
+      }),
+    ).toThrow(NamingEncoderError);
+  });
+
+  it("rejects bad names with a typed error", () => {
+    try {
+      encodeRegister({ from: TEST_ADDRESS, name: "BAD.mono", category: "human" });
+      expect.unreachable();
+    } catch (cause) {
+      expect(cause).toBeInstanceOf(NamingEncoderError);
+      expect((cause as NamingEncoderError).code).toBe("invalid_name");
+    }
+  });
+
+  it("rejects mismatched category vs TLD", () => {
+    try {
+      encodeRegister({
+        from: TEST_ADDRESS,
+        name: "alice.mono",
+        category: "agent",
+      });
+      expect.unreachable();
+    } catch (cause) {
+      expect(cause).toBeInstanceOf(NamingEncoderError);
+      expect((cause as NamingEncoderError).code).toBe("invalid_name");
+    }
+  });
+});
+
+describe("naming · encodeProposeTransfer", () => {
+  it("builds a transfer-propose tx with the recipient padded as address", () => {
+    const tx = encodeProposeTransfer({
+      from: TEST_ADDRESS,
+      name: "alice.mono",
+      recipient: TEST_ADDRESS,
+    });
+    expect(tx.to).toBe(NAME_REGISTRY_PRECOMPILE);
+    const data = tx.data as string;
+    expect(data.startsWith(NAMING_SELECTORS.proposeTransfer)).toBe(true);
+    // Recipient word ends in the lowercased TEST_ADDRESS hex.
+    const recipientWord = data.slice(2 + (4 + 32) * 2, 2 + (4 + 64) * 2);
+    expect(recipientWord.toLowerCase()).toContain(
+      TEST_ADDRESS.toLowerCase().slice(2),
+    );
+  });
+
+  it("accepts bech32m recipients", () => {
+    const tx = encodeProposeTransfer({
+      from: TEST_ADDRESS,
+      name: "alice.mono",
+      recipient: "mono17w0adeg64ky0daxwd2ugyuneellmjgnxk794yy",
+    });
+    const data = tx.data as string;
+    expect(data.startsWith(NAMING_SELECTORS.proposeTransfer)).toBe(true);
+  });
+
+  it("rejects invalid recipients with a typed error", () => {
+    try {
+      encodeProposeTransfer({
+        from: TEST_ADDRESS,
+        name: "alice.mono",
+        recipient: "not-a-real-address",
+      });
+      expect.unreachable();
+    } catch (cause) {
+      expect(cause).toBeInstanceOf(NamingEncoderError);
+      expect((cause as NamingEncoderError).code).toBe("invalid_recipient");
+    }
+  });
+});
+
+describe("naming · encodeAcceptTransfer / encodeCancelTransfer", () => {
+  it("builds accept-transfer calldata", () => {
+    const tx = encodeAcceptTransfer({
+      from: TEST_ADDRESS,
+      name: "alice.mono",
+    });
+    const data = tx.data as string;
+    expect(data.startsWith(NAMING_SELECTORS.acceptTransfer)).toBe(true);
+    // Offset word + length word + utf8(alice.mono) padded.
+    expect(data.length).toBeGreaterThan(2 + 8 + 64 + 64);
+  });
+
+  it("builds cancel-transfer calldata", () => {
+    const tx = encodeCancelTransfer({
+      from: TEST_ADDRESS,
+      name: "alice.mono",
+    });
+    const data = tx.data as string;
+    expect(data.startsWith(NAMING_SELECTORS.cancelTransfer)).toBe(true);
+  });
+
+  it("rejects malformed names from both", () => {
+    expect(() => encodeAcceptTransfer({ from: TEST_ADDRESS, name: "BAD" })).toThrow(
+      NamingEncoderError,
+    );
+    expect(() => encodeCancelTransfer({ from: TEST_ADDRESS, name: "BAD" })).toThrow(
+      NamingEncoderError,
+    );
   });
 });
