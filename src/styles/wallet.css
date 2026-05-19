@@ -947,6 +947,7 @@ body[data-denom="private"] .w-nav__item.is-active::before {
   animation: spin 900ms linear infinite;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
+@keyframes w-spin-anim { to { transform: rotate(360deg); } }
 .w-check {
   width: 48px; height: 48px;
   border-radius: 50%;
