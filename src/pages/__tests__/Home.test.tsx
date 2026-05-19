@@ -68,7 +68,10 @@ describe("Home — chainSnapshot rendering", () => {
     renderHome();
 
     // PublicHeroAmount in the loading branch renders "loading…" copy.
-    expect(await screen.findByText(/loading/i)).toBeInTheDocument();
+    // (IdentityCard also surfaces "Loading identity…" — both are valid
+    // pending affordances, hence findAllByText.)
+    const loadings = await screen.findAllByText(/loading/i);
+    expect(loadings.length).toBeGreaterThanOrEqual(1);
     // ChainStatusLine also surfaces the loading state, with the SDK
     // attribution in the footer.
     expect(
@@ -119,9 +122,9 @@ describe("Home — chainSnapshot rendering", () => {
     await waitFor(() => {
       expect(screen.getAllByText(/offline/i).length).toBeGreaterThanOrEqual(2);
     });
-    // ChainStatusLine carries the underlying error message verbatim.
-    expect(
-      await screen.findByText(/network unreachable/i),
-    ).toBeInTheDocument();
+    // ChainStatusLine carries the underlying error message verbatim
+    // (IdentityCard's soft-error footnote may carry it too).
+    const errs = await screen.findAllByText(/network unreachable/i);
+    expect(errs.length).toBeGreaterThanOrEqual(1);
   });
 });
