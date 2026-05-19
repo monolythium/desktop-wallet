@@ -688,13 +688,26 @@ function AutovoteCard({
           {capBps === null ? "no cap" : `${capBps} bps`}), and previews the
           result before signing. Per-user entropy ships in the next commit.
         </div>
-        <div className="w-autovote-buttons">
+        <div
+          className="w-autovote-buttons"
+          role="radiogroup"
+          aria-label="Autovote allocation mode"
+        >
           {buttons.map((b) => (
             <button
               key={b.id}
               type="button"
+              role="radio"
+              aria-checked={mode === b.id}
+              aria-label={`${b.label} — ${b.hint}`}
               className={`w-autovote-btn ${mode === b.id ? "is-on" : ""}`}
               onClick={() => onPickMode(b.id)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  onPickMode(b.id);
+                }
+              }}
               disabled={!clustersReady}
             >
               <div className="label">{b.label}</div>

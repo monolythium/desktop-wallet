@@ -122,6 +122,15 @@ function NameRow({
   return (
     <div
       role="listitem"
+      tabIndex={0}
+      aria-label={`${row.name} — ${row.category}, ${transferLabel.text}`}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          setMenuOpen((v) => !v);
+        }
+        if (e.key === "Escape") setMenuOpen(false);
+      }}
       className="w-owned-names__row"
       style={{
         display: "grid",
