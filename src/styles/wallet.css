@@ -385,6 +385,79 @@ body[data-denom="private"] .w-nav__item.is-active::before {
   letter-spacing: 0.08em;
   color: var(--w-text-3);
 }
+
+/* ── Autovote (Phase 2 — §23.9) ────────────────────────────────── */
+.w-autovote-buttons {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.w-autovote-btn {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  border: 1px solid var(--w-line);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.02);
+  cursor: pointer;
+  text-align: left;
+  transition: background-color 120ms ease, border-color 120ms ease;
+  font-family: inherit;
+  color: inherit;
+}
+.w-autovote-btn:hover:not(:disabled),
+.w-autovote-btn:focus-visible:not(:disabled) {
+  background: rgba(255, 255, 255, 0.045);
+  border-color: var(--w-text-3);
+  outline: none;
+}
+.w-autovote-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.w-autovote-btn.is-on {
+  border-color: var(--ok);
+  background: rgba(126, 227, 193, 0.06);
+}
+.w-autovote-btn .label {
+  font-size: 13.5px;
+  font-weight: 600;
+}
+.w-autovote-btn .hint {
+  font-size: 11.5px;
+  color: var(--w-text-3);
+}
+
+.w-autovote-preview {
+  border-top: 1px solid var(--w-line);
+  padding-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.w-autovote-preview__meta {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12.5px;
+}
+.w-autovote-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.w-autovote-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.02);
+  font-size: 13px;
+}
 .w-live-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
