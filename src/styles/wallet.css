@@ -304,6 +304,87 @@ body[data-denom="private"] .w-nav__item.is-active::before {
 [data-mock="true"] {
   opacity: 0.85;
 }
+
+/* ── ClusterPicker (Phase 2 — Stake + Operators) ───────────────── */
+.w-cluster-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.w-cluster-picker__head {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.w-cluster-picker__sort {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.w-cluster-picker__sort .cap {
+  margin-right: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 10px;
+  color: var(--w-text-3);
+}
+.w-cluster-picker__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.w-cluster-row {
+  display: grid;
+  grid-template-columns: 1fr minmax(280px, auto);
+  gap: 16px;
+  padding: 10px 12px;
+  border: 1px solid var(--w-line);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.02);
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+.w-cluster-row.is-interactive {
+  cursor: pointer;
+}
+.w-cluster-row.is-interactive:hover,
+.w-cluster-row.is-interactive:focus-visible {
+  background: rgba(255, 255, 255, 0.045);
+  border-color: var(--w-text-3);
+  outline: none;
+}
+.w-cluster-row__name {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.w-cluster-row__meta {
+  display: flex;
+  gap: 12px;
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--w-text-3);
+}
+.w-cluster-row__stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(70px, auto));
+  gap: 12px;
+  align-items: center;
+}
+.w-cluster-stat {
+  text-align: right;
+}
+.w-cluster-stat .cap {
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--w-text-3);
+}
 .w-live-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
