@@ -521,6 +521,40 @@ body[data-denom="private"] .w-nav__item.is-active::before {
   background: rgba(255, 255, 255, 0.06);
   outline: none;
 }
+
+/* ── RewardCard (Phase 2) ──────────────────────────────────────── */
+.w-card--compact .w-card__body {
+  padding: 8px 12px;
+}
+.w-reward-headline {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.w-reward-amount {
+  font-size: 22px;
+  font-weight: 600;
+  font-family: var(--f-mono);
+}
+.w-reward-amount.is-mock {
+  color: var(--w-text-3);
+}
+.w-reward-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.w-reward-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.02);
+  font-size: 13px;
+}
 .w-live-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));

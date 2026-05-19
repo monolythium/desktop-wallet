@@ -15,9 +15,11 @@ import { useCallback, useEffect, useState } from "react";
 import { IDENTITY } from "../data/fixtures";
 import { ClusterPicker } from "../components/ClusterPicker";
 import { DelegationsDashboard, type DelegationAction } from "../components/DelegationsDashboard";
+import { RewardCard } from "../components/RewardCard";
 import { formatAddress } from "../components/format";
 import { useOperations } from "../operations/context";
 import {
+  encodeClaim,
   encodeDelegate,
   encodeRedelegate,
   encodeUndelegate,
@@ -274,30 +276,64 @@ export function Stake() {
         setWeightBpsInput(String(delegation.weightBps));
         return;
       case "claim":
-        // Wired in commit 12. Surface the descriptor so the user gets
-        // feedback that the action is recognized.
-        ops.open({
-          title: "Claim (preview)",
-          subtitle: `Targets ${delegation.clusterName}`,
-          auth: "none",
-          diff: [
-            { k: "Cluster", v: delegation.clusterName },
-            { k: "Weight", v: `${delegation.weightBps} bps` },
-            { k: "Action", v: "claim" },
-          ],
-          effects: [
-            {
-              text: "Claim flow wires in Commit 12 (this phase).",
-              level: "info",
-            },
-          ],
-          execute: () =>
-            Promise.resolve({
-              headline: "claim preview only",
-              detail: "Real flow ships within Phase 2.",
-            }),
-        });
+        openClaim();
+        return;
     }
+  };
+
+  /**
+   * Claim — settles + withdraws ALL of the wallet's accrued
+   * delegation rewards in one tx (mono-core delegation precompile
+   * `claim()`, MS-CORE-0009). The chain doesn't expose a per-cluster
+   * claim primitive, so the surface is "Claim all" rather than
+   * per-row.
+   */
+  const openClaim = () => {
+    ops.open({
+      title: "Claim delegation rewards",
+      subtitle: "Settles + withdraws every accrued reward",
+      auth: "keychain",
+      diff: [
+        { k: "From", v: formatAddress(IDENTITY.address) },
+        {
+          k: "Pending",
+          v:
+            rewards?.totalLyth === null || rewards?.totalLyth === undefined
+              ? "preview unavailable"
+              : `${rewards.totalLyth.toFixed(4)} LYTH`,
+        },
+        {
+          k: "Scope",
+          v: "all clusters (chain `claim()` is wallet-wide)",
+        },
+      ],
+      effects: [
+        {
+          text:
+            "Calls the delegation precompile `claim()` selector. The " +
+            "chain settles every delegation row's accrued reward + " +
+            "credits the LYTH to your balance in a single tx.",
+        },
+        {
+          text:
+            "Per-cluster claim is not a chain primitive — `claim()` is " +
+            "wallet-wide.",
+          level: "info",
+        },
+      ],
+      execute: async (ctx) => {
+        if (!ctx?.vaultSeed) {
+          throw new Error("vault seed unavailable after keychain authorization");
+        }
+        const tx = encodeClaim({ from: IDENTITY.address });
+        const sub = await submitDelegationCall({ seed: ctx.vaultSeed, tx });
+        void refresh();
+        return {
+          headline: "Rewards claimed",
+          detail: sub.txHash,
+        };
+      },
+    });
   };
 
   const cancelRedelegate = () => {
@@ -469,6 +505,12 @@ export function Stake() {
           onSubmit={submitRedelegate}
         />
       ) : null}
+
+      <RewardCard
+        rewards={rewards}
+        onClaim={openClaim}
+        onRefresh={() => void refresh()}
+      />
 
       <DelegationsDashboard
         delegations={delegations}
