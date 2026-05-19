@@ -5,11 +5,22 @@
 // `mono1…` form mandated by whitepaper §22.7. Wire / RPC / IPC stays
 // hex; only the display layer changes.
 //
+// Phase 3 adds `useIdentityLabel` + `formatIdentity` — the §22.8-aware
+// unified display. Prefers a registered `.mono` name (via the
+// `lookupAddress` SDK reader) when one exists; falls back to
+// `formatAddressShort` (bech32m) otherwise. Names are display only —
+// bech32m remains the hover-title + copy target so the user can always
+// see / copy the canonical address form. A small in-process cache with
+// 5-minute TTL keeps the resolution per-address (one RPC per unique
+// counterparty per 5 minutes).
+//
 // The conversion delegates to `@monolythium/core-sdk`'s
 // `addressToBech32` so the desktop wallet, browser wallet, monoscan,
 // and any future surface share one source of truth for the codec.
 
+import { useEffect, useState } from "react";
 import { addressToBech32, AddressError, normalizeAddressHex } from "@monolythium/core-sdk";
+import { lookupAddress, type NameBinding } from "../sdk/naming";
 
 export function fmt(n: number | null | undefined, frac = 2): string {
   if (n === null || n === undefined) return "—";
@@ -149,3 +160,141 @@ export function formatAddressShort(addr: string | null | undefined, prefixChars 
     return shortHex(addr);
   }
 }
+
+// ─── Unified identity display (§22.8 names + §22.7 bech32m) ──────
+
+/** Per-address cache entry. `binding === null` means "we asked and the
+ *  chain said no name registered" — distinct from "we haven't asked
+ *  yet" (entry absent from the map). */
+interface IdentityCacheEntry {
+  binding: NameBinding | null;
+  cachedAtMs: number;
+}
+
+/** 5-minute TTL — long enough to avoid hammering the RPC on every
+ *  re-render of a long activity list, short enough that a freshly
+ *  registered name surfaces within a few minutes of registration. */
+const IDENTITY_TTL_MS = 5 * 60 * 1000;
+
+/** In-process identity cache. Module-level so it survives across
+ *  component re-mounts but is wiped on full page reload. Address keys
+ *  are stored lowercased. */
+const identityCache = new Map<string, IdentityCacheEntry>();
+
+/** Reset the identity cache. Test-only; production code never calls
+ *  this. */
+export function _resetIdentityCacheForTest(): void {
+  identityCache.clear();
+}
+
+/**
+ * Hook: resolve `addr` to its registered .mono name (if any) and
+ * surface the result as a sync render value. Returns:
+ *
+ *   - `{ name: "alice.mono", isName: true }` on a hit
+ *   - `{ name: "mono1…", isName: false }` on a confirmed miss
+ *   - `{ name: "mono1…", isName: false, pending: true }` while the
+ *     first resolution is in-flight (initial render)
+ *
+ * The cache is shared across every component that uses this hook, so
+ * the same address resolves once per 5-minute window regardless of
+ * how many sites it renders at.
+ */
+export function useIdentityLabel(addr: string | null | undefined): {
+  /** What to render — either the .mono name or the bech32m short form. */
+  name: string;
+  /** True iff the rendered value is a §22.8 name. */
+  isName: boolean;
+  /** True while the first resolution is in-flight (renders the
+   *  bech32m fallback immediately, refines once the chain answers). */
+  pending: boolean;
+} {
+  // Stable bech32m fallback. Computed sync so the first render is
+  // never an empty string.
+  const fallback = formatAddressShort(addr);
+  const [resolved, setResolved] = useState<{
+    name: string;
+    isName: boolean;
+    pending: boolean;
+  }>(() => initialFromCache(addr, fallback));
+
+  useEffect(() => {
+    if (!addr || typeof addr !== "string") {
+      setResolved({ name: fallback, isName: false, pending: false });
+      return;
+    }
+    // Normalize to lowercased hex for cache keying; if the input is
+    // bech32m or anything else, skip the cache (we can't reverse-resolve
+    // a non-hex without the SDK roundtrip).
+    let hexKey: string;
+    try {
+      if (addr.toLowerCase().startsWith("0x")) {
+        hexKey = normalizeAddressHex("0x" + addr.slice(2)).toLowerCase();
+      } else {
+        // bech32m or other — fall back without trying to cache.
+        setResolved({ name: fallback, isName: false, pending: false });
+        return;
+      }
+    } catch {
+      setResolved({ name: fallback, isName: false, pending: false });
+      return;
+    }
+    const now = Date.now();
+    const cached = identityCache.get(hexKey);
+    if (cached && now - cached.cachedAtMs < IDENTITY_TTL_MS) {
+      setResolved({
+        name: cached.binding ? cached.binding.name : fallback,
+        isName: cached.binding !== null,
+        pending: false,
+      });
+      return;
+    }
+    // Cache miss / expired — show fallback immediately, kick off the
+    // resolution.
+    setResolved({ name: fallback, isName: false, pending: true });
+    let cancelled = false;
+    (async () => {
+      const out = await lookupAddress(hexKey);
+      if (cancelled) return;
+      const binding = out.ok ? out.value ?? null : null;
+      identityCache.set(hexKey, { binding, cachedAtMs: Date.now() });
+      setResolved({
+        name: binding ? binding.name : fallback,
+        isName: binding !== null,
+        pending: false,
+      });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [addr, fallback]);
+
+  return resolved;
+}
+
+function initialFromCache(
+  addr: string | null | undefined,
+  fallback: string,
+): { name: string; isName: boolean; pending: boolean } {
+  if (!addr || typeof addr !== "string") {
+    return { name: fallback, isName: false, pending: false };
+  }
+  if (!addr.toLowerCase().startsWith("0x")) {
+    return { name: fallback, isName: false, pending: false };
+  }
+  try {
+    const hexKey = normalizeAddressHex("0x" + addr.slice(2)).toLowerCase();
+    const cached = identityCache.get(hexKey);
+    if (cached && Date.now() - cached.cachedAtMs < IDENTITY_TTL_MS) {
+      return {
+        name: cached.binding ? cached.binding.name : fallback,
+        isName: cached.binding !== null,
+        pending: false,
+      };
+    }
+  } catch {
+    // fall through
+  }
+  return { name: fallback, isName: false, pending: true };
+}
+
