@@ -17,8 +17,14 @@ import { ClusterPicker } from "../components/ClusterPicker";
 import { formatAddress } from "../components/format";
 import { useOperations } from "../operations/context";
 import { encodeDelegate } from "../sdk/delegation";
-import { getClusters, type ClusterSummary } from "../sdk/staking";
+import { getClusters, getDelegationCap, type ClusterSummary } from "../sdk/staking";
 import { submitDelegationCall } from "../sdk/submit-delegation";
+import {
+  type AutovoteAllocation,
+  type AutovoteMode,
+  type AutovoteResult,
+  runAutovote,
+} from "../sdk/autovote";
 
 type ClustersState =
   | { status: "loading"; value: null; error: null }
@@ -32,27 +38,111 @@ export function Stake() {
     value: null,
     error: null,
   });
+  const [capBps, setCapBps] = useState<number | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [selected, setSelected] = useState<ClusterSummary | null>(null);
   const [weightBpsInput, setWeightBpsInput] = useState("1000");
+  // Autovote state — Phase 2 §23.9 surface. `null` until the user
+  // picks a mode; recomputed on cluster-set refresh.
+  const [autovoteMode, setAutovoteMode] = useState<AutovoteMode | "custom" | null>(null);
+  const [autovoteResult, setAutovoteResult] = useState<AutovoteResult | null>(null);
 
   const refresh = useCallback(async () => {
     setClusters({ status: "loading", value: null, error: null });
-    const result = await getClusters();
-    if (!result.ok || !result.value) {
+    const [clusterResult, capResult] = await Promise.all([
+      getClusters(),
+      getDelegationCap(),
+    ]);
+    if (capResult.ok) setCapBps(capResult.value ?? null);
+    if (!clusterResult.ok || !clusterResult.value) {
       setClusters({
         status: "error",
         value: null,
-        error: result.error ?? "directory unavailable",
+        error: clusterResult.error ?? "directory unavailable",
       });
       return;
     }
-    setClusters({ status: "ok", value: result.value, error: null });
+    setClusters({ status: "ok", value: clusterResult.value, error: null });
   }, []);
 
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  const runMode = useCallback(
+    (mode: AutovoteMode) => {
+      setAutovoteMode(mode);
+      if (clusters.status !== "ok") {
+        setAutovoteResult(null);
+        return;
+      }
+      const result = runAutovote(mode, clusters.value, { capBps });
+      setAutovoteResult(result);
+    },
+    [clusters, capBps],
+  );
+
+  /**
+   * Build a list of OperationsDrawer descriptors — one per allocation
+   * row — and walk them sequentially. Each row signs + submits its
+   * own delegation tx; the drawer is opened anew for each step so the
+   * user sees the per-cluster diff before approving. Failures abort
+   * the chain.
+   */
+  const submitAutovote = (allocations: AutovoteAllocation[]) => {
+    if (allocations.length === 0) return;
+    const queue = [...allocations];
+    const stepN = queue.length;
+    const runStep = (step: number) => {
+      const next = queue.shift();
+      if (!next) return;
+      ops.open({
+        title: `Autovote · step ${step}/${stepN}`,
+        subtitle: `Delegate to ${next.cluster.name} (${next.weightBps} bps)`,
+        auth: "keychain",
+        diff: [
+          { k: "From", v: formatAddress(IDENTITY.address) },
+          { k: "Mode", v: humanMode(autovoteMode) },
+          { k: "Cluster", v: next.cluster.name },
+          {
+            k: "Weight",
+            v: `${next.weightBps} bps (${(next.weightBps / 100).toFixed(2)}%)`,
+          },
+          { k: "Step", v: `${step} of ${stepN}` },
+        ],
+        effects: [
+          {
+            text:
+              "Per-cluster cap enforced protocol-side (§23.7); chain rejects " +
+              "over-cap rows even if the wallet over-submits.",
+          },
+          { text: "Encrypted Sprintnet envelope via lyth_submitEncrypted." },
+        ],
+        execute: async (ctx) => {
+          if (!ctx?.vaultSeed) {
+            throw new Error("vault seed unavailable after keychain authorization");
+          }
+          const tx = encodeDelegate({
+            from: IDENTITY.address,
+            clusterId: next.cluster.clusterId,
+            weightBps: next.weightBps,
+          });
+          const sub = await submitDelegationCall({ seed: ctx.vaultSeed, tx });
+          // Queue the next step (if any) once the drawer closes.
+          if (queue.length > 0) {
+            // Defer to a microtask so the current drawer can transition
+            // through `done` before we open the next one.
+            setTimeout(() => runStep(step + 1), 0);
+          }
+          return {
+            headline: `Autovote step ${step}/${stepN} broadcast`,
+            detail: sub.txHash,
+          };
+        },
+      });
+    };
+    runStep(1);
+  };
 
   /** Open the OperationsDrawer for a delegate call. */
   const openDelegate = (cluster: ClusterSummary, weightBps: number) => {
@@ -136,6 +226,25 @@ export function Stake() {
         </div>
       </div>
 
+      <AutovoteCard
+        mode={autovoteMode}
+        result={autovoteResult}
+        capBps={capBps}
+        clustersReady={clusters.status === "ok"}
+        onPickMode={(mode) => {
+          if (mode === "custom") {
+            setAutovoteMode("custom");
+            setAutovoteResult(null);
+            setPickerOpen(true);
+            return;
+          }
+          runMode(mode);
+        }}
+        onSubmit={() => {
+          if (autovoteResult) submitAutovote(autovoteResult.allocations);
+        }}
+      />
+
       <div className="w-card">
         <div className="w-card__head">
           <h3>Delegate to a cluster</h3>
@@ -188,6 +297,148 @@ export function Stake() {
           ) : null}
         </div>
       </div>
+    </div>
+  );
+}
+
+function humanMode(mode: AutovoteMode | "custom" | null): string {
+  switch (mode) {
+    case "max-yield":
+      return "Max Yield";
+    case "max-diversity":
+      return "Max Diversity";
+    case "max-decentralization":
+      return "Max Decentralization";
+    case "custom":
+      return "Custom";
+    default:
+      return "(none)";
+  }
+}
+
+/**
+ * Whitepaper §23.9 four-button surface. The chain rewards
+ * diversification — the wallet's job is to make diversification the
+ * easy path. Each button computes an allocation against the live
+ * cluster set and the active delegation cap; the user reviews the
+ * preview and submits when ready.
+ *
+ * Per-user randomization (so two users picking Max Yield don't end
+ * up at the same cluster set) lands in Commit 8 — this commit
+ * uses deterministic sampling so the rest of the page wires cleanly
+ * first.
+ */
+function AutovoteCard({
+  mode,
+  result,
+  capBps,
+  clustersReady,
+  onPickMode,
+  onSubmit,
+}: {
+  mode: AutovoteMode | "custom" | null;
+  result: AutovoteResult | null;
+  capBps: number | null;
+  clustersReady: boolean;
+  onPickMode: (mode: AutovoteMode | "custom") => void;
+  onSubmit: () => void;
+}) {
+  const buttons: Array<{ id: AutovoteMode | "custom"; label: string; hint: string }> = [
+    {
+      id: "max-yield",
+      label: "Max Yield",
+      hint: "Highest APR consistent with the per-cluster cap.",
+    },
+    {
+      id: "max-diversity",
+      label: "Max Diversity",
+      hint: "Spread across reputable, high-uptime clusters.",
+    },
+    {
+      id: "max-decentralization",
+      label: "Max Decentralization",
+      hint: "Route stake away from concentrated clusters.",
+    },
+    {
+      id: "custom",
+      label: "Custom",
+      hint: "Manual per-cluster allocation, cap-enforced at submit.",
+    },
+  ];
+
+  return (
+    <div className="w-card">
+      <div className="w-card__head">
+        <h3>Autovote · §23.9 four-button</h3>
+        <span className="w-live-pill">live</span>
+      </div>
+      <div className="w-card__body">
+        <div className="row-help" style={{ marginBottom: 10 }}>
+          Pick a mode. The wallet computes an allocation against the live
+          cluster directory, respects the per-cluster cap (
+          {capBps === null ? "no cap" : `${capBps} bps`}), and previews the
+          result before signing. Per-user entropy ships in the next commit.
+        </div>
+        <div className="w-autovote-buttons">
+          {buttons.map((b) => (
+            <button
+              key={b.id}
+              type="button"
+              className={`w-autovote-btn ${mode === b.id ? "is-on" : ""}`}
+              onClick={() => onPickMode(b.id)}
+              disabled={!clustersReady}
+            >
+              <div className="label">{b.label}</div>
+              <div className="hint">{b.hint}</div>
+            </button>
+          ))}
+        </div>
+
+        {mode !== null && mode !== "custom" && result ? (
+          <AutovotePreview result={result} onSubmit={onSubmit} />
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function AutovotePreview({
+  result,
+  onSubmit,
+}: {
+  result: AutovoteResult;
+  onSubmit: () => void;
+}) {
+  const total = result.allocations.reduce((a, b) => a + b.weightBps, 0);
+  return (
+    <div className="w-autovote-preview">
+      <div className="w-autovote-preview__meta">
+        <span>
+          <b>{humanMode(result.mode)}</b> — {result.allocations.length} cluster
+          {result.allocations.length === 1 ? "" : "s"} · {total} bps total
+        </span>
+        <span className="row-help">
+          {result.eligibleCount} eligible
+          {result.skipped.length > 0
+            ? ` · ${result.skipped.length} chain-gapped skipped`
+            : ""}
+        </span>
+      </div>
+      <ul className="w-autovote-list">
+        {result.allocations.map((a) => (
+          <li key={a.cluster.clusterId} className="w-autovote-row">
+            <span>{a.cluster.name}</span>
+            <span className="mono">{a.weightBps} bps</span>
+          </li>
+        ))}
+      </ul>
+      <button
+        className="btn btn--primary"
+        onClick={onSubmit}
+        disabled={result.allocations.length === 0}
+      >
+        Submit autovote
+      </button>
     </div>
   );
 }
