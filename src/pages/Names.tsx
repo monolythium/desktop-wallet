@@ -9,6 +9,7 @@ import { useCallback, useState } from "react";
 import { IDENTITY } from "../data/fixtures";
 import { NameLookup, type LookupState } from "../components/NameLookup";
 import { OwnedNamesDashboard } from "../components/OwnedNamesDashboard";
+import { PendingTransferBanner } from "../components/PendingTransferBanner";
 import { useOperations } from "../operations/context";
 import { formatAddress, parseRecipient } from "../components/format";
 import {
@@ -110,6 +111,8 @@ export function Names() {
           §22.8 hierarchical name registry — addresses become handles.
         </div>
       </div>
+
+      <PendingTransferBanner address={IDENTITY.address} refreshKey={refreshKey} />
 
       <div className="w-card">
         <div className="w-card__head">

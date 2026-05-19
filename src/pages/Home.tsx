@@ -12,6 +12,7 @@ import { makeLedgerSigner } from "../sdk/signer";
 import { enumerateDevices, getAddress as ledgerGetAddress } from "../sdk/ledger";
 import { BALANCES, IDENTITY, SEND_DEMO, TOKENS, TXS_PRIVATE, TXS_PUBLIC } from "../data/fixtures";
 import type { Denom } from "../data/fixtures";
+import { PendingTransferBanner } from "../components/PendingTransferBanner";
 import { TokenRow } from "../components/TokenRow";
 import { TxRow } from "../components/TxRow";
 import { fmt, formatAddress, formatAddressShort } from "../components/format";
@@ -196,6 +197,9 @@ export function Home({ denom, goto }: Props) {
 
   return (
     <div className="w-page">
+      {isPub ? (
+        <PendingTransferBanner address={IDENTITY.address} goto={goto} />
+      ) : null}
       {/* Hero */}
       <div className="w-hero">
         <div className="w-hero__label">
