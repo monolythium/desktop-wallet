@@ -31,9 +31,9 @@ those rows until the chain ships them.
 
 | Phase | Scope                                                       | Whitepaper §       | Browser-wallet analogue        | Status      |
 |-------|-------------------------------------------------------------|--------------------|---------------------------------|-------------|
-| 1     | Baseline (Tauri/icons) + bech32m display + real balance     | §22.7              | Phase 1 + Phase 6 (subset)      | in progress |
-| 2     | Stake + four-button autovote (Max Yield / Diversity / …)    | §23.9              | Phase 7                         | planned     |
-| 3     | Operators page + cluster picker + cluster scoring           | §14, §23.5         | Phase 7.1                       | planned     |
+| 1     | Baseline (Tauri/icons) + bech32m display + real balance     | §22.7              | Phase 1 + Phase 6 (subset)      | done — [phase-01-baseline.md](phase-01-baseline.md) |
+| 2     | Stake + four-button autovote + delegate / unstake / redelegate + RewardCard + Operators page + Wallets breakdown | §14, §23, §23.9, §28.3 | Phase 7 + 7.1 | done — [phase-02-staking.md](phase-02-staking.md) |
+| 3     | Operators-mobility UI + per-operator signing detail OR §22.8 names | §14, §22.8 | Phase 7.1 (residual) | planned     |
 | 4     | §22.8 hierarchical name registry UI (mono / agent / cluster) | §22.8              | Phase 6 GAP #13                 | planned     |
 | 5     | NFT support (ERC-721/1155 read-side)                        | —                  | Phase 5                         | planned     |
 | 6     | Multi-vault + master password + auto-lock + lockout         | §21.2.1            | Phase 5                         | planned     |
