@@ -10,23 +10,37 @@
 // We tolerate non-Tauri runtimes (browser preview via `pnpm dev`) by
 // skipping the probe entirely and treating the wallet as already set up.
 
-import { useEffect, useState } from "react";
+import { Suspense, lazy, useEffect, useState } from "react";
 import { Onboarding } from "./components/Onboarding";
 import { Sidebar } from "./components/Sidebar";
 import { Topbar } from "./components/Topbar";
 import { Activity } from "./pages/Activity";
-import { AiTrading } from "./pages/AiTrading";
-import { Contacts } from "./pages/Contacts";
 import { Home } from "./pages/Home";
-import { Names } from "./pages/Names";
-import { News } from "./pages/News";
-import { Operators } from "./pages/Operators";
 import { Settings } from "./pages/Settings";
 import { Stake } from "./pages/Stake";
 import { Tokens } from "./pages/Tokens";
-import { Trade } from "./pages/Trade";
 import { Wallets } from "./pages/Wallets";
 import { OperationsProvider } from "./operations/context";
+
+// Lazy-loaded routes — these aren't on the default Home path, so
+// loading them only when the user visits cuts the initial bundle
+// size and shaves a few hundred ms off first paint. Each module
+// uses a named export; we re-shape into `{ default: ... }` so
+// React.lazy can pick it up.
+const Operators = lazy(() =>
+  import("./pages/Operators").then((m) => ({ default: m.Operators })),
+);
+const Names = lazy(() =>
+  import("./pages/Names").then((m) => ({ default: m.Names })),
+);
+const Contacts = lazy(() =>
+  import("./pages/Contacts").then((m) => ({ default: m.Contacts })),
+);
+const Trade = lazy(() => import("./pages/Trade").then((m) => ({ default: m.Trade })));
+const AiTrading = lazy(() =>
+  import("./pages/AiTrading").then((m) => ({ default: m.AiTrading })),
+);
+const News = lazy(() => import("./pages/News").then((m) => ({ default: m.News })));
 import { KeychainCallError, PRIMARY_ACCOUNT, unlock } from "./sdk/keychain";
 import "./styles/tokens.css";
 import "./styles/wallet.css";
@@ -145,13 +159,15 @@ export function App() {
           {route === "wallets" ? <Wallets /> : null}
           {route === "tokens" ? <Tokens /> : null}
           {route === "stake" ? <Stake /> : null}
-          {route === "operators" ? <Operators /> : null}
-          {route === "names" ? <Names /> : null}
-          {route === "contacts" ? <Contacts denom={denom} /> : null}
-          {route === "trade" ? <Trade /> : null}
-          {route === "ai-trade" ? <AiTrading /> : null}
-          {route === "news" ? <News /> : null}
           {route === "settings" ? <Settings /> : null}
+          <Suspense fallback={<RouteSpinner />}>
+            {route === "operators" ? <Operators /> : null}
+            {route === "names" ? <Names /> : null}
+            {route === "contacts" ? <Contacts denom={denom} /> : null}
+            {route === "trade" ? <Trade /> : null}
+            {route === "ai-trade" ? <AiTrading /> : null}
+            {route === "news" ? <News /> : null}
+          </Suspense>
         </main>
       </div>
     </OperationsProvider>
@@ -165,6 +181,17 @@ function BootSplash({ label }: { label: string }) {
         <div className="w-spin" style={{ margin: "0 auto 12px" }} />
         <div style={{ color: "var(--w-text-2)", fontSize: 13 }}>{label}</div>
       </div>
+    </div>
+  );
+}
+
+/** Spinner used as the Suspense fallback for lazy-loaded routes.
+ *  Sized small + centered so it doesn't shove the page layout while
+ *  the chunk fetches. */
+function RouteSpinner() {
+  return (
+    <div style={{ padding: 40, display: "flex", justifyContent: "center" }}>
+      <div className="w-spin" />
     </div>
   );
 }
