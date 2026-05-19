@@ -19,6 +19,7 @@
 //     `lyth_signingActivity` call returns a window > 0.
 
 import { useEffect, useState } from "react";
+import { ClusterMobilityNotice } from "../components/ClusterMobilityNotice";
 import { ClusterPicker } from "../components/ClusterPicker";
 import { OperatorActivitySparkline } from "../components/OperatorActivitySparkline";
 import { formatAddress, formatAddressShort } from "../components/format";
@@ -197,6 +198,7 @@ function ClusterDetailPanel({ detail }: { detail: ClusterDetail }) {
             <span className="w-mock-tag">[chain-gap]</span> {detail.chainGap}
           </div>
         ) : null}
+        <ClusterMobilityNotice clusterIds={[detail.summary.clusterId]} />
       </div>
     </div>
   );
