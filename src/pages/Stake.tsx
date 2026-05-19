@@ -17,7 +17,11 @@ import { ClusterPicker } from "../components/ClusterPicker";
 import { DelegationsDashboard, type DelegationAction } from "../components/DelegationsDashboard";
 import { formatAddress } from "../components/format";
 import { useOperations } from "../operations/context";
-import { encodeDelegate, encodeUndelegate } from "../sdk/delegation";
+import {
+  encodeDelegate,
+  encodeRedelegate,
+  encodeUndelegate,
+} from "../sdk/delegation";
 import {
   getClusters,
   getDelegationCap,
@@ -63,6 +67,10 @@ export function Stake() {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [selected, setSelected] = useState<ClusterSummary | null>(null);
   const [weightBpsInput, setWeightBpsInput] = useState("1000");
+  // Redelegate state — when set, the in-page UI surfaces the picker
+  // with the source cluster excluded, then the composer.
+  const [redelegateSource, setRedelegateSource] = useState<Delegation | null>(null);
+  const [redelegateTarget, setRedelegateTarget] = useState<ClusterSummary | null>(null);
   // Autovote state — Phase 2 §23.9 surface. `null` until the user
   // picks a mode; recomputed on cluster-set refresh.
   const [autovoteMode, setAutovoteMode] = useState<AutovoteMode | "custom" | null>(null);
@@ -261,34 +269,101 @@ export function Stake() {
         openUnstake(delegation);
         return;
       case "redelegate":
+        setRedelegateSource(delegation);
+        setRedelegateTarget(null);
+        setWeightBpsInput(String(delegation.weightBps));
+        return;
       case "claim":
-        // Wired in commits 11 / 12. Surface the descriptor so
-        // the user gets feedback that the action is recognized.
+        // Wired in commit 12. Surface the descriptor so the user gets
+        // feedback that the action is recognized.
         ops.open({
-          title: `${action[0]!.toUpperCase()}${action.slice(1)} (preview)`,
+          title: "Claim (preview)",
           subtitle: `Targets ${delegation.clusterName}`,
           auth: "none",
           diff: [
             { k: "Cluster", v: delegation.clusterName },
             { k: "Weight", v: `${delegation.weightBps} bps` },
-            { k: "Action", v: action },
+            { k: "Action", v: "claim" },
           ],
           effects: [
             {
-              text:
-                action === "redelegate"
-                  ? "Redelegate flow wires in Commit 11 (this phase)."
-                  : "Claim flow wires in Commit 12 (this phase).",
+              text: "Claim flow wires in Commit 12 (this phase).",
               level: "info",
             },
           ],
           execute: () =>
             Promise.resolve({
-              headline: `${action} preview only`,
+              headline: "claim preview only",
               detail: "Real flow ships within Phase 2.",
             }),
         });
     }
+  };
+
+  const cancelRedelegate = () => {
+    setRedelegateSource(null);
+    setRedelegateTarget(null);
+  };
+
+  /**
+   * Redelegate — atomic move of `weightBps` from one cluster to
+   * another (no two-step undelegate→delegate). The chain primitive
+   * is `redelegate(uint32 fromCluster, uint32 toCluster, uint16
+   * weightBps)`; per §14 cluster mobility this carries no cooldown
+   * for delegators (operator-side swap cooldown is separate).
+   */
+  const submitRedelegate = () => {
+    if (!redelegateSource || !redelegateTarget) return;
+    const bps = Number.parseInt(weightBpsInput, 10);
+    if (!Number.isInteger(bps) || bps <= 0 || bps > redelegateSource.weightBps) {
+      return;
+    }
+    const source = redelegateSource;
+    const target = redelegateTarget;
+    setRedelegateSource(null);
+    setRedelegateTarget(null);
+    ops.open({
+      title: `Redelegate to ${target.name}`,
+      subtitle: `Move ${bps} bps from ${source.clusterName}`,
+      auth: "keychain",
+      diff: [
+        { k: "From cluster", v: source.clusterName },
+        { k: "From cluster id", v: String(source.clusterId) },
+        { k: "To cluster", v: target.name },
+        { k: "To cluster id", v: String(target.clusterId) },
+        { k: "Weight moved", v: `${bps} bps (${(bps / 100).toFixed(2)}%)` },
+        { k: "Source remainder", v: `${source.weightBps - bps} bps` },
+      ],
+      effects: [
+        {
+          text:
+            "Atomic move — chain executes the source-side decrement + " +
+            "destination-side credit in a single tx. No cooldown.",
+        },
+        {
+          text:
+            "Per-cluster cap enforced protocol-side; the destination's " +
+            "post-state weight cannot exceed the active cap (§23.7).",
+        },
+      ],
+      execute: async (ctx) => {
+        if (!ctx?.vaultSeed) {
+          throw new Error("vault seed unavailable after keychain authorization");
+        }
+        const tx = encodeRedelegate({
+          from: IDENTITY.address,
+          fromClusterId: source.clusterId,
+          toClusterId: target.clusterId,
+          weightBps: bps,
+        });
+        const sub = await submitDelegationCall({ seed: ctx.vaultSeed, tx });
+        void refresh();
+        return {
+          headline: `Redelegated ${bps} bps to ${target.name}`,
+          detail: sub.txHash,
+        };
+      },
+    });
   };
 
   /**
@@ -381,6 +456,19 @@ export function Stake() {
           every margin.
         </div>
       </div>
+
+      {redelegateSource ? (
+        <RedelegateCard
+          source={redelegateSource}
+          target={redelegateTarget}
+          clusters={clusters.value ?? []}
+          weightBpsInput={weightBpsInput}
+          onWeightChange={setWeightBpsInput}
+          onPickTarget={setRedelegateTarget}
+          onCancel={cancelRedelegate}
+          onSubmit={submitRedelegate}
+        />
+      ) : null}
 
       <DelegationsDashboard
         delegations={delegations}
@@ -604,6 +692,106 @@ function AutovotePreview({
       >
         Submit autovote
       </button>
+    </div>
+  );
+}
+
+function RedelegateCard({
+  source,
+  target,
+  clusters,
+  weightBpsInput,
+  onWeightChange,
+  onPickTarget,
+  onCancel,
+  onSubmit,
+}: {
+  source: Delegation;
+  target: ClusterSummary | null;
+  clusters: ClusterSummary[];
+  weightBpsInput: string;
+  onWeightChange: (v: string) => void;
+  onPickTarget: (c: ClusterSummary | null) => void;
+  onCancel: () => void;
+  onSubmit: () => void;
+}) {
+  const bps = Number.parseInt(weightBpsInput, 10);
+  const valid =
+    Number.isInteger(bps) && bps > 0 && bps <= source.weightBps;
+  return (
+    <div className="w-card">
+      <div className="w-card__head">
+        <h3>Redelegate from {source.clusterName}</h3>
+        <div className="w-card__head__spacer" />
+        <button className="btn btn--sm btn--ghost" onClick={onCancel}>
+          Cancel
+        </button>
+      </div>
+      <div className="w-card__body">
+        <div className="row-help" style={{ marginBottom: 10 }}>
+          Atomic move from <b>{source.clusterName}</b> to another active
+          cluster. Currently holding <span className="mono">{source.weightBps} bps</span>
+          on the source row.
+        </div>
+        {!target ? (
+          <ClusterPicker
+            clusters={clusters}
+            excludeIds={[source.clusterId]}
+            onSelect={onPickTarget}
+          />
+        ) : (
+          <div className="w-live-grid">
+            <div className="w-live-cell">
+              <div className="cap">Destination</div>
+              <div>{target.name}</div>
+            </div>
+            <div className="w-live-cell">
+              <div className="cap">Cluster id</div>
+              <div className="mono">{target.clusterId}</div>
+            </div>
+            <div className="w-live-cell">
+              <div className="cap">Move (bps)</div>
+              <div className="w-live-form" style={{ marginTop: 4 }}>
+                <input
+                  aria-label="Redelegate weight in basis points"
+                  className="w-live-input mono"
+                  type="number"
+                  min={1}
+                  max={source.weightBps}
+                  value={weightBpsInput}
+                  onChange={(e) => onWeightChange(e.currentTarget.value)}
+                />
+                <span className="row-help" style={{ marginLeft: 8 }}>
+                  max {source.weightBps} bps from source
+                </span>
+              </div>
+              {!valid ? (
+                <div className="w-live-error" style={{ marginTop: 6 }}>
+                  Move must be between 1 and {source.weightBps} bps.
+                </div>
+              ) : null}
+            </div>
+            <div className="w-live-cell">
+              <div className="cap">Actions</div>
+              <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+                <button
+                  className="btn btn--sm btn--ghost"
+                  onClick={() => onPickTarget(null)}
+                >
+                  Change target
+                </button>
+                <button
+                  className="btn btn--sm btn--primary"
+                  onClick={onSubmit}
+                  disabled={!valid}
+                >
+                  Redelegate
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
