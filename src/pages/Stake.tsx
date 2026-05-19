@@ -1,147 +1,256 @@
-// Stake page — DVT cluster delegation. Public denom only.
-// Live read-only RPCs are wired where the SDK exposes them; write flows
-// remain as visible placeholders.
+// Stake page — Phase 2 entry point.
+//
+// Layout (top to bottom):
+//
+//   1. Delegate to a cluster CTA → ClusterPicker → amount → drawer
+//   2. (Phase 2 follow-up commits add: autovote modes, delegations
+//      dashboard, RewardCard, unstake/redelegate flows in this same
+//      page.)
+//
+// Cluster reads come from `getClusters()` (src/sdk/staking.ts). The
+// chain-gap reality (no on-chain APR / reputation / uptime yet) is
+// surfaced via the ClusterPicker's [mock] tagging.
 
-import { useEffect, useState } from "react";
-import { TodoSection } from "../components/TodoSection";
+import { useCallback, useEffect, useState } from "react";
 import { IDENTITY } from "../data/fixtures";
-import { formatOutcome, loadLiveStakeStatus, type LiveStakeStatus } from "../sdk/live";
+import { ClusterPicker } from "../components/ClusterPicker";
+import { formatAddress } from "../components/format";
+import { useOperations } from "../operations/context";
+import { encodeDelegate } from "../sdk/delegation";
+import { getClusters, type ClusterSummary } from "../sdk/staking";
+import { submitDelegationCall } from "../sdk/submit-delegation";
+
+type ClustersState =
+  | { status: "loading"; value: null; error: null }
+  | { status: "ok"; value: ClusterSummary[]; error: null }
+  | { status: "error"; value: null; error: string };
 
 export function Stake() {
-  const [status, setStatus] = useState<LiveStakeStatus | null>(null);
-  const [busy, setBusy] = useState(false);
+  const ops = useOperations();
+  const [clusters, setClusters] = useState<ClustersState>({
+    status: "loading",
+    value: null,
+    error: null,
+  });
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [selected, setSelected] = useState<ClusterSummary | null>(null);
+  const [weightBpsInput, setWeightBpsInput] = useState("1000");
 
-  const refresh = async () => {
-    setBusy(true);
-    try {
-      setStatus(await loadLiveStakeStatus(IDENTITY.address));
-    } finally {
-      setBusy(false);
+  const refresh = useCallback(async () => {
+    setClusters({ status: "loading", value: null, error: null });
+    const result = await getClusters();
+    if (!result.ok || !result.value) {
+      setClusters({
+        status: "error",
+        value: null,
+        error: result.error ?? "directory unavailable",
+      });
+      return;
     }
-  };
+    setClusters({ status: "ok", value: result.value, error: null });
+  }, []);
 
   useEffect(() => {
     void refresh();
-  }, []);
+  }, [refresh]);
 
-  const clusters = status?.clusters.ok ? status.clusters.value ?? [] : [];
-  const active = status?.activeClusters.ok ? status.activeClusters.value ?? [] : [];
-  const healthy = status?.healthyClusters.ok ? status.healthyClusters.value ?? [] : [];
-  const delegations = status?.delegations.ok ? status.delegations.value : null;
-  const delegationHistory = status?.delegationHistory.ok ? status.delegationHistory.value ?? [] : [];
+  /** Open the OperationsDrawer for a delegate call. */
+  const openDelegate = (cluster: ClusterSummary, weightBps: number) => {
+    ops.open({
+      title: `Delegate to ${cluster.name}`,
+      subtitle: `Allocate ${weightBps} bps (${(weightBps / 100).toFixed(2)}%) to cluster ${cluster.clusterId}`,
+      auth: "keychain",
+      diff: [
+        { k: "From", v: formatAddress(IDENTITY.address) },
+        { k: "Cluster", v: cluster.name },
+        { k: "Cluster id", v: String(cluster.clusterId) },
+        { k: "Weight", v: `${weightBps} bps (${(weightBps / 100).toFixed(2)}%)` },
+        {
+          k: "Expected APR",
+          v: cluster.apr === null ? "preview unavailable" : `${(cluster.apr * 100).toFixed(2)}%`,
+        },
+      ],
+      effects: [
+        {
+          text:
+            "Adds (or tops up) your weight on this cluster. Per-cluster cap " +
+            "is enforced protocol-side (§23.7).",
+        },
+        {
+          text: "Sends an encrypted ML-DSA envelope via lyth_submitEncrypted.",
+        },
+      ],
+      execute: async (ctx) => {
+        if (!ctx?.vaultSeed) {
+          throw new Error("vault seed unavailable after keychain authorization");
+        }
+        const tx = encodeDelegate({
+          from: IDENTITY.address,
+          clusterId: cluster.clusterId,
+          weightBps,
+        });
+        const submission = await submitDelegationCall({
+          seed: ctx.vaultSeed,
+          tx,
+        });
+        return {
+          headline: `Delegated to ${cluster.name}`,
+          detail: `${submission.txHash} · ${submission.envelopeWireBytes} byte envelope`,
+        };
+      },
+    });
+  };
+
+  const cancelPick = () => {
+    setPickerOpen(false);
+    setSelected(null);
+  };
+
+  /** Returns null if the input is valid; otherwise an error string. */
+  const validateBps = (): string | null => {
+    const n = Number.parseInt(weightBpsInput, 10);
+    if (!Number.isInteger(n)) return "Weight must be an integer";
+    if (n <= 0) return "Weight must be > 0";
+    if (n > 10_000) return "Weight must be ≤ 10000 (100%)";
+    return null;
+  };
+
+  const submitSelected = () => {
+    if (!selected) return;
+    const err = validateBps();
+    if (err !== null) return;
+    const bps = Number.parseInt(weightBpsInput, 10);
+    setPickerOpen(false);
+    setSelected(null);
+    openDelegate(selected, bps);
+  };
 
   return (
     <div className="w-page">
       <div className="w-page__header">
         <h1>Stake</h1>
-        <div className="sub">DVT clusters · 100 clusters · 7 or 10 operators per cluster.</div>
+        <div className="sub">
+          Delegate to a cluster of operators. Per-wallet delegation cap and the
+          quadratic reward curve (§23.5 / §23.7) push toward diversification at
+          every margin.
+        </div>
       </div>
 
       <div className="w-card">
         <div className="w-card__head">
-          <h3>Live staking reads</h3>
-          <span className="w-live-pill">live</span>
-          <span className="w-card__head__spacer" />
-          <button className="btn btn--sm" onClick={refresh} disabled={busy}>
-            {busy ? "Refreshing…" : "Refresh"}
-          </button>
+          <h3>Delegate to a cluster</h3>
+          <div className="w-card__head__spacer" />
+          {!pickerOpen ? (
+            <button
+              className="btn btn--primary btn--sm"
+              onClick={() => setPickerOpen(true)}
+              disabled={clusters.status !== "ok"}
+            >
+              Pick cluster
+            </button>
+          ) : (
+            <button className="btn btn--sm btn--ghost" onClick={cancelPick}>
+              Cancel
+            </button>
+          )}
         </div>
+
         <div className="w-card__body">
-          <div className="w-live-grid">
-            <LiveCell label="Clusters" value={status ? formatOutcome(status.clusters, (rows) => rows.length.toString()) : "loading"} />
-            <LiveCell label="Active" value={status ? formatOutcome(status.activeClusters, (rows) => rows.length.toString()) : "loading"} />
-            <LiveCell label="Healthy" value={status ? formatOutcome(status.healthyClusters, (rows) => rows.length.toString()) : "loading"} />
-            <LiveCell label="My bps" value={delegations ? delegations.totalBps.toString() : status?.delegations.error ?? "loading"} />
-          </div>
-          {status ? <div className="row-help">Endpoint: <span className="mono">{status.endpoint}</span></div> : null}
-          {clusters.length > 0 ? (
-            <div className="w-live-list">
-              {clusters.slice(0, 6).map((cluster) => (
-                <div className="w-live-row" key={cluster.clusterId}>
-                  <div>
-                    <div className="row-label">Cluster #{cluster.clusterId}</div>
-                    <div className="row-help mono">
-                      {cluster.threshold}-of-{cluster.size} · {cluster.aggregateHealth}
-                    </div>
-                  </div>
-                  <div className="w-live-right">
-                    <div className="mono">{cluster.size} operators</div>
-                    <span className={`w-live-pill ${cluster.active ? "" : "is-muted"}`}>
-                      {cluster.active ? "active" : "inactive"}
-                    </span>
-                  </div>
-                </div>
-              ))}
+          {!pickerOpen && !selected ? (
+            <div className="row-help">
+              Open the picker to see live clusters from{" "}
+              <span className="mono">lyth_clusterDirectory</span>. Operators
+              listed in each row come from{" "}
+              <span className="mono">lyth_clusterStatus</span>; capability
+              badges and signing activity follow on the Operators page.
             </div>
           ) : null}
-          {delegationHistory.length > 0 ? (
-            <div className="w-live-list">
-              {delegationHistory.slice(0, 5).map((row) => (
-                <div className="w-live-row" key={`${row.blockHeight}-${row.txIndex}-${row.logIndex}`}>
-                  <div>
-                    <div className="row-label">{row.kind}</div>
-                    <div className="row-help">block {row.blockHeight.toString()}</div>
-                  </div>
-                  <div className="w-live-right mono">{row.weightBps} bps</div>
-                </div>
-              ))}
-            </div>
+
+          {pickerOpen && !selected ? (
+            <ClusterPicker
+              clusters={clusters.value ?? []}
+              isLoading={clusters.status === "loading"}
+              error={clusters.error}
+              onRefresh={refresh}
+              onSelect={(c) => setSelected(c)}
+            />
           ) : null}
-          {clusters.length === 0 && status?.clusters.ok ? <div className="row-help">Cluster descriptor set is empty.</div> : null}
-          {status?.clusters.ok === false ? <div className="w-live-error">cluster set: {status.clusters.error}</div> : null}
-          {status?.delegations.ok === false ? <div className="w-live-error">delegations: {status.delegations.error}</div> : null}
-          {status?.delegationHistory.ok === false ? <div className="w-live-error">delegation history: {status.delegationHistory.error}</div> : null}
-          {active.length || healthy.length ? null : null}
+
+          {selected ? (
+            <DelegateComposer
+              cluster={selected}
+              weightBpsInput={weightBpsInput}
+              onWeightChange={setWeightBpsInput}
+              validateBps={validateBps}
+              onCancel={cancelPick}
+              onSubmit={submitSelected}
+            />
+          ) : null}
         </div>
       </div>
-
-      <TodoSection
-        title="My stakes"
-        items={[
-          "TODO — list of clusters this wallet has stake in (up to 10 cluster allocations)",
-          "TODO — per-cluster amount + earned (30d) + unlock window; current bps + event history are live",
-          "TODO — auto-compound toggle per stake (OperationsDrawer write)",
-          "TODO — claim rewards (OperationsDrawer write)",
-          "TODO — withdraw / migrate to a different cluster (cooldown 14d+1ep)",
-        ]}
-      />
-
-      <TodoSection
-        title="Cluster marketplace"
-        items={[
-          "TODO — full cluster list (lyth_clusterDirectory live data plus indexer APY/reliability enrichment)",
-          "TODO — filter by region · APR · reliability · diversity score",
-          "TODO — cluster detail: members, slot fill (live/total), TVS, slashing history",
-          "TODO — stake to cluster (OperationsDrawer write)",
-        ]}
-      />
-
-      <TodoSection
-        title="Operator path"
-        items={[
-          "TODO — apply to run a cluster slot (deep link to /staking on website)",
-          "TODO — bond commitment estimator",
-          "TODO — operator profile preview (hardware attest, public uptime, refs)",
-        ]}
-      />
-
-      <TodoSection
-        title="Network state"
-        items={[
-          "TODO — total seats filled / open (live descriptor count is wired)",
-          "TODO — foundation vs marketplace operators",
-          "TODO — current swap window (3-epoch notice)",
-        ]}
-      />
     </div>
   );
 }
 
-function LiveCell({ label, value }: { label: string; value: string }) {
+function DelegateComposer({
+  cluster,
+  weightBpsInput,
+  onWeightChange,
+  validateBps,
+  onCancel,
+  onSubmit,
+}: {
+  cluster: ClusterSummary;
+  weightBpsInput: string;
+  onWeightChange: (v: string) => void;
+  validateBps: () => string | null;
+  onCancel: () => void;
+  onSubmit: () => void;
+}) {
+  const err = validateBps();
   return (
-    <div className="w-live-cell">
-      <div className="cap">{label}</div>
-      <div>{value}</div>
+    <div className="w-live-grid">
+      <div className="w-live-cell">
+        <div className="cap">Cluster</div>
+        <div>{cluster.name}</div>
+      </div>
+      <div className="w-live-cell">
+        <div className="cap">Cluster id</div>
+        <div className="mono">{cluster.clusterId}</div>
+      </div>
+      <div className="w-live-cell">
+        <div className="cap">Weight (bps)</div>
+        <div className="w-live-form" style={{ marginTop: 4 }}>
+          <input
+            aria-label="Delegation weight in basis points"
+            className="w-live-input mono"
+            type="number"
+            min={1}
+            max={10000}
+            value={weightBpsInput}
+            onChange={(e) => onWeightChange(e.currentTarget.value)}
+          />
+          <span className="row-help" style={{ marginLeft: 8 }}>
+            {weightBpsInput}/10000 = {(Number(weightBpsInput) / 100).toFixed(2)}%
+          </span>
+        </div>
+        {err ? <div className="w-live-error" style={{ marginTop: 6 }}>{err}</div> : null}
+      </div>
+      <div className="w-live-cell">
+        <div className="cap">Actions</div>
+        <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+          <button className="btn btn--sm btn--ghost" onClick={onCancel}>
+            Back
+          </button>
+          <button
+            className="btn btn--sm btn--primary"
+            onClick={onSubmit}
+            disabled={err !== null}
+          >
+            Delegate
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
