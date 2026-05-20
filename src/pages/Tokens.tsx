@@ -17,6 +17,7 @@ import { useCallback, useEffect, useState } from "react";
 import { IDENTITY } from "../data/fixtures";
 import { AddCustomToken } from "../components/AddCustomToken";
 import { Identity } from "../components/Identity";
+import { SendErc20Form } from "../components/SendErc20Form";
 import {
   formatTokenAmount,
   getTokenBalance,
@@ -160,6 +161,7 @@ function Erc20Section({
   rows: Erc20Row[];
   onChanged: () => void;
 }) {
+  const [sendOpen, setSendOpen] = useState<string | null>(null);
   if (rows.length === 0) return null;
   return (
     <div className="w-card" style={{ marginBottom: 12 }}>
@@ -171,7 +173,14 @@ function Erc20Section({
       </div>
       <div className="w-card__body" style={{ padding: 0 }}>
         {rows.map((row) => (
-          <Erc20TokenRow key={row.token.contract} row={row} onChanged={onChanged} />
+          <Erc20TokenRow
+            key={row.token.contract}
+            row={row}
+            onChanged={onChanged}
+            sendOpen={sendOpen === row.token.contract}
+            onOpenSend={() => setSendOpen(row.token.contract)}
+            onCloseSend={() => setSendOpen(null)}
+          />
         ))}
       </div>
     </div>
@@ -181,52 +190,75 @@ function Erc20Section({
 function Erc20TokenRow({
   row,
   onChanged,
+  sendOpen,
+  onOpenSend,
+  onCloseSend,
 }: {
   row: Erc20Row;
   onChanged: () => void;
+  sendOpen: boolean;
+  onOpenSend: () => void;
+  onCloseSend: () => void;
 }) {
   const decimals = row.token.decimals ?? 18;
   const formatted = row.balance === null ? "—" : formatTokenAmount(row.balance, decimals);
   return (
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns: "auto 1fr auto auto",
-        gap: 12,
-        alignItems: "center",
-        padding: "10px 14px",
-        borderBottom: "1px solid var(--w-border)",
-      }}
-    >
-      <TokenLogo symbol={row.token.symbol} />
-      <div>
-        <div style={{ fontSize: 13, fontWeight: 600 }}>
-          {row.token.symbol || "?"}{" "}
-          {row.token.name ? (
-            <span className="cap" style={{ marginLeft: 6, fontWeight: 400 }}>
-              {row.token.name}
+    <>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "auto 1fr auto auto auto",
+          gap: 12,
+          alignItems: "center",
+          padding: "10px 14px",
+          borderBottom: "1px solid var(--w-border)",
+        }}
+      >
+        <TokenLogo symbol={row.token.symbol} />
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 600 }}>
+            {row.token.symbol || "?"}{" "}
+            {row.token.name ? (
+              <span className="cap" style={{ marginLeft: 6, fontWeight: 400 }}>
+                {row.token.name}
+              </span>
+            ) : null}
+          </div>
+          <div className="cap" style={{ marginTop: 2 }}>
+            <Identity addr={row.token.contract} />
+          </div>
+        </div>
+        <div className="mono" style={{ fontSize: 13, textAlign: "right" }}>
+          {typeof formatted === "number" ? formatted.toLocaleString(undefined, {
+            maximumFractionDigits: 6,
+          }) : formatted}
+          <div className="cap" style={{ marginTop: 2 }}>
+            <span className="w-mock-tag" title="No on-chain oracle yet">
+              [mock] USD
             </span>
-          ) : null}
+          </div>
         </div>
-        <div className="cap" style={{ marginTop: 2 }}>
-          <Identity addr={row.token.contract} />
-        </div>
+        <button
+          className="btn btn--sm btn--primary"
+          onClick={onOpenSend}
+          disabled={row.balance === null || row.balance === 0n}
+        >
+          Send
+        </button>
+        <RowActions
+          contract={row.token.contract}
+          onChanged={onChanged}
+        />
       </div>
-      <div className="mono" style={{ fontSize: 13, textAlign: "right" }}>
-        {typeof formatted === "number" ? formatted.toLocaleString(undefined, {
-          maximumFractionDigits: 6,
-        }) : formatted}
-        <div className="cap" style={{ marginTop: 2 }}>
-          <span className="w-mock-tag" title="No on-chain oracle yet">
-            [mock] USD
-          </span>
-        </div>
-      </div>
-      <RowActions
-        contract={row.token.contract}
-        onChanged={onChanged}
-      />
-    </div>
+      {sendOpen && row.balance !== null ? (
+        <SendErc20Form
+          token={row.token}
+          balance={row.balance}
+          onClose={onCloseSend}
+          onSubmitted={onChanged}
+        />
+      ) : null}
+    </>
   );
 }
 
