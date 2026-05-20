@@ -136,6 +136,8 @@ impl SealedPayload {
         }
     }
 
+    /// Used by `mek::aead_open` + the migration helper (Commit 9).
+    #[allow(dead_code)]
     pub fn decode(&self) -> Result<([u8; GCM_NONCE_LEN], Vec<u8>), ContainerError> {
         let nonce = URL_SAFE_NO_PAD
             .decode(&self.nonce)
@@ -214,7 +216,8 @@ impl VaultContainerV1 {
     /// `vault_create` call populates `vaults[0]` and the active id.
     /// Callers in production go through `commands::vault_create` rather
     /// than this directly; this constructor is intended for tests and
-    /// the migration path.
+    /// the migration path (Commit 9).
+    #[allow(dead_code)]
     pub fn empty_with_salt(salt: &[u8; MEK_SALT_LEN], params: VaultArgon2Params) -> Self {
         Self {
             version: CONTAINER_VERSION,

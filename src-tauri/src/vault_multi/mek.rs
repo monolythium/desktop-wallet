@@ -169,6 +169,7 @@ pub(super) fn aead_unwrap(
 
 /// Same shape for sealed payloads — included here so the migration
 /// helper (Commit 9) can use it without pulling in vek.rs directly.
+#[allow(dead_code)]
 pub(super) fn aead_open(
     sealed: &SealedPayload,
     key: &[u8; 32],

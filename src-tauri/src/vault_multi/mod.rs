@@ -12,14 +12,22 @@
 // same crypto primitives. Once the lazy migration (Commit 9) lands the
 // legacy module is reduced to a reference for the migration helper.
 
+pub mod commands;
 pub mod container;
 pub mod mek;
 pub mod vek;
 
 // Re-export the top-level types so call-sites can `use vault_multi::*`.
+// These exports are public-facing — internal crate code uses qualified
+// paths today, but the broader Phase 5+ surface (migration, commands.rs,
+// future signer integration) reaches in via these names.
+#[allow(unused_imports)]
 pub use container::{
     SealedPayload, VaultArgon2Params, VaultContainerV1, VaultRecord, VaultRecordSummary,
     WrappedKey, CONTAINER_VERSION,
 };
+#[allow(unused_imports)]
 pub use mek::{derive_mek, generate_mek_salt, verify_password, VaultError};
+#[allow(unused_imports)]
 pub use vek::{generate_vek, open_payload, seal_payload, unwrap_vek, wrap_vek};
+pub use commands::VaultStore;
