@@ -213,6 +213,49 @@ export async function deleteVault(id: string, confirmToken: string): Promise<voi
   }
 }
 
+/**
+ * Lazy migration of the legacy single-vault keychain blob into the v1
+ * container. Call sequence (TS-side):
+ *
+ *   1. `fetchAndUnlockVault(PRIMARY_ACCOUNT, password)` — uses the
+ *      Phase 1 legacy unlock to recover the 32-byte seed
+ *   2. Derive the address from the seed (via the SDK's MlDsa65Backend)
+ *   3. Call `migrateLegacyVault({ seed, password, label, address })`
+ *
+ * The Rust side builds a fresh v1 container, seals the seed under a
+ * new VEK + wraps the VEK under a freshly-derived MEK, and persists
+ * `vault.v1.json`. The legacy keychain entry is left untouched
+ * (harmless once the container is the source of truth — Phase 6 can
+ * purge it).
+ */
+export async function migrateLegacyVault(args: {
+  seed: Uint8Array;
+  password: string;
+  label: string;
+  address: string;
+}): Promise<VaultSummary> {
+  if (args.seed.length !== 32) {
+    throw new MultiVaultCallError({
+      code: "invalid_argument",
+      message: `seed must be 32 bytes, got ${args.seed.length}`,
+    });
+  }
+  if (!args.password) {
+    throw new MultiVaultCallError({ code: "invalid_argument", message: "password is empty" });
+  }
+  try {
+    const wire = await invoke<VaultSummaryWire>("vault_migrate_legacy", {
+      seed: Array.from(args.seed),
+      password: args.password,
+      label: args.label,
+      address: args.address,
+    });
+    return fromWire(wire);
+  } catch (raw) {
+    throw normalizeError(raw);
+  }
+}
+
 // ─── Helpers exposed for tests ─────────────────────────────────────
 
 /** Test-only: round-trip the wire shape through the camelCase mapper.
