@@ -14,6 +14,7 @@ use tokio::sync::Mutex;
 mod keychain;
 mod ledger;
 mod vault;
+mod vault_multi;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
