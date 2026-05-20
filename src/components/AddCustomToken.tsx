@@ -15,8 +15,7 @@
 import { useEffect, useState } from "react";
 import { parseRecipient } from "./format";
 import { getTokenMetadata } from "../sdk/erc20";
-import { supportsErc721 } from "../sdk/erc721";
-import { supportsErc1155 } from "../sdk/erc1155";
+import { classifyContract } from "../sdk/token-classify";
 import { addToken, type TokenKind, type TrackedToken } from "../sdk/token-list";
 
 interface Props {
@@ -61,26 +60,24 @@ export function AddCustomToken({ onAdded, onCancel }: Props) {
     let cancelled = false;
     (async () => {
       try {
-        // Run all three checks in parallel — first to confirm wins.
-        const [is721, is1155, meta] = await Promise.all([
-          supportsErc721(contract),
-          supportsErc1155(contract),
+        // Phase 5 #D16 closure — `classifyContract` runs ERC-165 first
+        // then a structural fallback (decimals → erc20, ownerOf →
+        // erc721, uri → erc1155). Metadata fetched in parallel for the
+        // preview banner.
+        const [classification, meta] = await Promise.all([
+          classifyContract(contract),
           getTokenMetadata(contract),
         ]);
         if (cancelled) return;
-        let tokenKind: TokenKind;
-        if (is721) tokenKind = "erc721";
-        else if (is1155) tokenKind = "erc1155";
-        else if (meta.ok && meta.value) tokenKind = "erc20";
-        else {
+        if (classification.kind === "unknown") {
           setState({
             kind: "not-a-token",
             contract,
-            message:
-              "No ERC-165 / ERC-20 surface responded — this address may not be a token contract.",
+            message: classification.reason,
           });
           return;
         }
+        const tokenKind: TokenKind = classification.kind;
         const symbol = meta.ok ? meta.value?.symbol ?? "" : "";
         const name = meta.ok ? meta.value?.name ?? "" : "";
         const decimals = tokenKind === "erc20" && meta.ok
