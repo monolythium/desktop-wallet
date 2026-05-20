@@ -15,6 +15,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { IDENTITY } from "../data/fixtures";
+import { AddCustomToken } from "../components/AddCustomToken";
 import { Identity } from "../components/Identity";
 import {
   formatTokenAmount,
@@ -43,6 +44,7 @@ export function Tokens() {
   const [state, setState] = useState<LoadState>({ kind: "loading" });
   const [tracked, setTracked] = useState<TrackedToken[]>([]);
   const [balances, setBalances] = useState<Map<string, bigint>>(new Map());
+  const [addOpen, setAddOpen] = useState(false);
 
   const refresh = useCallback(async (forceRescan = false) => {
     setState({ kind: "loading" });
@@ -98,11 +100,27 @@ export function Tokens() {
         >
           {state.kind === "loading" ? "Scanning…" : "Refresh"}
         </button>
+        <button
+          className="btn btn--sm btn--ghost"
+          onClick={() => setAddOpen((v) => !v)}
+        >
+          {addOpen ? "Cancel add" : "+ Add custom token"}
+        </button>
         <span className="cap" style={{ color: "var(--w-text-3)" }}>
           Auto-detects from on-chain Transfer events; add a custom token
           if you hold something this scan missed.
         </span>
       </div>
+
+      {addOpen ? (
+        <AddCustomToken
+          onAdded={() => {
+            setAddOpen(false);
+            void refresh(false);
+          }}
+          onCancel={() => setAddOpen(false)}
+        />
+      ) : null}
 
       {state.kind === "error" ? (
         <div className="w-banner error">{state.message}</div>
