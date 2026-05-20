@@ -8,6 +8,9 @@ import type { Route } from "./types";
 
 interface Props {
   route: Route;
+  /** Phase 5 — quick "Lock now" action in the Topbar. Wires to the
+   *  Rust `vault_lock` command via useVaults().lock(). */
+  onLockNow?: () => void | Promise<void>;
 }
 
 const TITLES: Record<Route, string> = {
@@ -25,7 +28,7 @@ const TITLES: Record<Route, string> = {
   settings: "Settings",
 };
 
-export function Topbar({ route }: Props) {
+export function Topbar({ route, onLockNow }: Props) {
   const chain = useChainSnapshot(IDENTITY.address);
   const dotClass =
     chain.status === "loading" ? "is-stale"
@@ -47,6 +50,18 @@ export function Topbar({ route }: Props) {
         <span className={`dot ${dotClass}`} />
         <span>{syncLabel}</span>
       </div>
+      {onLockNow ? (
+        <button
+          type="button"
+          className="btn btn--sm btn--ghost"
+          onClick={() => void onLockNow()}
+          title="Lock the wallet — wipes the in-memory MEK"
+          aria-label="Lock wallet"
+          style={{ marginRight: 8 }}
+        >
+          🔒 Lock
+        </button>
+      ) : null}
       <div className="w-top__user">
         <div className="w-top__user__avatar" />
         <div>
