@@ -5,17 +5,18 @@
 // Tauri commands so call-sites don't have to import the SDK module
 // directly.
 //
-// The hook intentionally avoids a global event-bus pattern: every
-// mutating action calls `refresh()` after it resolves, and callers
-// that want cross-component reactivity bump a shared `refreshKey`
-// (Phase 3 contacts / Phase 4 tokens convention).
+// The hook also tracks a module-level `lockedFlag` — the in-memory
+// MEK existence is Rust-side state, so we mirror it here for the UI.
+// `lock()` sets it true; successful `unlock()` sets it false; every
+// new tab starts locked (the Rust process boots with mek=None too).
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import {
   createVaultMulti,
   deleteVault,
   listVaults,
   lockVault,
+  migrateLegacyVault,
   MultiVaultCallError,
   renameVault,
   selectVault,
@@ -33,6 +34,10 @@ export interface UseVaultsApi {
   state: VaultsState;
   /** The active vault (`isActive: true`) or null when none. */
   active: VaultSummary | null;
+  /** Derived UI state — true when the Rust-side MEK has been wiped
+   *  (i.e. `lock()` ran) or the wallet was just launched. Successful
+   *  `unlock()` flips this false; `lock()` flips it true. */
+  isLocked: boolean;
   /** Re-pull the list from disk. */
   refresh: () => Promise<void>;
   /** Switch active vault by id. Auto-refreshes on success. */
@@ -54,6 +59,43 @@ export interface UseVaultsApi {
   /** Delete. Caller supplies the confirmation token (last 4 chars
    *  of the lowercased address). */
   remove: (id: string, confirmToken: string) => Promise<void>;
+  /** Migrate the legacy single-vault keystore into the v1 container. */
+  migrateLegacy: (args: {
+    seed: Uint8Array;
+    password: string;
+    label: string;
+    address: string;
+  }) => Promise<void>;
+}
+
+// ─── Module-level locked flag ──────────────────────────────────────
+// Shared across every consumer of `useVaults` in the same tab.
+// Initial value: true — both the Rust process and the lock screen
+// start locked.
+
+let lockedFlag = true;
+const lockListeners = new Set<() => void>();
+
+function subscribeLocked(listener: () => void): () => void {
+  lockListeners.add(listener);
+  return () => {
+    lockListeners.delete(listener);
+  };
+}
+
+function getLockedSnapshot(): boolean {
+  return lockedFlag;
+}
+
+function setLocked(v: boolean): void {
+  if (lockedFlag === v) return;
+  lockedFlag = v;
+  for (const l of lockListeners) l();
+}
+
+/** Test-only — reset the lock flag back to default (locked). */
+export function _resetLockedForTest(): void {
+  setLocked(true);
 }
 
 export function useVaults(): UseVaultsApi {
@@ -62,6 +104,8 @@ export function useVaults(): UseVaultsApi {
     vaults: [],
     error: null,
   });
+
+  const isLocked = useSyncExternalStore(subscribeLocked, getLockedSnapshot, getLockedSnapshot);
 
   const refresh = useCallback(async () => {
     try {
@@ -90,6 +134,7 @@ export function useVaults(): UseVaultsApi {
   const unlock = useCallback(
     async (password: string) => {
       await unlockVaultMulti(password);
+      setLocked(false);
       await refresh();
     },
     [refresh],
@@ -97,6 +142,7 @@ export function useVaults(): UseVaultsApi {
 
   const lock = useCallback(async () => {
     await lockVault();
+    setLocked(true);
     await refresh();
   }, [refresh]);
 
@@ -108,6 +154,8 @@ export function useVaults(): UseVaultsApi {
       address: string;
     }) => {
       await createVaultMulti(args);
+      // Successful create implies unlock — Rust side caches the MEK.
+      setLocked(false);
       await refresh();
     },
     [refresh],
@@ -129,7 +177,33 @@ export function useVaults(): UseVaultsApi {
     [refresh],
   );
 
+  const migrateLegacy = useCallback(
+    async (args: {
+      seed: Uint8Array;
+      password: string;
+      label: string;
+      address: string;
+    }) => {
+      await migrateLegacyVault(args);
+      setLocked(false);
+      await refresh();
+    },
+    [refresh],
+  );
+
   const active = state.vaults.find((v) => v.isActive) ?? null;
 
-  return { state, active, refresh, select, unlock, lock, create, rename, remove };
+  return {
+    state,
+    active,
+    isLocked,
+    refresh,
+    select,
+    unlock,
+    lock,
+    create,
+    rename,
+    remove,
+    migrateLegacy,
+  };
 }
