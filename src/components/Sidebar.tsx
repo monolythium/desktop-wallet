@@ -3,10 +3,14 @@
 // until their RPC seams land. Node-ops screens live in Monarch Desktop.
 
 import type { ReactElement } from "react";
+import { useState } from "react";
 import { IDENTITY } from "../data/fixtures";
 import type { Denom } from "../data/fixtures";
 import type { Route } from "./types";
 import { Identity } from "./Identity";
+import { VaultCreateFlow } from "./VaultCreateFlow";
+import { VaultPicker } from "./VaultPicker";
+import { useVaults } from "../sdk/useVaults";
 
 interface NavItem {
   id: Route;
@@ -121,6 +125,9 @@ const NAV_FOOTER: NavItem[] = [
 
 export function Sidebar({ denom, setDenom, route, setRoute }: Props) {
   const visible = NAV.filter((n) => !n.publicOnly || denom === "public");
+  const vaults = useVaults();
+  const [showCreate, setShowCreate] = useState(false);
+  const isFirstVault = vaults.state.vaults.length === 0;
 
   return (
     <aside className="w-side">
@@ -131,6 +138,39 @@ export function Sidebar({ denom, setDenom, route, setRoute }: Props) {
           <small>Wallet</small>
         </div>
       </div>
+
+      <div style={{ padding: "8px 0" }}>
+        <VaultPicker
+          goto={setRoute}
+          onAddVault={() => setShowCreate(true)}
+        />
+      </div>
+
+      {showCreate ? (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.45)",
+            display: "flex",
+            alignItems: "flex-start",
+            justifyContent: "center",
+            zIndex: 100,
+            padding: 40,
+            overflowY: "auto",
+          }}
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) setShowCreate(false);
+          }}
+        >
+          <div style={{ width: "100%", maxWidth: 520 }}>
+            <VaultCreateFlow
+              isFirstVault={isFirstVault}
+              onClose={() => setShowCreate(false)}
+            />
+          </div>
+        </div>
+      ) : null}
 
       <div className="w-denom-toggle">
         {(["public", "private"] as const).map((d) => (
