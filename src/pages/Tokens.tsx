@@ -233,10 +233,12 @@ function Erc20TokenRow({
           {typeof formatted === "number" ? formatted.toLocaleString(undefined, {
             maximumFractionDigits: 6,
           }) : formatted}
-          <div className="cap" style={{ marginTop: 2 }}>
-            <span className="w-mock-tag" title="No on-chain oracle yet">
-              [mock] USD
-            </span>
+          <div
+            className="cap"
+            style={{ marginTop: 2 }}
+            title="Price oracle pending — chain-side dependency (#D13 closed Phase 5)"
+          >
+            — USD
           </div>
         </div>
         <button
