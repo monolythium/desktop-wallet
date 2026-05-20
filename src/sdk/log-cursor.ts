@@ -13,11 +13,27 @@
 // payload, cache the union. Invalidate the cache after 7 days or
 // manual force-rescan.
 //
-// Storage: localStorage, same convention as Phases 3 + 4 contacts +
-// token-list. Schema-versioned key.
+// Phase 5 #D17 closure — IndexedDB is now the persistence backend
+// instead of localStorage. IDB supports native bigint via the
+// structured-clone algorithm, so the previous "serialize bigints as
+// decimal strings" workaround drops.
+//
+// The public API stays SYNC (readdesktop MCP client / writedesktop MCP client / cleardesktop MCP client).
+// IDB itself is async, so we maintain an in-memory cache that:
+//   - hydrates on module load (one-shot async read of every cursor
+//     key)
+//   - serves sync reads from the in-memory mirror
+//   - writes fire-and-forget into IDB (and update the mirror sync)
+//
+// Migration: on hydrate we also read every legacy `mono.logcursor.v1.*`
+// localStorage key. If found we transfer the deserialized data into
+// the in-memory mirror + IDB and remove the localStorage entry.
 
 const STORAGE_KEY_PREFIX = "mono.logcursor.v1.";
 const CACHE_INVALIDATE_MS = 7 * 24 * 60 * 60 * 1000;
+const IDB_DB_NAME = "mono-wallet.v1";
+const IDB_STORE_NAME = "logcursor";
+const IDB_VERSION = 1;
 
 export type desktop MCP clientScope = "activity" | "discovery";
 
@@ -30,75 +46,224 @@ export interface desktop MCP clientEntry<T> {
   payload: T;
 }
 
-interface Serializeddesktop MCP clientEntry<T> {
-  lastBlock: string; // bigint serialized via toString
-  scannedAtMs: number;
-  payload: T;
-}
-
 function cursorKey(scope: desktop MCP clientScope, holder: string): string {
   return `${STORAGE_KEY_PREFIX}${scope}.${holder.toLowerCase()}`;
 }
 
+// ─── In-memory mirror ──────────────────────────────────────────────
+
+const memMirror = new Map<string, desktop MCP clientEntry<unknown>>();
+
+/** Test-only — clear the in-memory mirror. */
+function clearMirror(): void {
+  memMirror.clear();
+}
+
+// ─── IndexedDB layer ───────────────────────────────────────────────
+
+/** Open / upgrade the IDB. Returns the database connection. Throws
+ *  if IDB isn't available (the public API catches + falls back to the
+ *  in-memory-only mode). */
+function openDb(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    if (typeof indexedDB === "undefined") {
+      reject(new Error("indexedDB unavailable"));
+      return;
+    }
+    const req = indexedDB.open(IDB_DB_NAME, IDB_VERSION);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(IDB_STORE_NAME)) {
+        db.createObjectStore(IDB_STORE_NAME);
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error ?? new Error("idb open failed"));
+  });
+}
+
+async function idbReadAll(): Promise<Map<string, desktop MCP clientEntry<unknown>>> {
+  const out = new Map<string, desktop MCP clientEntry<unknown>>();
+  let db: IDBDatabase;
+  try {
+    db = await openDb();
+  } catch {
+    return out;
+  }
+  return new Promise((resolve) => {
+    const tx = db.transaction(IDB_STORE_NAME, "readonly");
+    const store = tx.objectStore(IDB_STORE_NAME);
+    const req = store.opendesktop MCP client();
+    req.onsuccess = () => {
+      const cursor = req.result;
+      if (cursor) {
+        const key = String(cursor.key);
+        const value = cursor.value as desktop MCP clientEntry<unknown>;
+        out.set(key, value);
+        cursor.continue();
+      } else {
+        db.close();
+        resolve(out);
+      }
+    };
+    req.onerror = () => {
+      db.close();
+      resolve(out);
+    };
+  });
+}
+
+function idbWrite(key: string, entry: desktop MCP clientEntry<unknown>): void {
+  // Fire-and-forget. The in-memory mirror is the authoritative read
+  // source; IDB is the durable backing store.
+  void (async () => {
+    try {
+      const db = await openDb();
+      const tx = db.transaction(IDB_STORE_NAME, "readwrite");
+      tx.objectStore(IDB_STORE_NAME).put(entry, key);
+      tx.oncomplete = () => db.close();
+      tx.onerror = () => db.close();
+    } catch {
+      // ignore
+    }
+  })();
+}
+
+function idbDelete(key: string): void {
+  void (async () => {
+    try {
+      const db = await openDb();
+      const tx = db.transaction(IDB_STORE_NAME, "readwrite");
+      tx.objectStore(IDB_STORE_NAME).delete(key);
+      tx.oncomplete = () => db.close();
+      tx.onerror = () => db.close();
+    } catch {
+      // ignore
+    }
+  })();
+}
+
+function idbClearAll(): void {
+  void (async () => {
+    try {
+      const db = await openDb();
+      const tx = db.transaction(IDB_STORE_NAME, "readwrite");
+      tx.objectStore(IDB_STORE_NAME).clear();
+      tx.oncomplete = () => db.close();
+      tx.onerror = () => db.close();
+    } catch {
+      // ignore
+    }
+  })();
+}
+
+// ─── Hydration + legacy localStorage migration ─────────────────────
+
+let hydratePromise: Promise<void> | null = null;
+
+/** Idempotent hydrate. Reads IDB into the in-memory mirror, then
+ *  migrates any legacy `mono.logcursor.v1.*` localStorage entries into
+ *  IDB + the mirror, removing the legacy keys on success. */
+export function hydrateLogdesktop MCP clientStore(): Promise<void> {
+  if (hydratePromise) return hydratePromise;
+  hydratePromise = (async () => {
+    // 1. Read everything currently in IDB.
+    const fromIdb = await idbReadAll();
+    for (const [k, v] of fromIdb.entries()) {
+      memMirror.set(k, v);
+    }
+    // 2. Migrate legacy localStorage entries.
+    try {
+      const keys: string[] = [];
+      for (let i = 0; i < localStorage.length; i += 1) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith(STORAGE_KEY_PREFIX)) keys.push(k);
+      }
+      for (const k of keys) {
+        const raw = localStorage.getItem(k);
+        if (!raw) continue;
+        try {
+          const parsed = JSON.parse(raw) as {
+            lastBlock?: unknown;
+            scannedAtMs?: unknown;
+            payload?: unknown;
+          };
+          if (
+            typeof parsed.lastBlock !== "string" ||
+            typeof parsed.scannedAtMs !== "number"
+          ) {
+            localStorage.removeItem(k);
+            continue;
+          }
+          const entry: desktop MCP clientEntry<unknown> = {
+            lastBlock: BigInt(parsed.lastBlock),
+            scannedAtMs: parsed.scannedAtMs,
+            payload: parsed.payload,
+          };
+          memMirror.set(k, entry);
+          idbWrite(k, entry);
+        } catch {
+          // unparseable legacy entry — drop
+        }
+        localStorage.removeItem(k);
+      }
+    } catch {
+      // localStorage unavailable — skip migration
+    }
+  })();
+  return hydratePromise;
+}
+
+// Kick off hydration eagerly on module load.
+void hydrateLogdesktop MCP clientStore();
+
+// ─── Public API (sync) ─────────────────────────────────────────────
+
 /** Read the persisted cursor entry for `(scope, holder)`. Returns null
- *  when no entry exists, the entry is malformed, or it's past the
- *  7-day invalidation window. */
+ *  when no entry exists OR it's past the 7-day invalidation window. */
 export function readdesktop MCP client<T>(
   scope: desktop MCP clientScope,
   holder: string,
 ): desktop MCP clientEntry<T> | null {
-  try {
-    const raw = localStorage.getItem(cursorKey(scope, holder));
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as Serializeddesktop MCP clientEntry<T>;
-    if (
-      typeof parsed.lastBlock !== "string" ||
-      typeof parsed.scannedAtMs !== "number"
-    ) {
-      return null;
-    }
-    if (Date.now() - parsed.scannedAtMs >= CACHE_INVALIDATE_MS) {
-      return null;
-    }
-    return {
-      lastBlock: BigInt(parsed.lastBlock),
-      scannedAtMs: parsed.scannedAtMs,
-      payload: parsed.payload,
-    };
-  } catch {
+  const key = cursorKey(scope, holder);
+  const entry = memMirror.get(key);
+  if (!entry) return null;
+  if (Date.now() - entry.scannedAtMs >= CACHE_INVALIDATE_MS) {
+    memMirror.delete(key);
+    idbDelete(key);
     return null;
   }
+  return entry as desktop MCP clientEntry<T>;
 }
 
-/** Write a fresh cursor entry. */
+/** Write a fresh cursor entry. Sync write to the in-memory mirror;
+ *  async fire-and-forget into IDB. */
 export function writedesktop MCP client<T>(
   scope: desktop MCP clientScope,
   holder: string,
   entry: desktop MCP clientEntry<T>,
 ): void {
-  try {
-    const serialized: Serializeddesktop MCP clientEntry<T> = {
-      lastBlock: entry.lastBlock.toString(),
-      scannedAtMs: entry.scannedAtMs,
-      payload: entry.payload,
-    };
-    localStorage.setItem(cursorKey(scope, holder), JSON.stringify(serialized));
-  } catch {
-    // Quota / unavailable — fail soft.
-  }
+  const key = cursorKey(scope, holder);
+  memMirror.set(key, entry as desktop MCP clientEntry<unknown>);
+  idbWrite(key, entry as desktop MCP clientEntry<unknown>);
 }
 
 /** Remove a cursor (used by manual "Refresh" / force-rescan). */
 export function cleardesktop MCP client(scope: desktop MCP clientScope, holder: string): void {
-  try {
-    localStorage.removeItem(cursorKey(scope, holder));
-  } catch {
-    // ignore
-  }
+  const key = cursorKey(scope, holder);
+  memMirror.delete(key);
+  idbDelete(key);
 }
 
-/** Test-only. Clears every cursor in localStorage. */
+/** Test-only. Clears every cursor across all storage layers + the
+ *  in-memory mirror. Also pre-arms hydratePromise so the next
+ *  hydrate() call short-circuits. */
 export function _resetAlldesktop MCP clientsForTest(): void {
+  clearMirror();
+  idbClearAll();
+  // Mark hydrate as done so subsequent test setups don't re-import
+  // legacy entries from a previous test's localStorage.
+  hydratePromise = Promise.resolve();
   try {
     const keys: string[] = [];
     for (let i = 0; i < localStorage.length; i += 1) {
