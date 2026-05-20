@@ -6,7 +6,7 @@ import type { ReactElement } from "react";
 import { IDENTITY } from "../data/fixtures";
 import type { Denom } from "../data/fixtures";
 import type { Route } from "./types";
-import { formatAddressShort } from "./format";
+import { Identity } from "./Identity";
 
 interface NavItem {
   id: Route;
@@ -52,6 +52,12 @@ const ICON_OPERATORS = () => (
     <rect x="3" y="14" width="18" height="4" rx="1" />
     <circle cx="6" cy="8" r="0.5" fill="currentColor" />
     <circle cx="6" cy="16" r="0.5" fill="currentColor" />
+  </svg>
+);
+const ICON_NAMES = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M4 7h16M4 12h10M4 17h7" />
+    <circle cx="19" cy="17" r="2.5" />
   </svg>
 );
 const ICON_CONTACTS = () => (
@@ -102,6 +108,7 @@ const NAV: NavItem[] = [
   { id: "tokens", label: "Tokens", icon: ICON_TOKENS, publicOnly: true },
   { id: "stake", label: "Stake", icon: ICON_STAKE, publicOnly: true },
   { id: "operators", label: "Operators", icon: ICON_OPERATORS, publicOnly: true },
+  { id: "names", label: "Names", icon: ICON_NAMES },
   { id: "contacts", label: "Contacts", icon: ICON_CONTACTS },
   { id: "trade", label: "Trade", icon: ICON_TRADE, publicOnly: true },
   { id: "ai-trade", label: "AI Trading", icon: ICON_AI, publicOnly: true, badge: "beta" },
@@ -175,7 +182,7 @@ export function Sidebar({ denom, setDenom, route, setRoute }: Props) {
 
       <div className="w-side__footer">
         <b>{IDENTITY.handle}</b>
-        <div className="addr" title={IDENTITY.address}>{formatAddressShort(IDENTITY.address)}</div>
+        <Identity addr={IDENTITY.address} className="addr" />
       </div>
     </aside>
   );

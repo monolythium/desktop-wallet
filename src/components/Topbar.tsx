@@ -3,7 +3,7 @@
 
 import { IDENTITY } from "../data/fixtures";
 import { useChainSnapshot } from "../sdk/useChainSnapshot";
-import { formatAddressShort } from "./format";
+import { Identity } from "./Identity";
 import type { Route } from "./types";
 
 interface Props {
@@ -17,6 +17,7 @@ const TITLES: Record<Route, string> = {
   tokens: "Tokens",
   stake: "Stake",
   operators: "Operators",
+  names: "Names",
   contacts: "Contacts",
   trade: "Trade",
   "ai-trade": "AI Trading",
@@ -50,9 +51,7 @@ export function Topbar({ route }: Props) {
         <div className="w-top__user__avatar" />
         <div>
           <div className="w-top__user__name">{IDENTITY.handle}</div>
-          <div className="w-top__user__addr" title={IDENTITY.address}>
-            {formatAddressShort(IDENTITY.address)}
-          </div>
+          <Identity addr={IDENTITY.address} className="w-top__user__addr" />
         </div>
       </div>
     </header>

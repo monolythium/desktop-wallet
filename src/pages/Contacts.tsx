@@ -1,41 +1,68 @@
-// Contacts page — address book. Denom-segregated:
-// public denom shows on-chain addresses; private denom shows view-keys.
+// Contacts — local-only address book with §22.8 name binding.
+//
+// Replaces the Phase-1 lookup-only stub. Stores contacts in
+// `localStorage` (non-secret) and renders each row with nickname
+// (primary), .mono name if available (secondary), and bech32m short
+// form (tertiary, hover-revealed via Identity).
+//
+// Add-contact form uses NameLookup for the address field so the user
+// can paste a .mono name (resolved via the SDK) or a bech32m / 0x
+// address directly via parseRecipient.
 
-import { useState } from "react";
-import { normalizeAddressHex } from "@monolythium/core-sdk";
-import { TodoSection } from "../components/TodoSection";
-import { IDENTITY } from "../data/fixtures";
-import { errorMessage, loadAccountPolicy } from "../sdk/live";
+import { useCallback, useEffect, useState } from "react";
+import { Identity } from "../components/Identity";
+import { RecipientInput } from "../components/RecipientInput";
 import { formatAddress } from "../components/format";
+import {
+  addContact,
+  deleteContact,
+  listContacts,
+  updateContact,
+  type Contact,
+} from "../sdk/contacts";
 
 interface Props {
   denom: "public" | "private";
 }
 
 export function Contacts({ denom }: Props) {
-  // Pre-fill with the user's own address in bech32m form so the input
-  // matches what they see elsewhere in the wallet. `normalizeAddressHex`
-  // accepts either format on submit.
-  const [address, setAddress] = useState(formatAddress(IDENTITY.address));
-  const [policy, setPolicy] = useState<Record<string, unknown> | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [contacts, setContacts] = useState<Contact[]>([]);
+  const [adding, setAdding] = useState(false);
+  const [editing, setEditing] = useState<Contact | null>(null);
 
-  const lookupPolicy = async () => {
-    setBusy(true);
-    setError(null);
-    setPolicy(null);
-    try {
-      // SDK accepts either 0x or mono1; normalize to hex for the
-      // chain-side call, then re-render bech32m back into the field so
-      // the displayed canonical stays §22.7-shaped.
-      const normalized = normalizeAddressHex(address);
-      setAddress(formatAddress(normalized));
-      setPolicy(await loadAccountPolicy(normalized) as Record<string, unknown>);
-    } catch (cause) {
-      setError(errorMessage(cause));
-    } finally {
-      setBusy(false);
+  useEffect(() => {
+    setContacts(listContacts());
+  }, []);
+
+  const refresh = () => setContacts(listContacts());
+
+  const onSubmit = (input: {
+    nickname: string;
+    addressHex: string;
+    notes: string;
+  }) => {
+    addContact({
+      nickname: input.nickname,
+      addressHex: input.addressHex,
+      notes: input.notes,
+    });
+    refresh();
+    setAdding(false);
+  };
+
+  const onEditSubmit = (c: Contact, patch: Partial<Contact>) => {
+    updateContact(c.id, patch);
+    refresh();
+    setEditing(null);
+  };
+
+  const onDelete = (c: Contact) => {
+    if (
+      // eslint-disable-next-line no-alert
+      window.confirm(`Delete contact '${c.nickname}'?`)
+    ) {
+      deleteContact(c.id);
+      refresh();
     }
   };
 
@@ -45,81 +72,228 @@ export function Contacts({ denom }: Props) {
         <h1>Contacts</h1>
         <div className="sub">
           {denom === "public"
-            ? "On-chain addresses · last-used, labels, tags."
+            ? "Local-only address book. Names render automatically when registered (§22.8)."
             : "Private view-keys · receiver-flagged, never on-chain."}
         </div>
       </div>
 
       <div className="w-card">
         <div className="w-card__head">
-          <h3>Live account policy lookup</h3>
-          <span className="w-live-pill">live</span>
-        </div>
-        <div className="w-card__body">
-          <div className="w-live-form">
-            <input
-              className="w-live-input mono"
-              value={address}
-              onChange={(event) => setAddress(event.currentTarget.value)}
-              placeholder="mono1… or 0x…"
-            />
-            <button className="btn btn--sm" onClick={lookupPolicy} disabled={busy}>
-              {busy ? "Checking…" : "Check"}
+          <h3>My contacts ({contacts.length})</h3>
+          {!adding ? (
+            <button className="btn btn--sm btn--primary" onClick={() => setAdding(true)}>
+              + Add contact
             </button>
-          </div>
-          {error ? <div className="w-live-error">{error}</div> : null}
-          {policy ? (
-            <div className="w-live-grid">
-              <LiveCell label="Mode" value={String(policy.mode ?? "unknown")} />
-              <LiveCell label="Explicit" value={String(policy.explicit ?? false)} />
-              <LiveCell label="Shielded" value={String(policy.allowShielded ?? false)} />
-              <LiveCell label="Confidential" value={String(policy.allowConfidential ?? false)} />
-              <LiveCell label="Stealth" value={String(policy.acceptStealth ?? false)} />
-              <LiveCell label="Flags" value={String(policy.flags ?? "0x00")} mono />
+          ) : null}
+        </div>
+        <div className="w-card__body" style={{ padding: 0 }}>
+          {adding ? (
+            <ContactForm
+              onSubmit={onSubmit}
+              onCancel={() => setAdding(false)}
+            />
+          ) : null}
+          {contacts.length === 0 && !adding ? (
+            <div style={{ padding: 16, color: "var(--w-text-3)", fontSize: 13 }}>
+              No contacts yet. Add one above.
             </div>
-          ) : (
-            <div className="row-help">Reads lyth_getAccountPolicy for a pasted address.</div>
+          ) : null}
+          {contacts.map((c) =>
+            editing && editing.id === c.id ? (
+              <ContactEditRow
+                key={c.id}
+                contact={c}
+                onSubmit={(patch) => onEditSubmit(c, patch)}
+                onCancel={() => setEditing(null)}
+              />
+            ) : (
+              <ContactRow
+                key={c.id}
+                contact={c}
+                onEdit={() => setEditing(c)}
+                onDelete={() => onDelete(c)}
+              />
+            ),
           )}
         </div>
       </div>
-
-      <TodoSection
-        title="My contacts"
-        items={[
-          "TODO — list with label · address (or view-key) · last-used",
-          "TODO — search + tag filter",
-          "TODO — pin frequently-used contacts to top",
-          "TODO — quick-send button (opens send modal pre-filled)",
-        ]}
-      />
-
-      <TodoSection
-        title="Add contact"
-        items={[
-          "TODO — paste address · resolve to lyth_getAccountPolicy preview",
-          "TODO — receiver-flag check before allowing private contact (Privacy Rule 3)",
-          "TODO — ENS-equivalent resolver (if/when surfaced)",
-          "TODO — import from CSV / signed contact card",
-        ]}
-      />
-
-      <TodoSection
-        title="Trust signals"
-        items={[
-          "TODO — verified-on-chain badge (lyth_getRegistration match)",
-          "TODO — exchange / contract address warnings",
-          "TODO — sanctions/OFAC check at add time (geofencing per legal-compliance memory)",
-        ]}
-      />
     </div>
   );
 }
 
-function LiveCell({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
+function ContactRow({
+  contact,
+  onEdit,
+  onDelete,
+}: {
+  contact: Contact;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
   return (
-    <div className="w-live-cell">
-      <div className="cap">{label}</div>
-      <div className={mono ? "mono" : ""}>{value}</div>
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "1fr auto auto",
+        gap: 12,
+        alignItems: "center",
+        padding: "10px 14px",
+        borderBottom: "1px solid var(--w-border)",
+      }}
+    >
+      <div>
+        <div style={{ fontSize: 13, fontWeight: 600 }}>{contact.nickname}</div>
+        <div style={{ fontSize: 12, color: "var(--w-text-2)" }}>
+          <Identity addr={contact.addressHex} />
+        </div>
+        {contact.notes ? (
+          <div className="cap" style={{ marginTop: 2 }}>
+            {contact.notes}
+          </div>
+        ) : null}
+      </div>
+      <button className="btn btn--sm btn--ghost" onClick={onEdit}>
+        Edit
+      </button>
+      <button
+        className="btn btn--sm btn--ghost"
+        onClick={onDelete}
+        style={{ color: "var(--alert)" }}
+      >
+        Delete
+      </button>
+    </div>
+  );
+}
+
+function ContactEditRow({
+  contact,
+  onSubmit,
+  onCancel,
+}: {
+  contact: Contact;
+  onSubmit: (patch: Partial<Contact>) => void;
+  onCancel: () => void;
+}) {
+  const [nickname, setNickname] = useState(contact.nickname);
+  const [notes, setNotes] = useState(contact.notes);
+
+  return (
+    <div
+      style={{
+        padding: "10px 14px",
+        borderBottom: "1px solid var(--w-border)",
+        background: "var(--w-surface-2, var(--w-surface))",
+      }}
+    >
+      <label className="cap">Nickname</label>
+      <input
+        className="w-live-input"
+        value={nickname}
+        onChange={(e) => setNickname(e.currentTarget.value)}
+        style={{ marginBottom: 8, marginTop: 4 }}
+      />
+      <label className="cap">Address</label>
+      <div className="mono" style={{ marginBottom: 8, marginTop: 4, fontSize: 12 }}>
+        {formatAddress(contact.addressHex)}
+      </div>
+      <label className="cap">Notes</label>
+      <input
+        className="w-live-input"
+        value={notes}
+        onChange={(e) => setNotes(e.currentTarget.value)}
+        style={{ marginBottom: 8, marginTop: 4 }}
+      />
+      <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+        <button
+          className="btn btn--sm btn--primary"
+          onClick={() => onSubmit({ nickname, notes })}
+          disabled={nickname.trim() === ""}
+        >
+          Save
+        </button>
+        <button className="btn btn--sm btn--ghost" onClick={onCancel}>
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ContactForm({
+  onSubmit,
+  onCancel,
+}: {
+  onSubmit: (args: { nickname: string; addressHex: string; notes: string }) => void;
+  onCancel: () => void;
+}) {
+  const [nickname, setNickname] = useState("");
+  const [addressInput, setAddressInput] = useState("");
+  const [resolvedHex, setResolvedHex] = useState<string | null>(null);
+  const [notes, setNotes] = useState("");
+
+  const canSubmit = nickname.trim() !== "" && resolvedHex !== null;
+
+  const onResolved = useCallback((hex: string | null) => setResolvedHex(hex), []);
+
+  const submit = () => {
+    if (resolvedHex === null) return;
+    onSubmit({ nickname, addressHex: resolvedHex, notes });
+  };
+
+  return (
+    <div
+      style={{
+        padding: 16,
+        borderBottom: "1px solid var(--w-border)",
+        background: "var(--w-surface-2, var(--w-surface))",
+      }}
+    >
+      <label className="cap">Nickname</label>
+      <input
+        className="w-live-input"
+        value={nickname}
+        onChange={(e) => setNickname(e.currentTarget.value)}
+        autoFocus
+        style={{ marginTop: 4, marginBottom: 12 }}
+        placeholder="e.g. Alice (work)"
+      />
+
+      <label className="cap" style={{ display: "block", marginTop: 8 }}>
+        Address — bech32m, hex, or .mono name
+      </label>
+      <div style={{ marginTop: 4, marginBottom: 12 }}>
+        <RecipientInput
+          value={addressInput}
+          onChange={setAddressInput}
+          onResolved={onResolved}
+          ariaLabel="Contact address"
+        />
+      </div>
+
+      <label className="cap" style={{ display: "block" }}>
+        Notes (optional)
+      </label>
+      <input
+        className="w-live-input"
+        value={notes}
+        onChange={(e) => setNotes(e.currentTarget.value)}
+        style={{ marginTop: 4, marginBottom: 12 }}
+        placeholder="e.g. exchange withdrawal"
+      />
+
+      <div style={{ display: "flex", gap: 6 }}>
+        <button
+          className="btn btn--sm btn--primary"
+          onClick={submit}
+          disabled={!canSubmit}
+        >
+          Save contact
+        </button>
+        <button className="btn btn--sm btn--ghost" onClick={onCancel}>
+          Cancel
+        </button>
+      </div>
     </div>
   );
 }
