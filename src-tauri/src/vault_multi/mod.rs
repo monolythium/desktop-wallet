@@ -13,9 +13,11 @@
 // legacy module is reduced to a reference for the migration helper.
 
 pub mod container;
+pub mod mek;
 
 // Re-export the top-level types so call-sites can `use vault_multi::*`.
 pub use container::{
     SealedPayload, VaultArgon2Params, VaultContainerV1, VaultRecord, VaultRecordSummary,
     WrappedKey, CONTAINER_VERSION,
 };
+pub use mek::{derive_mek, generate_mek_salt, verify_password, VaultError};
