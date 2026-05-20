@@ -18,7 +18,6 @@ import { Activity } from "./pages/Activity";
 import { Home } from "./pages/Home";
 import { Settings } from "./pages/Settings";
 import { Stake } from "./pages/Stake";
-import { Tokens } from "./pages/Tokens";
 import { Wallets } from "./pages/Wallets";
 import { OperationsProvider } from "./operations/context";
 
@@ -41,6 +40,7 @@ const AiTrading = lazy(() =>
   import("./pages/AiTrading").then((m) => ({ default: m.AiTrading })),
 );
 const News = lazy(() => import("./pages/News").then((m) => ({ default: m.News })));
+const Tokens = lazy(() => import("./pages/Tokens").then((m) => ({ default: m.Tokens })));
 import { KeychainCallError, PRIMARY_ACCOUNT, unlock } from "./sdk/keychain";
 import "./styles/tokens.css";
 import "./styles/wallet.css";
@@ -157,10 +157,10 @@ export function App() {
           {route === "home" ? <Home denom={denom} goto={setRoute} /> : null}
           {route === "activity" ? <Activity denom={denom} /> : null}
           {route === "wallets" ? <Wallets /> : null}
-          {route === "tokens" ? <Tokens /> : null}
           {route === "stake" ? <Stake /> : null}
           {route === "settings" ? <Settings /> : null}
           <Suspense fallback={<RouteSpinner />}>
+            {route === "tokens" ? <Tokens /> : null}
             {route === "operators" ? <Operators /> : null}
             {route === "names" ? <Names /> : null}
             {route === "contacts" ? <Contacts denom={denom} /> : null}

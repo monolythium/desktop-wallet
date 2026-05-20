@@ -6,15 +6,13 @@ import { useEffect, useState } from "react";
 import { useOperations } from "../operations/context";
 import { loadChainSnapshot } from "../sdk/client";
 import { useChainSnapshot } from "../sdk/useChainSnapshot";
-import { sendLyth } from "../sdk/send";
-import { sendNativeLyth } from "../sdk/native-send";
-import { makeLedgerSigner } from "../sdk/signer";
-import { enumerateDevices, getAddress as ledgerGetAddress } from "../sdk/ledger";
-import { BALANCES, IDENTITY, SEND_DEMO, TOKENS, TXS_PRIVATE, TXS_PUBLIC } from "../data/fixtures";
+import { BALANCES, IDENTITY, TOKENS, TXS_PRIVATE, TXS_PUBLIC } from "../data/fixtures";
 import type { Denom } from "../data/fixtures";
 import { IdentityCard } from "../components/IdentityCard";
 import { PendingTransferBanner } from "../components/PendingTransferBanner";
+import { SendLythForm } from "../components/SendLythForm";
 import { TokenRow } from "../components/TokenRow";
+import { TokenSummaryCard } from "../components/TokenSummaryCard";
 import { TxRow } from "../components/TxRow";
 import { fmt, formatAddress, formatAddressShort } from "../components/format";
 import type { Route } from "../components/types";
@@ -41,6 +39,7 @@ export function Home({ denom, goto }: Props) {
   const bal = BALANCES[denom];
   const [liveTokens, setLiveTokens] = useState<LiveTokenStatus | null>(null);
   const [liveActivity, setLiveActivity] = useState<RpcOutcome<LiveAddressActivityRow[]> | null>(null);
+  const [sendOpen, setSendOpen] = useState(false);
 
   // Live SDK call: chain id + balance for the bound address. The result is
   // surfaced through the topbar (see Topbar.tsx); the hook is mounted here so
@@ -64,97 +63,10 @@ export function Home({ denom, goto }: Props) {
     };
   }, [isPub]);
 
-  // Send LYTH — existing hardware-signer path. The drawer's hardware flow
-  // enumerates the device + confirms the address; once the user approves,
-  // `descriptor.execute()` builds a live TransactionRequest and broadcasts
-  // through `MonolythiumProvider`.
-  const openSend = () => {
-    ops.open({
-      title: `Send ${SEND_DEMO.amountLyth} LYTH`,
-      subtitle: `From ${IDENTITY.handle} via Ledger`,
-      auth: "hardware",
-      ledger: {
-        // Default Ethereum HD path; the drawer surfaces a hard error if
-        // the device-derived address doesn't match `expectedAddress`.
-        // We don't pin `expectedAddress` here yet because the demo
-        // identity address is a fixture — once Stage 5 binds an address
-        // from the unlocked vault, we'll wire that in.
-      },
-      diff: [
-        { k: "From",      v: formatAddress(IDENTITY.address) },
-        { k: "To",        v: formatAddress(SEND_DEMO.to) },
-        { k: "Token",     v: "LYTH" },
-        { k: "Amount",    v: `${SEND_DEMO.amountLyth} LYTH` },
-        { k: "Network",   v: chain.snapshot ? `chain ${chain.snapshot.chainId}` : "(querying)" },
-        { k: "Endpoint",  v: chain.snapshot?.endpoint ?? "(unknown)" },
-      ],
-      effects: [
-        { text: `Releases ${SEND_DEMO.amountLyth} LYTH from the public denomination.` },
-        { text: "Reads sender nonce + EIP-1559 fee data via @monolythium/core-sdk." },
-        { text: "Signs on Ledger device, broadcasts via MonolythiumProvider." },
-      ],
-      execute: async () => {
-        // Enumerate the device the drawer already negotiated, then
-        // build a real ethers Signer over our HID bridge.
-        const devices = await enumerateDevices();
-        const device = devices[0];
-        if (!device) {
-          throw new Error("Ledger detached between auth and execute — reconnect and retry");
-        }
-        const hdPath = "m/44'/60'/0'/0/0";
-        const address = await ledgerGetAddress(device.deviceId, hdPath);
-        const signer = makeLedgerSigner({
-          deviceId: device.deviceId,
-          hdPath,
-          address: address.toLowerCase(),
-        });
-        const result = await sendLyth(signer, {
-          from: address,
-          to: SEND_DEMO.to,
-          amountLyth: SEND_DEMO.amountLyth,
-        });
-        return {
-          headline: `Broadcast ${SEND_DEMO.amountLyth} LYTH`,
-          detail: result.txHash,
-        };
-      },
-    });
-  };
-
-  const openNativeSend = () => {
-    ops.open({
-      title: `Send ${SEND_DEMO.amountLyth} LYTH`,
-      subtitle: "Native ML-DSA encrypted Sprintnet send",
-      auth: "keychain",
-      diff: [
-        { k: "From",      v: "Unlocked vault address" },
-        { k: "To",        v: formatAddress(SEND_DEMO.to) },
-        { k: "Token",     v: "LYTH" },
-        { k: "Amount",    v: `${SEND_DEMO.amountLyth} LYTH` },
-        { k: "Network",   v: chain.snapshot ? `chain ${chain.snapshot.chainId}` : "Sprintnet" },
-        { k: "Endpoint",  v: chain.snapshot?.endpoint ?? "(default RPC)" },
-      ],
-      effects: [
-        { text: "Unlocks the local vault for this operation only." },
-        { text: "Derives an ML-DSA-65 signer with @monolythium/core-sdk/crypto." },
-        { text: "Wraps the native transaction in an encrypted envelope and submits lyth_submitEncrypted." },
-      ],
-      execute: async (ctx) => {
-        if (!ctx?.vaultSeed) {
-          throw new Error("vault seed unavailable after keychain authorization");
-        }
-        const result = await sendNativeLyth({
-          seed: ctx.vaultSeed,
-          to: SEND_DEMO.to,
-          amountLyth: SEND_DEMO.amountLyth,
-        });
-        return {
-          headline: `Broadcast ${SEND_DEMO.amountLyth} LYTH`,
-          detail: `${result.txHash} · from ${result.from}`,
-        };
-      },
-    });
-  };
+  // Send LYTH now flows through `<SendLythForm />` (inline reveal),
+  // which builds the OperationsDrawer descriptor from real recipient
+  // + amount inputs (RecipientInput + decimal amount). The two old
+  // SEND_DEMO-fixture handlers have been removed.
 
   const openReceive = () => {
     ops.open({
@@ -239,20 +151,16 @@ export function Home({ denom, goto }: Props) {
         </div>
 
         <div className="w-hero__bar">
-          <button className="w-hbtn w-hbtn--primary" onClick={openSend}>
+          <button
+            className="w-hbtn w-hbtn--primary"
+            onClick={() => setSendOpen((v) => !v)}
+            aria-expanded={sendOpen}
+          >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="m22 2-7 20-4-9-9-4Z" />
               <path d="M22 2 11 13" />
             </svg>
-            <span>Send</span>
-          </button>
-          <button className="w-hbtn" onClick={openNativeSend}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M12 2v20" />
-              <path d="m17 5-5-3-5 3" />
-              <path d="m17 19-5 3-5-3" />
-            </svg>
-            <span>Native</span>
+            <span>{sendOpen ? "Close" : "Send LYTH"}</span>
           </button>
           <button className="w-hbtn" onClick={openReceive}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -277,7 +185,16 @@ export function Home({ denom, goto }: Props) {
         />
       </div>
 
+      {isPub && sendOpen ? (
+        <SendLythForm
+          balanceLyth={chain.snapshot?.balanceLyth ?? bal.amount}
+          onClose={() => setSendOpen(false)}
+        />
+      ) : null}
+
       {isPub ? <IdentityCard address={IDENTITY.address} goto={goto} /> : null}
+
+      {isPub ? <TokenSummaryCard goto={goto} /> : null}
 
       {isPub ? (
         <div className="w-grid-2">
