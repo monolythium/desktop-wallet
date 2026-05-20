@@ -9,7 +9,7 @@
 // signer.
 
 use std::sync::Arc;
-use tauri::Manager;
+use tauri::{Emitter, Manager, WindowEvent};
 use tokio::sync::Mutex;
 
 mod keychain;
@@ -23,6 +23,29 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .on_window_event(|window, event| {
+            // Phase 5 — cross-platform proxy for "user stepped away."
+            // We emit a Tauri event the TS shell listens to; useVaults
+            // calls `vault.lock()` so the in-memory MEK is wiped.
+            //
+            // The truly OS-level signals (Windows session-lock,
+            // macOS will-sleep, Linux logind PrepareForSleep) need
+            // platform-specific bindings — surfaced as GAP #D18 in
+            // the Phase 5 final report. Window-focus loss is a
+            // reasonable proxy that works without extra deps and
+            // covers alt-tab / app-switch / Cmd+H / system-lock
+            // (which always blurs the window first on every OS
+            // we ship).
+            match event {
+                WindowEvent::Focused(false) => {
+                    let _ = window.emit("vault://focus-lost", ());
+                }
+                WindowEvent::CloseRequested { .. } => {
+                    let _ = window.emit("vault://window-closing", ());
+                }
+                _ => {}
+            }
+        })
         .manage(ledger_state)
         .invoke_handler(tauri::generate_handler![
             keychain::keychain_unlock,
