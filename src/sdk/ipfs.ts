@@ -37,20 +37,72 @@ export class IpfsResolveError extends Error {
 
 // ─── Gateway list ──────────────────────────────────────────────────
 
-/** Ordered list of IPFS gateways tried in sequence on each metadata
- *  fetch. The first one to return a 2xx with valid JSON wins. */
-export const IPFS_GATEWAYS = [
+/** Default (built-in) gateway list. The user-configurable override
+ *  lives in localStorage; `getIpfsGateways()` returns the override
+ *  when set, otherwise this default. */
+export const IPFS_GATEWAYS_DEFAULT = [
   "https://ipfs.io/ipfs/",
   "https://cloudflare-ipfs.com/ipfs/",
   "https://gateway.pinata.cloud/ipfs/",
 ] as const;
 
+/** Backwards-compat alias for callers that pre-date the user-config
+ *  override (Phase 5 closure #D15). New code should call
+ *  `getIpfsGateways()`. */
+export const IPFS_GATEWAYS: readonly string[] = IPFS_GATEWAYS_DEFAULT;
+
+/** localStorage key for the user-configured gateway list. Phase 5 #D15
+ *  closure — the user can reorder or replace the default chain when a
+ *  particular gateway rate-limits them. */
+const STORAGE_KEY_GATEWAYS = "mono.ipfs.gateways.v1";
+
+/** Read the current gateway list. Returns the user override when
+ *  configured (must be a non-empty string array); falls back to
+ *  `IPFS_GATEWAYS_DEFAULT` otherwise. */
+export function getIpfsGateways(): readonly string[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_GATEWAYS);
+    if (!raw) return IPFS_GATEWAYS_DEFAULT;
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return IPFS_GATEWAYS_DEFAULT;
+    const cleaned = parsed.filter(
+      (g): g is string =>
+        typeof g === "string" &&
+        (g.startsWith("https://") || g.startsWith("http://")) &&
+        g.length > 0,
+    );
+    return cleaned.length > 0 ? cleaned : IPFS_GATEWAYS_DEFAULT;
+  } catch {
+    return IPFS_GATEWAYS_DEFAULT;
+  }
+}
+
+/** Persist a user-configured gateway list. Each entry must be a
+ *  fully-qualified URL ending with `/ipfs/`. Pass an empty array (or
+ *  call `resetIpfsGateways()`) to revert to the default chain. */
+export function setIpfsGateways(gateways: readonly string[]): void {
+  try {
+    localStorage.setItem(STORAGE_KEY_GATEWAYS, JSON.stringify(gateways));
+  } catch {
+    // ignore
+  }
+}
+
+/** Revert to the built-in default chain. */
+export function resetIpfsGateways(): void {
+  try {
+    localStorage.removeItem(STORAGE_KEY_GATEWAYS);
+  } catch {
+    // ignore
+  }
+}
+
 /** Fetch timeout per gateway attempt (ms). */
 export const IPFS_FETCH_TIMEOUT_MS = 8_000;
 
 /** Rewrite an `ipfs://<cid>/path` URI to a gateway URL. Returns the
- *  rewritten URL plus the index in IPFS_GATEWAYS so the caller can
- *  iterate fallbacks. */
+ *  rewritten URL plus the index in the active gateway list so the
+ *  caller can iterate fallbacks. */
 export function rewriteIpfsUri(uri: string, gatewayIndex: number): string {
   // Accept `ipfs://CID/path` and `ipfs://ipfs/CID/path` (some pin
   // services emit the latter).
@@ -58,9 +110,10 @@ export function rewriteIpfsUri(uri: string, gatewayIndex: number): string {
   if (!uri.startsWith(prefix)) return uri;
   let rest = uri.slice(prefix.length);
   if (rest.startsWith("ipfs/")) rest = rest.slice(5);
-  const gateway = IPFS_GATEWAYS[gatewayIndex];
+  const gateways = getIpfsGateways();
+  const gateway = gateways[gatewayIndex];
   if (!gateway) {
-    return (IPFS_GATEWAYS[0] ?? "https://ipfs.io/ipfs/") + rest;
+    return (gateways[0] ?? "https://ipfs.io/ipfs/") + rest;
   }
   return gateway + rest;
 }
@@ -195,7 +248,10 @@ async function fetchWithGatewayFallback(
   fetchImpl: typeof fetch,
 ): Promise<NftMetadata> {
   let lastError: IpfsResolveError | null = null;
-  for (let i = 0; i < IPFS_GATEWAYS.length; i += 1) {
+  // Re-read the gateway list per call so a user reorder takes effect
+  // immediately for subsequent fetches (no remount required).
+  const gateways = getIpfsGateways();
+  for (let i = 0; i < gateways.length; i += 1) {
     const url = rewriteIpfsUri(ipfsUri, i);
     try {
       return await fetchJson(url, fetchImpl);
