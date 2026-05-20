@@ -12,6 +12,7 @@ import { IdentityCard } from "../components/IdentityCard";
 import { PendingTransferBanner } from "../components/PendingTransferBanner";
 import { SendLythForm } from "../components/SendLythForm";
 import { TokenRow } from "../components/TokenRow";
+import { TokenSummaryCard } from "../components/TokenSummaryCard";
 import { TxRow } from "../components/TxRow";
 import { fmt, formatAddress, formatAddressShort } from "../components/format";
 import type { Route } from "../components/types";
@@ -192,6 +193,8 @@ export function Home({ denom, goto }: Props) {
       ) : null}
 
       {isPub ? <IdentityCard address={IDENTITY.address} goto={goto} /> : null}
+
+      {isPub ? <TokenSummaryCard goto={goto} /> : null}
 
       {isPub ? (
         <div className="w-grid-2">
