@@ -16,6 +16,7 @@ import {
   deleteVault,
   listVaults,
   lockVault,
+  migrateLegacyVault,
   renameVault,
   selectVault,
   unlockVaultMulti,
@@ -237,6 +238,65 @@ describe("vault-multi · deleteVault", () => {
     } catch (cause) {
       expect((cause as MultiVaultCallError).cause.code).toBe("invalid_argument");
     }
+  });
+});
+
+describe("vault-multi · migrateLegacyVault", () => {
+  it("rejects wrong-length seed locally", async () => {
+    try {
+      await migrateLegacyVault({
+        seed: new Uint8Array(16),
+        password: "hunter2",
+        label: "Primary",
+        address: "0xaaaa",
+      });
+      expect.unreachable();
+    } catch (cause) {
+      expect((cause as MultiVaultCallError).cause.code).toBe("invalid_argument");
+    }
+    expect(invokeMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects empty password locally", async () => {
+    try {
+      await migrateLegacyVault({
+        seed: new Uint8Array(32),
+        password: "",
+        label: "P",
+        address: "0xa",
+      });
+      expect.unreachable();
+    } catch (cause) {
+      expect((cause as MultiVaultCallError).cause.code).toBe("invalid_argument");
+    }
+  });
+
+  it("invokes vault_migrate_legacy with the right args", async () => {
+    invokeMock.mockResolvedValueOnce({
+      id: "new",
+      label: "Primary",
+      address: "0xaaaa",
+      created_at: 1000,
+      is_active: true,
+    });
+    const seed = new Uint8Array(32);
+    seed[0] = 0xab;
+    const out = await migrateLegacyVault({
+      seed,
+      password: "hunter2",
+      label: "Primary",
+      address: "0xaaaa",
+    });
+    expect(out.id).toBe("new");
+    expect(invokeMock).toHaveBeenCalledWith(
+      "vault_migrate_legacy",
+      expect.objectContaining({
+        password: "hunter2",
+        label: "Primary",
+        address: "0xaaaa",
+        seed: expect.any(Array),
+      }),
+    );
   });
 });
 

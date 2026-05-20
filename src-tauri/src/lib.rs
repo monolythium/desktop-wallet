@@ -38,6 +38,7 @@ pub fn run() {
             vault_multi::commands::vault_create_multi,
             vault_multi::commands::vault_rename,
             vault_multi::commands::vault_delete,
+            vault_multi::commands::vault_migrate_legacy,
             ledger::ledger_enumerate_devices,
             ledger::ledger_get_address,
             ledger::ledger_sign_transaction,

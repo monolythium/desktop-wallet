@@ -568,6 +568,73 @@ pub async fn vault_delete(
     vault_delete_impl(&mut inner, &vault_id, &confirm_token)
 }
 
+/// Lazy migration of the legacy single-vault blob into the v1
+/// container. The TS side unseals the legacy blob first (using the
+/// existing `vault_unlock` from `vault.rs`), then hands the recovered
+/// seed + the master password + label + address here. Persists the
+/// new container; subsequent unlocks go through the v1 path.
+///
+/// Returns the freshly-active vault's summary.
+#[tauri::command]
+pub async fn vault_migrate_legacy(
+    seed: Vec<u8>,
+    password: String,
+    label: String,
+    address: String,
+    store: tauri::State<'_, VaultStore>,
+) -> Result<VaultRecordSummary, VaultError> {
+    if seed.len() != 32 {
+        return Err(VaultError::InvalidArgument {
+            message: format!("seed must be 32 bytes, got {}", seed.len()),
+        });
+    }
+    let mut seed_arr = [0u8; 32];
+    seed_arr.copy_from_slice(&seed);
+    let now_unix = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let mut inner = store.0.lock().await;
+    // Refuse if a container already exists — migration must not
+    // clobber a real v1 container. UI should never call this in that
+    // state, but defensive.
+    if inner.container_path.exists() {
+        seed_arr.iter_mut().for_each(|b| *b = 0);
+        return Err(VaultError::InvalidArgument {
+            message: "container already exists; refusing to overwrite".into(),
+        });
+    }
+    let result = (|| -> Result<VaultRecordSummary, VaultError> {
+        let container = super::migration::build_migrated_container(
+            &seed_arr,
+            password.as_bytes(),
+            &label,
+            &address,
+            now_unix,
+        )?;
+        let active_id = container.active_id.clone().ok_or(VaultError::Backend {
+            message: "migration produced container without active_id".into(),
+        })?;
+        inner.container = Some(container);
+        // Re-derive + cache MEK so the user is unlocked immediately
+        // post-migration.
+        let new_container = inner.container.as_ref().expect("just set");
+        let mek = super::mek::verify_password(new_container, password.as_bytes())?;
+        inner.mek = Some(mek);
+        inner.save()?;
+        let summary = inner
+            .container
+            .as_ref()
+            .expect("just saved")
+            .find(&active_id)
+            .expect("active present")
+            .summary(true);
+        Ok(summary)
+    })();
+    seed_arr.iter_mut().for_each(|b| *b = 0);
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
