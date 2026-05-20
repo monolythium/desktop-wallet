@@ -39,6 +39,10 @@ pub fn wrap_vek(vek: &[u8; 32], mek: &[u8; 32]) -> Result<WrappedKey, VaultError
 /// `VaultError::WrongPassword` for timing-safe parity. On success,
 /// returns the VEK wrapped in `Zeroizing<[u8; 32]>` — callers should
 /// keep the lifetime as short as possible.
+///
+/// Used by the operation-execution path (next commits) + the migration
+/// helper (Commit 9).
+#[allow(dead_code)]
 pub fn unwrap_vek(
     wrapped: &WrappedKey,
     mek: &[u8; 32],
@@ -65,6 +69,10 @@ pub fn seal_payload(payload: &[u8], vek: &[u8; 32]) -> Result<SealedPayload, Vau
 /// Open `sealed` under `vek`. AEAD failures collapse to
 /// `VaultError::WrongPassword` for parity. Returns the plaintext
 /// wrapped in `Zeroizing<Vec<u8>>`.
+///
+/// Used by the operation-execution path (post-Commit-5 callers wire
+/// `unlock-then-open` for signing).
+#[allow(dead_code)]
 pub fn open_payload(
     sealed: &SealedPayload,
     vek: &[u8; 32],
