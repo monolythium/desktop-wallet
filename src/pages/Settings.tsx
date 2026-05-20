@@ -5,6 +5,7 @@ import { useState } from "react";
 import { IDENTITY } from "../data/fixtures";
 import { useOperations } from "../operations/context";
 import { formatAddress } from "../components/format";
+import { VaultsPanel } from "../components/VaultsPanel";
 
 export function Settings() {
   const ops = useOperations();
@@ -60,6 +61,8 @@ export function Settings() {
           />
         </div>
       </div>
+
+      <VaultsPanel />
 
       <div className="w-card">
         <div className="w-card__head"><h3>Security</h3></div>
