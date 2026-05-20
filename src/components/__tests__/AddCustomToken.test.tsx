@@ -13,19 +13,20 @@ let supports721 = false;
 let supports1155 = false;
 let meta: { name: string; symbol: string; decimals: number } | null = null;
 
-vi.mock("../../sdk/erc721", async () => {
-  const actual = await vi.importActual<typeof import("../../sdk/erc721")>("../../sdk/erc721");
+vi.mock("../../sdk/token-classify", async () => {
   return {
-    ...actual,
-    supportsErc721: vi.fn(async () => supports721),
-  };
-});
-
-vi.mock("../../sdk/erc1155", async () => {
-  const actual = await vi.importActual<typeof import("../../sdk/erc1155")>("../../sdk/erc1155");
-  return {
-    ...actual,
-    supportsErc1155: vi.fn(async () => supports1155),
+    classifyContract: vi.fn(async () => {
+      if (supports721) {
+        return { kind: "erc721", source: "erc165", reason: "test" };
+      }
+      if (supports1155) {
+        return { kind: "erc1155", source: "erc165", reason: "test" };
+      }
+      if (meta !== null) {
+        return { kind: "erc20", source: "heuristic", reason: "test" };
+      }
+      return { kind: "unknown", source: "unknown", reason: "may not be a token contract" };
+    }),
   };
 });
 

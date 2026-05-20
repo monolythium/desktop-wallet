@@ -87,8 +87,10 @@ export async function loadTokenActivity(
     });
     fromBlock = window.fromBlock;
     if (window.isIncremental) {
-      const prior = readCursor<SerializedActivityRow[]>("activity", holder);
-      priorRows = (prior?.payload ?? []).map(deserializeRow);
+      // Phase 5 #D17 — IDB stores bigints natively via structured
+      // clone, so the cursor payload IS TokenActivityRow[] directly.
+      const prior = readCursor<TokenActivityRow[]>("activity", holder);
+      priorRows = prior?.payload ?? [];
     }
   }
   const blockHexFrom = "0x" + fromBlock.toString(16);
@@ -165,60 +167,18 @@ export async function loadTokenActivity(
     return b.logIndex - a.logIndex;
   });
   // Persist the cursor — cap the cached payload to the most recent
-  // 200 rows so localStorage doesn't bloat across long-running wallets.
+  // 200 rows so the IDB store doesn't bloat across long-running
+  // wallets. Phase 5 #D17: bigints stored natively via the IDB
+  // structured-clone algorithm; no JSON serialization required.
   if (latestBlock !== undefined) {
-    writeCursor<SerializedActivityRow[]>("activity", holder, {
+    writeCursor<TokenActivityRow[]>("activity", holder, {
       lastBlock: latestBlock,
       scannedAtMs: Date.now(),
-      payload: deduped.slice(0, 200).map(serializeRow),
+      payload: deduped.slice(0, 200),
     });
   }
   const limit = options.limit ?? 50;
   return { ok: true, value: deduped.slice(0, limit) };
-}
-
-// ─── Cursor (de)serialization ─────────────────────────────────────
-// `TokenActivityRow` carries bigints which JSON can't round-trip;
-// the cursor payload stores them as strings.
-
-interface SerializedActivityRow {
-  blockNumber: string;
-  txHash: string;
-  logIndex: number;
-  contract: string;
-  kind: TokenActivityKind;
-  direction: TokenActivityDirection;
-  counterparty: string;
-  amount: string;
-  tokenId: string | null;
-}
-
-function serializeRow(row: TokenActivityRow): SerializedActivityRow {
-  return {
-    blockNumber: row.blockNumber.toString(),
-    txHash: row.txHash,
-    logIndex: row.logIndex,
-    contract: row.contract,
-    kind: row.kind,
-    direction: row.direction,
-    counterparty: row.counterparty,
-    amount: row.amount.toString(),
-    tokenId: row.tokenId === null ? null : row.tokenId.toString(),
-  };
-}
-
-function deserializeRow(row: SerializedActivityRow): TokenActivityRow {
-  return {
-    blockNumber: BigInt(row.blockNumber),
-    txHash: row.txHash,
-    logIndex: row.logIndex,
-    contract: row.contract,
-    kind: row.kind,
-    direction: row.direction,
-    counterparty: row.counterparty,
-    amount: BigInt(row.amount),
-    tokenId: row.tokenId === null ? null : BigInt(row.tokenId),
-  };
 }
 
 // ─── Decoder ───────────────────────────────────────────────────────

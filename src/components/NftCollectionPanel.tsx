@@ -30,6 +30,8 @@ import {
   substituteErc1155IdPlaceholder,
 } from "../sdk/erc1155";
 import { resolveTokenUri, type NftMetadata } from "../sdk/ipfs";
+import { projectedTokenIds } from "../sdk/nft-projection";
+import { loadTokenActivity } from "../sdk/token-activity";
 import type { TrackedToken } from "../sdk/token-list";
 import { NftDetail } from "./NftDetail";
 import { NftGallery, type NftGalleryItem } from "./NftGallery";
@@ -209,7 +211,11 @@ async function loadOwnedTokenIds(
   if (token.kind === "erc721") {
     const balOut = await getNftBalance(token.contract, IDENTITY.address);
     const bal = balOut.ok && typeof balOut.value === "bigint" ? balOut.value : 0n;
-    if (bal === 0n) return [];
+    if (bal === 0n) {
+      // Either no holdings OR non-Enumerable collection. Fall through
+      // to projection — Phase 5 #D14 closes this gap.
+      return await projectFallback(token);
+    }
     // Cap at 50 — even Enumerable scans get costly past that.
     const cap = bal > 50n ? 50n : bal;
     const out: NftGalleryItem[] = [];
@@ -220,8 +226,8 @@ async function loadOwnedTokenIds(
         i,
       );
       if (!idOut.ok || typeof idOut.value !== "bigint") {
-        // Non-Enumerable collection — bail to empty + chain-gap copy.
-        return [];
+        // Non-Enumerable collection — fall through to projection.
+        return await projectFallback(token);
       }
       out.push({
         contract: token.contract,
@@ -232,8 +238,54 @@ async function loadOwnedTokenIds(
     }
     return out;
   }
-  // ERC-1155 without preseed → can't enumerate without log scan.
-  return [];
+  // ERC-1155 without preseed — use the projection seam (Phase 5 #D14).
+  return await projectFallback(token);
+}
+
+/**
+ * Phase 5 #D14 closure — project the activity-cursor log payload into
+ * a token-id list for the gallery. Chronological replay of
+ * Transfer / TransferSingle / TransferBatch events yields the
+ * currently-owned set without needing on-chain enumeration.
+ */
+async function projectFallback(token: TrackedToken): Promise<NftGalleryItem[]> {
+  const out = await loadTokenActivity(IDENTITY.address);
+  if (!out.ok || !out.value) return [];
+  const ids = projectedTokenIds(
+    out.value,
+    IDENTITY.address,
+    token.contract,
+    token.kind === "erc1155" ? "erc1155" : "erc721",
+  );
+  if (token.kind === "erc1155") {
+    // Project gives us tokenIds + can be cross-referenced for amount
+    // via a balanceOf round-trip; the loop below re-uses the existing
+    // preseed branch logic for amount lookup.
+    const items: NftGalleryItem[] = [];
+    for (const tokenId of ids.slice(0, 50)) {
+      const balOut = await getMultiTokenBalance(
+        token.contract,
+        IDENTITY.address,
+        tokenId,
+      );
+      const bal = balOut.ok && typeof balOut.value === "bigint" ? balOut.value : 0n;
+      if (bal === 0n) continue;
+      items.push({
+        contract: token.contract,
+        tokenId,
+        metadata: null,
+        amount: bal,
+        loading: true,
+      });
+    }
+    return items;
+  }
+  return ids.slice(0, 50).map((tokenId) => ({
+    contract: token.contract,
+    tokenId,
+    metadata: null,
+    loading: true,
+  }));
 }
 
 async function hydrateMetadata(
