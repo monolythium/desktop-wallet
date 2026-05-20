@@ -3,11 +3,15 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   IPFS_GATEWAYS,
+  IPFS_GATEWAYS_DEFAULT,
   IpfsResolveError,
   _resetIpfsCacheForTest,
+  getIpfsGateways,
+  resetIpfsGateways,
   resolveImageUrl,
   resolveTokenUri,
   rewriteIpfsUri,
+  setIpfsGateways,
 } from "../ipfs";
 
 beforeEach(() => {
@@ -212,5 +216,61 @@ describe("ipfs · resolveImageUrl", () => {
   it("returns null on null / unsupported", () => {
     expect(resolveImageUrl(undefined)).toBeNull();
     expect(resolveImageUrl("ftp://x")).toBeNull();
+  });
+});
+
+describe("ipfs · gateway config (#D15 closure)", () => {
+  beforeEach(() => {
+    resetIpfsGateways();
+  });
+
+  it("returns the default gateway list when nothing persisted", () => {
+    const out = getIpfsGateways();
+    expect(out).toEqual(IPFS_GATEWAYS_DEFAULT);
+  });
+
+  it("round-trips a user-configured list", () => {
+    setIpfsGateways(["https://example.com/ipfs/", "https://other.com/ipfs/"]);
+    expect(getIpfsGateways()).toEqual([
+      "https://example.com/ipfs/",
+      "https://other.com/ipfs/",
+    ]);
+  });
+
+  it("filters non-string / non-URL entries", () => {
+    localStorage.setItem(
+      "mono.ipfs.gateways.v1",
+      JSON.stringify(["https://good.com/ipfs/", 42, "ftp://bad", "https://also-good.com/ipfs/"]),
+    );
+    expect(getIpfsGateways()).toEqual([
+      "https://good.com/ipfs/",
+      "https://also-good.com/ipfs/",
+    ]);
+  });
+
+  it("falls back to default when the persisted list is empty", () => {
+    setIpfsGateways([]);
+    expect(getIpfsGateways()).toEqual(IPFS_GATEWAYS_DEFAULT);
+  });
+
+  it("falls back to default on malformed storage", () => {
+    localStorage.setItem("mono.ipfs.gateways.v1", "{not-json");
+    expect(getIpfsGateways()).toEqual(IPFS_GATEWAYS_DEFAULT);
+  });
+
+  it("uses the configured first gateway in rewriteIpfsUri", () => {
+    setIpfsGateways(["https://custom.gateway/ipfs/"]);
+    const url = rewriteIpfsUri("ipfs://Qm123/file.json", 0);
+    expect(url).toBe("https://custom.gateway/ipfs/Qm123/file.json");
+  });
+
+  it("resetIpfsGateways reverts to defaults", () => {
+    setIpfsGateways(["https://other.gateway/ipfs/"]);
+    resetIpfsGateways();
+    expect(getIpfsGateways()).toEqual(IPFS_GATEWAYS_DEFAULT);
+  });
+
+  it("IPFS_GATEWAYS alias still mirrors the default for backwards compat", () => {
+    expect(IPFS_GATEWAYS).toEqual(IPFS_GATEWAYS_DEFAULT);
   });
 });

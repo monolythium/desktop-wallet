@@ -5,9 +5,14 @@ import { useState } from "react";
 import { IDENTITY } from "../data/fixtures";
 import { useOperations } from "../operations/context";
 import { formatAddress } from "../components/format";
+import { NetworkPanel } from "../components/NetworkPanel";
+import { SecurityPanel } from "../components/SecurityPanel";
+import { VaultsPanel } from "../components/VaultsPanel";
+import { useVaults } from "../sdk/useVaults";
 
 export function Settings() {
   const ops = useOperations();
+  const vaults = useVaults();
   const [currency, setCurrency] = useState("USD");
   const [compound, setCompound] = useState("always");
 
@@ -61,8 +66,16 @@ export function Settings() {
         </div>
       </div>
 
+      <VaultsPanel />
+
+      <SecurityPanel
+        onLockNow={() => vaults.lock()}
+      />
+
+      <NetworkPanel />
+
       <div className="w-card">
-        <div className="w-card__head"><h3>Security</h3></div>
+        <div className="w-card__head"><h3>Key management</h3></div>
         <div className="w-card__body">
           <div className="w-setting-row">
             <div>

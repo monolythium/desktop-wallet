@@ -11,9 +11,12 @@
 // skipping the probe entirely and treating the wallet as already set up.
 
 import { Suspense, lazy, useEffect, useState } from "react";
+import { LockScreen } from "./components/LockScreen";
 import { Onboarding } from "./components/Onboarding";
 import { Sidebar } from "./components/Sidebar";
 import { Topbar } from "./components/Topbar";
+import { getAutoLockMinutes, installIdleTimer } from "./sdk/auto-lock";
+import { useVaults } from "./sdk/useVaults";
 import { Activity } from "./pages/Activity";
 import { Home } from "./pages/Home";
 import { Settings } from "./pages/Settings";
@@ -150,27 +153,119 @@ export function App() {
 
   return (
     <OperationsProvider>
-      <div className="w-app">
-        <Sidebar denom={denom} setDenom={setDenom} route={route} setRoute={setRoute} />
-        <Topbar route={route} />
-        <main className="w-main">
-          {route === "home" ? <Home denom={denom} goto={setRoute} /> : null}
-          {route === "activity" ? <Activity denom={denom} /> : null}
-          {route === "wallets" ? <Wallets /> : null}
-          {route === "stake" ? <Stake /> : null}
-          {route === "settings" ? <Settings /> : null}
-          <Suspense fallback={<RouteSpinner />}>
-            {route === "tokens" ? <Tokens /> : null}
-            {route === "operators" ? <Operators /> : null}
-            {route === "names" ? <Names /> : null}
-            {route === "contacts" ? <Contacts denom={denom} /> : null}
-            {route === "trade" ? <Trade /> : null}
-            {route === "ai-trade" ? <AiTrading /> : null}
-            {route === "news" ? <News /> : null}
-          </Suspense>
-        </main>
-      </div>
+      <Shell
+        route={route}
+        setRoute={setRoute}
+        denom={denom}
+        setDenom={setDenom}
+      />
     </OperationsProvider>
+  );
+}
+
+/** Inner shell — must live below OperationsProvider so any consumer
+ *  can use `useOperations`. Owns the lock-gate and the idle timer. */
+function Shell({
+  route,
+  setRoute,
+  denom,
+  setDenom,
+}: {
+  route: Route;
+  setRoute: (r: Route) => void;
+  denom: Denom;
+  setDenom: (d: Denom) => void;
+}) {
+  const vaults = useVaults();
+
+  // Auto-lock idle timer — re-installs whenever the persisted interval
+  // changes. The interval is read via `getAutoLockMinutes()` rather
+  // than a hook because the SecurityPanel mutates localStorage
+  // directly; a single `useEffect` that depends on the locked state
+  // and re-reads on mount is enough — the user has to be unlocked to
+  // change the interval.
+  useEffect(() => {
+    if (vaults.isLocked) return;
+    const minutes = getAutoLockMinutes();
+    const handle = installIdleTimer(minutes, () => {
+      void vaults.lock();
+    });
+    return () => handle.dispose();
+  }, [vaults.isLocked, vaults.lock]);
+
+  // Lock-on-window-close. The Rust process dies on real close, which
+  // kills the in-memory MEK anyway — but adding the explicit lock()
+  // call covers:
+  //   - dev-mode browser preview where `beforeunload` is the only
+  //     hook we get
+  //   - future multi-window scenarios where one window closing
+  //     shouldn't leave another with a live MEK
+  // The handler is intentionally fire-and-forget (browsers don't
+  // wait for a beforeunload promise).
+  useEffect(() => {
+    const handler = () => {
+      void vaults.lock();
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [vaults.lock]);
+
+  // Phase 5 Commit 12 — listen for the Rust-emitted `vault://focus-lost`
+  // event (window blur). This is the cross-platform proxy for "user
+  // stepped away" — fires when the user alt-tabs, another app takes
+  // focus, or the system locks (which always blurs the active window
+  // first). Truly OS-level events (Windows session-lock / macOS
+  // will-sleep / Linux PrepareForSleep) are GAP #D18.
+  useEffect(() => {
+    if (vaults.isLocked) return;
+    let cancelled = false;
+    let unlisten: (() => void) | null = null;
+    (async () => {
+      try {
+        const { listen } = await import("@tauri-apps/api/event");
+        unlisten = await listen("vault://focus-lost", () => {
+          if (cancelled) return;
+          void vaults.lock();
+        });
+      } catch {
+        // Non-Tauri environment (dev browser preview) — ignore.
+      }
+    })();
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, [vaults.isLocked, vaults.lock]);
+
+  // Lock screen is rendered only when the wallet HAS a vault on disk
+  // AND the in-memory MEK is wiped. First-launch (no vaults) flows
+  // through the onboarding path / the empty-state CTA in the Sidebar.
+  const hasVaults = vaults.state.vaults.length > 0;
+  if (hasVaults && vaults.isLocked) {
+    return <LockScreen />;
+  }
+
+  return (
+    <div className="w-app">
+      <Sidebar denom={denom} setDenom={setDenom} route={route} setRoute={setRoute} />
+      <Topbar route={route} onLockNow={() => void vaults.lock()} />
+      <main className="w-main">
+        {route === "home" ? <Home denom={denom} goto={setRoute} /> : null}
+        {route === "activity" ? <Activity denom={denom} /> : null}
+        {route === "wallets" ? <Wallets /> : null}
+        {route === "stake" ? <Stake /> : null}
+        {route === "settings" ? <Settings /> : null}
+        <Suspense fallback={<RouteSpinner />}>
+          {route === "tokens" ? <Tokens /> : null}
+          {route === "operators" ? <Operators /> : null}
+          {route === "names" ? <Names /> : null}
+          {route === "contacts" ? <Contacts denom={denom} /> : null}
+          {route === "trade" ? <Trade /> : null}
+          {route === "ai-trade" ? <AiTrading /> : null}
+          {route === "news" ? <News /> : null}
+        </Suspense>
+      </main>
+    </div>
   );
 }
 

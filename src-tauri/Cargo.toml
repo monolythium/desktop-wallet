@@ -34,6 +34,11 @@ rand = { version = "0.8", default-features = false, features = ["getrandom"] }
 base64 = { version = "0.22", default-features = false, features = ["alloc"] }
 zeroize = { version = "1", features = ["derive"] }
 
+# UUID-shaped vault ids for the multi-vault container (Phase 5).
+# v4 random ids; `rng-getrandom` reuses the same OsRng path as
+# `rand`'s `OsRng`, so no extra entropy source is added.
+uuid = { version = "1", default-features = false, features = ["v4", "rng-getrandom", "serde"] }
+
 # Ledger hardware signer (Stage 4). HID-only — WebUSB is out of scope.
 # `ledger-transport-hid` brings in `hidapi` which links against the system
 # HIDAPI / IOHIDManager (macOS) / hidraw (Linux) / hid.dll (Windows).

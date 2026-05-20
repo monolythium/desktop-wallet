@@ -108,7 +108,7 @@ describe("Tokens · rendering", () => {
     expect(screen.getByText(/ERC-1155 collections/i)).toBeInTheDocument();
   });
 
-  it("surfaces the [mock] USD tag on each ERC-20 row", async () => {
+  it("renders the chain-gap USD placeholder (em-dash) on each ERC-20 row", async () => {
     addToken({
       contract: "0xa1", kind: "erc20", symbol: "FOO", name: "Foo Token", decimals: 18,
     });
@@ -116,7 +116,11 @@ describe("Tokens · rendering", () => {
     await waitFor(() => {
       expect(screen.getByText("FOO")).toBeInTheDocument();
     });
-    expect(screen.getAllByText(/\[mock\] USD/i).length).toBeGreaterThan(0);
+    // Phase 5 (#D13 closure): chain-gap USD placeholder is "— USD"
+    // with a tooltip explaining the deferral.
+    const cells = screen.getAllByText(/— USD/);
+    expect(cells.length).toBeGreaterThan(0);
+    expect(cells[0]?.getAttribute("title")).toMatch(/Price oracle pending/i);
   });
 });
 
