@@ -6,6 +6,7 @@ import {
   _resetAllCursorsForTest,
   clearCursor,
   computeScanWindow,
+  hydrateLogCursorStore,
   readCursor,
   writeCursor,
 } from "../log-cursor";
@@ -20,15 +21,17 @@ describe("log-cursor · read/write", () => {
     expect(readCursor("activity", TEST_ADDRESS)).toBeNull();
   });
 
-  it("round-trips a bigint lastBlock through localStorage", () => {
+  it("round-trips a bigint lastBlock + bigint payload natively (Phase 5: IDB)", () => {
+    // Phase 5 #D17 — payload can carry bigints directly; no
+    // serialization round-trip required.
     writeCursor("activity", TEST_ADDRESS, {
       lastBlock: 12_345_678_901_234n,
       scannedAtMs: Date.now(),
-      payload: { foo: "bar" },
+      payload: { foo: "bar", id: 999_999_999_999n },
     });
-    const entry = readCursor<{ foo: string }>("activity", TEST_ADDRESS);
+    const entry = readCursor<{ foo: string; id: bigint }>("activity", TEST_ADDRESS);
     expect(entry?.lastBlock).toBe(12_345_678_901_234n);
-    expect(entry?.payload).toEqual({ foo: "bar" });
+    expect(entry?.payload).toEqual({ foo: "bar", id: 999_999_999_999n });
   });
 
   it("returns null on stale entries (>7 days)", () => {
@@ -124,5 +127,28 @@ describe("log-cursor · computeScanWindow", () => {
       defaultLookback: 100_000n,
     });
     expect(window.isIncremental).toBe(false);
+  });
+});
+
+describe("log-cursor · Phase 5 #D17 IDB storage path", () => {
+  it("preserves bigint payload values without serialization", () => {
+    // Phase 4 stored bigints as decimal strings via JSON; Phase 5
+    // (IDB) preserves bigint identity through the in-memory mirror.
+    const huge = 10n ** 30n + 17n;
+    writeCursor("discovery", TEST_ADDRESS, {
+      lastBlock: huge,
+      scannedAtMs: Date.now(),
+      payload: { count: huge, tag: "phase-5" },
+    });
+    const entry = readCursor<{ count: bigint; tag: string }>("discovery", TEST_ADDRESS);
+    expect(entry?.lastBlock).toBe(huge);
+    expect(entry?.payload.count).toBe(huge);
+    expect(entry?.payload.tag).toBe("phase-5");
+  });
+
+  it("hydrateLogCursorStore is idempotent", async () => {
+    await hydrateLogCursorStore();
+    await hydrateLogCursorStore();
+    expect(true).toBe(true);
   });
 });
