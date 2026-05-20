@@ -210,6 +210,33 @@ function Shell({
     return () => window.removeEventListener("beforeunload", handler);
   }, [vaults.lock]);
 
+  // Phase 5 Commit 12 — listen for the Rust-emitted `vault://focus-lost`
+  // event (window blur). This is the cross-platform proxy for "user
+  // stepped away" — fires when the user alt-tabs, another app takes
+  // focus, or the system locks (which always blurs the active window
+  // first). Truly OS-level events (Windows session-lock / macOS
+  // will-sleep / Linux PrepareForSleep) are GAP #D18.
+  useEffect(() => {
+    if (vaults.isLocked) return;
+    let cancelled = false;
+    let unlisten: (() => void) | null = null;
+    (async () => {
+      try {
+        const { listen } = await import("@tauri-apps/api/event");
+        unlisten = await listen("vault://focus-lost", () => {
+          if (cancelled) return;
+          void vaults.lock();
+        });
+      } catch {
+        // Non-Tauri environment (dev browser preview) — ignore.
+      }
+    })();
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, [vaults.isLocked, vaults.lock]);
+
   // Lock screen is rendered only when the wallet HAS a vault on disk
   // AND the in-memory MEK is wiped. First-launch (no vaults) flows
   // through the onboarding path / the empty-state CTA in the Sidebar.
