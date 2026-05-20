@@ -14,6 +14,7 @@
 
 pub mod container;
 pub mod mek;
+pub mod vek;
 
 // Re-export the top-level types so call-sites can `use vault_multi::*`.
 pub use container::{
@@ -21,3 +22,4 @@ pub use container::{
     WrappedKey, CONTAINER_VERSION,
 };
 pub use mek::{derive_mek, generate_mek_salt, verify_password, VaultError};
+pub use vek::{generate_vek, open_payload, seal_payload, unwrap_vek, wrap_vek};
