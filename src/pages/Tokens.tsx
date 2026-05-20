@@ -17,6 +17,7 @@ import { useCallback, useEffect, useState } from "react";
 import { IDENTITY } from "../data/fixtures";
 import { AddCustomToken } from "../components/AddCustomToken";
 import { Identity } from "../components/Identity";
+import { NftCollectionPanel } from "../components/NftCollectionPanel";
 import { SendErc20Form } from "../components/SendErc20Form";
 import {
   formatTokenAmount,
@@ -300,33 +301,44 @@ function NftCollectionRow({
   token: TrackedToken;
   onChanged: () => void;
 }) {
+  const [expanded, setExpanded] = useState(false);
   return (
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns: "auto 1fr auto",
-        gap: 12,
-        alignItems: "center",
-        padding: "10px 14px",
-        borderBottom: "1px solid var(--w-border)",
-      }}
-    >
-      <TokenLogo symbol={token.symbol || token.kind.toUpperCase()} />
-      <div>
-        <div style={{ fontSize: 13, fontWeight: 600 }}>
-          {token.symbol || token.kind.toUpperCase()}{" "}
-          {token.name ? (
-            <span className="cap" style={{ marginLeft: 6, fontWeight: 400 }}>
-              {token.name}
-            </span>
-          ) : null}
+    <>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "auto 1fr auto auto",
+          gap: 12,
+          alignItems: "center",
+          padding: "10px 14px",
+          borderBottom: "1px solid var(--w-border)",
+        }}
+      >
+        <TokenLogo symbol={token.symbol || token.kind.toUpperCase()} />
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 600 }}>
+            {token.symbol || token.kind.toUpperCase()}{" "}
+            {token.name ? (
+              <span className="cap" style={{ marginLeft: 6, fontWeight: 400 }}>
+                {token.name}
+              </span>
+            ) : null}
+          </div>
+          <div className="cap" style={{ marginTop: 2 }}>
+            <Identity addr={token.contract} />
+          </div>
         </div>
-        <div className="cap" style={{ marginTop: 2 }}>
-          <Identity addr={token.contract} />
-        </div>
+        <button
+          className="btn btn--sm btn--ghost"
+          aria-expanded={expanded}
+          onClick={() => setExpanded((v) => !v)}
+        >
+          {expanded ? "▾ Hide" : "▸ View"}
+        </button>
+        <RowActions contract={token.contract} onChanged={onChanged} />
       </div>
-      <RowActions contract={token.contract} onChanged={onChanged} />
-    </div>
+      {expanded ? <NftCollectionPanel token={token} /> : null}
+    </>
   );
 }
 
