@@ -13,6 +13,11 @@ import { AbiCoder } from "ethers";
 import { getProvider } from "./client";
 import { capture, type RpcOutcome } from "./live";
 import {
+  computeScanWindow,
+  readCursor,
+  writeCursor,
+} from "./log-cursor";
+import {
   TOPIC_TRANSFER,
   TOPIC_TRANSFER_BATCH,
   TOPIC_TRANSFER_SINGLE,
@@ -64,6 +69,8 @@ export async function loadTokenActivity(
   const provider = getProvider();
   const client = provider.rpcClient;
   let fromBlock: bigint;
+  let latestBlock: bigint | undefined;
+  let priorRows: TokenActivityRow[] = [];
   if (options.fromBlock !== undefined) {
     fromBlock = options.fromBlock;
   } else {
@@ -71,7 +78,18 @@ export async function loadTokenActivity(
     if (!latestOut.ok || typeof latestOut.value !== "bigint") {
       return { ok: false, error: latestOut.error ?? "ethBlockNumber failed" };
     }
-    fromBlock = latestOut.value > 100_000n ? latestOut.value - 100_000n : 0n;
+    latestBlock = latestOut.value;
+    const window = computeScanWindow({
+      scope: "activity",
+      holder,
+      latestBlock,
+      defaultLookback: 100_000n,
+    });
+    fromBlock = window.fromBlock;
+    if (window.isIncremental) {
+      const prior = readCursor<SerializedActivityRow[]>("activity", holder);
+      priorRows = (prior?.payload ?? []).map(deserializeRow);
+    }
   }
   const blockHexFrom = "0x" + fromBlock.toString(16);
   const blockHexTo =
@@ -125,8 +143,12 @@ export async function loadTokenActivity(
       if (decoded) rows.push(decoded);
     }
   }
+  // Merge in the cursor's prior payload (incremental scans only re-fetch
+  // blocks since the cursor; the older rows live in the cursor payload).
+  rows.push(...priorRows);
+
   // Deduplicate by (txHash, logIndex) — a self-transfer touches both
-  // `from` and `to` queries.
+  // `from` and `to` queries; the cursor merge can also duplicate.
   const seen = new Set<string>();
   const deduped: TokenActivityRow[] = [];
   for (const row of rows) {
@@ -142,8 +164,61 @@ export async function loadTokenActivity(
     }
     return b.logIndex - a.logIndex;
   });
+  // Persist the cursor — cap the cached payload to the most recent
+  // 200 rows so localStorage doesn't bloat across long-running wallets.
+  if (latestBlock !== undefined) {
+    writeCursor<SerializedActivityRow[]>("activity", holder, {
+      lastBlock: latestBlock,
+      scannedAtMs: Date.now(),
+      payload: deduped.slice(0, 200).map(serializeRow),
+    });
+  }
   const limit = options.limit ?? 50;
   return { ok: true, value: deduped.slice(0, limit) };
+}
+
+// ─── Cursor (de)serialization ─────────────────────────────────────
+// `TokenActivityRow` carries bigints which JSON can't round-trip;
+// the cursor payload stores them as strings.
+
+interface SerializedActivityRow {
+  blockNumber: string;
+  txHash: string;
+  logIndex: number;
+  contract: string;
+  kind: TokenActivityKind;
+  direction: TokenActivityDirection;
+  counterparty: string;
+  amount: string;
+  tokenId: string | null;
+}
+
+function serializeRow(row: TokenActivityRow): SerializedActivityRow {
+  return {
+    blockNumber: row.blockNumber.toString(),
+    txHash: row.txHash,
+    logIndex: row.logIndex,
+    contract: row.contract,
+    kind: row.kind,
+    direction: row.direction,
+    counterparty: row.counterparty,
+    amount: row.amount.toString(),
+    tokenId: row.tokenId === null ? null : row.tokenId.toString(),
+  };
+}
+
+function deserializeRow(row: SerializedActivityRow): TokenActivityRow {
+  return {
+    blockNumber: BigInt(row.blockNumber),
+    txHash: row.txHash,
+    logIndex: row.logIndex,
+    contract: row.contract,
+    kind: row.kind,
+    direction: row.direction,
+    counterparty: row.counterparty,
+    amount: BigInt(row.amount),
+    tokenId: row.tokenId === null ? null : BigInt(row.tokenId),
+  };
 }
 
 // ─── Decoder ───────────────────────────────────────────────────────

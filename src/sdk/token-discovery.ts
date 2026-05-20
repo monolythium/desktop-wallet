@@ -26,6 +26,12 @@
 import { keccak256, toUtf8Bytes, zeroPadValue } from "ethers";
 import { getProvider } from "./client";
 import { capture, type RpcOutcome } from "./live";
+import {
+  clearCursor,
+  computeScanWindow,
+  readCursor,
+  writeCursor,
+} from "./log-cursor";
 
 // ─── Topic hashes ──────────────────────────────────────────────────
 
@@ -137,6 +143,11 @@ export async function discoverTokens(
   options: DiscoverOptions = {},
 ): Promise<RpcOutcome<DiscoveredToken[]>> {
   const useCache = options.useCache !== false;
+  // Force-rescan path clears the persisted cursor + cache so the next
+  // pass scans the full default window.
+  if (!useCache) {
+    clearCursor("discovery", holder);
+  }
   if (useCache) {
     const cached = readCache(holder);
     if (cached) return { ok: true, value: cached.tokens };
@@ -145,8 +156,13 @@ export async function discoverTokens(
   const provider = getProvider();
   const client = provider.rpcClient;
 
-  // Resolve scan window if not provided.
+  // Resolve scan window. Caller-provided `fromBlock` wins; otherwise
+  // we consult the persisted cursor — incremental scans only ask the
+  // RPC about blocks since the last successful fetch.
   let fromBlock: bigint;
+  let latestBlock: bigint | undefined;
+  let isIncremental = false;
+  let priorTokens: DiscoveredToken[] = [];
   if (options.fromBlock !== undefined) {
     fromBlock = options.fromBlock;
   } else {
@@ -154,7 +170,19 @@ export async function discoverTokens(
     if (!latestOut.ok || typeof latestOut.value !== "bigint") {
       return { ok: false, error: latestOut.error ?? "ethBlockNumber failed" };
     }
-    fromBlock = latestOut.value > 100_000n ? latestOut.value - 100_000n : 0n;
+    latestBlock = latestOut.value;
+    const window = computeScanWindow({
+      scope: "discovery",
+      holder,
+      latestBlock,
+      defaultLookback: 100_000n,
+    });
+    fromBlock = window.fromBlock;
+    isIncremental = window.isIncremental;
+    if (isIncremental) {
+      const prior = readCursor<DiscoveredToken[]>("discovery", holder);
+      priorTokens = prior?.payload ?? [];
+    }
   }
   const toBlock = options.toBlock ?? "latest";
 
@@ -230,6 +258,14 @@ export async function discoverTokens(
     }
   }
 
+  // Seed the discovery map with the prior cursor payload so an
+  // incremental scan returns the union, not just blocks since cursor.
+  for (const prior of priorTokens) {
+    if (!discovered.has(prior.contract)) {
+      discovered.set(prior.contract, prior.kind);
+    }
+  }
+
   const tokens = Array.from(discovered.entries()).map(
     ([contract, kind]): DiscoveredToken => ({ contract, kind }),
   );
@@ -239,6 +275,16 @@ export async function discoverTokens(
     fromBlock: blockHexFrom,
     tokens,
   });
+
+  // Advance the cursor for the next incremental scan. Only do this
+  // when we know `latestBlock` (caller didn't override the range).
+  if (latestBlock !== undefined) {
+    writeCursor<DiscoveredToken[]>("discovery", holder, {
+      lastBlock: latestBlock,
+      scannedAtMs: Date.now(),
+      payload: tokens,
+    });
+  }
 
   return { ok: true, value: tokens };
 }
