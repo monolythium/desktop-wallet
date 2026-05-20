@@ -5,6 +5,7 @@ import { useState } from "react";
 import { IDENTITY } from "../data/fixtures";
 import { useOperations } from "../operations/context";
 import { formatAddress } from "../components/format";
+import { NetworkPanel } from "../components/NetworkPanel";
 import { SecurityPanel } from "../components/SecurityPanel";
 import { VaultsPanel } from "../components/VaultsPanel";
 import { useVaults } from "../sdk/useVaults";
@@ -70,6 +71,8 @@ export function Settings() {
       <SecurityPanel
         onLockNow={() => vaults.lock()}
       />
+
+      <NetworkPanel />
 
       <div className="w-card">
         <div className="w-card__head"><h3>Key management</h3></div>
