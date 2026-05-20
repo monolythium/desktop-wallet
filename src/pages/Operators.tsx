@@ -19,7 +19,9 @@
 //     `lyth_signingActivity` call returns a window > 0.
 
 import { useEffect, useState } from "react";
+import { ClusterMobilityNotice } from "../components/ClusterMobilityNotice";
 import { ClusterPicker } from "../components/ClusterPicker";
+import { OperatorActivitySparkline } from "../components/OperatorActivitySparkline";
 import { formatAddress, formatAddressShort } from "../components/format";
 import {
   getClusterDetail,
@@ -196,25 +198,32 @@ function ClusterDetailPanel({ detail }: { detail: ClusterDetail }) {
             <span className="w-mock-tag">[chain-gap]</span> {detail.chainGap}
           </div>
         ) : null}
+        <ClusterMobilityNotice clusterIds={[detail.summary.clusterId]} />
       </div>
     </div>
   );
 }
 
 function OperatorListItem({ operator }: { operator: OperatorRow }) {
+  const [expanded, setExpanded] = useState(false);
   const [signing, setSigning] = useState<OperatorSigningActivityResponse | null>(null);
   const [signingError, setSigningError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const loadSigning = async () => {
+  // Lazy-load: the signing-activity RPC is per operator + per N-round
+  // window. We only fire when the row is actually expanded — important
+  // for clusters of 10+ operators where mounting all of them up-front
+  // would generate 10× RPCs at page load.
+  const toggle = async () => {
+    const next = !expanded;
+    setExpanded(next);
+    if (!next || signing !== null || busy) return;
     setBusy(true);
     setSigningError(null);
     // The chain keys signing activity by `authorityIndex`. The
     // OperatorInfoResponse doesn't carry that index directly — we
-    // pass the cluster's authority index when wiring real data. For
-    // Phase 2 we use 0 as a placeholder and surface the chain-gap
-    // note if the lookup fails. The Operators page will refine this
-    // when the chain ships the operator→authorityIndex resolver.
+    // pass 0 as a placeholder until the chain ships the
+    // operator→authorityIndex resolver (GAP #D2 from Phase 2).
     const result = await getOperatorSigningActivity(0, 100);
     if (!result.ok || !result.value) {
       setSigningError(result.error ?? "signing-activity unavailable");
@@ -224,14 +233,23 @@ function OperatorListItem({ operator }: { operator: OperatorRow }) {
     setBusy(false);
   };
 
-  const missRate = signing
-    ? computeMissRate(signing)
-    : null;
+  const missRate = signing ? computeMissRate(signing) : null;
+  const lastSignedRound = signing ? findLastSignedRound(signing) : null;
 
   return (
     <li className="w-operator-row">
       <div className="w-operator-row__head">
         <div className="w-operator-row__id">
+          <button
+            type="button"
+            className="btn btn--sm btn--ghost"
+            aria-expanded={expanded}
+            onClick={() => void toggle()}
+            style={{ marginRight: 6 }}
+            title={expanded ? "Collapse" : "Expand"}
+          >
+            {expanded ? "▾" : "▸"}
+          </button>
           <span title={operator.operatorId}>
             {operator.moniker ?? `op-${formatAddressShort(operator.chainAddress)}`}
           </span>
@@ -263,24 +281,63 @@ function OperatorListItem({ operator }: { operator: OperatorRow }) {
         )}
       </div>
 
-      <div className="w-operator-row__signing">
-        {signing === null && signingError === null ? (
-          <button className="btn btn--sm" onClick={loadSigning} disabled={busy}>
-            {busy ? "Loading…" : "Show signing activity"}
-          </button>
-        ) : null}
-        {signingError ? (
-          <div className="w-live-error">{signingError}</div>
-        ) : null}
-        {signing && missRate !== null ? (
-          <span className="row-help">
-            Miss rate over last {signing.entries.length} rounds:{" "}
-            <b className="mono">{(missRate * 100).toFixed(1)}%</b>
-          </span>
-        ) : null}
-      </div>
+      {expanded ? (
+        <div className="w-operator-row__expansion" style={{ marginTop: 8, paddingTop: 8, borderTop: "1px dashed var(--w-border)" }}>
+          {busy ? (
+            <div className="row-help">Loading signing-activity window…</div>
+          ) : signingError ? (
+            <div className="w-live-error">{signingError}</div>
+          ) : signing ? (
+            <>
+              <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 6 }}>
+                <span className="cap">Last {signing.entries.length} rounds:</span>
+                <OperatorActivitySparkline entries={signing.entries} />
+              </div>
+              <div className="w-live-grid">
+                <LiveCell
+                  label="Miss rate"
+                  value={missRate === null ? null : `${(missRate * 100).toFixed(1)}%`}
+                />
+                <LiveCell
+                  label="Last signed"
+                  value={
+                    lastSignedRound === null
+                      ? null
+                      : `round ${lastSignedRound.toString()}`
+                  }
+                />
+                <LiveCell
+                  label="Current round"
+                  value={signing.currentRound.toString()}
+                />
+                <LiveCell
+                  label="Attestation freshness"
+                  value={null}
+                />
+              </div>
+              <div className="row-help" style={{ marginTop: 8 }}>
+                <span className="w-mock-tag">[chain-gap]</span>{" "}
+                Attestation-quote freshness + per-operator authorityIndex resolver
+                pending (Phase 3 GAP #D11).
+              </div>
+            </>
+          ) : null}
+        </div>
+      ) : null}
     </li>
   );
+}
+
+function findLastSignedRound(activity: OperatorSigningActivityResponse): bigint | null {
+  // Walk entries from highest-round-first; chain emits descending by
+  // convention, but defensive-sort to handle either ordering.
+  let best: bigint | null = null;
+  for (const e of activity.entries) {
+    if (e.status === "signed") {
+      if (best === null || e.round > best) best = e.round;
+    }
+  }
+  return best;
 }
 
 function CapabilityChip({ cap }: { cap: CapabilityBadge }) {

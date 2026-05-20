@@ -1158,3 +1158,23 @@ body[data-denom="private"] .w-nav__item.is-active::before {
   border: 1px solid rgba(var(--gold-glow), 0.25);
   vertical-align: middle;
 }
+
+/* Phase 3 a11y — focus rings for stake / names / contacts surfaces. */
+.w-name-lookup input:focus-visible,
+.w-recipient-input input:focus-visible,
+.w-live-input:focus-visible {
+  outline: 2px solid var(--gold-hi);
+  outline-offset: 1px;
+  border-radius: 4px;
+}
+
+.w-owned-names__row:focus-within {
+  background: rgba(var(--gold-glow), 0.04);
+}
+
+.w-owned-names__menu button:focus-visible,
+.w-operator-row__head button:focus-visible {
+  outline: 2px solid var(--gold-hi);
+  outline-offset: 2px;
+  border-radius: 4px;
+}

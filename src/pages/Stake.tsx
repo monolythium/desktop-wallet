@@ -11,8 +11,9 @@
 // chain-gap reality (no on-chain APR / reputation / uptime yet) is
 // surfaced via the ClusterPicker's [mock] tagging.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { IDENTITY } from "../data/fixtures";
+import { ClusterMobilityNotice } from "../components/ClusterMobilityNotice";
 import { ClusterPicker } from "../components/ClusterPicker";
 import { DelegationsDashboard, type DelegationAction } from "../components/DelegationsDashboard";
 import { RewardCard } from "../components/RewardCard";
@@ -463,6 +464,14 @@ export function Stake() {
     rewards?.perCluster.map((r) => [r.clusterId, r.amountLyth]) ?? [],
   );
 
+  // Cluster ids the user has delegations on — drives the mobility
+  // notice. Memoised so the notice's effect doesn't re-fire each
+  // render.
+  const delegatedClusterIds = useMemo(
+    () => (delegations ?? []).map((d) => d.clusterId),
+    [delegations],
+  );
+
   /** Returns null if the input is valid; otherwise an error string. */
   const validateBps = (): string | null => {
     const n = Number.parseInt(weightBpsInput, 10);
@@ -492,6 +501,11 @@ export function Stake() {
           every margin.
         </div>
       </div>
+
+      <ClusterMobilityNotice
+        clusterIds={delegatedClusterIds}
+        title="Recent membership changes on your clusters"
+      />
 
       {redelegateSource ? (
         <RedelegateCard
@@ -674,13 +688,26 @@ function AutovoteCard({
           {capBps === null ? "no cap" : `${capBps} bps`}), and previews the
           result before signing. Per-user entropy ships in the next commit.
         </div>
-        <div className="w-autovote-buttons">
+        <div
+          className="w-autovote-buttons"
+          role="radiogroup"
+          aria-label="Autovote allocation mode"
+        >
           {buttons.map((b) => (
             <button
               key={b.id}
               type="button"
+              role="radio"
+              aria-checked={mode === b.id}
+              aria-label={`${b.label} — ${b.hint}`}
               className={`w-autovote-btn ${mode === b.id ? "is-on" : ""}`}
               onClick={() => onPickMode(b.id)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  onPickMode(b.id);
+                }
+              }}
               disabled={!clustersReady}
             >
               <div className="label">{b.label}</div>
