@@ -130,7 +130,7 @@ impl VaultStoreInner {
 
     /// Load the container from disk into memory. NoContainer if the
     /// file doesn't exist; Backend on shape failures.
-    fn load(&mut self) -> Result<(), VaultError> {
+    pub(super) fn load(&mut self) -> Result<(), VaultError> {
         if self.container.is_some() {
             return Ok(());
         }
@@ -155,9 +155,37 @@ impl VaultStoreInner {
         }
     }
 
+    /// Same as `load` but treats `NoContainer` as "initialize a
+    /// fresh empty container" rather than an error. Used by Phase 6
+    /// multisig flows that can run before any single-vault exists.
+    pub(super) fn load_or_init(&mut self) -> Result<(), VaultError> {
+        match self.load() {
+            Ok(_) => Ok(()),
+            Err(VaultError::NoContainer) => {
+                let salt = super::mek::generate_mek_salt();
+                let params = super::container::VaultArgon2Params::recommended();
+                let salt_b64 = base64::Engine::encode(
+                    &base64::engine::general_purpose::URL_SAFE_NO_PAD,
+                    salt,
+                );
+                self.container = Some(VaultContainerV1 {
+                    version: super::CONTAINER_VERSION,
+                    mek_salt: salt_b64,
+                    mek_argon_params: params,
+                    vaults: Vec::new(),
+                    multisig_vaults: Vec::new(),
+                    proposals: Vec::new(),
+                    active_id: None,
+                });
+                Ok(())
+            }
+            Err(other) => Err(other),
+        }
+    }
+
     /// Persist the in-memory container to disk atomically (write to
     /// temp + rename).
-    fn save(&self) -> Result<(), VaultError> {
+    pub(super) fn save(&self) -> Result<(), VaultError> {
         let container = self.container.as_ref().ok_or(VaultError::Backend {
             message: "no container to save".into(),
         })?;
