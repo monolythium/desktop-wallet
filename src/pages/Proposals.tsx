@@ -25,11 +25,18 @@ import { useMultisigs, useProposals } from "../sdk/useMultisig";
 import { MultisigInvokeError, type Proposal } from "../sdk/multisig";
 import { fetchAndUnlockVault, PRIMARY_ACCOUNT } from "../sdk/keychain";
 import { MlDsa65Backend } from "@monolythium/core-sdk/crypto";
+import {
+  decodeEnvelope,
+  encodeProposalShare,
+  encodeSignatureShare,
+  signatureBytesFromHex,
+} from "../sdk/offband";
 
 export function Proposals() {
   const multisigs = useMultisigs();
   const active = multisigs.active;
   const proposalsApi = useProposals(active?.id ?? null);
+  const [signExternalOpen, setSignExternalOpen] = useState(false);
 
   if (multisigs.state.status === "loading") {
     return (
@@ -48,12 +55,24 @@ export function Proposals() {
         <h2>Proposals</h2>
         <div className="w-card" style={{ marginTop: 12 }}>
           <div className="w-card__body" style={{ padding: 16 }}>
-            <div className="row-help">
+            <div className="row-help" style={{ marginBottom: 12 }}>
               No multisig vault is active. Switch to a multisig from the
               vault picker (top of the sidebar) to see proposals here.
             </div>
+            <button
+              className="btn btn--sm"
+              onClick={() => setSignExternalOpen(true)}
+            >
+              Sign an external proposal…
+            </button>
           </div>
         </div>
+        {signExternalOpen ? (
+          <SignExternalProposalModal
+            multisigs={multisigs.state.multisigs}
+            onClose={() => setSignExternalOpen(false)}
+          />
+        ) : null}
       </div>
     );
   }
@@ -82,6 +101,20 @@ export function Proposals() {
       >
         <Identity addr={active.address} />
       </div>
+      <div style={{ display: "flex", gap: 6, marginTop: 12 }}>
+        <button
+          className="btn btn--sm"
+          onClick={() => setSignExternalOpen(true)}
+        >
+          Sign an external proposal…
+        </button>
+      </div>
+      {signExternalOpen ? (
+        <SignExternalProposalModal
+          multisigs={multisigs.state.multisigs}
+          onClose={() => setSignExternalOpen(false)}
+        />
+      ) : null}
 
       {proposalsApi.state.status === "error" ? (
         <div className="w-banner error" style={{ marginTop: 12 }}>
@@ -109,6 +142,9 @@ export function Proposals() {
               activeMultisig={active}
               onSign={async (args) => {
                 await proposalsApi.sign(args);
+              }}
+              onImportSignature={async (args) => {
+                await proposalsApi.importSignature(args);
               }}
               onCancel={async (byAddress) => {
                 await proposalsApi.cancel(p.id, byAddress);
@@ -139,6 +175,11 @@ interface ProposalCardProps {
     signerAddress: string;
     signature: Uint8Array;
   }) => Promise<void>;
+  onImportSignature: (args: {
+    proposalId: string;
+    signerAddress: string;
+    signature: Uint8Array;
+  }) => Promise<void>;
   onCancel: (byAddress: string) => Promise<void>;
   onMarkSubmitted: (txHash: string) => Promise<void>;
 }
@@ -147,6 +188,7 @@ function ProposalCard({
   proposal,
   activeMultisig,
   onSign,
+  onImportSignature,
   onCancel,
   onMarkSubmitted,
 }: ProposalCardProps) {
@@ -154,6 +196,8 @@ function ProposalCard({
   const [signOpen, setSignOpen] = useState(false);
   const [cancelOpen, setCancelOpen] = useState(false);
   const [submitOpen, setSubmitOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
 
   const signedAddresses = useMemo(
     () => new Set(proposal.signatures.map((s) => s.signerAddress.toLowerCase())),
@@ -285,6 +329,16 @@ function ProposalCard({
                 Sign as this wallet
               </button>
             ) : null}
+            {!terminal ? (
+              <button className="btn btn--sm" onClick={() => setShareOpen(true)}>
+                Export to co-signer
+              </button>
+            ) : null}
+            {!terminal ? (
+              <button className="btn btn--sm" onClick={() => setImportOpen(true)}>
+                Import signature
+              </button>
+            ) : null}
             {proposal.state === "ready_to_submit" ? (
               <button
                 className="btn btn--sm"
@@ -329,6 +383,23 @@ function ProposalCard({
           onConfirm={async (txHash) => {
             await onMarkSubmitted(txHash);
             setSubmitOpen(false);
+          }}
+        />
+      ) : null}
+      {shareOpen ? (
+        <ShareProposalModal
+          proposal={proposal}
+          onClose={() => setShareOpen(false)}
+        />
+      ) : null}
+      {importOpen ? (
+        <ImportSignatureModal
+          proposal={proposal}
+          activeMultisig={activeMultisig}
+          onClose={() => setImportOpen(false)}
+          onImport={async (args) => {
+            await onImportSignature(args);
+            setImportOpen(false);
           }}
         />
       ) : null}
@@ -615,6 +686,453 @@ function MarkSubmittedModal({
               disabled={busy || !valid}
             >
               Record submission
+            </button>
+            <button className="btn btn--sm btn--ghost" onClick={onClose} disabled={busy}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      </div>
+    </ModalOverlay>
+  );
+}
+
+// ─── Sign an external (received-by-share) proposal ────────────────
+
+function SignExternalProposalModal({
+  multisigs,
+  onClose,
+}: {
+  multisigs: {
+    id: string;
+    label: string;
+    threshold: number;
+    signerCount: number;
+    signers: { id: string; label: string; address: string; kind: "local" | "external" }[];
+  }[];
+  onClose: () => void;
+}) {
+  const [phase, setPhase] = useState<"paste" | "sign" | "envelope">("paste");
+  const [envelopeText, setEnvelopeText] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [parsedShare, setParsedShare] = useState<
+    | {
+        multisigVaultId: string;
+        proposalId: string;
+        payloadHash: string;
+        matchingMultisig: (typeof multisigs)[number];
+      }
+    | null
+  >(null);
+  const [outEnvelope, setOutEnvelope] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  const parseAndSetup = () => {
+    setError(null);
+    let env;
+    try {
+      env = decodeEnvelope(envelopeText);
+    } catch (cause) {
+      setError((cause as Error).message);
+      return;
+    }
+    if (env.kind !== "proposal-share") {
+      setError(
+        `Wrong envelope kind "${env.kind}" — paste a "proposal-share" envelope`,
+      );
+      return;
+    }
+    const match = multisigs.find((m) => m.id === env.multisigVaultId);
+    if (!match) {
+      setError(
+        "The proposal references a multisig vault you don't have on this wallet.",
+      );
+      return;
+    }
+    setParsedShare({
+      multisigVaultId: env.multisigVaultId,
+      proposalId: env.proposalId,
+      payloadHash: env.payloadHash,
+      matchingMultisig: match,
+    });
+    setPhase("sign");
+  };
+
+  const signAndProduceEnvelope = async () => {
+    if (!parsedShare) return;
+    if (!password) {
+      setError("Master password required");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    const seed = await fetchAndUnlockVault(PRIMARY_ACCOUNT, password).catch(
+      (cause) => {
+        setError((cause as Error)?.message ?? String(cause));
+        return null;
+      },
+    );
+    if (!seed) {
+      setBusy(false);
+      return;
+    }
+    try {
+      const backend = MlDsa65Backend.fromSeed(seed);
+      const myAddress = backend.getAddress().toLowerCase();
+      const isMember = parsedShare.matchingMultisig.signers.some(
+        (s) => s.address.toLowerCase() === myAddress,
+      );
+      if (!isMember) {
+        setError("Your active single-vault isn't a signer of that multisig.");
+        return;
+      }
+      const hashHex = parsedShare.payloadHash.startsWith("0x")
+        ? parsedShare.payloadHash.slice(2)
+        : parsedShare.payloadHash;
+      const bytes = new Uint8Array(hashHex.length / 2);
+      for (let i = 0; i < hashHex.length; i += 2) {
+        bytes[i / 2] = Number.parseInt(hashHex.slice(i, i + 2), 16);
+      }
+      const signature = backend.signPrehash(bytes);
+      const envelope = encodeSignatureShare({
+        proposalId: parsedShare.proposalId,
+        signerAddress: myAddress,
+        signature,
+      });
+      setOutEnvelope(envelope);
+      setPhase("envelope");
+    } catch (cause) {
+      setError((cause as Error)?.message ?? String(cause));
+    } finally {
+      seed.fill(0);
+      setBusy(false);
+    }
+  };
+
+  return (
+    <ModalOverlay onDismiss={onClose}>
+      <div className="w-card">
+        <div className="w-card__head">
+          <h3>Sign an external proposal</h3>
+          <button className="btn btn--sm btn--ghost" onClick={onClose}>
+            Cancel
+          </button>
+        </div>
+        <div className="w-card__body">
+          {phase === "paste" ? (
+            <>
+              <div className="row-help" style={{ marginBottom: 12 }}>
+                Paste the proposal-share envelope your co-signer sent. The
+                wallet validates the multisig is one you're a member of
+                before unsealing your seed.
+              </div>
+              <textarea
+                className="w-live-input mono"
+                value={envelopeText}
+                onChange={(e) => setEnvelopeText(e.currentTarget.value)}
+                rows={10}
+                placeholder='{"type":"monolythium.multisig.envelope.v1",...}'
+                style={{
+                  width: "100%",
+                  fontFamily: "var(--f-mono)",
+                  fontSize: 11,
+                  marginBottom: 12,
+                }}
+                spellCheck={false}
+              />
+              {error ? (
+                <div className="w-banner error" style={{ marginBottom: 12 }}>
+                  ✗ {error}
+                </div>
+              ) : null}
+              <div style={{ display: "flex", gap: 6 }}>
+                <button
+                  className="btn btn--sm btn--primary"
+                  onClick={parseAndSetup}
+                  disabled={!envelopeText.trim()}
+                >
+                  Continue
+                </button>
+                <button className="btn btn--sm btn--ghost" onClick={onClose}>
+                  Cancel
+                </button>
+              </div>
+            </>
+          ) : null}
+
+          {phase === "sign" && parsedShare ? (
+            <>
+              <div className="w-kv">
+                <span className="k">Multisig</span>
+                <span className="v">{parsedShare.matchingMultisig.label}</span>
+              </div>
+              <div className="w-kv">
+                <span className="k">Threshold</span>
+                <span className="v">
+                  {parsedShare.matchingMultisig.threshold} of{" "}
+                  {parsedShare.matchingMultisig.signerCount}
+                </span>
+              </div>
+              <div className="cap" style={{ marginTop: 12, marginBottom: 4 }}>
+                Master password
+              </div>
+              <input
+                type="password"
+                className="w-live-input"
+                value={password}
+                onChange={(e) => setPassword(e.currentTarget.value)}
+                autoComplete="current-password"
+                autoFocus
+                disabled={busy}
+                style={{ marginBottom: 8 }}
+              />
+              {error ? (
+                <div className="w-banner error" style={{ marginBottom: 12 }}>
+                  ✗ {error}
+                </div>
+              ) : null}
+              <div style={{ display: "flex", gap: 6 }}>
+                <button
+                  className="btn btn--sm btn--primary"
+                  onClick={() => void signAndProduceEnvelope()}
+                  disabled={busy || !password}
+                >
+                  {busy ? "Signing…" : "Sign"}
+                </button>
+                <button
+                  className="btn btn--sm btn--ghost"
+                  onClick={() => setPhase("paste")}
+                  disabled={busy}
+                >
+                  Back
+                </button>
+              </div>
+            </>
+          ) : null}
+
+          {phase === "envelope" && outEnvelope ? (
+            <>
+              <div className="row-help" style={{ marginBottom: 12 }}>
+                Send this signature envelope back to the proposal creator.
+                Their wallet imports it via "Import signature" to attach.
+              </div>
+              <textarea
+                className="w-live-input mono"
+                value={outEnvelope}
+                readOnly
+                rows={12}
+                style={{
+                  width: "100%",
+                  fontFamily: "var(--f-mono)",
+                  fontSize: 11,
+                  marginBottom: 12,
+                }}
+                spellCheck={false}
+              />
+              <div style={{ display: "flex", gap: 6 }}>
+                <button
+                  className="btn btn--sm btn--primary"
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(outEnvelope);
+                      setCopied(true);
+                      setTimeout(() => setCopied(false), 1500);
+                    } catch {
+                      setCopied(false);
+                    }
+                  }}
+                >
+                  {copied ? "Copied ✓" : "Copy to clipboard"}
+                </button>
+                <button className="btn btn--sm btn--ghost" onClick={onClose}>
+                  Done
+                </button>
+              </div>
+            </>
+          ) : null}
+        </div>
+      </div>
+    </ModalOverlay>
+  );
+}
+
+// ─── Share + Import (off-band coordination) ──────────────────────
+
+function ShareProposalModal({
+  proposal,
+  onClose,
+}: {
+  proposal: Proposal;
+  onClose: () => void;
+}) {
+  const envelope = useMemo(() => encodeProposalShare(proposal), [proposal]);
+  const [copied, setCopied] = useState(false);
+  return (
+    <ModalOverlay onDismiss={onClose}>
+      <div className="w-card">
+        <div className="w-card__head">
+          <h3>Share proposal with a co-signer</h3>
+          <button className="btn btn--sm btn--ghost" onClick={onClose}>
+            Close
+          </button>
+        </div>
+        <div className="w-card__body">
+          <div className="row-help" style={{ marginBottom: 12 }}>
+            Send this text to your co-signer via Signal, email, or any other
+            channel. Their wallet imports it, signs locally, and sends back a
+            signature envelope you import below.
+          </div>
+          <textarea
+            className="w-live-input mono"
+            value={envelope}
+            readOnly
+            rows={12}
+            spellCheck={false}
+            style={{
+              width: "100%",
+              fontFamily: "var(--f-mono)",
+              fontSize: 11,
+              marginBottom: 12,
+            }}
+          />
+          <div style={{ display: "flex", gap: 6 }}>
+            <button
+              className="btn btn--sm btn--primary"
+              onClick={async () => {
+                try {
+                  await navigator.clipboard.writeText(envelope);
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 1500);
+                } catch {
+                  setCopied(false);
+                }
+              }}
+            >
+              {copied ? "Copied ✓" : "Copy to clipboard"}
+            </button>
+            <button className="btn btn--sm btn--ghost" onClick={onClose}>
+              Close
+            </button>
+          </div>
+        </div>
+      </div>
+    </ModalOverlay>
+  );
+}
+
+function ImportSignatureModal({
+  proposal,
+  activeMultisig,
+  onClose,
+  onImport,
+}: {
+  proposal: Proposal;
+  activeMultisig: ProposalCardProps["activeMultisig"];
+  onClose: () => void;
+  onImport: (args: {
+    proposalId: string;
+    signerAddress: string;
+    signature: Uint8Array;
+  }) => Promise<void>;
+}) {
+  const [text, setText] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const submit = async () => {
+    setError(null);
+    let envelope;
+    try {
+      envelope = decodeEnvelope(text);
+    } catch (cause) {
+      setError((cause as Error).message);
+      return;
+    }
+    if (envelope.kind !== "signature") {
+      setError(
+        `Wrong envelope kind "${envelope.kind}" — paste a "signature" envelope`,
+      );
+      return;
+    }
+    if (envelope.proposalId !== proposal.id) {
+      setError(
+        `Envelope is for proposal ${envelope.proposalId.slice(0, 8)}…, not this one`,
+      );
+      return;
+    }
+    const isMember = activeMultisig.signers.some(
+      (s) => s.address.toLowerCase() === envelope.signerAddress,
+    );
+    if (!isMember) {
+      setError(
+        `Signature is from ${envelope.signerAddress.slice(0, 8)}…, who is not a signer of this multisig`,
+      );
+      return;
+    }
+    if (
+      proposal.signatures.some(
+        (s) => s.signerAddress.toLowerCase() === envelope.signerAddress,
+      )
+    ) {
+      setError("That signer has already attached a signature");
+      return;
+    }
+    setBusy(true);
+    try {
+      const sigBytes = signatureBytesFromHex(envelope.signatureHex);
+      await onImport({
+        proposalId: envelope.proposalId,
+        signerAddress: envelope.signerAddress,
+        signature: sigBytes,
+      });
+    } catch (cause) {
+      setError((cause as Error)?.message ?? String(cause));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <ModalOverlay onDismiss={onClose}>
+      <div className="w-card">
+        <div className="w-card__head">
+          <h3>Import a co-signer's signature</h3>
+          <button className="btn btn--sm btn--ghost" onClick={onClose}>
+            Cancel
+          </button>
+        </div>
+        <div className="w-card__body">
+          <div className="row-help" style={{ marginBottom: 12 }}>
+            Paste the signature envelope your co-signer sent back. The
+            wallet validates the envelope type, proposal id, and signer
+            membership before attaching.
+          </div>
+          <textarea
+            className="w-live-input mono"
+            value={text}
+            onChange={(e) => setText(e.currentTarget.value)}
+            rows={10}
+            placeholder='{"type":"monolythium.multisig.envelope.v1",...}'
+            spellCheck={false}
+            style={{
+              width: "100%",
+              fontFamily: "var(--f-mono)",
+              fontSize: 11,
+              marginBottom: 12,
+            }}
+          />
+          {error ? (
+            <div className="w-banner error" style={{ marginBottom: 12 }}>
+              ✗ {error}
+            </div>
+          ) : null}
+          <div style={{ display: "flex", gap: 6 }}>
+            <button
+              className="btn btn--sm btn--primary"
+              onClick={() => void submit()}
+              disabled={busy || !text.trim()}
+            >
+              {busy ? "Attaching…" : "Attach signature"}
             </button>
             <button className="btn btn--sm btn--ghost" onClick={onClose} disabled={busy}>
               Cancel
