@@ -25,6 +25,13 @@ import {
   getAddress as ledgerGetAddress,
   type LedgerDeviceInfo,
 } from "../sdk/ledger";
+import { useMultisigs } from "../sdk/useMultisig";
+import {
+  MultisigInvokeError,
+  proposalAttachSignature,
+  proposalCreate,
+} from "../sdk/multisig";
+import { MlDsa65Backend } from "@monolythium/core-sdk/crypto";
 import type {
   OperationExecutionContext,
   OperationDescriptor,
@@ -78,6 +85,10 @@ type LedgerFlow =
   | { kind: "approved"; device: LedgerDeviceInfo; address: string };
 
 export function OperationsDrawer({ descriptor, onClose }: Props) {
+  const multisigs = useMultisigs();
+  const activeMultisig = multisigs.active;
+  const useProposalRouting =
+    activeMultisig !== null && descriptor.proposal !== undefined;
   const [stage, setStage] = useState<OperationStage>("preview");
   const [result, setResult] = useState<OperationResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -158,7 +169,11 @@ export function OperationsDrawer({ descriptor, onClose }: Props) {
       setAuthBusy(false);
       // Clear the password from state immediately on success.
       setPassword("");
-      void runExecute({ vaultSeed });
+      if (useProposalRouting) {
+        void runProposalCreate(vaultSeed);
+      } else {
+        void runExecute({ vaultSeed });
+      }
       return;
     }
     if (descriptor.auth === "hardware") {
@@ -259,6 +274,78 @@ export function OperationsDrawer({ descriptor, onClose }: Props) {
     }
   };
 
+  /**
+   * Multisig branch — runs in place of `runExecute` when the active vault
+   * is a multisig AND the descriptor advertises proposal routing. Creates
+   * the proposal Rust-side, then signs the proposal's `payload_hash` with
+   * the creator's ML-DSA-65 key and attaches that signature in one round
+   * trip. Co-signers attach later from the Proposals page.
+   */
+  const runProposalCreate = async (seed: Uint8Array) => {
+    if (!activeMultisig || !descriptor.proposal) {
+      setError("proposal routing not applicable");
+      setStage("error");
+      seed.fill(0);
+      return;
+    }
+    setStage("executing");
+    setError(null);
+    try {
+      const backend = MlDsa65Backend.fromSeed(seed);
+      const creatorAddr = backend.getAddress().toLowerCase();
+      const isMember = activeMultisig.signers.some(
+        (s) => s.address.toLowerCase() === creatorAddr,
+      );
+      if (!isMember) {
+        throw new Error(
+          `Your active vault (${creatorAddr.slice(0, 8)}…) isn't a signer of "${activeMultisig.label}".`,
+        );
+      }
+      const proposal = await proposalCreate({
+        multisigVaultId: activeMultisig.id,
+        operation: descriptor.proposal.operation,
+        payload: descriptor.proposal.payload,
+        createdByAddress: creatorAddr,
+      });
+      // Sign the payload_hash with the creator's key and attach.
+      const hashHex = proposal.payloadHash.startsWith("0x")
+        ? proposal.payloadHash.slice(2)
+        : proposal.payloadHash;
+      const hashBytes = new Uint8Array(hashHex.length / 2);
+      for (let i = 0; i < hashHex.length; i += 2) {
+        hashBytes[i / 2] = Number.parseInt(hashHex.slice(i, i + 2), 16);
+      }
+      const signature = backend.signPrehash(hashBytes);
+      const updated = await proposalAttachSignature({
+        proposalId: proposal.id,
+        signerAddress: creatorAddr,
+        signature,
+      });
+      const sigsNeeded = Math.max(
+        0,
+        activeMultisig.threshold - updated.signatures.length,
+      );
+      setResult({
+        headline: "Draft proposal created",
+        detail:
+          sigsNeeded > 0
+            ? `${sigsNeeded} more signature${sigsNeeded === 1 ? "" : "s"} needed`
+            : "Threshold reached — ready to submit",
+        proposalId: updated.id,
+      });
+      setStage("done");
+    } catch (cause) {
+      const message =
+        cause instanceof MultisigInvokeError
+          ? cause.message
+          : (cause as Error)?.message ?? String(cause);
+      setError(message);
+      setStage("error");
+    } finally {
+      seed.fill(0);
+    }
+  };
+
   return (
     <div
       className="w-overlay"
@@ -288,6 +375,12 @@ export function OperationsDrawer({ descriptor, onClose }: Props) {
         <StageRail stage={stage} />
 
         <div className="w-drawer__body">
+          {stage === "preview" && activeMultisig !== null ? (
+            <MultisigBanner
+              activeMultisig={activeMultisig}
+              supportsProposal={descriptor.proposal !== undefined}
+            />
+          ) : null}
           {stage === "preview" ? <PreviewPane descriptor={descriptor} /> : null}
           {stage === "auth" ? (
             <AuthPane
@@ -309,8 +402,24 @@ export function OperationsDrawer({ descriptor, onClose }: Props) {
           {stage === "preview" ? (
             <>
               <button className="btn btn--ghost" onClick={onClose}>Cancel</button>
-              <button className="btn btn--primary" style={{ marginLeft: "auto" }} onClick={advanceFromPreview}>
-                {descriptor.auth === "none" ? "Run" : "Continue"}
+              <button
+                className="btn btn--primary"
+                style={{ marginLeft: "auto" }}
+                onClick={advanceFromPreview}
+                disabled={
+                  activeMultisig !== null && descriptor.proposal === undefined
+                }
+                title={
+                  activeMultisig !== null && descriptor.proposal === undefined
+                    ? "This operation isn't supported on multisig vaults yet."
+                    : undefined
+                }
+              >
+                {useProposalRouting
+                  ? "Continue — create proposal"
+                  : descriptor.auth === "none"
+                    ? "Run"
+                    : "Continue"}
               </button>
             </>
           ) : null}
@@ -392,6 +501,44 @@ function StageRail({ stage }: { stage: OperationStage }) {
           </span>
         );
       })}
+    </div>
+  );
+}
+
+function MultisigBanner({
+  activeMultisig,
+  supportsProposal,
+}: {
+  activeMultisig: { label: string; threshold: number; signerCount: number };
+  supportsProposal: boolean;
+}) {
+  if (!supportsProposal) {
+    return (
+      <div className="w-banner error" style={{ marginBottom: 12 }}>
+        <div style={{ fontWeight: 600, marginBottom: 4 }}>
+          Multisig vault active — operation unavailable
+        </div>
+        <div style={{ fontSize: 12, color: "var(--w-text-2)" }}>
+          The active vault "{activeMultisig.label}" requires{" "}
+          {activeMultisig.threshold} of {activeMultisig.signerCount} signers,
+          and this operation isn't routed through proposals yet. Switch to a
+          single-signer vault to continue.
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="w-banner" style={{ marginBottom: 12 }}>
+      <div style={{ fontWeight: 600, marginBottom: 4 }}>
+        Multisig: drafting a proposal
+      </div>
+      <div style={{ fontSize: 12, color: "var(--w-text-2)" }}>
+        Continuing creates a draft proposal for{" "}
+        <span className="mono">{activeMultisig.label}</span> (
+        {activeMultisig.threshold} of {activeMultisig.signerCount}). Your
+        signature is attached automatically; remaining signers co-sign from
+        the Proposals page.
+      </div>
     </div>
   );
 }
@@ -711,6 +858,14 @@ function DonePane({ descriptor, result }: { descriptor: OperationDescriptor; res
           <div className="cap" style={{ marginBottom: 4 }}>Detail</div>
           <div className="mono" style={{ fontSize: 12, color: "var(--w-text-2)", wordBreak: "break-all" }}>
             {result.detail}
+          </div>
+        </div>
+      ) : null}
+      {result.proposalId ? (
+        <div style={{ marginTop: 14 }}>
+          <div className="cap" style={{ marginBottom: 4 }}>Proposal ID</div>
+          <div className="mono" style={{ fontSize: 11, color: "var(--w-text-2)", wordBreak: "break-all" }}>
+            {result.proposalId}
           </div>
         </div>
       ) : null}
