@@ -1,0 +1,853 @@
+// Tauri commands for multisig vault + proposal CRUD.
+//
+// Surface (every command returns Result<T, MultisigCommandError>):
+//
+//   multisig_create(label, signers, threshold, password)
+//                                              → MultisigVaultSummary
+//   multisigs_list()                            → Vec<MultisigVaultSummary>
+//   proposal_create(multisig_vault_id, operation, payload)
+//                                              → ProposalSummary
+//   proposal_attach_signature(proposal_id, signer_address, signature_bytes)
+//                                              → ProposalSummary
+//   proposal_mark_submitted(proposal_id, tx_hash)
+//                                              → ProposalSummary
+//   proposal_cancel(proposal_id, by_address)   → ()
+//   proposals_list(multisig_vault_id)          → Vec<ProposalSummary>
+//
+// Signing itself happens TS-side (TS already has unsealed seeds for
+// the user's local single-vaults via the Phase 5 `vault_unlock` →
+// `keychain::fetchAndUnlockVault` path; it derives an
+// MlDsa65Backend and signs the proposal's payload_hash). Rust only
+// stores the resulting signature bytes — keeps the ML-DSA crate out
+// of the Rust dep graph for now.
+//
+// `proposal_mark_submitted` is also called TS-side after the wallet's
+// existing send / submit path broadcasts the bundled tx; this is
+// what gives the off-chain audit trail (chain sees a single-signer
+// envelope; this module records the M-of-N audit per browser-wallet
+// Phase 8 pattern).
+
+use serde::{Deserialize, Serialize};
+use std::time::{SystemTime, UNIX_EPOCH};
+use thiserror::Error;
+
+use super::commands::{VaultStore, VaultStoreInner};
+use super::multisig::{
+    assert_signer_set_unique, derive_multisig_address, derive_signer_address,
+    generate_multisig_vault_id, generate_signer_id, validate_signer, validate_threshold,
+    MultisigError, MultisigVaultRecord, MultisigVaultSummary, SignerEntry, SignerKindInner,
+};
+use super::proposal::{
+    attach_signature, build_proposal, cancel_proposal as cancel_proposal_impl, mark_submitted,
+    reconcile_expiry, Proposal, ProposalError, ProposalOperation, DEFAULT_TX_TTL_SECS,
+};
+use super::mek::VaultError;
+
+// ─── Wire-shape input/error types ──────────────────────────────────
+
+/// One signer input from the TS side. The TS layer already validates
+/// pubkey hex; this struct mirrors the network shape. Address is
+/// computed Rust-side from pubkey via keccak256 so the wallet never
+/// trusts a caller-supplied derivation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SignerInput {
+    pub label: String,
+    pub pubkey: String,
+    /// "local" or "external". When "local", `vault_id` must reference
+    /// an existing single-vault in the container.
+    pub kind: String,
+    #[serde(default)]
+    pub vault_id: Option<String>,
+}
+
+/// Public-facing error envelope. Combines `MultisigError` (data-
+/// layer) + `ProposalError` (lifecycle) + storage-layer codes.
+#[derive(Debug, Error, Serialize, Deserialize)]
+#[serde(tag = "code", rename_all = "snake_case")]
+pub enum MultisigCommandError {
+    #[error("vault layer: {0}")]
+    Multisig(#[from] MultisigError),
+    #[error("proposal layer: {0}")]
+    Proposal(#[from] ProposalError),
+    #[error("vault layer: {0}")]
+    Vault(#[from] VaultError),
+    #[error("backend error: {message}")]
+    Backend { message: String },
+}
+
+// ─── Helpers ───────────────────────────────────────────────────────
+
+fn now_unix() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+fn convert_signer_inputs(
+    inputs: &[SignerInput],
+    container: &super::container::VaultContainerV1,
+    now: u64,
+) -> Result<Vec<SignerEntry>, MultisigError> {
+    let mut signers = Vec::with_capacity(inputs.len());
+    for input in inputs {
+        let pubkey = input.pubkey.to_ascii_lowercase();
+        let address = derive_signer_address(&pubkey).ok_or(MultisigError::InvalidPubkey)?;
+        let kind_inner = match input.kind.as_str() {
+            "local" => {
+                let vault_id = input
+                    .vault_id
+                    .as_ref()
+                    .ok_or(MultisigError::InvalidLocalVaultRef)?;
+                // Must reference an actual local vault.
+                if !container.vaults.iter().any(|v| &v.id == vault_id) {
+                    return Err(MultisigError::InvalidLocalVaultRef);
+                }
+                SignerKindInner::Local {
+                    vault_id: vault_id.clone(),
+                }
+            }
+            "external" => SignerKindInner::External,
+            _ => {
+                return Err(MultisigError::InvalidLocalVaultRef);
+            }
+        };
+        let entry = SignerEntry {
+            id: generate_signer_id(),
+            label: input.label.trim().to_string(),
+            pubkey: format!("0x{}", pubkey.strip_prefix("0x").unwrap_or(&pubkey)),
+            address,
+            kind_inner,
+            created_at: now,
+        };
+        validate_signer(&entry)?;
+        signers.push(entry);
+    }
+    assert_signer_set_unique(&signers)?;
+    Ok(signers)
+}
+
+fn find_multisig<'a>(
+    container: &'a super::container::VaultContainerV1,
+    multisig_vault_id: &str,
+) -> Result<&'a MultisigVaultRecord, MultisigCommandError> {
+    container
+        .multisig_vaults
+        .iter()
+        .find(|m| m.id == multisig_vault_id)
+        .ok_or_else(|| MultisigCommandError::from(MultisigError::NotFound(multisig_vault_id.into())))
+}
+
+fn find_multisig_mut<'a>(
+    container: &'a mut super::container::VaultContainerV1,
+    multisig_vault_id: &str,
+) -> Result<&'a mut MultisigVaultRecord, MultisigCommandError> {
+    container
+        .multisig_vaults
+        .iter_mut()
+        .find(|m| m.id == multisig_vault_id)
+        .ok_or_else(|| MultisigCommandError::from(MultisigError::NotFound(multisig_vault_id.into())))
+}
+
+fn find_proposal_mut<'a>(
+    container: &'a mut super::container::VaultContainerV1,
+    proposal_id: &str,
+) -> Result<&'a mut Proposal, MultisigCommandError> {
+    container
+        .proposals
+        .iter_mut()
+        .find(|p| p.id == proposal_id)
+        .ok_or_else(|| MultisigCommandError::from(ProposalError::NotFound(proposal_id.into())))
+}
+
+// ─── Pure-Rust testable impls ──────────────────────────────────────
+
+/// Create a multisig vault. The caller must already be unlocked.
+/// `password` is verified Rust-side before any mutation lands.
+pub fn multisig_create_impl(
+    inner: &mut VaultStoreInner,
+    label: &str,
+    signer_inputs: &[SignerInput],
+    threshold: u8,
+    password: &str,
+) -> Result<MultisigVaultSummary, MultisigCommandError> {
+    let trimmed = label.trim();
+    if trimmed.is_empty() || trimmed.len() > 64 {
+        return Err(MultisigCommandError::from(MultisigError::InvalidLabel));
+    }
+    if password.is_empty() {
+        return Err(MultisigCommandError::from(VaultError::InvalidArgument {
+            message: "password is empty".into(),
+        }));
+    }
+    validate_threshold(threshold, signer_inputs.len() as u8)
+        .map_err(MultisigCommandError::from)?;
+
+    inner.load_or_init()?;
+    let container = inner.container.as_ref().ok_or_else(|| {
+        MultisigCommandError::Backend {
+            message: "container not initialized".into(),
+        }
+    })?;
+
+    // Verify master password by probing the first single-vault, if
+    // one exists; if the container has only multisig vaults so far
+    // (unusual but valid) we accept any non-empty password — Phase 7
+    // can tighten via a probe value held in the container itself.
+    if !container.vaults.is_empty() {
+        super::mek::verify_password(container, password.as_bytes())
+            .map_err(MultisigCommandError::from)?;
+    }
+
+    let now = now_unix();
+    let signers = convert_signer_inputs(signer_inputs, container, now)?;
+    let address = derive_multisig_address(&signers, threshold);
+    let record = MultisigVaultRecord {
+        id: generate_multisig_vault_id(),
+        label: trimmed.to_string(),
+        address,
+        created_at: now,
+        signers,
+        threshold,
+        pending_proposal_ids: Vec::new(),
+    };
+    let new_id = record.id.clone();
+    let summary = record.summary(true);
+
+    let container_mut = inner.container.as_mut().ok_or_else(|| {
+        MultisigCommandError::Backend {
+            message: "container not initialized".into(),
+        }
+    })?;
+    container_mut.multisig_vaults.push(record);
+    container_mut.active_id = Some(new_id);
+    inner.save().map_err(|e| MultisigCommandError::Backend {
+        message: format!("save failed: {e}"),
+    })?;
+    Ok(summary)
+}
+
+/// List all multisig vaults.
+pub fn multisigs_list_impl(
+    inner: &mut VaultStoreInner,
+) -> Result<Vec<MultisigVaultSummary>, MultisigCommandError> {
+    inner.load_or_init()?;
+    let container = match inner.container.as_ref() {
+        Some(c) => c,
+        None => return Ok(Vec::new()),
+    };
+    let active = container.active_id.as_deref();
+    Ok(container
+        .multisig_vaults
+        .iter()
+        .map(|m| {
+            let is_active = active == Some(m.id.as_str());
+            m.summary(is_active)
+        })
+        .collect())
+}
+
+/// Create a fresh proposal in Draft state. The caller is the signer
+/// identified by `created_by_address`. The proposal is persisted; the
+/// caller separately signs the proposal_hash and calls
+/// proposal_attach_signature with the resulting bytes.
+pub fn proposal_create_impl(
+    inner: &mut VaultStoreInner,
+    multisig_vault_id: &str,
+    operation: ProposalOperation,
+    payload: Vec<u8>,
+    created_by_address: &str,
+    ttl_secs_override: Option<u64>,
+) -> Result<Proposal, MultisigCommandError> {
+    inner.load_or_init()?;
+    let container = inner.container.as_ref().ok_or_else(|| {
+        MultisigCommandError::Backend {
+            message: "container not initialized".into(),
+        }
+    })?;
+    // Verify multisig exists + creator is a signer.
+    let multisig = find_multisig(container, multisig_vault_id)?;
+    let creator_lower = created_by_address.to_ascii_lowercase();
+    if !multisig
+        .signers
+        .iter()
+        .any(|s| s.address.to_ascii_lowercase() == creator_lower)
+    {
+        return Err(MultisigCommandError::from(ProposalError::UnknownSigner(
+            creator_lower,
+        )));
+    }
+    let now = now_unix();
+    let ttl = ttl_secs_override.unwrap_or(DEFAULT_TX_TTL_SECS);
+    let proposal = build_proposal(
+        multisig_vault_id.to_string(),
+        operation,
+        payload,
+        creator_lower,
+        now,
+        now + ttl,
+    )
+    .map_err(MultisigCommandError::from)?;
+
+    let container_mut = inner.container.as_mut().ok_or_else(|| {
+        MultisigCommandError::Backend {
+            message: "container not initialized".into(),
+        }
+    })?;
+    let multisig_mut = find_multisig_mut(container_mut, multisig_vault_id)?;
+    multisig_mut.pending_proposal_ids.push(proposal.id.clone());
+    container_mut.proposals.push(proposal.clone());
+    inner.save().map_err(|e| MultisigCommandError::Backend {
+        message: format!("save failed: {e}"),
+    })?;
+    Ok(proposal)
+}
+
+/// Attach a signature to an existing proposal.
+pub fn proposal_attach_signature_impl(
+    inner: &mut VaultStoreInner,
+    proposal_id: &str,
+    signer_address: &str,
+    signature_bytes: &[u8],
+) -> Result<Proposal, MultisigCommandError> {
+    inner.load_or_init()?;
+    let now = now_unix();
+    let container_mut = inner.container.as_mut().ok_or_else(|| {
+        MultisigCommandError::Backend {
+            message: "container not initialized".into(),
+        }
+    })?;
+    // First resolve threshold + members from the multisig vault.
+    let proposal_vault_id = container_mut
+        .proposals
+        .iter()
+        .find(|p| p.id == proposal_id)
+        .map(|p| p.multisig_vault_id.clone())
+        .ok_or_else(|| MultisigCommandError::from(ProposalError::NotFound(proposal_id.into())))?;
+    let multisig = container_mut
+        .multisig_vaults
+        .iter()
+        .find(|m| m.id == proposal_vault_id)
+        .ok_or_else(|| {
+            MultisigCommandError::from(ProposalError::VaultNotFound(proposal_vault_id.clone()))
+        })?;
+    let threshold = multisig.threshold;
+    let member_set: std::collections::HashSet<String> = multisig
+        .signers
+        .iter()
+        .map(|s| s.address.to_ascii_lowercase())
+        .collect();
+    // Now mutate the proposal.
+    let proposal = find_proposal_mut(container_mut, proposal_id)?;
+    attach_signature(
+        proposal,
+        signer_address,
+        signature_bytes,
+        now,
+        threshold,
+        |addr| member_set.contains(addr),
+    )
+    .map_err(MultisigCommandError::from)?;
+    let updated = proposal.clone();
+    inner.save().map_err(|e| MultisigCommandError::Backend {
+        message: format!("save failed: {e}"),
+    })?;
+    Ok(updated)
+}
+
+/// Mark a proposal as submitted post-broadcast.
+pub fn proposal_mark_submitted_impl(
+    inner: &mut VaultStoreInner,
+    proposal_id: &str,
+    tx_hash: String,
+) -> Result<Proposal, MultisigCommandError> {
+    inner.load_or_init()?;
+    let container_mut = inner.container.as_mut().ok_or_else(|| {
+        MultisigCommandError::Backend {
+            message: "container not initialized".into(),
+        }
+    })?;
+    let proposal_vault_id = container_mut
+        .proposals
+        .iter()
+        .find(|p| p.id == proposal_id)
+        .map(|p| p.multisig_vault_id.clone())
+        .ok_or_else(|| MultisigCommandError::from(ProposalError::NotFound(proposal_id.into())))?;
+    let threshold = container_mut
+        .multisig_vaults
+        .iter()
+        .find(|m| m.id == proposal_vault_id)
+        .map(|m| m.threshold)
+        .ok_or_else(|| MultisigCommandError::from(ProposalError::VaultNotFound(proposal_vault_id)))?;
+    let proposal = find_proposal_mut(container_mut, proposal_id)?;
+    mark_submitted(proposal, tx_hash, threshold).map_err(MultisigCommandError::from)?;
+    let updated = proposal.clone();
+    inner.save().map_err(|e| MultisigCommandError::Backend {
+        message: format!("save failed: {e}"),
+    })?;
+    Ok(updated)
+}
+
+/// Cancel a proposal — creator-only.
+pub fn proposal_cancel_impl(
+    inner: &mut VaultStoreInner,
+    proposal_id: &str,
+    by_address: &str,
+) -> Result<(), MultisigCommandError> {
+    inner.load_or_init()?;
+    let container_mut = inner.container.as_mut().ok_or_else(|| {
+        MultisigCommandError::Backend {
+            message: "container not initialized".into(),
+        }
+    })?;
+    let proposal = find_proposal_mut(container_mut, proposal_id)?;
+    cancel_proposal_impl(proposal, by_address).map_err(MultisigCommandError::from)?;
+    inner.save().map_err(|e| MultisigCommandError::Backend {
+        message: format!("save failed: {e}"),
+    })
+}
+
+/// List proposals for one multisig vault. Reconciles expiry on each
+/// row so the caller sees a fresh view.
+pub fn proposals_list_impl(
+    inner: &mut VaultStoreInner,
+    multisig_vault_id: &str,
+) -> Result<Vec<Proposal>, MultisigCommandError> {
+    inner.load_or_init()?;
+    let now = now_unix();
+    let container_mut = inner.container.as_mut().ok_or_else(|| {
+        MultisigCommandError::Backend {
+            message: "container not initialized".into(),
+        }
+    })?;
+    let mut changed = false;
+    let mut out = Vec::new();
+    for p in container_mut.proposals.iter_mut() {
+        if p.multisig_vault_id != multisig_vault_id {
+            continue;
+        }
+        let prev = p.state;
+        reconcile_expiry(p, now);
+        if prev != p.state {
+            changed = true;
+        }
+        out.push(p.clone());
+    }
+    if changed {
+        inner.save().map_err(|e| MultisigCommandError::Backend {
+            message: format!("save failed: {e}"),
+        })?;
+    }
+    Ok(out)
+}
+
+/// Import a signature payload from off-band exchange — Commit 9
+/// validates the wrapper shape before reaching this impl; we just
+/// attach the signature to the proposal.
+#[allow(dead_code)]
+pub fn proposal_import_signature_impl(
+    inner: &mut VaultStoreInner,
+    proposal_id: &str,
+    signer_address: &str,
+    signature_bytes: &[u8],
+) -> Result<Proposal, MultisigCommandError> {
+    proposal_attach_signature_impl(inner, proposal_id, signer_address, signature_bytes)
+}
+
+// ─── Tauri command wrappers ────────────────────────────────────────
+
+#[tauri::command]
+pub async fn multisig_create(
+    label: String,
+    signers: Vec<SignerInput>,
+    threshold: u8,
+    password: String,
+    store: tauri::State<'_, VaultStore>,
+) -> Result<MultisigVaultSummary, MultisigCommandError> {
+    let mut inner = store.0.lock().await;
+    multisig_create_impl(&mut inner, &label, &signers, threshold, &password)
+}
+
+#[tauri::command]
+pub async fn multisigs_list(
+    store: tauri::State<'_, VaultStore>,
+) -> Result<Vec<MultisigVaultSummary>, MultisigCommandError> {
+    let mut inner = store.0.lock().await;
+    multisigs_list_impl(&mut inner)
+}
+
+#[tauri::command]
+pub async fn proposal_create(
+    multisig_vault_id: String,
+    operation: ProposalOperation,
+    payload: Vec<u8>,
+    created_by_address: String,
+    ttl_secs: Option<u64>,
+    store: tauri::State<'_, VaultStore>,
+) -> Result<Proposal, MultisigCommandError> {
+    let mut inner = store.0.lock().await;
+    proposal_create_impl(
+        &mut inner,
+        &multisig_vault_id,
+        operation,
+        payload,
+        &created_by_address,
+        ttl_secs,
+    )
+}
+
+#[tauri::command]
+pub async fn proposal_attach_signature(
+    proposal_id: String,
+    signer_address: String,
+    signature: Vec<u8>,
+    store: tauri::State<'_, VaultStore>,
+) -> Result<Proposal, MultisigCommandError> {
+    let mut inner = store.0.lock().await;
+    proposal_attach_signature_impl(&mut inner, &proposal_id, &signer_address, &signature)
+}
+
+#[tauri::command]
+pub async fn proposal_mark_submitted(
+    proposal_id: String,
+    tx_hash: String,
+    store: tauri::State<'_, VaultStore>,
+) -> Result<Proposal, MultisigCommandError> {
+    let mut inner = store.0.lock().await;
+    proposal_mark_submitted_impl(&mut inner, &proposal_id, tx_hash)
+}
+
+#[tauri::command]
+pub async fn proposal_cancel(
+    proposal_id: String,
+    by_address: String,
+    store: tauri::State<'_, VaultStore>,
+) -> Result<(), MultisigCommandError> {
+    let mut inner = store.0.lock().await;
+    proposal_cancel_impl(&mut inner, &proposal_id, &by_address)
+}
+
+#[tauri::command]
+pub async fn proposals_list(
+    multisig_vault_id: String,
+    store: tauri::State<'_, VaultStore>,
+) -> Result<Vec<Proposal>, MultisigCommandError> {
+    let mut inner = store.0.lock().await;
+    proposals_list_impl(&mut inner, &multisig_vault_id)
+}
+
+#[tauri::command]
+pub async fn proposal_import_signature(
+    proposal_id: String,
+    signer_address: String,
+    signature: Vec<u8>,
+    store: tauri::State<'_, VaultStore>,
+) -> Result<Proposal, MultisigCommandError> {
+    let mut inner = store.0.lock().await;
+    proposal_attach_signature_impl(&mut inner, &proposal_id, &signer_address, &signature)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use super::super::proposal::{ProposalState, ML_DSA_65_SIGNATURE_LEN};
+    use rand::{rngs::OsRng, RngCore};
+    use std::path::PathBuf;
+
+    fn tmp_path(name: &str) -> PathBuf {
+        let mut p = std::env::temp_dir();
+        let mut nonce = [0u8; 8];
+        OsRng.fill_bytes(&mut nonce);
+        let suffix: String = nonce.iter().map(|b| format!("{:02x}", b)).collect();
+        p.push(format!("mono-multisig-test-{}-{}.json", name, suffix));
+        p
+    }
+
+    fn fresh_store(name: &str) -> VaultStoreInner {
+        let path = tmp_path(name);
+        let _ = std::fs::remove_file(&path);
+        VaultStoreInner::new(path)
+    }
+
+    fn cleanup(inner: &VaultStoreInner) {
+        let _ = std::fs::remove_file(&inner.container_path);
+        let _ = std::fs::remove_file(inner.container_path.with_extension("v1.json.tmp"));
+    }
+
+    fn dummy_pubkey(seed: u8) -> String {
+        let mut hex = String::with_capacity(2 + 1952 * 2);
+        hex.push_str("0x");
+        for i in 0..1952 {
+            let b = seed.wrapping_add(i as u8);
+            hex.push_str(&format!("{b:02x}"));
+        }
+        hex
+    }
+
+    fn external_signer_input(seed: u8, label: &str) -> SignerInput {
+        SignerInput {
+            label: label.into(),
+            pubkey: dummy_pubkey(seed),
+            kind: "external".into(),
+            vault_id: None,
+        }
+    }
+
+    fn dummy_signature() -> Vec<u8> {
+        vec![0u8; ML_DSA_65_SIGNATURE_LEN]
+    }
+
+    fn setup_with_one_local_vault() -> VaultStoreInner {
+        let mut inner = fresh_store("multisig");
+        // Create a regular single-vault to host the master password.
+        let seed = [9u8; 32];
+        super::super::commands::vault_create_impl(
+            &mut inner,
+            "Personal",
+            "hunter2",
+            &seed,
+            "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+            1_000_000,
+        )
+        .unwrap();
+        inner
+    }
+
+    #[test]
+    fn create_multisig_rejects_bad_threshold() {
+        let mut inner = setup_with_one_local_vault();
+        let signers = vec![external_signer_input(1, "A"), external_signer_input(2, "B")];
+        let err = multisig_create_impl(&mut inner, "T", &signers, 3, "hunter2").unwrap_err();
+        assert!(matches!(
+            err,
+            MultisigCommandError::Multisig(MultisigError::InvalidThreshold { .. })
+        ));
+        cleanup(&inner);
+    }
+
+    #[test]
+    fn create_multisig_rejects_bad_password() {
+        let mut inner = setup_with_one_local_vault();
+        let signers = vec![external_signer_input(1, "A"), external_signer_input(2, "B")];
+        let err = multisig_create_impl(&mut inner, "T", &signers, 2, "wrong").unwrap_err();
+        assert!(matches!(
+            err,
+            MultisigCommandError::Vault(VaultError::WrongPassword)
+        ));
+        cleanup(&inner);
+    }
+
+    #[test]
+    fn create_multisig_happy_path_persists_and_returns_summary() {
+        let mut inner = setup_with_one_local_vault();
+        let signers = vec![
+            external_signer_input(1, "A"),
+            external_signer_input(2, "B"),
+            external_signer_input(3, "C"),
+        ];
+        let sum = multisig_create_impl(&mut inner, "Treasury", &signers, 2, "hunter2").unwrap();
+        assert_eq!(sum.signer_count, 3);
+        assert_eq!(sum.threshold, 2);
+        assert!(sum.is_active);
+        assert!(sum.address.starts_with("0x"));
+        assert_eq!(sum.address.len(), 42);
+        // Container has one multisig vault.
+        let list = multisigs_list_impl(&mut inner).unwrap();
+        assert_eq!(list.len(), 1);
+        cleanup(&inner);
+    }
+
+    #[test]
+    fn create_multisig_rejects_duplicate_signers() {
+        let mut inner = setup_with_one_local_vault();
+        let dup = external_signer_input(1, "A");
+        let signers = vec![dup.clone(), dup];
+        let err = multisig_create_impl(&mut inner, "T", &signers, 2, "hunter2").unwrap_err();
+        assert!(matches!(
+            err,
+            MultisigCommandError::Multisig(MultisigError::DuplicateSigner)
+        ));
+        cleanup(&inner);
+    }
+
+    #[test]
+    fn proposal_create_rejects_unknown_signer() {
+        let mut inner = setup_with_one_local_vault();
+        let signers = vec![external_signer_input(1, "A"), external_signer_input(2, "B")];
+        let sum = multisig_create_impl(&mut inner, "T", &signers, 2, "hunter2").unwrap();
+        let err = proposal_create_impl(
+            &mut inner,
+            &sum.id,
+            ProposalOperation::Send,
+            b"payload".to_vec(),
+            "0xstranger00000000000000000000000000000000",
+            None,
+        )
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            MultisigCommandError::Proposal(ProposalError::UnknownSigner(_))
+        ));
+        cleanup(&inner);
+    }
+
+    #[test]
+    fn proposal_create_happy_path_links_into_multisig() {
+        let mut inner = setup_with_one_local_vault();
+        let signers = vec![external_signer_input(1, "A"), external_signer_input(2, "B")];
+        let sum = multisig_create_impl(&mut inner, "T", &signers, 2, "hunter2").unwrap();
+        let creator_addr = sum.signers[0].address.clone();
+        let p = proposal_create_impl(
+            &mut inner,
+            &sum.id,
+            ProposalOperation::Send,
+            b"payload".to_vec(),
+            &creator_addr,
+            None,
+        )
+        .unwrap();
+        assert_eq!(p.state, ProposalState::Draft);
+        assert_eq!(p.multisig_vault_id, sum.id);
+        // Multisig has the proposal id in its pending list.
+        let list = multisigs_list_impl(&mut inner).unwrap();
+        assert_eq!(list[0].pending_proposal_count, 1);
+        cleanup(&inner);
+    }
+
+    #[test]
+    fn proposal_attach_signature_flow() {
+        let mut inner = setup_with_one_local_vault();
+        let signers = vec![external_signer_input(1, "A"), external_signer_input(2, "B")];
+        let sum = multisig_create_impl(&mut inner, "T", &signers, 2, "hunter2").unwrap();
+        let addr_a = sum.signers[0].address.clone();
+        let addr_b = sum.signers[1].address.clone();
+        let p = proposal_create_impl(
+            &mut inner,
+            &sum.id,
+            ProposalOperation::Send,
+            b"payload".to_vec(),
+            &addr_a,
+            None,
+        )
+        .unwrap();
+        // First signature → Collecting.
+        let p_after_a = proposal_attach_signature_impl(&mut inner, &p.id, &addr_a, &dummy_signature())
+            .unwrap();
+        assert_eq!(p_after_a.state, ProposalState::Collecting);
+        // Second signature → ReadyToSubmit.
+        let p_after_b = proposal_attach_signature_impl(&mut inner, &p.id, &addr_b, &dummy_signature())
+            .unwrap();
+        assert_eq!(p_after_b.state, ProposalState::ReadyToSubmit);
+        cleanup(&inner);
+    }
+
+    #[test]
+    fn proposal_attach_signature_rejects_non_member() {
+        let mut inner = setup_with_one_local_vault();
+        let signers = vec![external_signer_input(1, "A"), external_signer_input(2, "B")];
+        let sum = multisig_create_impl(&mut inner, "T", &signers, 2, "hunter2").unwrap();
+        let addr_a = sum.signers[0].address.clone();
+        let p = proposal_create_impl(
+            &mut inner,
+            &sum.id,
+            ProposalOperation::Send,
+            b"payload".to_vec(),
+            &addr_a,
+            None,
+        )
+        .unwrap();
+        let err = proposal_attach_signature_impl(
+            &mut inner,
+            &p.id,
+            "0xstranger00000000000000000000000000000000",
+            &dummy_signature(),
+        )
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            MultisigCommandError::Proposal(ProposalError::UnknownSigner(_))
+        ));
+        cleanup(&inner);
+    }
+
+    #[test]
+    fn proposal_mark_submitted_after_threshold() {
+        let mut inner = setup_with_one_local_vault();
+        let signers = vec![external_signer_input(1, "A"), external_signer_input(2, "B")];
+        let sum = multisig_create_impl(&mut inner, "T", &signers, 2, "hunter2").unwrap();
+        let addr_a = sum.signers[0].address.clone();
+        let addr_b = sum.signers[1].address.clone();
+        let p = proposal_create_impl(
+            &mut inner,
+            &sum.id,
+            ProposalOperation::Send,
+            b"x".to_vec(),
+            &addr_a,
+            None,
+        )
+        .unwrap();
+        proposal_attach_signature_impl(&mut inner, &p.id, &addr_a, &dummy_signature()).unwrap();
+        proposal_attach_signature_impl(&mut inner, &p.id, &addr_b, &dummy_signature()).unwrap();
+        let submitted =
+            proposal_mark_submitted_impl(&mut inner, &p.id, "0xdeadbeef".into()).unwrap();
+        assert_eq!(submitted.state, ProposalState::Submitted);
+        assert_eq!(submitted.tx_hash.as_deref(), Some("0xdeadbeef"));
+        cleanup(&inner);
+    }
+
+    #[test]
+    fn proposal_cancel_creator_only() {
+        let mut inner = setup_with_one_local_vault();
+        let signers = vec![external_signer_input(1, "A"), external_signer_input(2, "B")];
+        let sum = multisig_create_impl(&mut inner, "T", &signers, 2, "hunter2").unwrap();
+        let addr_a = sum.signers[0].address.clone();
+        let addr_b = sum.signers[1].address.clone();
+        let p = proposal_create_impl(
+            &mut inner,
+            &sum.id,
+            ProposalOperation::Send,
+            b"x".to_vec(),
+            &addr_a,
+            None,
+        )
+        .unwrap();
+        let err = proposal_cancel_impl(&mut inner, &p.id, &addr_b).unwrap_err();
+        assert!(matches!(
+            err,
+            MultisigCommandError::Proposal(ProposalError::NotCreator)
+        ));
+        proposal_cancel_impl(&mut inner, &p.id, &addr_a).unwrap();
+        cleanup(&inner);
+    }
+
+    #[test]
+    fn proposals_list_filters_by_multisig() {
+        let mut inner = setup_with_one_local_vault();
+        let signers = vec![external_signer_input(1, "A"), external_signer_input(2, "B")];
+        let sum = multisig_create_impl(&mut inner, "T", &signers, 2, "hunter2").unwrap();
+        let addr_a = sum.signers[0].address.clone();
+        let p1 = proposal_create_impl(
+            &mut inner,
+            &sum.id,
+            ProposalOperation::Send,
+            b"a".to_vec(),
+            &addr_a,
+            None,
+        )
+        .unwrap();
+        let p2 = proposal_create_impl(
+            &mut inner,
+            &sum.id,
+            ProposalOperation::TokenTransfer,
+            b"b".to_vec(),
+            &addr_a,
+            None,
+        )
+        .unwrap();
+        let list = proposals_list_impl(&mut inner, &sum.id).unwrap();
+        let ids: Vec<&str> = list.iter().map(|p| p.id.as_str()).collect();
+        assert!(ids.contains(&p1.id.as_str()));
+        assert!(ids.contains(&p2.id.as_str()));
+        cleanup(&inner);
+    }
+}

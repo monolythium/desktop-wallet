@@ -21,6 +21,7 @@ pub mod container;
 pub mod mek;
 pub mod migration;
 pub mod multisig;
+pub mod multisig_commands;
 pub mod proposal;
 pub mod vek;
 
