@@ -67,11 +67,35 @@ export interface OperationDescriptor {
   /** Hardware-signer context (only used when `auth === "hardware"`). */
   ledger?: LedgerContext;
   /**
+   * Optional multisig routing. When the active vault is a multisig AND
+   * this field is set, the drawer routes the operation through
+   * `proposal_create` + `proposal_attach_signature` (the creator's own
+   * share) instead of calling `execute`. The descriptor's `payload` is
+   * the operation's binary representation; the Rust side stores it
+   * opaquely + keccak256-hashes it (with the operation discriminator
+   * and domain tag) to produce the `payload_hash` each member signs.
+   */
+  proposal?: ProposalRouting;
+  /**
    * The actual work. Resolves with an arbitrary "result" payload (tx hash,
    * RPC echo, etc.); throws to land the drawer in `error`. Implementations
    * are responsible for the chain side; the drawer owns UI state only.
    */
   execute: (ctx?: OperationExecutionContext) => Promise<OperationResult>;
+}
+
+/** Proposal routing carries the operation kind + the raw payload bytes
+ *  the wallet would otherwise broadcast directly. The drawer creates the
+ *  proposal in Draft state and attaches the creator's signature in one
+ *  shot when proposal routing is active. */
+export interface ProposalRouting {
+  operation:
+    | "send"
+    | "token_transfer"
+    | "stake"
+    | "naming"
+    | "governance";
+  payload: Uint8Array;
 }
 
 export interface OperationExecutionContext {
@@ -86,4 +110,7 @@ export interface OperationResult {
   detail?: string;
   /** Optional URL the user can copy from the done pane. */
   link?: string;
+  /** Set when the drawer routed through proposal creation. Triggers the
+   *  "go to proposals" CTA on the Done pane. */
+  proposalId?: string;
 }

@@ -9,6 +9,7 @@ import type { Denom } from "../data/fixtures";
 import type { Route } from "./types";
 import { Identity } from "./Identity";
 import { VaultCreateFlow } from "./VaultCreateFlow";
+import { MultisigCreateFlow } from "./MultisigCreateFlow";
 import { VaultPicker } from "./VaultPicker";
 import { useVaults } from "../sdk/useVaults";
 
@@ -91,6 +92,13 @@ const ICON_NEWS = () => (
     <path d="M7 8h10M7 12h10M7 16h6" />
   </svg>
 );
+const ICON_PROPOSALS = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+    <polyline points="14 2 14 8 20 8" />
+    <path d="M9 13h6M9 17h6" />
+  </svg>
+);
 const ICON_SETTINGS = () => (
   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <circle cx="12" cy="12" r="3" />
@@ -117,6 +125,7 @@ const NAV: NavItem[] = [
   { id: "trade", label: "Trade", icon: ICON_TRADE, publicOnly: true },
   { id: "ai-trade", label: "AI Trading", icon: ICON_AI, publicOnly: true, badge: "beta" },
   { id: "news", label: "News", icon: ICON_NEWS },
+  { id: "proposals", label: "Proposals", icon: ICON_PROPOSALS },
 ];
 
 const NAV_FOOTER: NavItem[] = [
@@ -127,6 +136,7 @@ export function Sidebar({ denom, setDenom, route, setRoute }: Props) {
   const visible = NAV.filter((n) => !n.publicOnly || denom === "public");
   const vaults = useVaults();
   const [showCreate, setShowCreate] = useState(false);
+  const [showCreateMultisig, setShowCreateMultisig] = useState(false);
   const isFirstVault = vaults.state.vaults.length === 0;
 
   return (
@@ -143,6 +153,7 @@ export function Sidebar({ denom, setDenom, route, setRoute }: Props) {
         <VaultPicker
           goto={setRoute}
           onAddVault={() => setShowCreate(true)}
+          onAddMultisig={() => setShowCreateMultisig(true)}
         />
       </div>
 
@@ -167,6 +178,31 @@ export function Sidebar({ denom, setDenom, route, setRoute }: Props) {
             <VaultCreateFlow
               isFirstVault={isFirstVault}
               onClose={() => setShowCreate(false)}
+            />
+          </div>
+        </div>
+      ) : null}
+
+      {showCreateMultisig ? (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.45)",
+            display: "flex",
+            alignItems: "flex-start",
+            justifyContent: "center",
+            zIndex: 100,
+            padding: 40,
+            overflowY: "auto",
+          }}
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) setShowCreateMultisig(false);
+          }}
+        >
+          <div style={{ width: "100%", maxWidth: 520 }}>
+            <MultisigCreateFlow
+              onClose={() => setShowCreateMultisig(false)}
             />
           </div>
         </div>

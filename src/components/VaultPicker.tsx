@@ -13,18 +13,23 @@
 import { useEffect, useRef, useState } from "react";
 import { Identity } from "./Identity";
 import { useVaults } from "../sdk/useVaults";
+import { useMultisigs } from "../sdk/useMultisig";
 import type { Route } from "./types";
 import type { VaultSummary } from "../sdk/vault-multi";
+import type { MultisigVaultSummary } from "../sdk/multisig";
 
 interface Props {
   /** Routes the "Manage vaults" link. */
   goto?: (r: Route) => void;
   /** Opens the Add-vault flow (Commit 7 — wires this via Settings). */
   onAddVault?: () => void;
+  /** Opens the Create-multisig flow. */
+  onAddMultisig?: () => void;
 }
 
-export function VaultPicker({ goto, onAddVault }: Props) {
+export function VaultPicker({ goto, onAddVault, onAddMultisig }: Props) {
   const { state, active, select } = useVaults();
+  const multisigs = useMultisigs();
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement | null>(null);
 
@@ -59,7 +64,10 @@ export function VaultPicker({ goto, onAddVault }: Props) {
     );
   }
 
-  if (state.status === "error" || state.vaults.length === 0) {
+  const multisigList = multisigs.state.multisigs;
+  const activeMultisig = multisigs.active;
+
+  if (state.status === "error" || (state.vaults.length === 0 && multisigList.length === 0)) {
     return (
       <button
         type="button"
@@ -71,6 +79,9 @@ export function VaultPicker({ goto, onAddVault }: Props) {
       </button>
     );
   }
+
+  // Header label tracks whichever surface holds active_id.
+  const headerLabel = activeMultisig?.label ?? active?.label ?? "—";
 
   return (
     <div ref={wrapRef} style={{ position: "relative" }}>
@@ -93,7 +104,22 @@ export function VaultPicker({ goto, onAddVault }: Props) {
           cursor: "pointer",
         }}
       >
-        <span style={{ fontWeight: 600 }}>{active?.label ?? "—"}</span>
+        <span style={{ fontWeight: 600 }}>{headerLabel}</span>
+        {activeMultisig ? (
+          <span
+            className="cap"
+            aria-label={`Multisig ${activeMultisig.threshold} of ${activeMultisig.signerCount}`}
+            style={{
+              padding: "1px 5px",
+              borderRadius: 6,
+              border: "1px solid var(--w-border)",
+              color: "var(--gold-hi, var(--w-text-2))",
+              fontSize: 10.5,
+            }}
+          >
+            {activeMultisig.threshold}/{activeMultisig.signerCount}
+          </span>
+        ) : null}
         <span className="cap" style={{ color: "var(--w-text-3)" }}>▾</span>
       </button>
       {open ? (
@@ -104,7 +130,7 @@ export function VaultPicker({ goto, onAddVault }: Props) {
             position: "absolute",
             top: "calc(100% + 4px)",
             left: 0,
-            minWidth: 260,
+            minWidth: 280,
             background: "var(--w-surface)",
             border: "1px solid var(--w-border)",
             borderRadius: 6,
@@ -113,6 +139,18 @@ export function VaultPicker({ goto, onAddVault }: Props) {
             zIndex: 20,
           }}
         >
+          {state.vaults.length > 0 ? (
+            <div
+              className="cap"
+              style={{
+                padding: "6px 10px 2px",
+                color: "var(--w-text-3)",
+                fontSize: 10.5,
+              }}
+            >
+              Single-signer
+            </div>
+          ) : null}
           {state.vaults.map((vault) => (
             <VaultRow
               key={vault.id}
@@ -123,6 +161,36 @@ export function VaultPicker({ goto, onAddVault }: Props) {
               }}
             />
           ))}
+          {multisigList.length > 0 ? (
+            <>
+              <div
+                style={{
+                  borderTop: "1px solid var(--w-border)",
+                  margin: "4px 0",
+                }}
+              />
+              <div
+                className="cap"
+                style={{
+                  padding: "6px 10px 2px",
+                  color: "var(--w-text-3)",
+                  fontSize: 10.5,
+                }}
+              >
+                Multisig
+              </div>
+              {multisigList.map((ms) => (
+                <MultisigRow
+                  key={ms.id}
+                  multisig={ms}
+                  onClick={async () => {
+                    setOpen(false);
+                    if (!ms.isActive) await multisigs.select(ms.id);
+                  }}
+                />
+              ))}
+            </>
+          ) : null}
           <div
             style={{
               borderTop: "1px solid var(--w-border)",
@@ -137,6 +205,16 @@ export function VaultPicker({ goto, onAddVault }: Props) {
           >
             + Add vault
           </FooterButton>
+          {onAddMultisig ? (
+            <FooterButton
+              onClick={() => {
+                setOpen(false);
+                onAddMultisig();
+              }}
+            >
+              + Create multisig vault
+            </FooterButton>
+          ) : null}
           {goto ? (
             <FooterButton
               onClick={() => {
@@ -150,6 +228,70 @@ export function VaultPicker({ goto, onAddVault }: Props) {
         </div>
       ) : null}
     </div>
+  );
+}
+
+function MultisigRow({
+  multisig,
+  onClick,
+}: {
+  multisig: MultisigVaultSummary;
+  onClick: () => void | Promise<void>;
+}) {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      onClick={() => void onClick()}
+      aria-checked={multisig.isActive}
+      style={{
+        display: "grid",
+        gridTemplateColumns: "auto 1fr auto",
+        gap: 8,
+        alignItems: "center",
+        width: "100%",
+        padding: "8px 10px",
+        background: "transparent",
+        border: "none",
+        cursor: "pointer",
+        color: "var(--w-text-1)",
+        textAlign: "left",
+        borderRadius: 4,
+      }}
+    >
+      <span style={{ width: 14 }}>{multisig.isActive ? "✓" : ""}</span>
+      <div>
+        <div
+          style={{
+            fontSize: 12.5,
+            fontWeight: 600,
+            display: "flex",
+            gap: 6,
+            alignItems: "center",
+          }}
+        >
+          <span>{multisig.label}</span>
+          <span
+            className="cap"
+            style={{
+              padding: "1px 5px",
+              borderRadius: 6,
+              border: "1px solid var(--w-border)",
+              color: "var(--gold-hi, var(--w-text-2))",
+              fontSize: 10.5,
+            }}
+          >
+            {multisig.threshold} of {multisig.signerCount}
+          </span>
+        </div>
+        <div className="cap" style={{ marginTop: 2 }}>
+          <Identity addr={multisig.address} />
+        </div>
+      </div>
+      <span className="cap" style={{ color: "var(--w-text-3)" }}>
+        {multisig.isActive ? "active" : ""}
+      </span>
+    </button>
   );
 }
 
