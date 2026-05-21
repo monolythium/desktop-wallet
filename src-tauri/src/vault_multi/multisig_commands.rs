@@ -247,6 +247,45 @@ pub fn multisigs_list_impl(
         .collect())
 }
 
+/// Switch the active vault to a multisig. Mirrors `vault_select_impl`:
+/// requires the wallet to be unlocked (MEK loaded), so an attacker who
+/// hijacks the IPC channel can't flip the active vault out from under
+/// a locked wallet.
+pub fn multisig_select_impl(
+    inner: &mut VaultStoreInner,
+    multisig_vault_id: &str,
+) -> Result<MultisigVaultSummary, MultisigCommandError> {
+    if inner.mek.is_none() {
+        return Err(MultisigCommandError::from(VaultError::Backend {
+            message: "vault is locked".into(),
+        }));
+    }
+    inner.load()?;
+    let container = inner.container.as_mut().ok_or_else(|| {
+        MultisigCommandError::from(VaultError::NoContainer)
+    })?;
+    if !container
+        .multisig_vaults
+        .iter()
+        .any(|m| m.id == multisig_vault_id)
+    {
+        return Err(MultisigCommandError::from(MultisigError::NotFound(
+            multisig_vault_id.into(),
+        )));
+    }
+    container.active_id = Some(multisig_vault_id.to_string());
+    let summary = container
+        .multisig_vaults
+        .iter()
+        .find(|m| m.id == multisig_vault_id)
+        .expect("just checked")
+        .summary(true);
+    inner.save().map_err(|e| MultisigCommandError::Backend {
+        message: format!("save failed: {e}"),
+    })?;
+    Ok(summary)
+}
+
 /// Create a fresh proposal in Draft state. The caller is the signer
 /// identified by `created_by_address`. The proposal is persisted; the
 /// caller separately signs the proposal_hash and calls
@@ -477,6 +516,15 @@ pub async fn multisigs_list(
 }
 
 #[tauri::command]
+pub async fn multisig_select(
+    multisig_vault_id: String,
+    store: tauri::State<'_, VaultStore>,
+) -> Result<MultisigVaultSummary, MultisigCommandError> {
+    let mut inner = store.0.lock().await;
+    multisig_select_impl(&mut inner, &multisig_vault_id)
+}
+
+#[tauri::command]
 pub async fn proposal_create(
     multisig_vault_id: String,
     operation: ProposalOperation,
@@ -654,6 +702,57 @@ mod tests {
         // Container has one multisig vault.
         let list = multisigs_list_impl(&mut inner).unwrap();
         assert_eq!(list.len(), 1);
+        cleanup(&inner);
+    }
+
+    #[test]
+    fn multisig_select_switches_active_id() {
+        let mut inner = setup_with_one_local_vault();
+        let signers = vec![external_signer_input(1, "A"), external_signer_input(2, "B")];
+        let created = multisig_create_impl(&mut inner, "Treasury", &signers, 2, "hunter2").unwrap();
+        // create made it active; flip back to single vault via vault_select
+        // then back to multisig via multisig_select.
+        let single_id = inner
+            .container
+            .as_ref()
+            .unwrap()
+            .vaults[0]
+            .id
+            .clone();
+        super::super::commands::vault_select_impl(&mut inner, &single_id).unwrap();
+        let sum = multisig_select_impl(&mut inner, &created.id).unwrap();
+        assert!(sum.is_active);
+        assert_eq!(
+            inner.container.as_ref().unwrap().active_id.as_deref(),
+            Some(created.id.as_str()),
+        );
+        cleanup(&inner);
+    }
+
+    #[test]
+    fn multisig_select_rejects_unknown_id() {
+        let mut inner = setup_with_one_local_vault();
+        let err = multisig_select_impl(&mut inner, "no-such-id").unwrap_err();
+        assert!(matches!(
+            err,
+            MultisigCommandError::Multisig(MultisigError::NotFound(_))
+        ));
+        cleanup(&inner);
+    }
+
+    #[test]
+    fn multisig_select_rejects_when_locked() {
+        let mut inner = setup_with_one_local_vault();
+        let signers = vec![external_signer_input(1, "A"), external_signer_input(2, "B")];
+        let created =
+            multisig_create_impl(&mut inner, "Treasury", &signers, 2, "hunter2").unwrap();
+        // Drop the MEK to simulate a locked wallet.
+        inner.mek = None;
+        let err = multisig_select_impl(&mut inner, &created.id).unwrap_err();
+        assert!(matches!(
+            err,
+            MultisigCommandError::Vault(VaultError::Backend { .. })
+        ));
         cleanup(&inner);
     }
 

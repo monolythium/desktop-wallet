@@ -9,6 +9,7 @@ import type { Denom } from "../data/fixtures";
 import type { Route } from "./types";
 import { Identity } from "./Identity";
 import { VaultCreateFlow } from "./VaultCreateFlow";
+import { MultisigCreateFlow } from "./MultisigCreateFlow";
 import { VaultPicker } from "./VaultPicker";
 import { useVaults } from "../sdk/useVaults";
 
@@ -127,6 +128,7 @@ export function Sidebar({ denom, setDenom, route, setRoute }: Props) {
   const visible = NAV.filter((n) => !n.publicOnly || denom === "public");
   const vaults = useVaults();
   const [showCreate, setShowCreate] = useState(false);
+  const [showCreateMultisig, setShowCreateMultisig] = useState(false);
   const isFirstVault = vaults.state.vaults.length === 0;
 
   return (
@@ -143,6 +145,7 @@ export function Sidebar({ denom, setDenom, route, setRoute }: Props) {
         <VaultPicker
           goto={setRoute}
           onAddVault={() => setShowCreate(true)}
+          onAddMultisig={() => setShowCreateMultisig(true)}
         />
       </div>
 
@@ -167,6 +170,31 @@ export function Sidebar({ denom, setDenom, route, setRoute }: Props) {
             <VaultCreateFlow
               isFirstVault={isFirstVault}
               onClose={() => setShowCreate(false)}
+            />
+          </div>
+        </div>
+      ) : null}
+
+      {showCreateMultisig ? (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.45)",
+            display: "flex",
+            alignItems: "flex-start",
+            justifyContent: "center",
+            zIndex: 100,
+            padding: 40,
+            overflowY: "auto",
+          }}
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) setShowCreateMultisig(false);
+          }}
+        >
+          <div style={{ width: "100%", maxWidth: 520 }}>
+            <MultisigCreateFlow
+              onClose={() => setShowCreateMultisig(false)}
             />
           </div>
         </div>
