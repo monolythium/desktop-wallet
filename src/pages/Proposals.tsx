@@ -31,6 +31,8 @@ import {
   encodeSignatureShare,
   signatureBytesFromHex,
 } from "../sdk/offband";
+import { tryDecodeIntentFromHex } from "../sdk/multisig-intent";
+import { sendNativeLyth } from "../sdk/native-send";
 
 export function Proposals() {
   const multisigs = useMultisigs();
@@ -203,6 +205,11 @@ function ProposalCard({
   const [submitOpen, setSubmitOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  const [broadcastOpen, setBroadcastOpen] = useState(false);
+  const decodedIntent = useMemo(
+    () => tryDecodeIntentFromHex(proposal.payloadHex),
+    [proposal.payloadHex],
+  );
 
   const signedAddresses = useMemo(
     () => new Set(proposal.signatures.map((s) => s.signerAddress.toLowerCase())),
@@ -345,12 +352,22 @@ function ProposalCard({
               </button>
             ) : null}
             {proposal.state === "ready_to_submit" &&
+            proposal.operation !== "governance" &&
+            decodedIntent ? (
+              <button
+                className="btn btn--sm btn--primary"
+                onClick={() => setBroadcastOpen(true)}
+              >
+                Broadcast and record
+              </button>
+            ) : null}
+            {proposal.state === "ready_to_submit" &&
             proposal.operation !== "governance" ? (
               <button
                 className="btn btn--sm"
                 onClick={() => setSubmitOpen(true)}
               >
-                Mark submitted
+                Record tx hash manually
               </button>
             ) : null}
             {proposal.state === "ready_to_submit" &&
@@ -418,7 +435,121 @@ function ProposalCard({
           }}
         />
       ) : null}
+      {broadcastOpen && decodedIntent && decodedIntent.kind === "send" ? (
+        <BroadcastSendModal
+          intent={decodedIntent}
+          onClose={() => setBroadcastOpen(false)}
+          onSubmitted={async (txHash) => {
+            await onMarkSubmitted(txHash);
+            setBroadcastOpen(false);
+          }}
+        />
+      ) : null}
     </div>
+  );
+}
+
+function BroadcastSendModal({
+  intent,
+  onClose,
+  onSubmitted,
+}: {
+  intent: { to: string; amountLyth: string };
+  onClose: () => void;
+  onSubmitted: (txHash: string) => Promise<void>;
+}) {
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const submit = async () => {
+    setError(null);
+    if (!password) {
+      setError("Master password required");
+      return;
+    }
+    setBusy(true);
+    const seed = await fetchAndUnlockVault(PRIMARY_ACCOUNT, password).catch(
+      (cause) => {
+        setError((cause as Error)?.message ?? String(cause));
+        return null;
+      },
+    );
+    if (!seed) {
+      setBusy(false);
+      return;
+    }
+    try {
+      const result = await sendNativeLyth({
+        seed,
+        to: intent.to,
+        amountLyth: intent.amountLyth,
+      });
+      await onSubmitted(result.txHash);
+    } catch (cause) {
+      setError((cause as Error)?.message ?? String(cause));
+    } finally {
+      seed.fill(0);
+      setBusy(false);
+    }
+  };
+  return (
+    <ModalOverlay onDismiss={onClose}>
+      <div className="w-card">
+        <div className="w-card__head">
+          <h3>Broadcast multisig send</h3>
+          <button className="btn btn--sm btn--ghost" onClick={onClose}>
+            Cancel
+          </button>
+        </div>
+        <div className="w-card__body">
+          <div className="row-help" style={{ marginBottom: 12 }}>
+            The proposal has the threshold of co-signers. Broadcasting
+            wraps the encoded send intent into the wallet's standard
+            native-send envelope and submits it. The resulting tx hash is
+            recorded as the proposal's submission.
+          </div>
+          <div className="w-kv">
+            <span className="k">To</span>
+            <span className="v mono" style={{ fontSize: 11 }}>
+              {intent.to}
+            </span>
+          </div>
+          <div className="w-kv">
+            <span className="k">Amount</span>
+            <span className="v">{intent.amountLyth} LYTH</span>
+          </div>
+          <div className="cap" style={{ marginTop: 12, marginBottom: 4 }}>
+            Master password (to sign the broadcast tx)
+          </div>
+          <input
+            type="password"
+            className="w-live-input"
+            value={password}
+            onChange={(e) => setPassword(e.currentTarget.value)}
+            autoComplete="current-password"
+            disabled={busy}
+            autoFocus
+          />
+          {error ? (
+            <div className="w-banner error" style={{ marginTop: 12 }}>
+              ✗ {error}
+            </div>
+          ) : null}
+          <div style={{ display: "flex", gap: 6, marginTop: 16 }}>
+            <button
+              className="btn btn--sm btn--primary"
+              onClick={() => void submit()}
+              disabled={busy || !password}
+            >
+              {busy ? "Broadcasting…" : "Broadcast"}
+            </button>
+            <button className="btn btn--sm btn--ghost" onClick={onClose} disabled={busy}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      </div>
+    </ModalOverlay>
   );
 }
 
