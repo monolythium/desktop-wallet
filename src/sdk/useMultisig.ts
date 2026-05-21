@@ -5,6 +5,7 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   MultisigInvokeError,
+  multisigApplyGovernance,
   multisigCreate,
   multisigSelect,
   multisigsList,
@@ -123,6 +124,7 @@ export interface UseProposalsApi {
   }) => Promise<Proposal>;
   cancel: (proposalId: string, byAddress: string) => Promise<void>;
   markSubmitted: (proposalId: string, txHash: string) => Promise<Proposal>;
+  applyGovernance: (proposalId: string) => Promise<MultisigVaultSummary>;
 }
 
 export function useProposals(multisigVaultId: string | null | undefined): UseProposalsApi {
@@ -227,5 +229,23 @@ export function useProposals(multisigVaultId: string | null | undefined): UsePro
     [refresh],
   );
 
-  return { state, refresh, create, sign, importSignature, cancel, markSubmitted };
+  const applyGovernance = useCallback(
+    async (proposalId: string) => {
+      const updated = await multisigApplyGovernance(proposalId);
+      await refresh();
+      return updated;
+    },
+    [refresh],
+  );
+
+  return {
+    state,
+    refresh,
+    create,
+    sign,
+    importSignature,
+    cancel,
+    markSubmitted,
+    applyGovernance,
+  };
 }

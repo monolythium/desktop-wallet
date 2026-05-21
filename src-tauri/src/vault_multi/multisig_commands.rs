@@ -77,6 +77,29 @@ pub enum MultisigCommandError {
 
 // ─── Helpers ───────────────────────────────────────────────────────
 
+fn decode_hex(s: &str) -> Option<Vec<u8>> {
+    if s.len() % 2 != 0 {
+        return None;
+    }
+    let mut out = Vec::with_capacity(s.len() / 2);
+    let bytes = s.as_bytes();
+    for chunk in bytes.chunks(2) {
+        let hi = nibble(chunk[0])?;
+        let lo = nibble(chunk[1])?;
+        out.push((hi << 4) | lo);
+    }
+    Some(out)
+}
+
+fn nibble(b: u8) -> Option<u8> {
+    match b {
+        b'0'..=b'9' => Some(b - b'0'),
+        b'a'..=b'f' => Some(10 + b - b'a'),
+        b'A'..=b'F' => Some(10 + b - b'A'),
+        _ => None,
+    }
+}
+
 fn now_unix() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -245,6 +268,130 @@ pub fn multisigs_list_impl(
             m.summary(is_active)
         })
         .collect())
+}
+
+/// Apply a governance change carried by a fully-signed proposal.
+///
+/// V1 payload format (single discriminator byte + body):
+///   0x01 | new_threshold (u8)   — SetThreshold
+///
+/// Other governance ops (add/remove/rotate signers) ship in Phase 7;
+/// this command's payload parser rejects unknown discriminators so the
+/// wallet can ratchet up.
+///
+/// Preconditions:
+///   - proposal exists, has operation == Governance
+///   - state == ReadyToSubmit (threshold reached)
+///   - payload decodes cleanly
+///
+/// On success the multisig vault record is updated AND the proposal is
+/// marked Submitted with `tx_hash` set to a marker so the audit trail
+/// surfaces the governance event ("governance: set_threshold N").
+pub fn multisig_apply_governance_impl(
+    inner: &mut VaultStoreInner,
+    proposal_id: &str,
+) -> Result<MultisigVaultSummary, MultisigCommandError> {
+    if inner.mek.is_none() {
+        return Err(MultisigCommandError::from(VaultError::Backend {
+            message: "vault is locked".into(),
+        }));
+    }
+    inner.load()?;
+    let container = inner.container.as_mut().ok_or_else(|| {
+        MultisigCommandError::from(VaultError::NoContainer)
+    })?;
+    let proposal = container
+        .proposals
+        .iter()
+        .find(|p| p.id == proposal_id)
+        .ok_or_else(|| {
+            MultisigCommandError::from(ProposalError::NotFound(proposal_id.into()))
+        })?
+        .clone();
+    if !matches!(proposal.operation, ProposalOperation::Governance) {
+        return Err(MultisigCommandError::from(ProposalError::InvalidArgument {
+            message: "proposal is not a governance proposal".into(),
+        }));
+    }
+    if !matches!(proposal.state, super::proposal::ProposalState::ReadyToSubmit) {
+        return Err(MultisigCommandError::from(ProposalError::InvalidArgument {
+            message: format!(
+                "proposal must be ready_to_submit (currently {:?})",
+                proposal.state
+            ),
+        }));
+    }
+    let payload_hex = proposal.payload_hex.trim_start_matches("0x");
+    let payload = decode_hex(payload_hex).ok_or_else(|| {
+        MultisigCommandError::from(ProposalError::InvalidArgument {
+            message: "payload hex decode failed".into(),
+        })
+    })?;
+    if payload.is_empty() {
+        return Err(MultisigCommandError::from(ProposalError::InvalidArgument {
+            message: "empty governance payload".into(),
+        }));
+    }
+    let (audit_msg, target_label) = match payload[0] {
+        0x01 => {
+            // SetThreshold(new)
+            if payload.len() != 2 {
+                return Err(MultisigCommandError::from(ProposalError::InvalidArgument {
+                    message: "SetThreshold payload must be 2 bytes (disc + u8)".into(),
+                }));
+            }
+            let new_threshold = payload[1];
+            let multisig = container
+                .multisig_vaults
+                .iter_mut()
+                .find(|m| m.id == proposal.multisig_vault_id)
+                .ok_or_else(|| {
+                    MultisigCommandError::from(MultisigError::NotFound(
+                        proposal.multisig_vault_id.clone(),
+                    ))
+                })?;
+            super::multisig::validate_threshold(new_threshold, multisig.signers.len() as u8)
+                .map_err(MultisigCommandError::from)?;
+            multisig.threshold = new_threshold;
+            (
+                format!("governance: set_threshold {}", new_threshold),
+                multisig.label.clone(),
+            )
+        }
+        other => {
+            return Err(MultisigCommandError::from(ProposalError::InvalidArgument {
+                message: format!(
+                    "unknown governance discriminator 0x{:02x} (phase 6 ships SetThreshold only)",
+                    other
+                ),
+            }));
+        }
+    };
+    // Mark the proposal Submitted with an audit-trail marker as tx_hash.
+    // Use the proposal's own collected signature count as the threshold
+    // check — the state was already verified as ReadyToSubmit against the
+    // OLD threshold above, and the new threshold may not match (the
+    // SetThreshold case mutates it).
+    let multisig_id = proposal.multisig_vault_id.clone();
+    let proposal_mut = container
+        .proposals
+        .iter_mut()
+        .find(|p| p.id == proposal_id)
+        .expect("found earlier");
+    let sig_count = proposal_mut.signatures.len() as u8;
+    mark_submitted(proposal_mut, audit_msg, sig_count)
+        .map_err(MultisigCommandError::from)?;
+    let summary = container
+        .multisig_vaults
+        .iter()
+        .find(|m| m.id == multisig_id)
+        .expect("just applied")
+        .summary(container.active_id.as_deref() == Some(multisig_id.as_str()));
+    inner.save().map_err(|e| MultisigCommandError::Backend {
+        message: format!("save failed: {e}"),
+    })?;
+    let _ = target_label;
+    Ok(summary)
 }
 
 /// Switch the active vault to a multisig. Mirrors `vault_select_impl`:
@@ -513,6 +660,15 @@ pub async fn multisigs_list(
 ) -> Result<Vec<MultisigVaultSummary>, MultisigCommandError> {
     let mut inner = store.0.lock().await;
     multisigs_list_impl(&mut inner)
+}
+
+#[tauri::command]
+pub async fn multisig_apply_governance(
+    proposal_id: String,
+    store: tauri::State<'_, VaultStore>,
+) -> Result<MultisigVaultSummary, MultisigCommandError> {
+    let mut inner = store.0.lock().await;
+    multisig_apply_governance_impl(&mut inner, &proposal_id)
 }
 
 #[tauri::command]
@@ -865,6 +1021,96 @@ mod tests {
         assert!(matches!(
             err,
             MultisigCommandError::Proposal(ProposalError::UnknownSigner(_))
+        ));
+        cleanup(&inner);
+    }
+
+    #[test]
+    fn governance_set_threshold_applies_to_multisig() {
+        let mut inner = setup_with_one_local_vault();
+        let signers = vec![
+            external_signer_input(1, "A"),
+            external_signer_input(2, "B"),
+            external_signer_input(3, "C"),
+        ];
+        let sum = multisig_create_impl(&mut inner, "T", &signers, 2, "hunter2").unwrap();
+        let addr_a = sum.signers[0].address.clone();
+        let addr_b = sum.signers[1].address.clone();
+        // Create a governance proposal: SetThreshold(3).
+        let payload = vec![0x01u8, 0x03];
+        let p = proposal_create_impl(
+            &mut inner,
+            &sum.id,
+            ProposalOperation::Governance,
+            payload,
+            &addr_a,
+            None,
+        )
+        .unwrap();
+        proposal_attach_signature_impl(&mut inner, &p.id, &addr_a, &dummy_signature()).unwrap();
+        proposal_attach_signature_impl(&mut inner, &p.id, &addr_b, &dummy_signature()).unwrap();
+        // Apply.
+        let after = multisig_apply_governance_impl(&mut inner, &p.id).unwrap();
+        assert_eq!(after.threshold, 3);
+        // Proposal state is now Submitted with the audit marker.
+        let list = inner.container.as_ref().unwrap().proposals.clone();
+        let final_p = list.iter().find(|x| x.id == p.id).unwrap();
+        assert_eq!(final_p.state, ProposalState::Submitted);
+        assert!(final_p
+            .tx_hash
+            .as_ref()
+            .unwrap()
+            .contains("set_threshold 3"));
+        cleanup(&inner);
+    }
+
+    #[test]
+    fn governance_rejects_unknown_discriminator() {
+        let mut inner = setup_with_one_local_vault();
+        let signers = vec![external_signer_input(1, "A"), external_signer_input(2, "B")];
+        let sum = multisig_create_impl(&mut inner, "T", &signers, 2, "hunter2").unwrap();
+        let addr_a = sum.signers[0].address.clone();
+        let addr_b = sum.signers[1].address.clone();
+        let p = proposal_create_impl(
+            &mut inner,
+            &sum.id,
+            ProposalOperation::Governance,
+            vec![0xff, 0xff],
+            &addr_a,
+            None,
+        )
+        .unwrap();
+        proposal_attach_signature_impl(&mut inner, &p.id, &addr_a, &dummy_signature()).unwrap();
+        proposal_attach_signature_impl(&mut inner, &p.id, &addr_b, &dummy_signature()).unwrap();
+        let err = multisig_apply_governance_impl(&mut inner, &p.id).unwrap_err();
+        assert!(matches!(
+            err,
+            MultisigCommandError::Proposal(ProposalError::InvalidArgument { .. })
+        ));
+        cleanup(&inner);
+    }
+
+    #[test]
+    fn governance_rejects_below_threshold() {
+        let mut inner = setup_with_one_local_vault();
+        let signers = vec![external_signer_input(1, "A"), external_signer_input(2, "B")];
+        let sum = multisig_create_impl(&mut inner, "T", &signers, 2, "hunter2").unwrap();
+        let addr_a = sum.signers[0].address.clone();
+        let p = proposal_create_impl(
+            &mut inner,
+            &sum.id,
+            ProposalOperation::Governance,
+            vec![0x01, 0x02],
+            &addr_a,
+            None,
+        )
+        .unwrap();
+        // Only one signature so far → not ReadyToSubmit.
+        proposal_attach_signature_impl(&mut inner, &p.id, &addr_a, &dummy_signature()).unwrap();
+        let err = multisig_apply_governance_impl(&mut inner, &p.id).unwrap_err();
+        assert!(matches!(
+            err,
+            MultisigCommandError::Proposal(ProposalError::InvalidArgument { .. })
         ));
         cleanup(&inner);
     }
