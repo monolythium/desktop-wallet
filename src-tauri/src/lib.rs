@@ -65,6 +65,7 @@ pub fn run() {
             // Phase 6 multisig + proposal commands.
             vault_multi::multisig_commands::multisig_create,
             vault_multi::multisig_commands::multisigs_list,
+            vault_multi::multisig_commands::multisig_select,
             vault_multi::multisig_commands::proposal_create,
             vault_multi::multisig_commands::proposal_attach_signature,
             vault_multi::multisig_commands::proposal_mark_submitted,

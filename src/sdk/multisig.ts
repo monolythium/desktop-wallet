@@ -314,6 +314,20 @@ export async function multisigsList(): Promise<MultisigVaultSummary[]> {
   }
 }
 
+/** Switch the active vault to a multisig. Wallet must be unlocked. */
+export async function multisigSelect(
+  multisigVaultId: string,
+): Promise<MultisigVaultSummary> {
+  try {
+    const wire = await invoke<MultisigVaultSummaryWire>("multisig_select", {
+      multisigVaultId,
+    });
+    return multisigSummaryFromWire(wire);
+  } catch (raw) {
+    throw normalizeError(raw);
+  }
+}
+
 /** Create a Draft proposal. The caller subsequently signs the
  *  proposal's `payloadHash` (TS-side via MlDsa65Backend) and calls
  *  `proposalAttachSignature` with the result. */

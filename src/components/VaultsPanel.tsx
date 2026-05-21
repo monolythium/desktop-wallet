@@ -12,17 +12,22 @@
 import { useState } from "react";
 import { Identity } from "./Identity";
 import { VaultCreateFlow } from "./VaultCreateFlow";
+import { MultisigCreateFlow } from "./MultisigCreateFlow";
 import { useVaults } from "../sdk/useVaults";
+import { useMultisigs } from "../sdk/useMultisig";
 import {
   MultiVaultCallError,
   type VaultSummary,
 } from "../sdk/vault-multi";
+import type { MultisigVaultSummary } from "../sdk/multisig";
 
 export function VaultsPanel() {
   const vaults = useVaults();
+  const multisigs = useMultisigs();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
+  const [showCreateMultisig, setShowCreateMultisig] = useState(false);
 
   if (vaults.state.status === "loading") {
     return (
@@ -38,6 +43,7 @@ export function VaultsPanel() {
   }
 
   const vaultList = vaults.state.vaults;
+  const multisigList = multisigs.state.multisigs;
   const onlyOne = vaultList.length <= 1;
 
   return (
@@ -46,10 +52,20 @@ export function VaultsPanel() {
         <h3>Vaults</h3>
         <span className="cap" style={{ color: "var(--w-text-3)" }}>
           {vaultList.length} {vaultList.length === 1 ? "vault" : "vaults"}
+          {multisigList.length > 0
+            ? ` · ${multisigList.length} multisig`
+            : ""}
         </span>
         <span className="w-card__head__spacer" />
         <button className="btn btn--sm" onClick={() => setShowCreate(true)}>
           + Add vault
+        </button>
+        <button
+          className="btn btn--sm"
+          onClick={() => setShowCreateMultisig(true)}
+          style={{ marginLeft: 6 }}
+        >
+          + Add multisig
         </button>
       </div>
       <div className="w-card__body" style={{ padding: 0 }}>
@@ -74,6 +90,25 @@ export function VaultsPanel() {
             />
           ))
         )}
+        {multisigList.length > 0 ? (
+          <>
+            <div
+              className="cap"
+              style={{
+                padding: "12px 14px 6px",
+                color: "var(--w-text-3)",
+                borderTop: "1px solid var(--w-border)",
+                background: "var(--w-surface, transparent)",
+                fontSize: 10.5,
+              }}
+            >
+              Multisig vaults
+            </div>
+            {multisigList.map((m) => (
+              <MultisigPanelRow key={m.id} multisig={m} />
+            ))}
+          </>
+        ) : null}
       </div>
 
       {showCreate ? (
@@ -82,6 +117,12 @@ export function VaultsPanel() {
             isFirstVault={vaultList.length === 0}
             onClose={() => setShowCreate(false)}
           />
+        </ModalOverlay>
+      ) : null}
+
+      {showCreateMultisig ? (
+        <ModalOverlay onDismiss={() => setShowCreateMultisig(false)}>
+          <MultisigCreateFlow onClose={() => setShowCreateMultisig(false)} />
         </ModalOverlay>
       ) : null}
 
@@ -97,6 +138,78 @@ export function VaultsPanel() {
           }}
         />
       ) : null}
+    </div>
+  );
+}
+
+function MultisigPanelRow({ multisig }: { multisig: MultisigVaultSummary }) {
+  return (
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "1fr auto",
+        gap: 12,
+        alignItems: "center",
+        padding: "10px 14px",
+        borderBottom: "1px solid var(--w-border)",
+      }}
+    >
+      <div>
+        <div
+          style={{
+            fontSize: 13,
+            fontWeight: 600,
+            display: "flex",
+            gap: 8,
+            alignItems: "center",
+          }}
+        >
+          <span>{multisig.label}</span>
+          <span
+            className="cap"
+            style={{
+              padding: "1px 6px",
+              borderRadius: 8,
+              border: "1px solid var(--w-border)",
+              color: "var(--gold-hi, var(--w-text-2))",
+            }}
+          >
+            {multisig.threshold} of {multisig.signerCount}
+          </span>
+          {multisig.isActive ? (
+            <span
+              className="cap"
+              style={{
+                padding: "1px 6px",
+                borderRadius: 8,
+                border: "1px solid var(--w-border)",
+                color: "var(--ok)",
+              }}
+            >
+              active
+            </span>
+          ) : null}
+          {multisig.pendingProposalCount > 0 ? (
+            <span
+              className="cap"
+              style={{
+                padding: "1px 6px",
+                borderRadius: 8,
+                border: "1px solid var(--w-border)",
+                color: "var(--alert)",
+              }}
+            >
+              {multisig.pendingProposalCount} pending
+            </span>
+          ) : null}
+        </div>
+        <div className="cap" style={{ marginTop: 2 }}>
+          <Identity addr={multisig.address} />
+        </div>
+      </div>
+      <span className="cap" style={{ color: "var(--w-text-3)" }}>
+        {multisig.signerCount} signers
+      </span>
     </div>
   );
 }

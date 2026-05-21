@@ -115,3 +115,101 @@ describe("VaultPicker", () => {
     });
   });
 });
+
+// ─── Multisig support ─────────────────────────────────────────────
+
+const MULTISIG_WIRE = {
+  id: "ms-1",
+  label: "Treasury",
+  address: "0xaaaa00000000000000000000000000000000aaaa",
+  created_at: 300,
+  threshold: 2,
+  signer_count: 3,
+  signers: [],
+  is_active: false,
+  pending_proposal_count: 0,
+};
+
+function routedMock(opts: {
+  vaults?: unknown[];
+  multisigs?: unknown[];
+}) {
+  return async (cmd: string) => {
+    if (cmd === "vaults_list") return opts.vaults ?? [];
+    if (cmd === "multisigs_list") return opts.multisigs ?? [];
+    return undefined;
+  };
+}
+
+describe("VaultPicker · multisig", () => {
+  it("renders the multisig section with an M-of-N badge", async () => {
+    invokeMock.mockImplementation(
+      routedMock({ vaults: VAULTS_WIRE, multisigs: [MULTISIG_WIRE] }),
+    );
+    render(<VaultPicker />);
+    await waitFor(() => {
+      expect(screen.getByText("Personal")).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByText("Personal"));
+    await waitFor(() => {
+      expect(screen.getByText("Treasury")).toBeInTheDocument();
+    });
+    // Section header.
+    expect(screen.getByText(/^Multisig$/)).toBeInTheDocument();
+    // M-of-N badge appears next to the multisig label.
+    expect(screen.getByText(/2 of 3/i)).toBeInTheDocument();
+  });
+
+  it("renders the compact M/N chip on the trigger when a multisig is active", async () => {
+    invokeMock.mockImplementation(
+      routedMock({
+        // No single vault marked active — multisig holds active_id.
+        vaults: [{ ...VAULTS_WIRE[0]!, is_active: false }, { ...VAULTS_WIRE[1]!, is_active: false }],
+        multisigs: [{ ...MULTISIG_WIRE, is_active: true }],
+      }),
+    );
+    render(<VaultPicker />);
+    await waitFor(() => {
+      expect(screen.getByText("Treasury")).toBeInTheDocument();
+    });
+    expect(screen.getByLabelText(/Multisig 2 of 3/i)).toBeInTheDocument();
+  });
+
+  it("calls multisig_select when a non-active multisig row is clicked", async () => {
+    invokeMock.mockImplementation(async (cmd: string) => {
+      if (cmd === "vaults_list") return VAULTS_WIRE;
+      if (cmd === "multisigs_list") return [MULTISIG_WIRE];
+      if (cmd === "multisig_select")
+        return { ...MULTISIG_WIRE, is_active: true };
+      return undefined;
+    });
+    render(<VaultPicker />);
+    await waitFor(() => {
+      expect(screen.getByText("Personal")).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByText("Personal"));
+    await waitFor(() => {
+      expect(screen.getByText("Treasury")).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByText("Treasury"));
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("multisig_select", {
+        multisigVaultId: "ms-1",
+      });
+    });
+  });
+
+  it("invokes onAddMultisig from the menu CTA", async () => {
+    invokeMock.mockImplementation(
+      routedMock({ vaults: VAULTS_WIRE, multisigs: [] }),
+    );
+    const onAddMultisig = vi.fn();
+    render(<VaultPicker onAddMultisig={onAddMultisig} />);
+    await waitFor(() => {
+      expect(screen.getByText("Personal")).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByText("Personal"));
+    fireEvent.click(screen.getByText(/\+ Create multisig vault/i));
+    expect(onAddMultisig).toHaveBeenCalled();
+  });
+});

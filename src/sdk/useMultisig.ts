@@ -6,6 +6,7 @@ import { useCallback, useEffect, useState } from "react";
 import {
   MultisigInvokeError,
   multisigCreate,
+  multisigSelect,
   multisigsList,
   proposalAttachSignature,
   proposalCancel,
@@ -36,6 +37,8 @@ export interface UseMultisigsApi {
     threshold: number;
     password: string;
   }) => Promise<MultisigVaultSummary>;
+  /** Switch the active vault to a multisig by id. */
+  select: (multisigVaultId: string) => Promise<void>;
 }
 
 export function useMultisigs(): UseMultisigsApi {
@@ -80,9 +83,17 @@ export function useMultisigs(): UseMultisigsApi {
     [refresh],
   );
 
+  const select = useCallback(
+    async (multisigVaultId: string) => {
+      await multisigSelect(multisigVaultId);
+      await refresh();
+    },
+    [refresh],
+  );
+
   const active = state.multisigs.find((m) => m.isActive) ?? null;
 
-  return { state, active, refresh, create };
+  return { state, active, refresh, create, select };
 }
 
 interface ProposalsState {
