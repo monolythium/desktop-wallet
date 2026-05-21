@@ -20,6 +20,7 @@ import {
 } from "../sdk/ledger";
 import { sendLyth } from "../sdk/send";
 import { sendNativeLyth } from "../sdk/native-send";
+import { encodeSendIntent } from "../sdk/multisig-intent";
 import { makeLedgerSigner } from "../sdk/signer";
 import { Identity } from "./Identity";
 import { RecipientInput } from "./RecipientInput";
@@ -131,10 +132,22 @@ export function SendLythForm({ balanceLyth, onClose }: Props) {
   const openNativeSend = () => {
     if (recipient === null) return;
     if (validateAmount() === null) return;
+    // Encode the send intent so a multisig active-vault routes through
+    // proposal creation. The OperationsDrawer (Commit 7) picks this up
+    // automatically when active is a multisig + descriptor.proposal is
+    // present; the dashboard later applies the bundled broadcast.
+    const intentPayload = encodeSendIntent({
+      to: recipient,
+      amountLyth: amount,
+    });
     ops.open({
       title: `Send ${amount} LYTH`,
       subtitle: "Native ML-DSA encrypted Sprintnet send",
       auth: "keychain",
+      proposal: {
+        operation: "send",
+        payload: intentPayload,
+      },
       diff: [
         { k: "From", v: "Unlocked vault address" },
         { k: "To", v: formatAddress(recipient) },

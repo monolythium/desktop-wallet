@@ -344,7 +344,7 @@ describe("Proposals · cancel + mark-submitted", () => {
     });
     fireEvent.click(screen.getByText("send"));
     fireEvent.click(
-      await screen.findByRole("button", { name: /Mark submitted/i }),
+      await screen.findByRole("button", { name: /Record tx hash manually/i }),
     );
     const recordBtn = await screen.findByRole("button", {
       name: /Record submission/i,
