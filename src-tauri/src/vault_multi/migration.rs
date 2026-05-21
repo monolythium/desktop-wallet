@@ -113,6 +113,7 @@ pub fn build_migrated_container(
         mek_argon_params,
         vaults: vec![record],
         multisig_vaults: Vec::new(),
+        proposals: Vec::new(),
         active_id: Some(active_id),
     })
 }

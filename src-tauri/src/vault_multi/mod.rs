@@ -21,6 +21,7 @@ pub mod container;
 pub mod mek;
 pub mod migration;
 pub mod multisig;
+pub mod proposal;
 pub mod vek;
 
 // Re-export the top-level types so call-sites can `use vault_multi::*`.
