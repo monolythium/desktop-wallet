@@ -44,6 +44,9 @@ const AiTrading = lazy(() =>
 );
 const News = lazy(() => import("./pages/News").then((m) => ({ default: m.News })));
 const Tokens = lazy(() => import("./pages/Tokens").then((m) => ({ default: m.Tokens })));
+const Proposals = lazy(() =>
+  import("./pages/Proposals").then((m) => ({ default: m.Proposals })),
+);
 import { KeychainCallError, PRIMARY_ACCOUNT, unlock } from "./sdk/keychain";
 import "./styles/tokens.css";
 import "./styles/wallet.css";
@@ -263,6 +266,7 @@ function Shell({
           {route === "trade" ? <Trade /> : null}
           {route === "ai-trade" ? <AiTrading /> : null}
           {route === "news" ? <News /> : null}
+          {route === "proposals" ? <Proposals /> : null}
         </Suspense>
       </main>
     </div>

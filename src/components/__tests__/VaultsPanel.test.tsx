@@ -157,3 +157,86 @@ describe("VaultsPanel · delete", () => {
     expect(deleteBtn.disabled).toBe(true);
   });
 });
+
+// ─── Multisig section ──────────────────────────────────────────────
+
+const MULTISIG_WIRE = {
+  id: "ms-1",
+  label: "Treasury",
+  address: "0xaaaa00000000000000000000000000000000aaaa",
+  created_at: 300,
+  threshold: 2,
+  signer_count: 3,
+  signers: [],
+  is_active: false,
+  pending_proposal_count: 0,
+};
+
+function routedMock(opts: {
+  vaults?: unknown[];
+  multisigs?: unknown[];
+}) {
+  return async (cmd: string) => {
+    if (cmd === "vaults_list") return opts.vaults ?? [];
+    if (cmd === "multisigs_list") return opts.multisigs ?? [];
+    return undefined;
+  };
+}
+
+describe("VaultsPanel · multisig section", () => {
+  it("renders the multisig header and M-of-N badge", async () => {
+    invokeMock.mockImplementation(
+      routedMock({ vaults: TWO_VAULTS, multisigs: [MULTISIG_WIRE] }),
+    );
+    render(<VaultsPanel />);
+    await waitFor(() => {
+      expect(screen.getByText("Treasury")).toBeInTheDocument();
+    });
+    expect(screen.getByText(/Multisig vaults/i)).toBeInTheDocument();
+    expect(screen.getByText(/2 of 3/i)).toBeInTheDocument();
+    expect(screen.getByText(/3 signers/i)).toBeInTheDocument();
+  });
+
+  it("surfaces an `active` badge when the multisig holds active_id", async () => {
+    invokeMock.mockImplementation(
+      routedMock({
+        vaults: TWO_VAULTS,
+        multisigs: [{ ...MULTISIG_WIRE, is_active: true }],
+      }),
+    );
+    render(<VaultsPanel />);
+    await waitFor(() => {
+      expect(screen.getByText("Treasury")).toBeInTheDocument();
+    });
+    // Two "active" labels possible: one for the single vault, one for the
+    // multisig. The multisig's "active" lives next to its label.
+    const actives = screen.getAllByText("active");
+    expect(actives.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("shows a pending-count chip when proposals are pending", async () => {
+    invokeMock.mockImplementation(
+      routedMock({
+        vaults: TWO_VAULTS,
+        multisigs: [{ ...MULTISIG_WIRE, pending_proposal_count: 4 }],
+      }),
+    );
+    render(<VaultsPanel />);
+    await waitFor(() => {
+      expect(screen.getByText(/4 pending/i)).toBeInTheDocument();
+    });
+  });
+
+  it("'+ Add multisig' button opens the create flow", async () => {
+    invokeMock.mockImplementation(
+      routedMock({ vaults: TWO_VAULTS, multisigs: [] }),
+    );
+    render(<VaultsPanel />);
+    await waitFor(() => {
+      expect(screen.getByText("Personal")).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByText(/\+ Add multisig/i));
+    // The wizard's "Step 1 of 4" appears.
+    expect(await screen.findByText(/Step 1 of 4/i)).toBeInTheDocument();
+  });
+});

@@ -201,12 +201,23 @@ pub struct VaultContainerV1 {
     /// base64url-no-pad encoded MEK Argon2id salt (16 bytes).
     pub mek_salt: String,
     pub mek_argon_params: VaultArgon2Params,
-    /// Vault records in creation order. Order is meaningful to the UI
-    /// (the picker renders them in this order).
+    /// Single-signer vault records in creation order. Order is
+    /// meaningful to the UI (the picker renders them in this order).
     pub vaults: Vec<VaultRecord>,
-    /// Currently-active vault id (UI selection). `None` only on a fresh
-    /// container before any vault is created — should be Some after
-    /// Commit 4's `vault_create` runs at least once.
+    /// Phase 6 — multisig vault records. Sibling list to `vaults`.
+    /// `serde(default)` so pre-Phase-6 v1 containers keep parsing.
+    #[serde(default)]
+    pub multisig_vaults: Vec<super::multisig::MultisigVaultRecord>,
+    /// Phase 6 — proposals belonging to all multisig vaults. Held at
+    /// the container level (rather than nested inside each multisig
+    /// vault) so cross-vault lookups stay O(1) and import paths can
+    /// reach any proposal by id.
+    #[serde(default)]
+    pub proposals: Vec<super::proposal::Proposal>,
+    /// Currently-active vault id (UI selection). May reference either
+    /// a single-signer `vaults[i].id` OR a `multisig_vaults[i].id`
+    /// (Phase 6 picker treats both as first-class). `None` only on a
+    /// fresh container before any vault is created.
     #[serde(default)]
     pub active_id: Option<String>,
 }
@@ -224,6 +235,8 @@ impl VaultContainerV1 {
             mek_salt: URL_SAFE_NO_PAD.encode(salt),
             mek_argon_params: params,
             vaults: Vec::new(),
+            multisig_vaults: Vec::new(),
+            proposals: Vec::new(),
             active_id: None,
         }
     }
