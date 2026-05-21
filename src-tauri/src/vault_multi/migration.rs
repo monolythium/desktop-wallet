@@ -112,6 +112,7 @@ pub fn build_migrated_container(
         mek_salt: URL_SAFE_NO_PAD.encode(mek_salt),
         mek_argon_params,
         vaults: vec![record],
+        multisig_vaults: Vec::new(),
         active_id: Some(active_id),
     })
 }

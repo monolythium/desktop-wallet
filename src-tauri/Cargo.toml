@@ -39,6 +39,11 @@ zeroize = { version = "1", features = ["derive"] }
 # `rand`'s `OsRng`, so no extra entropy source is added.
 uuid = { version = "1", default-features = false, features = ["v4", "rng-getrandom", "serde"] }
 
+# Phase 6 — Keccak-256 for multisig address derivation + proposal
+# canonical hashing. RustCrypto `sha3` crate; same family the wallet's
+# existing crates use (alloc-only, no system deps).
+sha3 = { version = "0.10", default-features = false }
+
 # Ledger hardware signer (Stage 4). HID-only — WebUSB is out of scope.
 # `ledger-transport-hid` brings in `hidapi` which links against the system
 # HIDAPI / IOHIDManager (macOS) / hidraw (Linux) / hid.dll (Windows).
