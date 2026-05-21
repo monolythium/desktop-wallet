@@ -328,6 +328,29 @@ export async function multisigSelect(
   }
 }
 
+/** Apply a governance change carried by a fully-signed proposal. */
+export async function multisigApplyGovernance(
+  proposalId: string,
+): Promise<MultisigVaultSummary> {
+  try {
+    const wire = await invoke<MultisigVaultSummaryWire>(
+      "multisig_apply_governance",
+      { proposalId },
+    );
+    return multisigSummaryFromWire(wire);
+  } catch (raw) {
+    throw normalizeError(raw);
+  }
+}
+
+/** Encode a governance "SetThreshold(N)" payload as 2 bytes (disc + N). */
+export function encodeGovernanceSetThreshold(newThreshold: number): Uint8Array {
+  if (newThreshold < 1 || newThreshold > 255) {
+    throw new Error("threshold out of range [1, 255]");
+  }
+  return new Uint8Array([0x01, newThreshold]);
+}
+
 /** Create a Draft proposal. The caller subsequently signs the
  *  proposal's `payloadHash` (TS-side via MlDsa65Backend) and calls
  *  `proposalAttachSignature` with the result. */

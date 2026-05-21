@@ -13,6 +13,7 @@ import { useState } from "react";
 import { Identity } from "./Identity";
 import { VaultCreateFlow } from "./VaultCreateFlow";
 import { MultisigCreateFlow } from "./MultisigCreateFlow";
+import { ChangeThresholdModal } from "./ChangeThresholdModal";
 import { useVaults } from "../sdk/useVaults";
 import { useMultisigs } from "../sdk/useMultisig";
 import {
@@ -143,11 +144,12 @@ export function VaultsPanel() {
 }
 
 function MultisigPanelRow({ multisig }: { multisig: MultisigVaultSummary }) {
+  const [thresholdOpen, setThresholdOpen] = useState(false);
   return (
     <div
       style={{
         display: "grid",
-        gridTemplateColumns: "1fr auto",
+        gridTemplateColumns: "1fr auto auto",
         gap: 12,
         alignItems: "center",
         padding: "10px 14px",
@@ -210,6 +212,18 @@ function MultisigPanelRow({ multisig }: { multisig: MultisigVaultSummary }) {
       <span className="cap" style={{ color: "var(--w-text-3)" }}>
         {multisig.signerCount} signers
       </span>
+      <button
+        className="btn btn--sm btn--ghost"
+        onClick={() => setThresholdOpen(true)}
+      >
+        Change threshold
+      </button>
+      {thresholdOpen ? (
+        <ChangeThresholdModal
+          multisig={multisig}
+          onClose={() => setThresholdOpen(false)}
+        />
+      ) : null}
     </div>
   );
 }

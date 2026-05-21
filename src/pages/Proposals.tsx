@@ -152,6 +152,9 @@ export function Proposals() {
               onMarkSubmitted={async (txHash) => {
                 await proposalsApi.markSubmitted(p.id, txHash);
               }}
+              onApplyGovernance={async () => {
+                await proposalsApi.applyGovernance(p.id);
+              }}
             />
           ))}
         </div>
@@ -182,6 +185,7 @@ interface ProposalCardProps {
   }) => Promise<void>;
   onCancel: (byAddress: string) => Promise<void>;
   onMarkSubmitted: (txHash: string) => Promise<void>;
+  onApplyGovernance: () => Promise<void>;
 }
 
 function ProposalCard({
@@ -191,6 +195,7 @@ function ProposalCard({
   onImportSignature,
   onCancel,
   onMarkSubmitted,
+  onApplyGovernance,
 }: ProposalCardProps) {
   const [expanded, setExpanded] = useState(false);
   const [signOpen, setSignOpen] = useState(false);
@@ -339,12 +344,22 @@ function ProposalCard({
                 Import signature
               </button>
             ) : null}
-            {proposal.state === "ready_to_submit" ? (
+            {proposal.state === "ready_to_submit" &&
+            proposal.operation !== "governance" ? (
               <button
                 className="btn btn--sm"
                 onClick={() => setSubmitOpen(true)}
               >
                 Mark submitted
+              </button>
+            ) : null}
+            {proposal.state === "ready_to_submit" &&
+            proposal.operation === "governance" ? (
+              <button
+                className="btn btn--sm btn--primary"
+                onClick={() => void onApplyGovernance()}
+              >
+                Apply governance change
               </button>
             ) : null}
             {!terminal ? (
