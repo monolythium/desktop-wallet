@@ -208,6 +208,12 @@ pub struct VaultContainerV1 {
     /// `serde(default)` so pre-Phase-6 v1 containers keep parsing.
     #[serde(default)]
     pub multisig_vaults: Vec<super::multisig::MultisigVaultRecord>,
+    /// Phase 6 — proposals belonging to all multisig vaults. Held at
+    /// the container level (rather than nested inside each multisig
+    /// vault) so cross-vault lookups stay O(1) and import paths can
+    /// reach any proposal by id.
+    #[serde(default)]
+    pub proposals: Vec<super::proposal::Proposal>,
     /// Currently-active vault id (UI selection). May reference either
     /// a single-signer `vaults[i].id` OR a `multisig_vaults[i].id`
     /// (Phase 6 picker treats both as first-class). `None` only on a
@@ -230,6 +236,7 @@ impl VaultContainerV1 {
             mek_argon_params: params,
             vaults: Vec::new(),
             multisig_vaults: Vec::new(),
+            proposals: Vec::new(),
             active_id: None,
         }
     }

@@ -366,6 +366,7 @@ pub fn vault_create_impl(
                 mek_argon_params: params,
                 vaults: Vec::new(),
                 multisig_vaults: Vec::new(),
+                proposals: Vec::new(),
                 active_id: None,
             });
             (mek, params, salt_b64)
