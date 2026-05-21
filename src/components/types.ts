@@ -13,6 +13,7 @@ export type Route =
   | "trade"
   | "ai-trade"
   | "news"
+  | "proposals"
   | "settings";
 
 export const ALL_ROUTES: Route[] = [
@@ -27,5 +28,6 @@ export const ALL_ROUTES: Route[] = [
   "trade",
   "ai-trade",
   "news",
+  "proposals",
   "settings",
 ];
