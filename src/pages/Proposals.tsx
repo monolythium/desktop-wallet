@@ -19,7 +19,7 @@
 //   - QR / text off-band signature import (Commit 9).
 //   - Auto-routing the bundled tx broadcast (Commit 11).
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Identity } from "../components/Identity";
 import { useMultisigs, useProposals } from "../sdk/useMultisig";
 import { MultisigInvokeError, type Proposal } from "../sdk/multisig";
@@ -1114,7 +1114,41 @@ function ShareProposalModal({
   onClose: () => void;
 }) {
   const envelope = useMemo(() => encodeProposalShare(proposal), [proposal]);
+  const [tab, setTab] = useState<"text" | "qr">("text");
   const [copied, setCopied] = useState(false);
+  const [qrSvg, setQrSvg] = useState<string | null>(null);
+  const [qrError, setQrError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (tab !== "qr") return;
+    let cancelled = false;
+    setQrError(null);
+    void (async () => {
+      try {
+        const QRCode = await import("qrcode");
+        const svg = await QRCode.toString(envelope, {
+          type: "svg",
+          errorCorrectionLevel: "M",
+          margin: 1,
+          width: 320,
+        });
+        if (!cancelled) setQrSvg(svg);
+      } catch (cause) {
+        if (!cancelled) {
+          // qrcode caps payloads at ~2.9 KB at error level M. Proposal
+          // envelopes for stake/name/send fit; ERC-1155 metadata-heavy
+          // payloads can blow the budget — surface the error so the user
+          // falls back to the text tab.
+          setQrError((cause as Error)?.message ?? String(cause));
+          setQrSvg(null);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [tab, envelope]);
+
   return (
     <ModalOverlay onDismiss={onClose}>
       <div className="w-card">
@@ -1124,44 +1158,117 @@ function ShareProposalModal({
             Close
           </button>
         </div>
+        <div
+          style={{
+            display: "flex",
+            gap: 6,
+            padding: "8px 16px",
+            borderBottom: "1px solid var(--w-border)",
+          }}
+        >
+          <button
+            type="button"
+            className={`btn btn--sm ${tab === "text" ? "btn--primary" : "btn--ghost"}`}
+            onClick={() => setTab("text")}
+          >
+            Text
+          </button>
+          <button
+            type="button"
+            className={`btn btn--sm ${tab === "qr" ? "btn--primary" : "btn--ghost"}`}
+            onClick={() => setTab("qr")}
+          >
+            QR
+          </button>
+        </div>
         <div className="w-card__body">
-          <div className="row-help" style={{ marginBottom: 12 }}>
-            Send this text to your co-signer via Signal, email, or any other
-            channel. Their wallet imports it, signs locally, and sends back a
-            signature envelope you import below.
-          </div>
-          <textarea
-            className="w-live-input mono"
-            value={envelope}
-            readOnly
-            rows={12}
-            spellCheck={false}
-            style={{
-              width: "100%",
-              fontFamily: "var(--f-mono)",
-              fontSize: 11,
-              marginBottom: 12,
-            }}
-          />
-          <div style={{ display: "flex", gap: 6 }}>
-            <button
-              className="btn btn--sm btn--primary"
-              onClick={async () => {
-                try {
-                  await navigator.clipboard.writeText(envelope);
-                  setCopied(true);
-                  setTimeout(() => setCopied(false), 1500);
-                } catch {
-                  setCopied(false);
-                }
-              }}
-            >
-              {copied ? "Copied ✓" : "Copy to clipboard"}
-            </button>
-            <button className="btn btn--sm btn--ghost" onClick={onClose}>
-              Close
-            </button>
-          </div>
+          {tab === "text" ? (
+            <>
+              <div className="row-help" style={{ marginBottom: 12 }}>
+                Send this text to your co-signer via Signal, email, or any
+                other channel. Their wallet imports it, signs locally, and
+                sends back a signature envelope you import below.
+              </div>
+              <textarea
+                className="w-live-input mono"
+                value={envelope}
+                readOnly
+                rows={12}
+                spellCheck={false}
+                style={{
+                  width: "100%",
+                  fontFamily: "var(--f-mono)",
+                  fontSize: 11,
+                  marginBottom: 12,
+                }}
+              />
+              <div style={{ display: "flex", gap: 6 }}>
+                <button
+                  className="btn btn--sm btn--primary"
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(envelope);
+                      setCopied(true);
+                      setTimeout(() => setCopied(false), 1500);
+                    } catch {
+                      setCopied(false);
+                    }
+                  }}
+                >
+                  {copied ? "Copied ✓" : "Copy to clipboard"}
+                </button>
+                <button className="btn btn--sm btn--ghost" onClick={onClose}>
+                  Close
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="row-help" style={{ marginBottom: 12 }}>
+                Scan the QR with your co-signer's wallet. Error-correction
+                level M (≈15% damage tolerance). Use a phone QR scanner to
+                read the envelope into a text editor and paste back via
+                their wallet's text-import. In-app camera scanning lands
+                in a later phase.
+              </div>
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "center",
+                  padding: 12,
+                  background: "white",
+                  borderRadius: 6,
+                  marginBottom: 12,
+                  minHeight: 320,
+                  alignItems: "center",
+                }}
+                aria-label="proposal-share QR code"
+              >
+                {qrSvg ? (
+                  <div
+                    style={{ width: 320, height: 320 }}
+                    // qrcode emits a self-contained SVG; inserting via
+                    // dangerouslySetInnerHTML is safe because the input
+                    // is the wallet's own canonical envelope JSON.
+                    dangerouslySetInnerHTML={{ __html: qrSvg }}
+                  />
+                ) : qrError ? (
+                  <div className="w-banner error">
+                    ✗ Couldn't generate QR: {qrError}. Use the Text tab.
+                  </div>
+                ) : (
+                  <div className="cap" style={{ color: "var(--w-text-3)" }}>
+                    Generating…
+                  </div>
+                )}
+              </div>
+              <div style={{ display: "flex", gap: 6 }}>
+                <button className="btn btn--sm btn--ghost" onClick={onClose}>
+                  Close
+                </button>
+              </div>
+            </>
+          )}
         </div>
       </div>
     </ModalOverlay>
