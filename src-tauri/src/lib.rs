@@ -106,6 +106,7 @@ pub fn run() {
             slh_backup::commands::slh_get_backup_status,
             slh_backup::commands::slh_test_recovery,
             slh_backup::commands::slh_remove_backup,
+            slh_backup::commands::slh_activate_recovery,
         ])
         .setup(|app| {
             // Phase 5: instantiate the multi-vault store with the

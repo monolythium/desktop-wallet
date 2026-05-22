@@ -265,6 +265,42 @@ export async function slhTestRecovery(args: {
   }
 }
 
+/** Activate the recovery — the Beta-critical path for §30.1. Used
+ *  when the user has lost their master password: they supply the
+ *  recovery password + 24-word mnemonic to prove possession of the
+ *  backup, and the wallet marks the backup as `activated`. After
+ *  this the SLH-DSA pubkey is the on-disk signing key going forward
+ *  (the chain-side emergency-key precompile at 0x1100 must accept
+ *  it; chain GAP tracked in Phase 8 report).
+ *
+ *  Vault does NOT need to be unlocked — the whole point is that
+ *  the master password is unavailable. */
+export async function slhActivateRecovery(args: {
+  vaultId: string;
+  recoveryPassword: string;
+  mnemonic: string;
+}): Promise<SlhBackupStatus> {
+  let entropy: Uint8Array;
+  try {
+    entropy = backupMnemonicToEntropy(args.mnemonic);
+  } catch (cause) {
+    if (cause instanceof SlhCallError) throw cause;
+    throw new SlhCallError({ code: "malformed" });
+  }
+  const entropyB64 = bytesToBase64Url(entropy);
+  entropy.fill(0);
+  try {
+    const wire = await invoke<SlhBackupStatusWire>("slh_activate_recovery", {
+      vaultId: args.vaultId,
+      recoveryPassword: args.recoveryPassword,
+      entropyB64,
+    });
+    return statusFromWire(wire);
+  } catch (raw) {
+    throw normalizeError(raw);
+  }
+}
+
 /** Remove the enrolled backup. Destructive — requires BOTH the
  *  master password AND the recovery password. */
 export async function slhRemoveBackup(args: {
@@ -296,6 +332,10 @@ export function useSlhBackup(vaultId: string | null): {
     recoveryPassword: string;
     mnemonic: string;
   }) => Promise<boolean>;
+  activateRecovery: (args: {
+    recoveryPassword: string;
+    mnemonic: string;
+  }) => Promise<SlhBackupStatus>;
   remove: (args: {
     masterPassword: string;
     recoveryPassword: string;
@@ -355,6 +395,18 @@ export function useSlhBackup(vaultId: string | null): {
     [vaultId],
   );
 
+  const activateRecovery = useCallback(
+    async (args: { recoveryPassword: string; mnemonic: string }) => {
+      if (!vaultId) {
+        throw new SlhCallError({ code: "vault_not_found", id: "" });
+      }
+      const result = await slhActivateRecovery({ vaultId, ...args });
+      await refresh();
+      return result;
+    },
+    [vaultId, refresh],
+  );
+
   const remove = useCallback(
     async (args: { masterPassword: string; recoveryPassword: string }) => {
       if (!vaultId) {
@@ -366,5 +418,14 @@ export function useSlhBackup(vaultId: string | null): {
     [vaultId, refresh],
   );
 
-  return { status, backup, error, refresh, enroll, testRecovery, remove };
+  return {
+    status,
+    backup,
+    error,
+    refresh,
+    enroll,
+    testRecovery,
+    activateRecovery,
+    remove,
+  };
 }

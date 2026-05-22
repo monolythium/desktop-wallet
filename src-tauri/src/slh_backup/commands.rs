@@ -377,6 +377,134 @@ pub fn slh_test_recovery_impl(
     Ok(true)
 }
 
+/// Activate the recovery — the Beta-critical path for §30.1. Given
+/// the user-supplied recovery password + the 32-byte entropy
+/// decoded from their written mnemonic, this:
+///
+///   1. Re-derives the recovery key from the password + stored salt
+///   2. Opens the sealed_entropy slot — failure ⇒ wrong password
+///   3. Byte-compares the stored entropy with the supplied one
+///   4. Regenerates the SLH-DSA keypair from the supplied entropy
+///      and asserts the pubkey matches the stored pubkey (defense-
+///      in-depth)
+///   5. Marks the backup as `activated = true` with the timestamp
+///
+/// Phase 8 scope: this does NOT re-key the vault's ML-DSA-65
+/// sealed_payload under a new master password — that's a separate
+/// operation deferred to Phase 9 (carries policy + ownership-proof
+/// implications). The activation flag is enough for the chain-side
+/// emergency-key precompile at 0x1100 to start accepting SLH-DSA
+/// signatures from this vault's backup pubkey (chain GAP — see
+/// Phase 8 final report).
+///
+/// Unlike enrolment, activation does NOT require the vault to be
+/// unlocked. The whole point of the flow is that the user has lost
+/// their master password.
+pub fn slh_activate_recovery_impl(
+    inner: &mut VaultStoreInner,
+    vault_id: &str,
+    recovery_password: &str,
+    entropy_b64: &str,
+    now: u64,
+) -> Result<SlhBackupStatus, SlhCommandError> {
+    inner.load().map_err(SlhCommandError::from)?;
+
+    // Read-only validation phase first — we don't mutate until every
+    // input is verified.
+    let (verified, _stored_pubkey_bytes) = {
+        let container = inner.container.as_ref().ok_or(SlhCommandError::Backend {
+            message: "container missing".into(),
+        })?;
+        let vault = container
+            .find(vault_id)
+            .ok_or(SlhCommandError::VaultNotFound {
+                id: vault_id.into(),
+            })?;
+        let record = vault
+            .slh_backup
+            .as_ref()
+            .ok_or(SlhCommandError::NotEnrolled)?;
+
+        // Re-derive the recovery key.
+        let salt_bytes = URL_SAFE_NO_PAD
+            .decode(&record.recovery_salt)
+            .map_err(|_| SlhCommandError::Malformed)?;
+        if salt_bytes.len() != MEK_SALT_LEN {
+            return Err(SlhCommandError::Malformed);
+        }
+        let mut salt = [0u8; MEK_SALT_LEN];
+        salt.copy_from_slice(&salt_bytes);
+        let recovery_key = derive_recovery_key(
+            recovery_password,
+            &salt,
+            &record.recovery_argon_params,
+        )?;
+
+        // Decode the user-supplied entropy.
+        let supplied_vec = URL_SAFE_NO_PAD
+            .decode(entropy_b64)
+            .map_err(|_| SlhCommandError::Malformed)?;
+        if supplied_vec.len() != SLH_ENTROPY_LEN {
+            return Err(SlhCommandError::InvalidEntropyLength {
+                expected: SLH_ENTROPY_LEN,
+            });
+        }
+        let mut supplied = [0u8; SLH_ENTROPY_LEN];
+        supplied.copy_from_slice(&supplied_vec);
+
+        // Open the stored entropy slot — wrong recovery password
+        // surfaces here as an AEAD tag failure.
+        let stored_z = open_payload(&record.sealed_entropy, &recovery_key)
+            .map_err(|_| SlhCommandError::WrongRecoveryPassword)?;
+        if stored_z.len() != SLH_ENTROPY_LEN {
+            return Err(SlhCommandError::Malformed);
+        }
+        let mut stored = [0u8; SLH_ENTROPY_LEN];
+        stored.copy_from_slice(&stored_z[..]);
+
+        // Constant-time entropy compare.
+        let mut diff: u8 = 0;
+        for (a, b) in stored.iter().zip(supplied.iter()) {
+            diff |= a ^ b;
+        }
+        if diff != 0 {
+            return Err(SlhCommandError::WrongRecoveryPassword);
+        }
+
+        // Regenerate keypair from supplied entropy + assert match
+        // against stored pubkey.
+        let (regenerated_pk, _) = generate_slh_keypair_from_entropy(&supplied)?;
+        let stored_pubkey = URL_SAFE_NO_PAD
+            .decode(&record.public_key)
+            .map_err(|_| SlhCommandError::Malformed)?;
+        if regenerated_pk.as_bytes().as_slice() != stored_pubkey.as_slice() {
+            return Err(SlhCommandError::Malformed);
+        }
+
+        (true, stored_pubkey)
+    };
+    debug_assert!(verified);
+
+    // Mutation phase — mark the backup activated.
+    let container = inner.container.as_mut().ok_or(SlhCommandError::Backend {
+        message: "container vanished".into(),
+    })?;
+    let vault = container
+        .find_mut(vault_id)
+        .ok_or(SlhCommandError::VaultNotFound {
+            id: vault_id.into(),
+        })?;
+    let record = vault
+        .slh_backup
+        .as_mut()
+        .ok_or(SlhCommandError::NotEnrolled)?;
+    record.activated = true;
+    record.activated_at = Some(now);
+    let new_status = record.status();
+    inner.save().map_err(SlhCommandError::from)?;
+    Ok(new_status)
+}
+
 pub fn slh_remove_backup_impl(
     inner: &mut VaultStoreInner,
     vault_id: &str,
@@ -475,6 +603,23 @@ pub async fn slh_remove_backup(
 ) -> Result<(), SlhCommandError> {
     let mut inner = store.0.lock().await;
     slh_remove_backup_impl(&mut inner, &vault_id, &master_password, &recovery_password)
+}
+
+#[tauri::command]
+pub async fn slh_activate_recovery(
+    vault_id: String,
+    recovery_password: String,
+    entropy_b64: String,
+    store: tauri::State<'_, VaultStore>,
+) -> Result<SlhBackupStatus, SlhCommandError> {
+    let mut inner = store.0.lock().await;
+    slh_activate_recovery_impl(
+        &mut inner,
+        &vault_id,
+        &recovery_password,
+        &entropy_b64,
+        now_unix(),
+    )
 }
 
 #[cfg(test)]
@@ -595,6 +740,123 @@ mod tests {
             slh_test_recovery_impl(&mut inner, &v, "strong-recovery-pw", &bad_entropy)
                 .unwrap();
         assert!(!ok);
+        let _ = std::fs::remove_file(&inner.container_path);
+    }
+
+    #[test]
+    fn activate_recovery_marks_backup_activated() {
+        let mut inner = tmp_inner();
+        let v = seed_test_vault(&mut inner);
+        let out =
+            slh_enroll_backup_impl(&mut inner, &v, "strong-recovery-pw", 100).unwrap();
+        let status = slh_activate_recovery_impl(
+            &mut inner,
+            &v,
+            "strong-recovery-pw",
+            &out.entropy_b64,
+            300,
+        )
+        .unwrap();
+        match status {
+            SlhBackupStatus::Activated {
+                created_at,
+                activated_at,
+            } => {
+                assert_eq!(created_at, 100);
+                assert_eq!(activated_at, 300);
+            }
+            other => panic!("unexpected status: {other:?}"),
+        }
+        // Re-querying status reflects activation.
+        let again = slh_get_backup_status_impl(&mut inner, &v).unwrap();
+        match again {
+            SlhBackupStatus::Activated { .. } => {}
+            other => panic!("status didn't persist: {other:?}"),
+        }
+        let _ = std::fs::remove_file(&inner.container_path);
+    }
+
+    #[test]
+    fn activate_recovery_rejects_wrong_password() {
+        let mut inner = tmp_inner();
+        let v = seed_test_vault(&mut inner);
+        let out =
+            slh_enroll_backup_impl(&mut inner, &v, "strong-recovery-pw", 100).unwrap();
+        let err = slh_activate_recovery_impl(
+            &mut inner,
+            &v,
+            "wrong-password",
+            &out.entropy_b64,
+            300,
+        )
+        .unwrap_err();
+        assert_eq!(err, SlhCommandError::WrongRecoveryPassword);
+        // Status remains enrolled.
+        let s = slh_get_backup_status_impl(&mut inner, &v).unwrap();
+        match s {
+            SlhBackupStatus::Enrolled { .. } => {}
+            other => panic!("status changed on failure: {other:?}"),
+        }
+        let _ = std::fs::remove_file(&inner.container_path);
+    }
+
+    #[test]
+    fn activate_recovery_rejects_wrong_entropy() {
+        let mut inner = tmp_inner();
+        let v = seed_test_vault(&mut inner);
+        slh_enroll_backup_impl(&mut inner, &v, "strong-recovery-pw", 100).unwrap();
+        // Supply a different 32-byte entropy.
+        let bad = URL_SAFE_NO_PAD.encode([0xAAu8; SLH_ENTROPY_LEN]);
+        let err = slh_activate_recovery_impl(
+            &mut inner,
+            &v,
+            "strong-recovery-pw",
+            &bad,
+            300,
+        )
+        .unwrap_err();
+        assert_eq!(err, SlhCommandError::WrongRecoveryPassword);
+        let _ = std::fs::remove_file(&inner.container_path);
+    }
+
+    #[test]
+    fn activate_recovery_rejects_when_not_enrolled() {
+        let mut inner = tmp_inner();
+        let v = seed_test_vault(&mut inner);
+        let ent = URL_SAFE_NO_PAD.encode([0u8; SLH_ENTROPY_LEN]);
+        let err = slh_activate_recovery_impl(
+            &mut inner,
+            &v,
+            "strong-recovery-pw",
+            &ent,
+            300,
+        )
+        .unwrap_err();
+        assert_eq!(err, SlhCommandError::NotEnrolled);
+        let _ = std::fs::remove_file(&inner.container_path);
+    }
+
+    #[test]
+    fn activate_recovery_works_while_vault_is_locked() {
+        let mut inner = tmp_inner();
+        let v = seed_test_vault(&mut inner);
+        let out =
+            slh_enroll_backup_impl(&mut inner, &v, "strong-recovery-pw", 100).unwrap();
+        // Lock the vault — recovery should still work (the whole
+        // point of the flow is the master password is unavailable).
+        inner.mek = None;
+        let status = slh_activate_recovery_impl(
+            &mut inner,
+            &v,
+            "strong-recovery-pw",
+            &out.entropy_b64,
+            400,
+        )
+        .unwrap();
+        match status {
+            SlhBackupStatus::Activated { .. } => {}
+            other => panic!("unexpected: {other:?}"),
+        }
         let _ = std::fs::remove_file(&inner.container_path);
     }
 

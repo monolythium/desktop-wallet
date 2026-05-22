@@ -43,8 +43,8 @@
 
 #[allow(unused_imports)]
 pub use commands::{
-    slh_enroll_backup, slh_get_backup_status, slh_remove_backup, slh_test_recovery,
-    SlhBackupRecord, SlhBackupStatus, SlhCommandError, SlhEnrollResult,
+    slh_activate_recovery, slh_enroll_backup, slh_get_backup_status, slh_remove_backup,
+    slh_test_recovery, SlhBackupRecord, SlhBackupStatus, SlhCommandError, SlhEnrollResult,
 };
 #[allow(unused_imports)]
 pub use keys::{
