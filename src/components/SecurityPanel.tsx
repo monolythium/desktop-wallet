@@ -15,6 +15,7 @@ import {
   getAutoLockMinutes,
   setAutoLockMinutes,
 } from "../sdk/auto-lock";
+import { EmergencyBackupSection } from "./EmergencyBackupSection";
 import {
   PasskeyCallError,
   type PasskeySummary,
@@ -103,6 +104,8 @@ export function SecurityPanel({ onLockNow, vaultId }: Props) {
             onPolicyChange={() => setPolicyVersion((v) => v + 1)}
           />
         ) : null}
+
+        {vaultId ? <EmergencyBackupSection vaultId={vaultId} /> : null}
       </div>
     </div>
   );
