@@ -93,6 +93,13 @@ pub fn run() {
             ipfs_cache::ipfs_cache_set,
             ipfs_cache::ipfs_cache_clear,
             ipfs_cache::ipfs_cache_stats,
+            // Phase 8 — passkey signer (two-tier security activation).
+            passkey::commands::passkey_list,
+            passkey::commands::passkey_enroll,
+            passkey::commands::passkey_rename,
+            passkey::commands::passkey_remove,
+            passkey::commands::passkey_challenge_create,
+            passkey::commands::passkey_attest,
         ])
         .setup(|app| {
             // Phase 5: instantiate the multi-vault store with the

@@ -44,12 +44,25 @@
 // same machine.
 
 #[allow(unused_imports)]
+pub use challenge::{
+    create_challenge, sign_challenge_software, verify_assertion, Assertion, AuthChallenge,
+    AuthError, CHALLENGE_DOMAIN, CHALLENGE_NONCE_LEN, CHALLENGE_TTL_SECS, PAYLOAD_HASH_LEN,
+};
+#[allow(unused_imports)]
+pub use commands::{
+    passkey_attest, passkey_challenge_create, passkey_enroll, passkey_list, passkey_remove,
+    passkey_rename, PasskeyCommandError,
+};
+#[allow(unused_imports)]
 pub use credential::{
     decode_credential_id, encode_credential_id, generate_credential_id, PasskeyBackend,
-    PasskeyEntry, PasskeyError, CREDENTIAL_ID_LEN, ED25519_PUB_LEN, ED25519_SEC_LEN,
+    PasskeyEntry, PasskeyEntrySummary, PasskeyError, CREDENTIAL_ID_LEN, ED25519_PUB_LEN,
+    ED25519_SEC_LEN, MAX_PASSKEYS_PER_VAULT,
 };
 #[allow(unused_imports)]
 pub use registration::{enroll_passkey, EnrollInputs};
 
+pub mod challenge;
+pub mod commands;
 pub mod credential;
 pub mod registration;
