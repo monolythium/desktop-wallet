@@ -31,7 +31,7 @@ import {
   encodeSignatureShare,
   signatureBytesFromHex,
 } from "../sdk/offband";
-import { tryDecodeIntentFromHex } from "../sdk/multisig-intent";
+import { describeIntent, tryDecodeIntentFromHex } from "../sdk/multisig-intent";
 import { sendNativeLyth } from "../sdk/native-send";
 
 export function Proposals() {
@@ -246,7 +246,7 @@ function ProposalCard({
         <span style={{ width: 12 }}>{expanded ? "▾" : "▸"}</span>
         <div>
           <div style={{ fontSize: 13, fontWeight: 600 }}>
-            {proposal.operation}{" "}
+            {decodedIntent ? describeIntent(decodedIntent) : proposal.operation}{" "}
             <span
               className="cap"
               style={{

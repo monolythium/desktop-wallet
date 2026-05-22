@@ -18,6 +18,7 @@ import {
   parseTokenAmount,
 } from "../sdk/erc20";
 import { submitContractCall } from "../sdk/submit-contract";
+import { encodeErc20TransferIntent } from "../sdk/multisig-intent";
 import type { TrackedToken } from "../sdk/token-list";
 import { formatAddress } from "./format";
 
@@ -71,6 +72,14 @@ export function SendErc20Form({ token, balance, onClose, onSubmitted }: Props) {
       title: `Send ${displayAmount} ${token.symbol}`,
       subtitle: `ERC-20 transfer on ${token.contract.slice(0, 12)}…`,
       auth: "keychain",
+      proposal: {
+        operation: "token_transfer",
+        payload: encodeErc20TransferIntent({
+          token: token.contract,
+          to: recipient,
+          amount: amountRaw.toString(),
+        }),
+      },
       diff: [
         { k: "From", v: formatAddress(IDENTITY.address) },
         { k: "To", v: formatAddress(recipient) },
