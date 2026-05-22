@@ -14,6 +14,7 @@ import {
   _statusFromWireForTest,
   backupMnemonicToEntropy,
   entropyToBackupMnemonic,
+  slhActivateRecovery,
   slhEnrollBackup,
   slhGetBackupStatus,
   slhRemoveBackup,
@@ -182,6 +183,69 @@ describe("slh-backup · slhTestRecovery", () => {
         recoveryPassword: "pw",
       }),
     );
+  });
+});
+
+describe("slh-backup · slhActivateRecovery", () => {
+  it("returns activated status on success", async () => {
+    const ent = new Uint8Array(32);
+    for (let i = 0; i < 32; i++) ent[i] = i;
+    const m = entropyToBackupMnemonic(ent);
+    invokeMock.mockResolvedValueOnce({
+      kind: "activated",
+      created_at: 100,
+      activated_at: 200,
+    });
+    const out = await slhActivateRecovery({
+      vaultId: "v1",
+      recoveryPassword: "strong-recovery-pw",
+      mnemonic: m,
+    });
+    expect(out).toEqual({
+      kind: "activated",
+      createdAt: 100,
+      activatedAt: 200,
+    });
+    expect(invokeMock).toHaveBeenCalledWith(
+      "slh_activate_recovery",
+      expect.objectContaining({
+        vaultId: "v1",
+        recoveryPassword: "strong-recovery-pw",
+      }),
+    );
+  });
+
+  it("throws malformed for invalid mnemonic", async () => {
+    try {
+      await slhActivateRecovery({
+        vaultId: "v1",
+        recoveryPassword: "pw",
+        mnemonic: "not real bip39 phrase",
+      });
+      expect.unreachable();
+    } catch (cause) {
+      expect((cause as SlhCallError).cause.code).toBe("malformed");
+    }
+    expect(invokeMock).not.toHaveBeenCalled();
+  });
+
+  it("surfaces wrong_recovery_password typed", async () => {
+    const ent = new Uint8Array(32);
+    for (let i = 0; i < 32; i++) ent[i] = i;
+    const m = entropyToBackupMnemonic(ent);
+    invokeMock.mockRejectedValueOnce({ code: "wrong_recovery_password" });
+    try {
+      await slhActivateRecovery({
+        vaultId: "v1",
+        recoveryPassword: "wrong",
+        mnemonic: m,
+      });
+      expect.unreachable();
+    } catch (cause) {
+      expect((cause as SlhCallError).cause.code).toBe(
+        "wrong_recovery_password",
+      );
+    }
   });
 });
 

@@ -14,6 +14,7 @@
 // `slh_test_recovery` with the user-supplied password + mnemonic.
 
 import { useMemo, useState } from "react";
+import { EmergencyRecoveryFlow } from "./EmergencyRecoveryFlow";
 import {
   SlhCallError,
   useSlhBackup,
@@ -31,6 +32,7 @@ export function EmergencyBackupSection({ vaultId }: Props) {
   const [showEnroll, setShowEnroll] = useState(false);
   const [showTest, setShowTest] = useState(false);
   const [showRemove, setShowRemove] = useState(false);
+  const [showRecovery, setShowRecovery] = useState(false);
   const [bannerError, setBannerError] = useState<string | null>(null);
 
   return (
@@ -81,15 +83,26 @@ export function EmergencyBackupSection({ vaultId }: Props) {
               Test recovery
             </button>
             {backup.kind === "enrolled" ? (
-              <button
-                className="btn btn--sm btn--ghost"
-                onClick={() => {
-                  setBannerError(null);
-                  setShowRemove(true);
-                }}
-              >
-                Remove backup
-              </button>
+              <>
+                <button
+                  className="btn btn--sm btn--ghost"
+                  onClick={() => {
+                    setBannerError(null);
+                    setShowRecovery(true);
+                  }}
+                >
+                  Activate recovery
+                </button>
+                <button
+                  className="btn btn--sm btn--ghost"
+                  onClick={() => {
+                    setBannerError(null);
+                    setShowRemove(true);
+                  }}
+                >
+                  Remove backup
+                </button>
+              </>
             ) : null}
           </>
         )}
@@ -124,6 +137,16 @@ export function EmergencyBackupSection({ vaultId }: Props) {
               setBannerError((cause as SlhCallError).message);
               return false;
             }
+          }}
+        />
+      ) : null}
+
+      {showRecovery ? (
+        <EmergencyRecoveryFlow
+          vaultId={vaultId}
+          onClose={() => {
+            setShowRecovery(false);
+            void refresh();
           }}
         />
       ) : null}
