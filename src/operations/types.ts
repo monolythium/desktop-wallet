@@ -77,11 +77,35 @@ export interface OperationDescriptor {
    */
   proposal?: ProposalRouting;
   /**
+   * Phase 8 — two-tier policy gate inputs. When supplied, the drawer
+   * evaluates the user's policy after the master-password unlock: if
+   * `valueLyth >= triggerThresholdLyth` AND `policy.passkeyRequired`
+   * AND ≥1 passkey is enrolled, the drawer requests a passkey
+   * assertion before calling `execute`. Below the threshold, or with
+   * the policy off, or with no passkey enrolled, the assertion is
+   * skipped and the legacy single-factor flow proceeds. Whitepaper
+   * §28.5 Q29-31.
+   */
+  policy?: PolicyGate;
+  /**
    * The actual work. Resolves with an arbitrary "result" payload (tx hash,
    * RPC echo, etc.); throws to land the drawer in `error`. Implementations
    * are responsible for the chain side; the drawer owns UI state only.
    */
   execute: (ctx?: OperationExecutionContext) => Promise<OperationResult>;
+}
+
+/** Inputs the OperationsDrawer needs to run the two-tier policy gate.
+ *  Caller (the form that builds the descriptor) computes both:
+ *   - `valueLyth` from the operation-specific interpretation
+ *     (Send: amount; Stake: stake amount; Names: register fee;
+ *      ERC-20: amount via decimals; NFT: fixed gas threshold or zero)
+ *   - `payloadHashB64` from the canonical tx bytes (base64url-no-pad
+ *     of a 32-byte hash; the wallet uses Keccak-256 over the same
+ *     bytes that go to the ML-DSA signer downstream) */
+export interface PolicyGate {
+  valueLyth: number;
+  payloadHashB64: string;
 }
 
 /** Proposal routing carries the operation kind + the raw payload bytes

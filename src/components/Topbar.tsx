@@ -10,6 +10,8 @@ import {
   getPolicy,
   type PolicyConfig,
 } from "../sdk/policy";
+import { useVaults } from "../sdk/useVaults";
+import { BackupStatusIndicator } from "./BackupStatusIndicator";
 import { Identity } from "./Identity";
 import type { Route } from "./types";
 
@@ -42,6 +44,9 @@ const TITLES: Record<Route, string> = {
 export function Topbar({ route, onLockNow, onBadgeClick }: Props) {
   const chain = useChainSnapshot(IDENTITY.address);
   const multisigs = useMultisigs();
+  const vaults = useVaults();
+  const activeVaultId = vaults.active?.id ?? null;
+  const balanceLyth = chain.snapshot?.balanceLyth ?? null;
   const [policy, setPolicyState] = useState<PolicyConfig>(() => getPolicy());
   // The policy lives in localStorage; refresh on focus so changes
   // made in another tab / Settings panel reflect here without a
@@ -87,13 +92,13 @@ export function Topbar({ route, onLockNow, onBadgeClick }: Props) {
       <button
         type="button"
         aria-label={`Unlock posture: ${posture.label}. Click to configure.`}
-        title="Configure security policy"
+        title={`Configure security policy — ${posture.label}`}
         onClick={() => onBadgeClick?.()}
         style={{
           marginLeft: 8,
           padding: "4px 10px",
           borderRadius: 8,
-          border: "1px solid var(--w-border)",
+          border: `1px solid ${toneColor}33`,
           background: "var(--w-surface, transparent)",
           color: toneColor,
           fontSize: 11,
@@ -101,10 +106,19 @@ export function Topbar({ route, onLockNow, onBadgeClick }: Props) {
           cursor: onBadgeClick ? "pointer" : "default",
           textTransform: "uppercase",
           letterSpacing: 0.3,
+          // Phase 8 — smooth tone transitions when the policy moves
+          // between weak / ok / strong (e.g. enrolling the first
+          // passkey lifts the badge from weak to ok).
+          transition:
+            "color 220ms ease, border-color 220ms ease, background 220ms ease",
         }}
       >
         {posture.label}
       </button>
+      <BackupStatusIndicator
+        vaultId={activeVaultId}
+        balanceLyth={balanceLyth}
+      />
       {onLockNow ? (
         <button
           type="button"

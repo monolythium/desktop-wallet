@@ -71,6 +71,7 @@ export function Settings() {
 
       <SecurityPanel
         onLockNow={() => vaults.lock()}
+        vaultId={vaults.active?.id ?? null}
       />
 
       <NetworkPanel />

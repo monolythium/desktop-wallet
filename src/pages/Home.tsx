@@ -6,8 +6,10 @@ import { useEffect, useState } from "react";
 import { useOperations } from "../operations/context";
 import { loadChainSnapshot } from "../sdk/client";
 import { useChainSnapshot } from "../sdk/useChainSnapshot";
+import { useVaults } from "../sdk/useVaults";
 import { BALANCES, IDENTITY, TOKENS, TXS_PRIVATE, TXS_PUBLIC } from "../data/fixtures";
 import type { Denom } from "../data/fixtures";
+import { BackupReminderCard } from "../components/BackupReminderCard";
 import { IdentityCard } from "../components/IdentityCard";
 import { PendingTransferBanner } from "../components/PendingTransferBanner";
 import { SendLythForm } from "../components/SendLythForm";
@@ -113,6 +115,10 @@ export function Home({ denom, goto }: Props) {
       {isPub ? (
         <PendingTransferBanner address={IDENTITY.address} goto={goto} />
       ) : null}
+      <HomeBackupReminder
+        balanceLyth={chain.snapshot?.balanceLyth ?? null}
+        onNavigateToSettings={() => goto("settings")}
+      />
       {/* Hero */}
       <div className="w-hero">
         <div className="w-hero__label">
@@ -439,5 +445,24 @@ function ChainStatusLine({
       {" · "}
       height <b style={{ color: "var(--w-text)" }}>{height === null ? "?" : height.toString()}</b>
     </div>
+  );
+}
+
+/** Phase 8 — SLH-DSA backup reminder card, gated by the active
+ *  vault + the chain-snapshot balance. */
+function HomeBackupReminder({
+  balanceLyth,
+  onNavigateToSettings,
+}: {
+  balanceLyth: number | null;
+  onNavigateToSettings: () => void;
+}) {
+  const vaults = useVaults();
+  return (
+    <BackupReminderCard
+      vaultId={vaults.active?.id ?? null}
+      balanceLyth={balanceLyth}
+      onNavigateToSettings={onNavigateToSettings}
+    />
   );
 }
