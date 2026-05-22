@@ -12,10 +12,15 @@ use std::sync::Arc;
 use tauri::{Emitter, Manager, WindowEvent};
 use tokio::sync::Mutex;
 
+mod auto_lock;
 mod keychain;
 mod ledger;
 mod vault;
 mod vault_multi;
+
+use auto_lock::system_events::{
+    register_platform_hooks, EventDispatcher, SystemEventKind, SystemEventListener,
+};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -91,8 +96,40 @@ pub fn run() {
                 .unwrap_or_else(|_| std::env::temp_dir().join("monolythium-wallet"));
             container_path.push("vault.v1.json");
             app.manage(vault_multi::VaultStore::new(container_path));
+
+            // Phase 7 — wire the platform session-lock dispatcher.
+            // The dispatcher fans OS-level events out to every
+            // registered listener; our default listener emits a
+            // Tauri event the TS shell handles by calling
+            // `vault.lock()`.
+            let dispatcher = EventDispatcher::new();
+            dispatcher.add_listener(TauriEmitListener {
+                handle: app.handle().clone(),
+            });
+            // No-op on platforms whose native hooks aren't wired yet
+            // (#D18-windows FFI activation, #D18-macos, #D18-linux).
+            // The Phase 5 focus-loss proxy stays as the primary
+            // lock trigger until those land.
+            if let Err(e) = register_platform_hooks(&dispatcher) {
+                eprintln!("auto_lock: register_platform_hooks: {e}");
+            }
+            app.manage(dispatcher);
             Ok(())
         })
         .run(tauri::generate_context!())
         .expect("error while running Monolythium Wallet");
+}
+
+/// Default SystemEventListener implementation that emits a Tauri event
+/// the TypeScript shell listens to. The shell handler calls
+/// `useVaults().lock()` for any of the three OS event kinds — they
+/// all map to "lock the wallet now."
+struct TauriEmitListener {
+    handle: tauri::AppHandle,
+}
+
+impl SystemEventListener for TauriEmitListener {
+    fn on_event(&self, kind: SystemEventKind) {
+        let _ = self.handle.emit("vault://os-event", kind.as_wire());
+    }
 }
