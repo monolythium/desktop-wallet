@@ -16,6 +16,7 @@ mod auto_lock;
 mod ipfs_cache;
 mod keychain;
 mod ledger;
+mod passkey;
 mod vault;
 mod vault_multi;
 
