@@ -17,6 +17,7 @@ mod ipfs_cache;
 mod keychain;
 mod ledger;
 mod passkey;
+mod slh_backup;
 mod vault;
 mod vault_multi;
 
