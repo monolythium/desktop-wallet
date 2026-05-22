@@ -36,6 +36,11 @@ import {
 } from "../sdk/staking";
 import { submitDelegationCall } from "../sdk/submit-delegation";
 import {
+  encodeStakeDelegateIntent,
+  encodeStakeRedelegateIntent,
+  encodeStakeUndelegateIntent,
+} from "../sdk/multisig-intent";
+import {
   type AutovoteAllocation,
   type AutovoteMode,
   type AutovoteResult,
@@ -155,6 +160,13 @@ export function Stake() {
         title: `Autovote · step ${step}/${stepN}`,
         subtitle: `Delegate to ${next.cluster.name} (${next.weightBps} bps)`,
         auth: "keychain",
+        proposal: {
+          operation: "stake",
+          payload: encodeStakeDelegateIntent({
+            clusterId: next.cluster.clusterId,
+            weightBps: next.weightBps,
+          }),
+        },
         diff: [
           { k: "From", v: formatAddress(IDENTITY.address) },
           { k: "Mode", v: humanMode(autovoteMode) },
@@ -205,6 +217,13 @@ export function Stake() {
       title: `Delegate to ${cluster.name}`,
       subtitle: `Allocate ${weightBps} bps (${(weightBps / 100).toFixed(2)}%) to cluster ${cluster.clusterId}`,
       auth: "keychain",
+      proposal: {
+        operation: "stake",
+        payload: encodeStakeDelegateIntent({
+          clusterId: cluster.clusterId,
+          weightBps,
+        }),
+      },
       diff: [
         { k: "From", v: formatAddress(IDENTITY.address) },
         { k: "Cluster", v: cluster.name },
@@ -363,6 +382,14 @@ export function Stake() {
       title: `Redelegate to ${target.name}`,
       subtitle: `Move ${bps} bps from ${source.clusterName}`,
       auth: "keychain",
+      proposal: {
+        operation: "stake",
+        payload: encodeStakeRedelegateIntent({
+          fromClusterId: source.clusterId,
+          toClusterId: target.clusterId,
+          weightBps: bps,
+        }),
+      },
       diff: [
         { k: "From cluster", v: source.clusterName },
         { k: "From cluster id", v: String(source.clusterId) },
@@ -421,6 +448,13 @@ export function Stake() {
       title: `Unstake from ${delegation.clusterName}`,
       subtitle: `Remove all ${delegation.weightBps} bps from cluster ${delegation.clusterId}`,
       auth: "keychain",
+      proposal: {
+        operation: "stake",
+        payload: encodeStakeUndelegateIntent({
+          clusterId: delegation.clusterId,
+          weightBps: delegation.weightBps,
+        }),
+      },
       diff: [
         { k: "From", v: formatAddress(IDENTITY.address) },
         { k: "Cluster", v: delegation.clusterName },

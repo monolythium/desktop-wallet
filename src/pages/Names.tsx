@@ -20,6 +20,7 @@ import {
   type NameCategory,
 } from "../sdk/naming";
 import { submitNamingCall } from "../sdk/submit-naming";
+import { encodeNameRegisterIntent } from "../sdk/multisig-intent";
 
 type RegistrationCategory = Extract<NameCategory, "human" | "agent">;
 
@@ -60,6 +61,14 @@ export function Names() {
       title: `Register ${canonical}`,
       subtitle: `Register a ${category} name in the §22.8 naming registry`,
       auth: "keychain",
+      proposal: {
+        operation: "naming",
+        payload: encodeNameRegisterIntent({
+          name: canonical,
+          category,
+          durationYears: 1,
+        }),
+      },
       diff: [
         { k: "From", v: formatAddress(IDENTITY.address) },
         { k: "Name", v: canonical },
