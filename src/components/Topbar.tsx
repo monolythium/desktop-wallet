@@ -10,6 +10,8 @@ import {
   getPolicy,
   type PolicyConfig,
 } from "../sdk/policy";
+import { useVaults } from "../sdk/useVaults";
+import { BackupStatusIndicator } from "./BackupStatusIndicator";
 import { Identity } from "./Identity";
 import type { Route } from "./types";
 
@@ -42,6 +44,9 @@ const TITLES: Record<Route, string> = {
 export function Topbar({ route, onLockNow, onBadgeClick }: Props) {
   const chain = useChainSnapshot(IDENTITY.address);
   const multisigs = useMultisigs();
+  const vaults = useVaults();
+  const activeVaultId = vaults.active?.id ?? null;
+  const balanceLyth = chain.snapshot?.balanceLyth ?? null;
   const [policy, setPolicyState] = useState<PolicyConfig>(() => getPolicy());
   // The policy lives in localStorage; refresh on focus so changes
   // made in another tab / Settings panel reflect here without a
@@ -110,6 +115,10 @@ export function Topbar({ route, onLockNow, onBadgeClick }: Props) {
       >
         {posture.label}
       </button>
+      <BackupStatusIndicator
+        vaultId={activeVaultId}
+        balanceLyth={balanceLyth}
+      />
       {onLockNow ? (
         <button
           type="button"
