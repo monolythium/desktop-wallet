@@ -40,6 +40,45 @@ function fixturePasskey(overrides: Partial<PasskeyWire> = {}): PasskeyWire {
   };
 }
 
+/** Routing mock builder. `listState` is read each time `passkey_list`
+ *  is invoked so callers can mutate it between actions to simulate
+ *  the refresh-after-mutation cycle. Every command not explicitly
+ *  routed returns `undefined`. */
+function buildInvoke(args: {
+  listState: { current: PasskeyWire[] };
+  enrollResponse?: PasskeyWire;
+  renameResponse?: PasskeyWire;
+  removeResponse?: unknown;
+}): (cmd: string, params?: Record<string, unknown>) => Promise<unknown> {
+  return async (cmd) => {
+    switch (cmd) {
+      case "passkey_list":
+        return args.listState.current;
+      case "passkey_enroll":
+        if (args.enrollResponse) {
+          args.listState.current = [...args.listState.current, args.enrollResponse];
+          return args.enrollResponse;
+        }
+        return undefined;
+      case "passkey_rename":
+        if (args.renameResponse) {
+          args.listState.current = args.listState.current.map((p) =>
+            p.id === args.renameResponse!.id ? args.renameResponse! : p,
+          );
+          return args.renameResponse;
+        }
+        return undefined;
+      case "passkey_remove":
+        args.listState.current = [];
+        return args.removeResponse ?? undefined;
+      case "slh_get_backup_status":
+        return { kind: "not_enrolled" };
+      default:
+        return undefined;
+    }
+  };
+}
+
 beforeEach(() => {
   invokeMock.mockReset();
   resetPolicy();
@@ -47,14 +86,15 @@ beforeEach(() => {
 
 describe("SecurityPanel · passkey section · empty state", () => {
   it("renders the empty-state hint when no passkeys are enrolled", async () => {
-    invokeMock.mockResolvedValue([]); // passkey_list
+    invokeMock.mockImplementation(
+      buildInvoke({ listState: { current: [] } }),
+    );
     render(<SecurityPanel vaultId={VAULT_ID} />);
     await waitFor(() =>
       expect(
         screen.getByText(/No passkeys enrolled yet/i),
       ).toBeInTheDocument(),
     );
-    // The Enroll button is present.
     expect(
       screen.getByRole("button", { name: /Enroll new passkey/i }),
     ).toBeInTheDocument();
@@ -65,14 +105,19 @@ describe("SecurityPanel · passkey section · empty state", () => {
     expect(
       screen.queryByText(/Passkey signers/i),
     ).not.toBeInTheDocument();
-    // No invoke calls at all in this branch.
     expect(invokeMock).not.toHaveBeenCalled();
   });
 });
 
 describe("SecurityPanel · passkey section · enrollment flow", () => {
   it("opens the enroll modal, submits, and flips enrolledForHighValue true", async () => {
-    invokeMock.mockResolvedValueOnce([]); // initial list
+    const listState = { current: [] as PasskeyWire[] };
+    invokeMock.mockImplementation(
+      buildInvoke({
+        listState,
+        enrollResponse: fixturePasskey({ label: "My laptop" }),
+      }),
+    );
     render(<SecurityPanel vaultId={VAULT_ID} />);
     await waitFor(() =>
       expect(
@@ -84,30 +129,21 @@ describe("SecurityPanel · passkey section · enrollment flow", () => {
     fireEvent.click(
       screen.getByRole("button", { name: /Enroll new passkey/i }),
     );
-    // Modal visible.
     expect(
       screen.getByRole("dialog", { name: /Enroll a new passkey/i }),
     ).toBeInTheDocument();
-
     fireEvent.change(screen.getByLabelText(/^Label$/i), {
       target: { value: "My laptop" },
     });
-    // enroll → list refresh.
-    invokeMock.mockResolvedValueOnce(fixturePasskey({ label: "My laptop" })); // passkey_enroll
-    invokeMock.mockResolvedValueOnce([
-      fixturePasskey({ label: "My laptop" }),
-    ]); // passkey_list refresh
     fireEvent.click(screen.getByRole("button", { name: /^Enroll$/i }));
 
     await waitFor(() =>
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
     );
-    // Row visible.
     await waitFor(() => {
       const labels = screen.getAllByText("My laptop");
       expect(labels.length).toBeGreaterThan(0);
     });
-    // Policy flag flipped + toggle re-rendered enabled.
     await waitFor(() =>
       expect(getPolicy().enrolledForHighValue).toBe(true),
     );
@@ -118,7 +154,9 @@ describe("SecurityPanel · passkey section · enrollment flow", () => {
   });
 
   it("disables Enroll while the label is empty", async () => {
-    invokeMock.mockResolvedValueOnce([]);
+    invokeMock.mockImplementation(
+      buildInvoke({ listState: { current: [] } }),
+    );
     render(<SecurityPanel vaultId={VAULT_ID} />);
     await waitFor(() =>
       expect(
@@ -139,9 +177,10 @@ describe("SecurityPanel · passkey section · enrollment flow", () => {
 
 describe("SecurityPanel · passkey section · remove flow", () => {
   it("requires the master password and warns when the last passkey is about to go", async () => {
-    invokeMock.mockResolvedValueOnce([
-      fixturePasskey({ label: "Only one" }),
-    ]); // initial list
+    const listState = {
+      current: [fixturePasskey({ label: "Only one" })] as PasskeyWire[],
+    };
+    invokeMock.mockImplementation(buildInvoke({ listState }));
     setPolicy({ enrolledForHighValue: true, passkeyRequired: true });
     render(<SecurityPanel vaultId={VAULT_ID} />);
     await waitFor(() => expect(screen.getByText("Only one")).toBeInTheDocument());
@@ -150,11 +189,9 @@ describe("SecurityPanel · passkey section · remove flow", () => {
     expect(
       screen.getByRole("dialog", { name: /Remove passkey "Only one"/i }),
     ).toBeInTheDocument();
-    // Last-passkey warning visible (policy was active).
     expect(
       screen.getByText(/Removing the last passkey will disable/i),
     ).toBeInTheDocument();
-    // Submit button disabled while password is empty.
     const submit = screen.getByRole("button", { name: /^Remove$/i });
     expect((submit as HTMLButtonElement).disabled).toBe(true);
 
@@ -162,10 +199,6 @@ describe("SecurityPanel · passkey section · remove flow", () => {
       target: { value: "pw-12345" },
     });
     expect((submit as HTMLButtonElement).disabled).toBe(false);
-
-    // remove → list refresh (empty).
-    invokeMock.mockResolvedValueOnce(undefined); // passkey_remove
-    invokeMock.mockResolvedValueOnce([]); // passkey_list refresh
     fireEvent.click(submit);
 
     await waitFor(() =>
@@ -174,15 +207,14 @@ describe("SecurityPanel · passkey section · remove flow", () => {
     await waitFor(() =>
       expect(getPolicy().enrolledForHighValue).toBe(false),
     );
-    // Policy toggle auto-cleared too.
     expect(getPolicy().passkeyRequired).toBe(false);
   });
 
   it("does NOT show the last-passkey warning when the policy toggle is off", async () => {
-    invokeMock.mockResolvedValueOnce([
-      fixturePasskey({ label: "Only one" }),
-    ]);
-    // Policy enrolled but NOT requiring passkey → no warning.
+    const listState = {
+      current: [fixturePasskey({ label: "Only one" })] as PasskeyWire[],
+    };
+    invokeMock.mockImplementation(buildInvoke({ listState }));
     setPolicy({ enrolledForHighValue: true, passkeyRequired: false });
     render(<SecurityPanel vaultId={VAULT_ID} />);
     await waitFor(() =>
@@ -197,9 +229,15 @@ describe("SecurityPanel · passkey section · remove flow", () => {
 
 describe("SecurityPanel · passkey section · rename flow", () => {
   it("updates the visible label after a successful rename", async () => {
-    invokeMock.mockResolvedValueOnce([
-      fixturePasskey({ label: "Old name" }),
-    ]);
+    const listState = {
+      current: [fixturePasskey({ label: "Old name" })] as PasskeyWire[],
+    };
+    invokeMock.mockImplementation(
+      buildInvoke({
+        listState,
+        renameResponse: fixturePasskey({ label: "New name" }),
+      }),
+    );
     render(<SecurityPanel vaultId={VAULT_ID} />);
     await waitFor(() =>
       expect(screen.getByText("Old name")).toBeInTheDocument(),
@@ -208,12 +246,6 @@ describe("SecurityPanel · passkey section · rename flow", () => {
     fireEvent.change(screen.getByLabelText(/^New label$/i), {
       target: { value: "New name" },
     });
-    invokeMock.mockResolvedValueOnce(
-      fixturePasskey({ label: "New name" }),
-    ); // passkey_rename
-    invokeMock.mockResolvedValueOnce([
-      fixturePasskey({ label: "New name" }),
-    ]); // refresh
     fireEvent.click(screen.getByRole("button", { name: /^Save$/i }));
     await waitFor(() =>
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
