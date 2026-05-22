@@ -127,6 +127,21 @@ export function App() {
     try { localStorage.setItem(ROUTE_KEY, route); } catch { /* ignore */ }
   }, [route]);
 
+  // Phase 8 — cross-component navigation bridge. The OperationsDrawer
+  // hint bar fires `wallet:nav` to ask the App for a route change
+  // (e.g. "Enroll now" → settings). Keeps the drawer decoupled from
+  // the App's route state machine.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<{ route?: Route }>).detail;
+      if (detail?.route && (ALL_ROUTES as string[]).includes(detail.route)) {
+        setRoute(detail.route);
+      }
+    };
+    window.addEventListener("wallet:nav", handler);
+    return () => window.removeEventListener("wallet:nav", handler);
+  }, []);
+
   useEffect(() => {
     document.body.dataset.denom = denom;
     try { localStorage.setItem(DENOM_KEY, denom); } catch { /* ignore */ }

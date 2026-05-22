@@ -95,6 +95,17 @@ type LedgerFlow =
   | { kind: "awaiting_approval"; device: LedgerDeviceInfo }
   | { kind: "approved"; device: LedgerDeviceInfo; address: string };
 
+/** Phase 8 — high-value hint bar. `checking` is the brief async
+ *  window between drawer-open and policy-resolution; `visible` carries
+ *  the threshold the hint should display; `hidden` covers every
+ *  skip-path (below threshold / passkey enrolled / dismissed). */
+type HintState =
+  | { kind: "checking" }
+  | { kind: "visible"; threshold: number }
+  | { kind: "hidden" };
+
+const HINT_DISMISS_KEY = "wallet.high-value-hint-dismissed";
+
 export function OperationsDrawer({ descriptor, onClose }: Props) {
   const multisigs = useMultisigs();
   const activeMultisig = multisigs.active;
@@ -114,6 +125,56 @@ export function OperationsDrawer({ descriptor, onClose }: Props) {
   // Phase 8 — passkey challenge progress, surfaced as a brief banner
   // during the auth → executing transition when the policy fires.
   const [challenging, setChallenging] = useState(false);
+  // Phase 8 — high-value hint visibility: per-session dismissible.
+  // The hint surfaces in preview when the descriptor advertises a
+  // policy value that crosses the threshold AND no passkey is enrolled
+  // on the active vault.
+  const [hintState, setHintState] = useState<HintState>({ kind: "checking" });
+  useEffect(() => {
+    if (stage !== "preview" || !descriptor.policy) {
+      setHintState({ kind: "hidden" });
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const vs = await listVaults();
+        if (cancelled) return;
+        const activeId = vs.find((v) => v.isActive)?.id ?? null;
+        if (!activeId) {
+          setHintState({ kind: "hidden" });
+          return;
+        }
+        const passkeys = await listPasskeys(activeId);
+        if (cancelled) return;
+        const policy = getPolicy();
+        const above =
+          descriptor.policy &&
+          descriptor.policy.valueLyth >= policy.triggerThresholdLyth;
+        const dismissed =
+          typeof sessionStorage !== "undefined" &&
+          sessionStorage.getItem(HINT_DISMISS_KEY) === "1";
+        if (
+          above &&
+          passkeys.length === 0 &&
+          !dismissed &&
+          descriptor.policy
+        ) {
+          setHintState({
+            kind: "visible",
+            threshold: policy.triggerThresholdLyth,
+          });
+        } else {
+          setHintState({ kind: "hidden" });
+        }
+      } catch {
+        if (!cancelled) setHintState({ kind: "hidden" });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [stage, descriptor.policy]);
   // Cancellation token for the in-flight hardware flow. We bump this
   // every time the user retries / steps back so a stale enumeration
   // resolving late doesn't clobber a fresh attempt.
@@ -486,6 +547,28 @@ export function OperationsDrawer({ descriptor, onClose }: Props) {
               supportsProposal={descriptor.proposal !== undefined}
             />
           ) : null}
+          {stage === "preview" && hintState.kind === "visible" ? (
+            <HighValueHintBar
+              threshold={hintState.threshold}
+              onDismiss={() => {
+                try {
+                  sessionStorage.setItem(HINT_DISMISS_KEY, "1");
+                } catch {
+                  // sessionStorage unavailable — fall through; the
+                  // hint stays dismissed in memory via state update.
+                }
+                setHintState({ kind: "hidden" });
+              }}
+              onEnrollNow={() => {
+                window.dispatchEvent(
+                  new CustomEvent("wallet:nav", {
+                    detail: { route: "settings" },
+                  }),
+                );
+                onClose();
+              }}
+            />
+          ) : null}
           {stage === "preview" ? <PreviewPane descriptor={descriptor} /> : null}
           {stage === "auth" ? (
             <AuthPane
@@ -645,6 +728,51 @@ function MultisigBanner({
         signature is attached automatically; remaining signers co-sign from
         the Proposals page.
       </div>
+    </div>
+  );
+}
+
+function HighValueHintBar({
+  threshold,
+  onDismiss,
+  onEnrollNow,
+}: {
+  threshold: number;
+  onDismiss: () => void;
+  onEnrollNow: () => void;
+}) {
+  return (
+    <div
+      className="w-banner"
+      role="region"
+      aria-label="High-value transaction hint"
+      style={{
+        marginBottom: 12,
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+      }}
+    >
+      <span aria-hidden="true">💡</span>
+      <div style={{ flex: 1, fontSize: 12 }}>
+        <strong>Tip — Enroll a passkey</strong>{" "}
+        to protect transactions over {threshold.toLocaleString()} LYTH.
+        The two-tier policy requires one passkey before the high-value
+        gate can activate.
+      </div>
+      <button
+        className="btn btn--sm btn--primary"
+        onClick={onEnrollNow}
+      >
+        Enroll now
+      </button>
+      <button
+        className="btn btn--sm btn--ghost"
+        onClick={onDismiss}
+        aria-label="Dismiss high-value hint"
+      >
+        Dismiss
+      </button>
     </div>
   );
 }

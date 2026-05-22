@@ -87,13 +87,13 @@ export function Topbar({ route, onLockNow, onBadgeClick }: Props) {
       <button
         type="button"
         aria-label={`Unlock posture: ${posture.label}. Click to configure.`}
-        title="Configure security policy"
+        title={`Configure security policy — ${posture.label}`}
         onClick={() => onBadgeClick?.()}
         style={{
           marginLeft: 8,
           padding: "4px 10px",
           borderRadius: 8,
-          border: "1px solid var(--w-border)",
+          border: `1px solid ${toneColor}33`,
           background: "var(--w-surface, transparent)",
           color: toneColor,
           fontSize: 11,
@@ -101,6 +101,11 @@ export function Topbar({ route, onLockNow, onBadgeClick }: Props) {
           cursor: onBadgeClick ? "pointer" : "default",
           textTransform: "uppercase",
           letterSpacing: 0.3,
+          // Phase 8 — smooth tone transitions when the policy moves
+          // between weak / ok / strong (e.g. enrolling the first
+          // passkey lifts the badge from weak to ok).
+          transition:
+            "color 220ms ease, border-color 220ms ease, background 220ms ease",
         }}
       >
         {posture.label}
