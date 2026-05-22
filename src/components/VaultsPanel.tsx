@@ -14,6 +14,8 @@ import { Identity } from "./Identity";
 import { VaultCreateFlow } from "./VaultCreateFlow";
 import { MultisigCreateFlow } from "./MultisigCreateFlow";
 import { ManageSignersModal } from "./ManageSignersModal";
+import { VaultExportModal } from "./VaultExportModal";
+import { VaultImportModal } from "./VaultImportModal";
 import { useVaults } from "../sdk/useVaults";
 import { useMultisigs } from "../sdk/useMultisig";
 import {
@@ -27,8 +29,10 @@ export function VaultsPanel() {
   const multisigs = useMultisigs();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [exportingId, setExportingId] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [showCreateMultisig, setShowCreateMultisig] = useState(false);
+  const [showImport, setShowImport] = useState(false);
 
   if (vaults.state.status === "loading") {
     return (
@@ -68,6 +72,13 @@ export function VaultsPanel() {
         >
           + Add multisig
         </button>
+        <button
+          className="btn btn--sm btn--ghost"
+          onClick={() => setShowImport(true)}
+          style={{ marginLeft: 6 }}
+        >
+          Import…
+        </button>
       </div>
       <div className="w-card__body" style={{ padding: 0 }}>
         {vaultList.length === 0 ? (
@@ -88,6 +99,7 @@ export function VaultsPanel() {
                 setEditingId(null);
               }}
               onStartDelete={() => setDeletingId(vault.id)}
+              onStartExport={() => setExportingId(vault.id)}
             />
           ))
         )}
@@ -136,6 +148,28 @@ export function VaultsPanel() {
             if (!id) return;
             await vaults.remove(id, confirmToken);
             setDeletingId(null);
+          }}
+        />
+      ) : null}
+
+      {exportingId ? (
+        (() => {
+          const v = vaultList.find((x) => x.id === exportingId);
+          if (!v) return null;
+          return (
+            <VaultExportModal
+              vault={v}
+              onClose={() => setExportingId(null)}
+            />
+          );
+        })()
+      ) : null}
+
+      {showImport ? (
+        <VaultImportModal
+          onClose={() => setShowImport(false)}
+          onImported={async () => {
+            await vaults.refresh();
           }}
         />
       ) : null}
@@ -238,6 +272,7 @@ function VaultRow({
   onCancelRename,
   onCommitRename,
   onStartDelete,
+  onStartExport,
 }: {
   vault: VaultSummary;
   isOnly: boolean;
@@ -246,6 +281,7 @@ function VaultRow({
   onCancelRename: () => void;
   onCommitRename: (newLabel: string) => Promise<void>;
   onStartDelete: () => void;
+  onStartExport: () => void;
 }) {
   const [draftLabel, setDraftLabel] = useState(vault.label);
   const [error, setError] = useState<string | null>(null);
@@ -255,7 +291,7 @@ function VaultRow({
     <div
       style={{
         display: "grid",
-        gridTemplateColumns: "1fr auto auto auto",
+        gridTemplateColumns: "1fr auto auto auto auto",
         gap: 12,
         alignItems: "center",
         padding: "10px 14px",
@@ -330,11 +366,15 @@ function VaultRow({
             Cancel
           </button>
           <span />
+          <span />
         </>
       ) : (
         <>
           <button className="btn btn--sm btn--ghost" onClick={onStartRename}>
             Rename
+          </button>
+          <button className="btn btn--sm btn--ghost" onClick={onStartExport}>
+            Export
           </button>
           <button
             className="btn btn--sm btn--ghost"
