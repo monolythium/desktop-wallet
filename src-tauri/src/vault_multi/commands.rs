@@ -130,7 +130,7 @@ impl VaultStoreInner {
 
     /// Load the container from disk into memory. NoContainer if the
     /// file doesn't exist; Backend on shape failures.
-    pub(super) fn load(&mut self) -> Result<(), VaultError> {
+    pub(crate) fn load(&mut self) -> Result<(), VaultError> {
         if self.container.is_some() {
             return Ok(());
         }
@@ -185,7 +185,7 @@ impl VaultStoreInner {
 
     /// Persist the in-memory container to disk atomically (write to
     /// temp + rename).
-    pub(super) fn save(&self) -> Result<(), VaultError> {
+    pub(crate) fn save(&self) -> Result<(), VaultError> {
         let container = self.container.as_ref().ok_or(VaultError::Backend {
             message: "no container to save".into(),
         })?;
@@ -417,6 +417,8 @@ pub fn vault_create_impl(
         created_at: now_unix,
         wrapped_vek,
         sealed_payload,
+        passkeys: Vec::new(),
+        slh_backup: None,
     };
 
     let container = inner.container.as_mut().ok_or(VaultError::Backend {

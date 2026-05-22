@@ -16,6 +16,8 @@ mod auto_lock;
 mod ipfs_cache;
 mod keychain;
 mod ledger;
+mod passkey;
+mod slh_backup;
 mod vault;
 mod vault_multi;
 
@@ -92,6 +94,19 @@ pub fn run() {
             ipfs_cache::ipfs_cache_set,
             ipfs_cache::ipfs_cache_clear,
             ipfs_cache::ipfs_cache_stats,
+            // Phase 8 — passkey signer (two-tier security activation).
+            passkey::commands::passkey_list,
+            passkey::commands::passkey_enroll,
+            passkey::commands::passkey_rename,
+            passkey::commands::passkey_remove,
+            passkey::commands::passkey_challenge_create,
+            passkey::commands::passkey_attest,
+            // Phase 8 — SLH-DSA emergency backup (§30.1).
+            slh_backup::commands::slh_enroll_backup,
+            slh_backup::commands::slh_get_backup_status,
+            slh_backup::commands::slh_test_recovery,
+            slh_backup::commands::slh_remove_backup,
+            slh_backup::commands::slh_activate_recovery,
         ])
         .setup(|app| {
             // Phase 5: instantiate the multi-vault store with the

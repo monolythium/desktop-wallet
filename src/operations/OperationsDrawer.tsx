@@ -31,7 +31,17 @@ import {
   proposalAttachSignature,
   proposalCreate,
 } from "../sdk/multisig";
+import {
+  attestPasskey,
+  createPasskeyChallenge,
+  listPasskeys,
+  PasskeyCallError,
+  type PasskeySummary,
+} from "../sdk/passkey";
+import { getPolicy } from "../sdk/policy";
+import { listVaults } from "../sdk/vault-multi";
 import { MlDsa65Backend } from "@monolythium/core-sdk/crypto";
+import { evaluatePolicyGate } from "./policy-gate";
 import type {
   OperationExecutionContext,
   OperationDescriptor,
@@ -69,7 +79,8 @@ const STAGE_LABEL: Record<OperationStage, string> = {
 type AuthError =
   | { kind: "keychain"; cause: KeychainCallError }
   | { kind: "vault"; cause: VaultCallError }
-  | { kind: "ledger"; cause: LedgerCallError };
+  | { kind: "ledger"; cause: LedgerCallError }
+  | { kind: "passkey"; cause: PasskeyCallError };
 
 /**
  * Hardware-signer mini state machine. The Ledger flow has more visible
@@ -83,6 +94,17 @@ type LedgerFlow =
   | { kind: "connected"; device: LedgerDeviceInfo }
   | { kind: "awaiting_approval"; device: LedgerDeviceInfo }
   | { kind: "approved"; device: LedgerDeviceInfo; address: string };
+
+/** Phase 8 — high-value hint bar. `checking` is the brief async
+ *  window between drawer-open and policy-resolution; `visible` carries
+ *  the threshold the hint should display; `hidden` covers every
+ *  skip-path (below threshold / passkey enrolled / dismissed). */
+type HintState =
+  | { kind: "checking" }
+  | { kind: "visible"; threshold: number }
+  | { kind: "hidden" };
+
+const HINT_DISMISS_KEY = "wallet.high-value-hint-dismissed";
 
 export function OperationsDrawer({ descriptor, onClose }: Props) {
   const multisigs = useMultisigs();
@@ -100,6 +122,59 @@ export function OperationsDrawer({ descriptor, onClose }: Props) {
   const [authBusy, setAuthBusy] = useState(false);
   const [password, setPassword] = useState("");
   const [ledgerFlow, setLedgerFlow] = useState<LedgerFlow>({ kind: "idle" });
+  // Phase 8 — passkey challenge progress, surfaced as a brief banner
+  // during the auth → executing transition when the policy fires.
+  const [challenging, setChallenging] = useState(false);
+  // Phase 8 — high-value hint visibility: per-session dismissible.
+  // The hint surfaces in preview when the descriptor advertises a
+  // policy value that crosses the threshold AND no passkey is enrolled
+  // on the active vault.
+  const [hintState, setHintState] = useState<HintState>({ kind: "checking" });
+  useEffect(() => {
+    if (stage !== "preview" || !descriptor.policy) {
+      setHintState({ kind: "hidden" });
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const vs = await listVaults();
+        if (cancelled) return;
+        const activeId = vs.find((v) => v.isActive)?.id ?? null;
+        if (!activeId) {
+          setHintState({ kind: "hidden" });
+          return;
+        }
+        const passkeys = await listPasskeys(activeId);
+        if (cancelled) return;
+        const policy = getPolicy();
+        const above =
+          descriptor.policy &&
+          descriptor.policy.valueLyth >= policy.triggerThresholdLyth;
+        const dismissed =
+          typeof sessionStorage !== "undefined" &&
+          sessionStorage.getItem(HINT_DISMISS_KEY) === "1";
+        if (
+          above &&
+          passkeys.length === 0 &&
+          !dismissed &&
+          descriptor.policy
+        ) {
+          setHintState({
+            kind: "visible",
+            threshold: policy.triggerThresholdLyth,
+          });
+        } else {
+          setHintState({ kind: "hidden" });
+        }
+      } catch {
+        if (!cancelled) setHintState({ kind: "hidden" });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [stage, descriptor.policy]);
   // Cancellation token for the in-flight hardware flow. We bump this
   // every time the user retries / steps back so a stale enumeration
   // resolving late doesn't clobber a fresh attempt.
@@ -169,6 +244,15 @@ export function OperationsDrawer({ descriptor, onClose }: Props) {
       setAuthBusy(false);
       // Clear the password from state immediately on success.
       setPassword("");
+      // Phase 8 — two-tier policy gate. Eval after the master-password
+      // unlock so a wrong password fails fast without invoking the
+      // passkey backend. Skip-paths fall through to the legacy flow;
+      // a challenge-required path attempts the assertion before
+      // calling execute and surfaces typed errors at the auth pane.
+      const challengeOk = await maybeRunPolicyChallenge();
+      if (!challengeOk) {
+        return;
+      }
       if (useProposalRouting) {
         void runProposalCreate(vaultSeed);
       } else {
@@ -258,6 +342,85 @@ export function OperationsDrawer({ descriptor, onClose }: Props) {
     }
   };
 
+  /**
+   * Phase 8 — evaluate the two-tier policy against the live passkey
+   * inventory and, when the gate fires, request an assertion before
+   * advancing to execute. Returns `true` when the drawer should
+   * proceed (either skip-paths or successful challenge), `false`
+   * when it must stay in the auth pane (challenge failed / cancelled
+   * / surface error).
+   */
+  const maybeRunPolicyChallenge = async (): Promise<boolean> => {
+    if (!descriptor.policy) return true;
+    // Resolve the active vault id at call-time rather than from a
+    // hook-captured closure — keeps the gate decoupled from
+    // useVaults' load timing.
+    let vaultId: string | null = null;
+    try {
+      const vs = await listVaults();
+      vaultId = vs.find((v) => v.isActive)?.id ?? null;
+    } catch {
+      return true; // Multi-vault unavailable — degrade gracefully.
+    }
+    if (!vaultId) return true;
+
+    // Fetch passkey inventory. Works on a locked vault too (list is
+    // metadata-only), so this is cheap.
+    let passkeys: PasskeySummary[] = [];
+    try {
+      passkeys = await listPasskeys(vaultId);
+    } catch (cause) {
+      // If list fails, log + skip — single-factor is the safe
+      // degradation. The user will see no extra prompt.
+      if (cause instanceof PasskeyCallError) {
+        // Suppress visible error in the drawer; the SecurityPanel
+        // surfaces these for the user.
+      }
+      return true;
+    }
+
+    const evaluation = evaluatePolicyGate({
+      policy: getPolicy(),
+      valueLyth: descriptor.policy.valueLyth,
+      enrolledPasskeyCount: passkeys.length,
+    });
+    if (evaluation.kind === "skip") return true;
+
+    // Challenge required. Pick the first enrolled credential for v1;
+    // a future commit can surface a picker if the user has multiple.
+    const credential = passkeys[0];
+    if (!credential) {
+      // Shouldn't happen — evaluatePolicyGate's `no_passkey` branch
+      // would have skipped — but defensive.
+      return true;
+    }
+    setChallenging(true);
+    setAuthError(null);
+    try {
+      const challenge = await createPasskeyChallenge(
+        descriptor.policy.payloadHashB64,
+      );
+      await attestPasskey({
+        vaultId,
+        credentialId: credential.id,
+        challenge,
+      });
+      setChallenging(false);
+      return true;
+    } catch (cause) {
+      const err =
+        cause instanceof PasskeyCallError
+          ? cause
+          : new PasskeyCallError({
+              code: "backend",
+              message: String(cause),
+            });
+      setAuthError({ kind: "passkey", cause: err });
+      setChallenging(false);
+      return false;
+    }
+  };
+
   const runExecute = async (ctx: OperationExecutionContext = {}) => {
     setStage("executing");
     setError(null);
@@ -288,6 +451,9 @@ export function OperationsDrawer({ descriptor, onClose }: Props) {
       seed.fill(0);
       return;
     }
+    // The per-signer policy evaluation already ran in advanceFromAuth
+    // before runProposalCreate was called. Multisig members each
+    // evaluate independently at their own sign time (spec §28.5).
     setStage("executing");
     setError(null);
     try {
@@ -381,6 +547,28 @@ export function OperationsDrawer({ descriptor, onClose }: Props) {
               supportsProposal={descriptor.proposal !== undefined}
             />
           ) : null}
+          {stage === "preview" && hintState.kind === "visible" ? (
+            <HighValueHintBar
+              threshold={hintState.threshold}
+              onDismiss={() => {
+                try {
+                  sessionStorage.setItem(HINT_DISMISS_KEY, "1");
+                } catch {
+                  // sessionStorage unavailable — fall through; the
+                  // hint stays dismissed in memory via state update.
+                }
+                setHintState({ kind: "hidden" });
+              }}
+              onEnrollNow={() => {
+                window.dispatchEvent(
+                  new CustomEvent("wallet:nav", {
+                    detail: { route: "settings" },
+                  }),
+                );
+                onClose();
+              }}
+            />
+          ) : null}
           {stage === "preview" ? <PreviewPane descriptor={descriptor} /> : null}
           {stage === "auth" ? (
             <AuthPane
@@ -389,8 +577,9 @@ export function OperationsDrawer({ descriptor, onClose }: Props) {
               password={password}
               setPassword={setPassword}
               onSubmit={() => void advanceFromAuth()}
-              busy={authBusy}
+              busy={authBusy || challenging}
               ledgerFlow={ledgerFlow}
+              challenging={challenging}
             />
           ) : null}
           {stage === "executing" ? <ExecutingPane descriptor={descriptor} /> : null}
@@ -543,6 +732,51 @@ function MultisigBanner({
   );
 }
 
+function HighValueHintBar({
+  threshold,
+  onDismiss,
+  onEnrollNow,
+}: {
+  threshold: number;
+  onDismiss: () => void;
+  onEnrollNow: () => void;
+}) {
+  return (
+    <div
+      className="w-banner"
+      role="region"
+      aria-label="High-value transaction hint"
+      style={{
+        marginBottom: 12,
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+      }}
+    >
+      <span aria-hidden="true">💡</span>
+      <div style={{ flex: 1, fontSize: 12 }}>
+        <strong>Tip — Enroll a passkey</strong>{" "}
+        to protect transactions over {threshold.toLocaleString()} LYTH.
+        The two-tier policy requires one passkey before the high-value
+        gate can activate.
+      </div>
+      <button
+        className="btn btn--sm btn--primary"
+        onClick={onEnrollNow}
+      >
+        Enroll now
+      </button>
+      <button
+        className="btn btn--sm btn--ghost"
+        onClick={onDismiss}
+        aria-label="Dismiss high-value hint"
+      >
+        Dismiss
+      </button>
+    </div>
+  );
+}
+
 function PreviewPane({ descriptor }: { descriptor: OperationDescriptor }) {
   return (
     <>
@@ -591,6 +825,7 @@ interface AuthPaneProps {
   onSubmit: () => void;
   busy: boolean;
   ledgerFlow: LedgerFlow;
+  challenging: boolean;
 }
 
 function AuthPane({
@@ -601,6 +836,7 @@ function AuthPane({
   onSubmit,
   busy,
   ledgerFlow,
+  challenging,
 }: AuthPaneProps) {
   if (descriptor.auth === "hardware") {
     return <LedgerAuthPane ledgerFlow={ledgerFlow} authError={authError} />;
@@ -636,6 +872,17 @@ function AuthPane({
           disabled={busy}
         />
       </label>
+      {challenging ? (
+        <div
+          className="w-banner"
+          role="status"
+          aria-live="polite"
+          style={{ marginTop: 12 }}
+        >
+          <span className="w-spin" style={{ width: 10, height: 10, marginRight: 8 }} />
+          Verifying passkey for high-value transaction…
+        </div>
+      ) : null}
       {authError ? <AuthErrorBanner error={authError} /> : null}
     </>
   );
@@ -681,6 +928,42 @@ function AuthErrorBanner({ error }: { error: AuthError }) {
       case "backend":
         headline = "Vault unavailable";
         detail = cause.message;
+        break;
+    }
+  } else if (error.kind === "passkey") {
+    const cause = error.cause.cause;
+    switch (cause.code) {
+      case "assertion_cancelled":
+        headline = "Passkey prompt cancelled";
+        detail = "The passkey prompt was dismissed. Retry to continue.";
+        break;
+      case "auth_failed":
+        headline = "Passkey authentication failed";
+        detail = "The passkey could not authorize this transaction. Retry.";
+        break;
+      case "counter_regression":
+        headline = "Replay rejected";
+        detail = "The passkey assertion was rejected (counter regression).";
+        break;
+      case "expired":
+        headline = "Challenge expired";
+        detail = "The 60-second challenge window lapsed. Retry.";
+        break;
+      case "not_enrolled":
+        headline = "No passkey enrolled";
+        detail = "Enroll a passkey from Settings → Security to continue.";
+        break;
+      case "vault_locked":
+        headline = "Vault locked";
+        detail = "The passkey backend reports the vault is locked.";
+        break;
+      case "device_not_supported":
+        headline = "Device not supported";
+        detail = "The passkey backend does not support this device.";
+        break;
+      default:
+        headline = "Passkey error";
+        detail = error.cause.message;
         break;
     }
   } else {

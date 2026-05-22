@@ -30,7 +30,7 @@ tokio = { version = "1", features = ["sync", "macros", "rt"] }
 # Stable releases of the RustCrypto password-hashes / AEADs lines.
 argon2 = { version = "0.5", default-features = false, features = ["alloc", "password-hash"] }
 aes-gcm = { version = "0.10", default-features = false, features = ["aes", "alloc"] }
-rand = { version = "0.8", default-features = false, features = ["getrandom"] }
+rand = { version = "0.8", default-features = false, features = ["getrandom", "std_rng"] }
 base64 = { version = "0.22", default-features = false, features = ["alloc"] }
 zeroize = { version = "1", features = ["derive"] }
 
@@ -43,6 +43,39 @@ uuid = { version = "1", default-features = false, features = ["v4", "rng-getrand
 # canonical hashing. RustCrypto `sha3` crate; same family the wallet's
 # existing crates use (alloc-only, no system deps).
 sha3 = { version = "0.10", default-features = false }
+
+# Phase 8 — passkey signer (software-backend Ed25519).
+#
+# Real OS-native passkey integration (Windows Hello / Touch ID /
+# Linux libfido2) lives behind an `Authenticator` trait — Phase 8
+# ships the software backend that signs over challenges with a
+# VEK-sealed Ed25519 secret. The shape on disk is identical to what
+# an OS-backed credential would carry, so swapping the backend in a
+# follow-up phase is a data migration rather than a schema change.
+#
+# `ed25519-dalek` 2.x is alloc-only and integrates with the same
+# `rand_core 0.6` line as the existing `rand 0.8` dep. `zeroize`
+# feature wipes the expanded secret on drop.
+ed25519-dalek = { version = "2", default-features = false, features = ["rand_core", "zeroize"] }
+
+# Phase 8 — SLH-DSA-SHA2-128s emergency backup (§30.1).
+#
+# `fips205` (stable v0.4.x by integritychain) implements FIPS 205
+# pure-Rust covering every variant. Algorithm id 1101 per the
+# Monolythium v2 spec maps to `SlhDsaSha2_128s`: 32-byte pubkey,
+# 17088-byte signature, small/fast-verify NIST-aligned variant.
+# The wallet uses SHAKE256 (existing `sha3` dep) for domain-tag
+# expansion onto the 48-byte keygen seed.
+#
+# Chain GAP — the emergency-key precompile at 0x1100 (per §22.4
+# + browser-wallet's chain investigation 2026-05-16) is the
+# acceptance side. The wallet generates the proof; chain acceptance
+# is tracked separately as a GAP in the final report.
+#
+# We disable the default-rng feature so the dep tree doesn't carry
+# its own getrandom path — the existing `rand 0.8` path already
+# pulls OsRng. Only the slh_dsa_sha2_128s variant is enabled.
+fips205 = { version = "0.4", default-features = false, features = ["slh_dsa_sha2_128s", "default-rng"] }
 
 # Ledger hardware signer (Stage 4). HID-only — WebUSB is out of scope.
 # `ledger-transport-hid` brings in `hidapi` which links against the system

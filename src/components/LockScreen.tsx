@@ -8,6 +8,7 @@
 // vault and wants to unlock to another.
 
 import { useEffect, useState } from "react";
+import { EmergencyRecoveryFlow } from "./EmergencyRecoveryFlow";
 import { Identity } from "./Identity";
 import { useVaults } from "../sdk/useVaults";
 import {
@@ -21,6 +22,7 @@ export function LockScreen() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [showPicker, setShowPicker] = useState(false);
+  const [showRecovery, setShowRecovery] = useState(false);
 
   const active = vaults.active;
   const list = vaults.state.vaults;
@@ -128,6 +130,30 @@ export function LockScreen() {
             </button>
           ) : null}
         </div>
+
+        {active ? (
+          <div style={{ marginTop: 12 }}>
+            <button
+              type="button"
+              className="btn btn--ghost btn--sm"
+              onClick={() => setShowRecovery(true)}
+              style={{ fontSize: 11.5 }}
+            >
+              Recover with emergency backup
+            </button>
+            <div className="cap" style={{ marginTop: 4, color: "var(--w-text-3)" }}>
+              Use this if you've lost your master password but still
+              have your 24-word recovery mnemonic + recovery password.
+            </div>
+          </div>
+        ) : null}
+
+        {showRecovery && active ? (
+          <EmergencyRecoveryFlow
+            vaultId={active.id}
+            onClose={() => setShowRecovery(false)}
+          />
+        ) : null}
 
         {showPicker && list.length > 1 ? (
           <div style={{ marginTop: 16 }}>
