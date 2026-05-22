@@ -270,14 +270,295 @@ pub fn multisigs_list_impl(
         .collect())
 }
 
+/// Parse one governance payload (discriminator + body) and mutate the
+/// target multisig vault accordingly. Returns `(audit_msg, label)` for
+/// the audit-trail marker. Pure mutation — caller handles persistence.
+///
+/// Wire format (discriminator byte + body):
+///
+///   0x01 | new_threshold:u8
+///         SetThreshold(new)
+///
+///   0x02 | kind:u8 | label_len:u8 | label[label_len] | pubkey[1952]
+///         [ | vault_id_len:u8 | vault_id[vault_id_len] ]    // if kind==local
+///         AddSigner(...)
+///
+///   0x03 | address[20]
+///         RemoveSigner(address)
+///
+///   0x04 | old_address[20] | new_label_len:u8 | new_label[L] | new_pubkey[1952]
+///         RotateSigner(...)
+///
+/// All length-prefixed strings are UTF-8. Pubkeys are raw bytes (the
+/// multisig data model elsewhere stores them as `0x`-prefixed lowercase
+/// hex; the payload format uses raw bytes for compactness inside a
+/// proposal). The multisig vault's `address` field is NOT recomputed
+/// after governance — it stays bound to the original create-time
+/// signer set so the on-chain identity remains stable.
+pub(super) fn apply_governance_payload(
+    multisig: &mut super::multisig::MultisigVaultRecord,
+    payload: &[u8],
+) -> Result<(String, String), MultisigCommandError> {
+    if payload.is_empty() {
+        return Err(MultisigCommandError::from(ProposalError::InvalidArgument {
+            message: "empty governance payload".into(),
+        }));
+    }
+    match payload[0] {
+        0x01 => apply_set_threshold(multisig, payload),
+        0x02 => apply_add_signer(multisig, payload),
+        0x03 => apply_remove_signer(multisig, payload),
+        0x04 => apply_rotate_signer(multisig, payload),
+        other => Err(MultisigCommandError::from(ProposalError::InvalidArgument {
+            message: format!(
+                "unknown governance discriminator 0x{:02x} (supported: 0x01..=0x04)",
+                other
+            ),
+        })),
+    }
+}
+
+fn apply_set_threshold(
+    multisig: &mut super::multisig::MultisigVaultRecord,
+    payload: &[u8],
+) -> Result<(String, String), MultisigCommandError> {
+    if payload.len() != 2 {
+        return Err(MultisigCommandError::from(ProposalError::InvalidArgument {
+            message: "SetThreshold payload must be 2 bytes (disc + u8)".into(),
+        }));
+    }
+    let new_threshold = payload[1];
+    super::multisig::validate_threshold(new_threshold, multisig.signers.len() as u8)
+        .map_err(MultisigCommandError::from)?;
+    multisig.threshold = new_threshold;
+    Ok((
+        format!("governance: set_threshold {}", new_threshold),
+        multisig.label.clone(),
+    ))
+}
+
+fn apply_add_signer(
+    multisig: &mut super::multisig::MultisigVaultRecord,
+    payload: &[u8],
+) -> Result<(String, String), MultisigCommandError> {
+    let body = &payload[1..];
+    // [kind:u8][label_len:u8][label][pubkey:1952]
+    // [optional vault_id_len:u8][vault_id]
+    if body.len() < 1 + 1 {
+        return Err(MultisigCommandError::from(ProposalError::InvalidArgument {
+            message: "AddSigner payload truncated (header)".into(),
+        }));
+    }
+    let kind_byte = body[0];
+    let label_len = body[1] as usize;
+    if label_len == 0 || label_len > 32 {
+        return Err(MultisigCommandError::from(MultisigError::InvalidSignerLabel));
+    }
+    let mut cursor = 2usize;
+    if body.len() < cursor + label_len {
+        return Err(MultisigCommandError::from(ProposalError::InvalidArgument {
+            message: "AddSigner payload truncated (label)".into(),
+        }));
+    }
+    let label_bytes = &body[cursor..cursor + label_len];
+    let label = std::str::from_utf8(label_bytes)
+        .map_err(|_| MultisigCommandError::from(MultisigError::InvalidSignerLabel))?
+        .trim()
+        .to_string();
+    if label.is_empty() {
+        return Err(MultisigCommandError::from(MultisigError::InvalidSignerLabel));
+    }
+    cursor += label_len;
+    if body.len() < cursor + super::multisig::ML_DSA_65_PUBKEY_LEN {
+        return Err(MultisigCommandError::from(ProposalError::InvalidArgument {
+            message: "AddSigner payload truncated (pubkey)".into(),
+        }));
+    }
+    let pubkey_bytes = &body[cursor..cursor + super::multisig::ML_DSA_65_PUBKEY_LEN];
+    cursor += super::multisig::ML_DSA_65_PUBKEY_LEN;
+    let pubkey_hex = bytes_to_hex(pubkey_bytes);
+    let address = super::multisig::derive_signer_address(&pubkey_hex)
+        .ok_or(MultisigCommandError::from(MultisigError::InvalidPubkey))?;
+
+    let kind_inner = match kind_byte {
+        0 => super::multisig::SignerKindInner::External,
+        1 => {
+            if body.len() < cursor + 1 {
+                return Err(MultisigCommandError::from(ProposalError::InvalidArgument {
+                    message: "AddSigner payload truncated (vault_id_len)".into(),
+                }));
+            }
+            let vid_len = body[cursor] as usize;
+            cursor += 1;
+            if vid_len == 0 || body.len() < cursor + vid_len {
+                return Err(MultisigCommandError::from(ProposalError::InvalidArgument {
+                    message: "AddSigner payload truncated or empty (vault_id)".into(),
+                }));
+            }
+            let vid = std::str::from_utf8(&body[cursor..cursor + vid_len])
+                .map_err(|_| {
+                    MultisigCommandError::from(ProposalError::InvalidArgument {
+                        message: "vault_id is not UTF-8".into(),
+                    })
+                })?
+                .to_string();
+            super::multisig::SignerKindInner::Local { vault_id: vid }
+        }
+        other => {
+            return Err(MultisigCommandError::from(ProposalError::InvalidArgument {
+                message: format!("unknown signer kind byte 0x{:02x}", other),
+            }));
+        }
+    };
+
+    if multisig.signers.len() as u8 >= super::multisig::MAX_SIGNERS {
+        return Err(MultisigCommandError::from(MultisigError::InvalidSignerCount {
+            got: multisig.signers.len() + 1,
+        }));
+    }
+    if multisig
+        .signers
+        .iter()
+        .any(|s| s.pubkey == pubkey_hex || s.address == address)
+    {
+        return Err(MultisigCommandError::from(MultisigError::DuplicateSigner));
+    }
+
+    let new_entry = super::multisig::SignerEntry {
+        id: super::multisig::generate_signer_id(),
+        label,
+        pubkey: pubkey_hex,
+        address: address.clone(),
+        kind_inner,
+        created_at: now_unix(),
+    };
+    multisig.signers.push(new_entry);
+    Ok((
+        format!("governance: add_signer {}", address),
+        multisig.label.clone(),
+    ))
+}
+
+fn apply_remove_signer(
+    multisig: &mut super::multisig::MultisigVaultRecord,
+    payload: &[u8],
+) -> Result<(String, String), MultisigCommandError> {
+    let body = &payload[1..];
+    if body.len() != 20 {
+        return Err(MultisigCommandError::from(ProposalError::InvalidArgument {
+            message: "RemoveSigner payload must be 20 bytes (address)".into(),
+        }));
+    }
+    let address = bytes_to_hex(body);
+    // After removal threshold M must still satisfy M <= N-1.
+    if multisig.signers.len() <= multisig.threshold as usize {
+        return Err(MultisigCommandError::from(ProposalError::InvalidArgument {
+            message: format!(
+                "removing this signer would make threshold {} unreachable (would have {} signers)",
+                multisig.threshold,
+                multisig.signers.len().saturating_sub(1),
+            ),
+        }));
+    }
+    let idx = multisig
+        .signers
+        .iter()
+        .position(|s| s.address == address)
+        .ok_or_else(|| {
+            MultisigCommandError::from(ProposalError::InvalidArgument {
+                message: format!("signer {} not found in multisig", address),
+            })
+        })?;
+    multisig.signers.remove(idx);
+    Ok((
+        format!("governance: remove_signer {}", address),
+        multisig.label.clone(),
+    ))
+}
+
+fn apply_rotate_signer(
+    multisig: &mut super::multisig::MultisigVaultRecord,
+    payload: &[u8],
+) -> Result<(String, String), MultisigCommandError> {
+    let body = &payload[1..];
+    // [old_address:20][new_label_len:u8][new_label][new_pubkey:1952]
+    if body.len() < 20 + 1 + super::multisig::ML_DSA_65_PUBKEY_LEN {
+        return Err(MultisigCommandError::from(ProposalError::InvalidArgument {
+            message: "RotateSigner payload truncated".into(),
+        }));
+    }
+    let old_address = bytes_to_hex(&body[0..20]);
+    let label_len = body[20] as usize;
+    if label_len == 0 || label_len > 32 {
+        return Err(MultisigCommandError::from(MultisigError::InvalidSignerLabel));
+    }
+    if body.len() < 20 + 1 + label_len + super::multisig::ML_DSA_65_PUBKEY_LEN {
+        return Err(MultisigCommandError::from(ProposalError::InvalidArgument {
+            message: "RotateSigner payload truncated (label)".into(),
+        }));
+    }
+    let label = std::str::from_utf8(&body[21..21 + label_len])
+        .map_err(|_| MultisigCommandError::from(MultisigError::InvalidSignerLabel))?
+        .trim()
+        .to_string();
+    if label.is_empty() {
+        return Err(MultisigCommandError::from(MultisigError::InvalidSignerLabel));
+    }
+    let pk_start = 21 + label_len;
+    let pubkey_bytes = &body[pk_start..pk_start + super::multisig::ML_DSA_65_PUBKEY_LEN];
+    let new_pubkey_hex = bytes_to_hex(pubkey_bytes);
+    let new_address = super::multisig::derive_signer_address(&new_pubkey_hex)
+        .ok_or(MultisigCommandError::from(MultisigError::InvalidPubkey))?;
+
+    let idx = multisig
+        .signers
+        .iter()
+        .position(|s| s.address == old_address)
+        .ok_or_else(|| {
+            MultisigCommandError::from(ProposalError::InvalidArgument {
+                message: format!("signer {} not found in multisig", old_address),
+            })
+        })?;
+    // Reject if the new pubkey/address already exists on a different
+    // signer (would create a duplicate).
+    if multisig
+        .signers
+        .iter()
+        .enumerate()
+        .any(|(i, s)| i != idx && (s.pubkey == new_pubkey_hex || s.address == new_address))
+    {
+        return Err(MultisigCommandError::from(MultisigError::DuplicateSigner));
+    }
+    // Preserve id + kind_inner so the rotation is local-data minimal.
+    let existing = multisig.signers[idx].clone();
+    multisig.signers[idx] = super::multisig::SignerEntry {
+        id: existing.id,
+        label,
+        pubkey: new_pubkey_hex,
+        address: new_address.clone(),
+        kind_inner: existing.kind_inner,
+        created_at: existing.created_at,
+    };
+    Ok((
+        format!("governance: rotate_signer {} -> {}", old_address, new_address),
+        multisig.label.clone(),
+    ))
+}
+
+fn bytes_to_hex(bytes: &[u8]) -> String {
+    let mut s = String::with_capacity(2 + bytes.len() * 2);
+    s.push_str("0x");
+    for b in bytes {
+        s.push_str(&format!("{:02x}", b));
+    }
+    s
+}
+
 /// Apply a governance change carried by a fully-signed proposal.
 ///
-/// V1 payload format (single discriminator byte + body):
-///   0x01 | new_threshold (u8)   — SetThreshold
-///
-/// Other governance ops (add/remove/rotate signers) ship in Phase 7;
-/// this command's payload parser rejects unknown discriminators so the
-/// wallet can ratchet up.
+/// Wire format documented on `apply_governance_payload`. Supported
+/// discriminators: 0x01 SetThreshold, 0x02 AddSigner, 0x03 RemoveSigner,
+/// 0x04 RotateSigner.
 ///
 /// Preconditions:
 ///   - proposal exists, has operation == Governance
@@ -286,7 +567,7 @@ pub fn multisigs_list_impl(
 ///
 /// On success the multisig vault record is updated AND the proposal is
 /// marked Submitted with `tx_hash` set to a marker so the audit trail
-/// surfaces the governance event ("governance: set_threshold N").
+/// surfaces the governance event ("governance: set_threshold N", etc.).
 pub fn multisig_apply_governance_impl(
     inner: &mut VaultStoreInner,
     proposal_id: &str,
@@ -332,41 +613,17 @@ pub fn multisig_apply_governance_impl(
             message: "empty governance payload".into(),
         }));
     }
-    let (audit_msg, target_label) = match payload[0] {
-        0x01 => {
-            // SetThreshold(new)
-            if payload.len() != 2 {
-                return Err(MultisigCommandError::from(ProposalError::InvalidArgument {
-                    message: "SetThreshold payload must be 2 bytes (disc + u8)".into(),
-                }));
-            }
-            let new_threshold = payload[1];
-            let multisig = container
-                .multisig_vaults
-                .iter_mut()
-                .find(|m| m.id == proposal.multisig_vault_id)
-                .ok_or_else(|| {
-                    MultisigCommandError::from(MultisigError::NotFound(
-                        proposal.multisig_vault_id.clone(),
-                    ))
-                })?;
-            super::multisig::validate_threshold(new_threshold, multisig.signers.len() as u8)
-                .map_err(MultisigCommandError::from)?;
-            multisig.threshold = new_threshold;
-            (
-                format!("governance: set_threshold {}", new_threshold),
-                multisig.label.clone(),
-            )
-        }
-        other => {
-            return Err(MultisigCommandError::from(ProposalError::InvalidArgument {
-                message: format!(
-                    "unknown governance discriminator 0x{:02x} (phase 6 ships SetThreshold only)",
-                    other
-                ),
-            }));
-        }
-    };
+    let multisig_idx = container
+        .multisig_vaults
+        .iter()
+        .position(|m| m.id == proposal.multisig_vault_id)
+        .ok_or_else(|| {
+            MultisigCommandError::from(MultisigError::NotFound(
+                proposal.multisig_vault_id.clone(),
+            ))
+        })?;
+    let (audit_msg, target_label) =
+        apply_governance_payload(&mut container.multisig_vaults[multisig_idx], &payload)?;
     // Mark the proposal Submitted with an audit-trail marker as tx_hash.
     // Use the proposal's own collected signature count as the threshold
     // check — the state was already verified as ReadyToSubmit against the
@@ -1061,6 +1318,185 @@ mod tests {
             .as_ref()
             .unwrap()
             .contains("set_threshold 3"));
+        cleanup(&inner);
+    }
+
+    // Helpers for governance payload construction in tests.
+    fn dummy_pubkey_bytes(seed: u8) -> Vec<u8> {
+        (0..1952).map(|i| seed.wrapping_add(i as u8)).collect()
+    }
+
+    fn build_add_signer_external_payload(seed: u8, label: &str) -> Vec<u8> {
+        let mut out = vec![0x02u8, 0x00, label.len() as u8];
+        out.extend_from_slice(label.as_bytes());
+        out.extend(dummy_pubkey_bytes(seed));
+        out
+    }
+
+    fn build_remove_signer_payload(address_hex: &str) -> Vec<u8> {
+        let stripped = address_hex.trim_start_matches("0x");
+        let mut out = vec![0x03u8];
+        for i in (0..stripped.len()).step_by(2) {
+            out.push(u8::from_str_radix(&stripped[i..i + 2], 16).unwrap());
+        }
+        out
+    }
+
+    fn build_rotate_signer_payload(
+        old_address_hex: &str,
+        new_seed: u8,
+        new_label: &str,
+    ) -> Vec<u8> {
+        let stripped = old_address_hex.trim_start_matches("0x");
+        let mut out = vec![0x04u8];
+        for i in (0..stripped.len()).step_by(2) {
+            out.push(u8::from_str_radix(&stripped[i..i + 2], 16).unwrap());
+        }
+        out.push(new_label.len() as u8);
+        out.extend_from_slice(new_label.as_bytes());
+        out.extend(dummy_pubkey_bytes(new_seed));
+        out
+    }
+
+    fn drive_governance(
+        inner: &mut VaultStoreInner,
+        sum: &MultisigVaultSummary,
+        payload: Vec<u8>,
+    ) -> Result<MultisigVaultSummary, MultisigCommandError> {
+        let addr_a = sum.signers[0].address.clone();
+        let addr_b = sum.signers[1].address.clone();
+        let p = proposal_create_impl(
+            inner,
+            &sum.id,
+            ProposalOperation::Governance,
+            payload,
+            &addr_a,
+            None,
+        )?;
+        proposal_attach_signature_impl(inner, &p.id, &addr_a, &dummy_signature())?;
+        proposal_attach_signature_impl(inner, &p.id, &addr_b, &dummy_signature())?;
+        multisig_apply_governance_impl(inner, &p.id)
+    }
+
+    #[test]
+    fn governance_add_signer_external_appends_to_roster() {
+        let mut inner = setup_with_one_local_vault();
+        let signers = vec![external_signer_input(1, "A"), external_signer_input(2, "B")];
+        let sum = multisig_create_impl(&mut inner, "T", &signers, 2, "hunter2").unwrap();
+        let payload = build_add_signer_external_payload(3, "Cofounder C");
+        let after = drive_governance(&mut inner, &sum, payload).unwrap();
+        assert_eq!(after.signer_count, 3);
+        assert_eq!(after.signers[2].label, "Cofounder C");
+        // Address derived from pubkey by Rust — we don't trust caller-supplied derivation.
+        assert_eq!(after.signers[2].address.len(), 42);
+        assert!(after.signers[2].address.starts_with("0x"));
+        // Threshold is unchanged.
+        assert_eq!(after.threshold, 2);
+        cleanup(&inner);
+    }
+
+    #[test]
+    fn governance_add_signer_rejects_duplicate_pubkey() {
+        let mut inner = setup_with_one_local_vault();
+        let signers = vec![external_signer_input(1, "A"), external_signer_input(2, "B")];
+        let sum = multisig_create_impl(&mut inner, "T", &signers, 2, "hunter2").unwrap();
+        // Re-add signer 1's pubkey via governance — must fail with DuplicateSigner.
+        let payload = build_add_signer_external_payload(1, "Duplicate");
+        let err = drive_governance(&mut inner, &sum, payload).unwrap_err();
+        assert!(matches!(
+            err,
+            MultisigCommandError::Multisig(MultisigError::DuplicateSigner)
+        ));
+        cleanup(&inner);
+    }
+
+    #[test]
+    fn governance_remove_signer_drops_from_roster() {
+        let mut inner = setup_with_one_local_vault();
+        let signers = vec![
+            external_signer_input(1, "A"),
+            external_signer_input(2, "B"),
+            external_signer_input(3, "C"),
+        ];
+        let sum = multisig_create_impl(&mut inner, "T", &signers, 2, "hunter2").unwrap();
+        let addr_c = sum.signers[2].address.clone();
+        let payload = build_remove_signer_payload(&addr_c);
+        let after = drive_governance(&mut inner, &sum, payload).unwrap();
+        assert_eq!(after.signer_count, 2);
+        assert!(after.signers.iter().all(|s| s.address != addr_c));
+        cleanup(&inner);
+    }
+
+    #[test]
+    fn governance_remove_signer_respects_threshold_invariant() {
+        let mut inner = setup_with_one_local_vault();
+        // 2-of-2 multisig — removing any signer would leave threshold unreachable.
+        let signers = vec![external_signer_input(1, "A"), external_signer_input(2, "B")];
+        let sum = multisig_create_impl(&mut inner, "T", &signers, 2, "hunter2").unwrap();
+        let addr_a = sum.signers[0].address.clone();
+        let payload = build_remove_signer_payload(&addr_a);
+        let err = drive_governance(&mut inner, &sum, payload).unwrap_err();
+        assert!(matches!(
+            err,
+            MultisigCommandError::Proposal(ProposalError::InvalidArgument { .. })
+        ));
+        cleanup(&inner);
+    }
+
+    #[test]
+    fn governance_rotate_signer_replaces_pubkey_in_place() {
+        let mut inner = setup_with_one_local_vault();
+        let signers = vec![
+            external_signer_input(1, "A"),
+            external_signer_input(2, "B"),
+            external_signer_input(3, "C"),
+        ];
+        let sum = multisig_create_impl(&mut inner, "T", &signers, 2, "hunter2").unwrap();
+        let addr_c = sum.signers[2].address.clone();
+        let pre_id = sum.signers[2].id.clone();
+        let payload = build_rotate_signer_payload(&addr_c, 4, "C rekeyed");
+        let after = drive_governance(&mut inner, &sum, payload).unwrap();
+        assert_eq!(after.signer_count, 3);
+        // The signer record at index 2 is replaced but keeps its id.
+        assert_eq!(after.signers[2].id, pre_id);
+        assert_eq!(after.signers[2].label, "C rekeyed");
+        assert_ne!(after.signers[2].address, addr_c);
+        cleanup(&inner);
+    }
+
+    #[test]
+    fn governance_rotate_signer_rejects_duplicate_with_other_member() {
+        let mut inner = setup_with_one_local_vault();
+        let signers = vec![
+            external_signer_input(1, "A"),
+            external_signer_input(2, "B"),
+            external_signer_input(3, "C"),
+        ];
+        let sum = multisig_create_impl(&mut inner, "T", &signers, 2, "hunter2").unwrap();
+        let addr_c = sum.signers[2].address.clone();
+        // Try to rotate C to match A's pubkey — must reject.
+        let payload = build_rotate_signer_payload(&addr_c, 1, "Imposter");
+        let err = drive_governance(&mut inner, &sum, payload).unwrap_err();
+        assert!(matches!(
+            err,
+            MultisigCommandError::Multisig(MultisigError::DuplicateSigner)
+        ));
+        cleanup(&inner);
+    }
+
+    #[test]
+    fn governance_add_signer_then_set_threshold_works() {
+        let mut inner = setup_with_one_local_vault();
+        let signers = vec![external_signer_input(1, "A"), external_signer_input(2, "B")];
+        let sum = multisig_create_impl(&mut inner, "T", &signers, 2, "hunter2").unwrap();
+        let after_add =
+            drive_governance(&mut inner, &sum, build_add_signer_external_payload(3, "C"))
+                .unwrap();
+        assert_eq!(after_add.signer_count, 3);
+        // Bump threshold to 3 — the previous proposal's signature count
+        // already cleared so this is a fresh governance round.
+        let after_thresh = drive_governance(&mut inner, &after_add, vec![0x01, 0x03]).unwrap();
+        assert_eq!(after_thresh.threshold, 3);
         cleanup(&inner);
     }
 

@@ -7,10 +7,21 @@
 // generative collections inline JSON in calldata).
 //
 // 50-entry LRU cache with a 10-min TTL avoids re-fetching the same
-// CID multiple times while the user scrolls the NFT gallery. Cache
-// is in-memory only — fine for a single session; persistence would
-// add complexity for no observable win since metadata doesn't change
-// between sessions worth a per-machine cache.
+// CID multiple times while the user scrolls the NFT gallery. Phase 7
+// adds a second tier — disk cache via the `ipfs_cache_*` Tauri
+// commands (30-day TTL, 500-entry LRU by atime). Resolution order:
+//
+//   1. memory cache (this file)
+//   2. disk cache (`ipfs-disk-cache.ts`)
+//   3. gateway network fetch (rewrite to each gateway, first 2xx wins)
+//
+// Network successes write to both tiers. Memory hits don't touch the
+// disk; disk hits warm the memory cache for the rest of the session.
+
+import {
+  ipfsDiskCacheGet,
+  ipfsDiskCacheSet,
+} from "./ipfs-disk-cache";
 
 // ─── Public types ──────────────────────────────────────────────────
 
@@ -187,6 +198,22 @@ export async function resolveTokenUri(
   const cached = cacheGet(uri);
   if (cached) return cached;
 
+  // Tier 2 — disk cache. `data:` URIs decode inline and skip both
+  // tiers (no point caching what's already in the URI).
+  if (!uri.startsWith("data:")) {
+    const diskJson = await ipfsDiskCacheGet(uri);
+    if (diskJson !== null) {
+      try {
+        const parsed = JSON.parse(diskJson) as NftMetadata;
+        cacheSet(uri, parsed);
+        return parsed;
+      } catch {
+        // Treat a corrupt disk entry as a miss — the network fetch
+        // below overwrites it.
+      }
+    }
+  }
+
   let result: NftMetadata | null = null;
 
   if (uri.startsWith("data:")) {
@@ -209,6 +236,11 @@ export async function resolveTokenUri(
     );
   }
   cacheSet(uri, result);
+  // Persist to disk only for `ipfs://` + `http(s)://` schemes — the
+  // data: URI case has already returned above.
+  if (!uri.startsWith("data:")) {
+    void ipfsDiskCacheSet(uri, JSON.stringify(result));
+  }
   return result;
 }
 

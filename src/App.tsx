@@ -217,26 +217,36 @@ function Shell({
   // event (window blur). This is the cross-platform proxy for "user
   // stepped away" — fires when the user alt-tabs, another app takes
   // focus, or the system locks (which always blurs the active window
-  // first). Truly OS-level events (Windows session-lock / macOS
-  // will-sleep / Linux PrepareForSleep) are GAP #D18.
+  // first).
+  //
+  // Phase 7 Commit 5 — additionally listen for `vault://os-event`,
+  // which carries the SystemEventKind wire string from the Rust-side
+  // EventDispatcher. Same effect (lock the vault), but distinct
+  // source: this fires from real OS-level hooks once the
+  // platform-specific impls land (#D18-windows / #D18-macos /
+  // #D18-linux). The two channels overlap intentionally — the
+  // focus-loss proxy is the durable belt; the os-event channel is
+  // the OS-native suspenders.
   useEffect(() => {
     if (vaults.isLocked) return;
     let cancelled = false;
-    let unlisten: (() => void) | null = null;
+    const unlistens: Array<() => void> = [];
     (async () => {
       try {
         const { listen } = await import("@tauri-apps/api/event");
-        unlisten = await listen("vault://focus-lost", () => {
+        const lockNow = () => {
           if (cancelled) return;
           void vaults.lock();
-        });
+        };
+        unlistens.push(await listen("vault://focus-lost", lockNow));
+        unlistens.push(await listen("vault://os-event", lockNow));
       } catch {
         // Non-Tauri environment (dev browser preview) — ignore.
       }
     })();
     return () => {
       cancelled = true;
-      unlisten?.();
+      for (const u of unlistens) u();
     };
   }, [vaults.isLocked, vaults.lock]);
 
@@ -251,7 +261,11 @@ function Shell({
   return (
     <div className="w-app">
       <Sidebar denom={denom} setDenom={setDenom} route={route} setRoute={setRoute} />
-      <Topbar route={route} onLockNow={() => void vaults.lock()} />
+      <Topbar
+        route={route}
+        onLockNow={() => void vaults.lock()}
+        onBadgeClick={() => setRoute("settings")}
+      />
       <main className="w-main">
         {route === "home" ? <Home denom={denom} goto={setRoute} /> : null}
         {route === "activity" ? <Activity denom={denom} /> : null}

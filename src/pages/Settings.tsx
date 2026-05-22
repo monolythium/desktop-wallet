@@ -5,6 +5,7 @@ import { useState } from "react";
 import { IDENTITY } from "../data/fixtures";
 import { useOperations } from "../operations/context";
 import { formatAddress } from "../components/format";
+import { MultisigAboutCard } from "../components/MultisigAboutCard";
 import { NetworkPanel } from "../components/NetworkPanel";
 import { SecurityPanel } from "../components/SecurityPanel";
 import { VaultsPanel } from "../components/VaultsPanel";
@@ -95,6 +96,8 @@ export function Settings() {
           </div>
         </div>
       </div>
+
+      <MultisigAboutCard />
 
       <div className="w-card">
         <div className="w-card__head"><h3>About</h3></div>
