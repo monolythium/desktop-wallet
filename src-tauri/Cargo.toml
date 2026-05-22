@@ -44,6 +44,20 @@ uuid = { version = "1", default-features = false, features = ["v4", "rng-getrand
 # existing crates use (alloc-only, no system deps).
 sha3 = { version = "0.10", default-features = false }
 
+# Phase 8 — passkey signer (software-backend Ed25519).
+#
+# Real OS-native passkey integration (Windows Hello / Touch ID /
+# Linux libfido2) lives behind an `Authenticator` trait — Phase 8
+# ships the software backend that signs over challenges with a
+# VEK-sealed Ed25519 secret. The shape on disk is identical to what
+# an OS-backed credential would carry, so swapping the backend in a
+# follow-up phase is a data migration rather than a schema change.
+#
+# `ed25519-dalek` 2.x is alloc-only and integrates with the same
+# `rand_core 0.6` line as the existing `rand 0.8` dep. `zeroize`
+# feature wipes the expanded secret on drop.
+ed25519-dalek = { version = "2", default-features = false, features = ["rand_core", "zeroize"] }
+
 # Ledger hardware signer (Stage 4). HID-only — WebUSB is out of scope.
 # `ledger-transport-hid` brings in `hidapi` which links against the system
 # HIDAPI / IOHIDManager (macOS) / hidraw (Linux) / hid.dll (Windows).
