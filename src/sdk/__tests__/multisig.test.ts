@@ -13,6 +13,10 @@ import {
   _multisigSummaryFromWireForTest,
   _normalizeErrorForTest,
   _proposalFromWireForTest,
+  encodeGovernanceAddSigner,
+  encodeGovernanceRemoveSigner,
+  encodeGovernanceRotateSigner,
+  encodeGovernanceSetThreshold,
   multisigCreate,
   multisigsList,
   proposalAttachSignature,
@@ -332,5 +336,94 @@ describe("proposalsList", () => {
     expect(invokeMock).toHaveBeenCalledWith("proposals_list", {
       multisigVaultId: "v",
     });
+  });
+});
+
+describe("multisig · governance payload encoders", () => {
+  it("encodes SetThreshold as 2 bytes [disc, N]", () => {
+    const out = encodeGovernanceSetThreshold(3);
+    expect(out).toEqual(new Uint8Array([0x01, 0x03]));
+  });
+
+  it("rejects out-of-range thresholds", () => {
+    expect(() => encodeGovernanceSetThreshold(0)).toThrow();
+    expect(() => encodeGovernanceSetThreshold(256)).toThrow();
+  });
+
+  it("encodes external AddSigner with disc + kind + label + pubkey", () => {
+    const pubkey = "0x" + "ab".repeat(1952);
+    const out = encodeGovernanceAddSigner({
+      kind: "external",
+      label: "Backup",
+      pubkey,
+    });
+    expect(out[0]).toBe(0x02);
+    expect(out[1]).toBe(0x00); // external
+    expect(out[2]).toBe(6); // label length
+    // After disc(1) + kind(1) + len(1) + label(6) → pubkey starts at 9.
+    expect(out[9]).toBe(0xab);
+    expect(out.length).toBe(1 + 1 + 1 + 6 + 1952);
+  });
+
+  it("encodes local AddSigner with trailing vault_id block", () => {
+    const pubkey = "0x" + "cd".repeat(1952);
+    const out = encodeGovernanceAddSigner({
+      kind: "local",
+      label: "Me",
+      pubkey,
+      vaultId: "v-abc",
+    });
+    expect(out[0]).toBe(0x02);
+    expect(out[1]).toBe(0x01); // local
+    // Tail: 5-byte vault_id_len + "v-abc"
+    expect(out[out.length - 6]).toBe(5);
+    expect(new TextDecoder().decode(out.slice(-5))).toBe("v-abc");
+  });
+
+  it("rejects local AddSigner without vaultId", () => {
+    expect(() =>
+      encodeGovernanceAddSigner({
+        kind: "local",
+        label: "Me",
+        pubkey: "0x" + "00".repeat(1952),
+      }),
+    ).toThrow(/local signer requires vaultId/);
+  });
+
+  it("rejects AddSigner with wrong-length pubkey", () => {
+    expect(() =>
+      encodeGovernanceAddSigner({
+        kind: "external",
+        label: "X",
+        pubkey: "0xdeadbeef",
+      }),
+    ).toThrow(/1952 bytes/);
+  });
+
+  it("encodes RemoveSigner as 21 bytes [disc, 20-byte address]", () => {
+    const addr = "0x" + "ab".repeat(20);
+    const out = encodeGovernanceRemoveSigner(addr);
+    expect(out[0]).toBe(0x03);
+    expect(out.length).toBe(21);
+    for (let i = 0; i < 20; i += 1) expect(out[1 + i]).toBe(0xab);
+  });
+
+  it("rejects RemoveSigner with non-20-byte address", () => {
+    expect(() => encodeGovernanceRemoveSigner("0xdead")).toThrow(/20 bytes/);
+  });
+
+  it("encodes RotateSigner with all four sections", () => {
+    const oldAddr = "0x" + "aa".repeat(20);
+    const newPub = "0x" + "bb".repeat(1952);
+    const out = encodeGovernanceRotateSigner({
+      oldAddress: oldAddr,
+      newLabel: "rekey",
+      newPubkey: newPub,
+    });
+    expect(out[0]).toBe(0x04);
+    expect(out.length).toBe(1 + 20 + 1 + 5 + 1952);
+    expect(out[21]).toBe(5); // new label length
+    expect(new TextDecoder().decode(out.slice(22, 27))).toBe("rekey");
+    expect(out[27]).toBe(0xbb); // first byte of new pubkey
   });
 });

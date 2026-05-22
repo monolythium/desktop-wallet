@@ -351,6 +351,103 @@ export function encodeGovernanceSetThreshold(newThreshold: number): Uint8Array {
   return new Uint8Array([0x01, newThreshold]);
 }
 
+/** Encode a governance "AddSigner" payload. `vaultId` is only used when
+ *  `kind === "local"`. Pubkey is the standard 0x + 3904-hex form. */
+export function encodeGovernanceAddSigner(args: {
+  kind: SignerKindWire;
+  label: string;
+  pubkey: string;
+  vaultId?: string;
+}): Uint8Array {
+  const labelBytes = new TextEncoder().encode(args.label.trim());
+  if (labelBytes.length === 0 || labelBytes.length > 32) {
+    throw new Error("label must be 1..=32 bytes after trim");
+  }
+  const pubBytes = hexToBytes(args.pubkey);
+  if (pubBytes.length !== 1952) {
+    throw new Error(`pubkey must be 1952 bytes, got ${pubBytes.length}`);
+  }
+  const kindByte = args.kind === "local" ? 1 : 0;
+  let extra: Uint8Array | null = null;
+  if (args.kind === "local") {
+    if (!args.vaultId) throw new Error("local signer requires vaultId");
+    const vidBytes = new TextEncoder().encode(args.vaultId);
+    if (vidBytes.length === 0 || vidBytes.length > 255) {
+      throw new Error("vaultId length must be 1..=255 bytes");
+    }
+    extra = new Uint8Array(1 + vidBytes.length);
+    extra[0] = vidBytes.length;
+    extra.set(vidBytes, 1);
+  }
+  const extraLen = extra?.length ?? 0;
+  const out = new Uint8Array(1 + 1 + 1 + labelBytes.length + pubBytes.length + extraLen);
+  let i = 0;
+  out[i++] = 0x02;
+  out[i++] = kindByte;
+  out[i++] = labelBytes.length;
+  out.set(labelBytes, i);
+  i += labelBytes.length;
+  out.set(pubBytes, i);
+  i += pubBytes.length;
+  if (extra) out.set(extra, i);
+  return out;
+}
+
+/** Encode a governance "RemoveSigner(address)" payload — 21 bytes. */
+export function encodeGovernanceRemoveSigner(addressHex: string): Uint8Array {
+  const addrBytes = hexToBytes(addressHex);
+  if (addrBytes.length !== 20) {
+    throw new Error(`address must be 20 bytes, got ${addrBytes.length}`);
+  }
+  const out = new Uint8Array(1 + 20);
+  out[0] = 0x03;
+  out.set(addrBytes, 1);
+  return out;
+}
+
+/** Encode a governance "RotateSigner" payload. Replaces an existing
+ *  signer's pubkey + label in place; the signer's id is preserved. */
+export function encodeGovernanceRotateSigner(args: {
+  oldAddress: string;
+  newLabel: string;
+  newPubkey: string;
+}): Uint8Array {
+  const oldBytes = hexToBytes(args.oldAddress);
+  if (oldBytes.length !== 20) {
+    throw new Error("oldAddress must be 20 bytes");
+  }
+  const labelBytes = new TextEncoder().encode(args.newLabel.trim());
+  if (labelBytes.length === 0 || labelBytes.length > 32) {
+    throw new Error("newLabel must be 1..=32 bytes");
+  }
+  const pubBytes = hexToBytes(args.newPubkey);
+  if (pubBytes.length !== 1952) {
+    throw new Error(`newPubkey must be 1952 bytes, got ${pubBytes.length}`);
+  }
+  const out = new Uint8Array(1 + 20 + 1 + labelBytes.length + pubBytes.length);
+  let i = 0;
+  out[i++] = 0x04;
+  out.set(oldBytes, i);
+  i += 20;
+  out[i++] = labelBytes.length;
+  out.set(labelBytes, i);
+  i += labelBytes.length;
+  out.set(pubBytes, i);
+  return out;
+}
+
+function hexToBytes(hex: string): Uint8Array {
+  const stripped = hex.startsWith("0x") ? hex.slice(2) : hex;
+  if (stripped.length % 2 !== 0) {
+    throw new Error("hex must have even length");
+  }
+  const out = new Uint8Array(stripped.length / 2);
+  for (let i = 0; i < out.length; i += 1) {
+    out[i] = Number.parseInt(stripped.slice(i * 2, i * 2 + 2), 16);
+  }
+  return out;
+}
+
 /** Create a Draft proposal. The caller subsequently signs the
  *  proposal's `payloadHash` (TS-side via MlDsa65Backend) and calls
  *  `proposalAttachSignature` with the result. */
