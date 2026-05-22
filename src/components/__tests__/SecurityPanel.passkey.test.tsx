@@ -107,13 +107,14 @@ describe("SecurityPanel · passkey section · enrollment flow", () => {
       const labels = screen.getAllByText("My laptop");
       expect(labels.length).toBeGreaterThan(0);
     });
-    // Policy flag flipped.
+    // Policy flag flipped + toggle re-rendered enabled.
     await waitFor(() =>
       expect(getPolicy().enrolledForHighValue).toBe(true),
     );
-    // Policy toggle now enabled.
-    const toggle = screen.getByRole("checkbox") as HTMLInputElement;
-    expect(toggle.disabled).toBe(false);
+    await waitFor(() => {
+      const toggle = screen.getByRole("checkbox") as HTMLInputElement;
+      expect(toggle.disabled).toBe(false);
+    });
   });
 
   it("disables Enroll while the label is empty", async () => {
