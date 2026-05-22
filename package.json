@@ -21,6 +21,7 @@
     "@noble/hashes": "^2.2.0",
     "@noble/post-quantum": "^0.6.1",
     "@tauri-apps/api": "^2.11.0",
+    "qrcode": "^1.5.4",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
@@ -28,6 +29,7 @@
     "@tauri-apps/cli": "^2.11.2",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
+    "@types/qrcode": "^1.5.6",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^5.0.0",

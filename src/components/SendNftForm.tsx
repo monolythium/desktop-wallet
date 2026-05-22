@@ -14,6 +14,7 @@ import { useOperations } from "../operations/context";
 import { encodeSafeTransferFrom } from "../sdk/erc721";
 import { encodeSafeTransferFrom1155 } from "../sdk/erc1155";
 import { submitContractCall } from "../sdk/submit-contract";
+import { encodeNftTransferIntent } from "../sdk/multisig-intent";
 import { Identity } from "./Identity";
 import { RecipientInput } from "./RecipientInput";
 import { formatAddress } from "./format";
@@ -96,6 +97,16 @@ export function SendNftForm(props: Props) {
       title,
       subtitle: `${isErc1155 ? "ERC-1155" : "ERC-721"} transfer · ${props.collectionSymbol ?? ""} #${props.tokenId.toString()}`,
       auth: "keychain",
+      proposal: {
+        operation: "token_transfer",
+        payload: encodeNftTransferIntent({
+          contract: props.contract,
+          to: recipient,
+          tokenId: props.tokenId.toString(),
+          amount: (isErc1155 ? amountValue : 1n).toString(),
+          standard: transferKind,
+        }),
+      },
       diff: [
         { k: "From", v: formatAddress(IDENTITY.address) },
         { k: "To", v: formatAddress(recipient) },
