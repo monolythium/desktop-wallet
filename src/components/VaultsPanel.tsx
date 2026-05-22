@@ -13,7 +13,7 @@ import { useState } from "react";
 import { Identity } from "./Identity";
 import { VaultCreateFlow } from "./VaultCreateFlow";
 import { MultisigCreateFlow } from "./MultisigCreateFlow";
-import { ChangeThresholdModal } from "./ChangeThresholdModal";
+import { ManageSignersModal } from "./ManageSignersModal";
 import { useVaults } from "../sdk/useVaults";
 import { useMultisigs } from "../sdk/useMultisig";
 import {
@@ -216,10 +216,10 @@ function MultisigPanelRow({ multisig }: { multisig: MultisigVaultSummary }) {
         className="btn btn--sm btn--ghost"
         onClick={() => setThresholdOpen(true)}
       >
-        Change threshold
+        Manage signers
       </button>
       {thresholdOpen ? (
-        <ChangeThresholdModal
+        <ManageSignersModal
           multisig={multisig}
           onClose={() => setThresholdOpen(false)}
         />
