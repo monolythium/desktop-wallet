@@ -219,6 +219,7 @@ pub fn vault_import_blob_impl(
         wrapped_vek,
         sealed_payload,
         passkeys: Vec::new(),
+        slh_backup: None,
     };
     container.vaults.push(new_record);
     inner.save().map_err(|e| ExportError::Backend {

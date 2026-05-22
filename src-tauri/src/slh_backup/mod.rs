@@ -42,6 +42,11 @@
 // and tracked as a GAP in the Phase 8 report.
 
 #[allow(unused_imports)]
+pub use commands::{
+    slh_enroll_backup, slh_get_backup_status, slh_remove_backup, slh_test_recovery,
+    SlhBackupRecord, SlhBackupStatus, SlhCommandError, SlhEnrollResult,
+};
+#[allow(unused_imports)]
 pub use keys::{
     derive_rng_seed, generate_slh_keypair, generate_slh_keypair_from_entropy,
     SlhBackupError, SlhPublicKey, SlhSecretKey, SLH_BACKUP_ALGO_ID,
@@ -50,5 +55,6 @@ pub use keys::{
 #[allow(unused_imports)]
 pub use sign::{sign_with_slh, verify_slh, SlhSignature};
 
+pub mod commands;
 pub mod keys;
 pub mod sign;

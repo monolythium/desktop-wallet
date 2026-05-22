@@ -172,6 +172,11 @@ pub struct VaultRecord {
     /// `passkey::credential::MAX_PASSKEYS_PER_VAULT` (currently 8).
     #[serde(default)]
     pub passkeys: Vec<crate::passkey::PasskeyEntry>,
+    /// Phase 8 — SLH-DSA emergency backup record. At most one per
+    /// vault; `None` when the user hasn't enrolled. `serde(default)`
+    /// for backwards compatibility with pre-Phase-8 v1 containers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub slh_backup: Option<crate::slh_backup::commands::SlhBackupRecord>,
 }
 
 /// Public-facing summary handed to the UI by `vaults_list`. Carries no
@@ -305,6 +310,7 @@ mod tests {
             wrapped_vek: WrappedKey::from_bytes(&[0u8; GCM_NONCE_LEN], &vec![0u8; 48]),
             sealed_payload: SealedPayload::from_bytes(&[0u8; GCM_NONCE_LEN], &vec![0u8; 48]),
             passkeys: Vec::new(),
+            slh_backup: None,
         }
     }
 

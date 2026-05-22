@@ -101,6 +101,11 @@ pub fn run() {
             passkey::commands::passkey_remove,
             passkey::commands::passkey_challenge_create,
             passkey::commands::passkey_attest,
+            // Phase 8 — SLH-DSA emergency backup (§30.1).
+            slh_backup::commands::slh_enroll_backup,
+            slh_backup::commands::slh_get_backup_status,
+            slh_backup::commands::slh_test_recovery,
+            slh_backup::commands::slh_remove_backup,
         ])
         .setup(|app| {
             // Phase 5: instantiate the multi-vault store with the
