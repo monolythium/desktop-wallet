@@ -105,6 +105,7 @@ pub fn build_migrated_container(
         wrapped_vek,
         sealed_payload,
         passkeys: Vec::new(),
+        slh_backup: None,
     };
     let active_id = record.id.clone();
 

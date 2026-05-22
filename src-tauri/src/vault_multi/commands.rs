@@ -418,6 +418,7 @@ pub fn vault_create_impl(
         wrapped_vek,
         sealed_payload,
         passkeys: Vec::new(),
+        slh_backup: None,
     };
 
     let container = inner.container.as_mut().ok_or(VaultError::Backend {
