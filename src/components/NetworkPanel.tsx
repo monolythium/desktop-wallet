@@ -7,13 +7,18 @@
 // are accepted; the saved list takes effect immediately for any
 // subsequent IPFS fetch (the resolver re-reads the list per call).
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   IPFS_GATEWAYS_DEFAULT,
   getIpfsGateways,
   resetIpfsGateways,
   setIpfsGateways,
 } from "../sdk/ipfs";
+import {
+  ipfsDiskCacheClear,
+  ipfsDiskCacheStats,
+  type IpfsCacheStats,
+} from "../sdk/ipfs-disk-cache";
 
 export function NetworkPanel() {
   const [gateways, setGateways] = useState<string[]>(() =>
@@ -169,6 +174,73 @@ export function NetworkPanel() {
           ) : null}
         </div>
       </div>
+
+      <IpfsCacheRow />
     </div>
   );
+}
+
+function IpfsCacheRow() {
+  const [stats, setStats] = useState<IpfsCacheStats | null>(null);
+  const [busy, setBusy] = useState(false);
+  const refresh = useCallback(async () => {
+    setStats(await ipfsDiskCacheStats());
+  }, []);
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+  return (
+    <div className="w-card" style={{ marginTop: 12 }}>
+      <div className="w-card__head">
+        <h3>IPFS metadata cache</h3>
+        <span className="cap" style={{ color: "var(--w-text-3)" }}>
+          {stats
+            ? `${stats.entryCount} entries · ${formatBytes(stats.totalBytes)}`
+            : "loading…"}
+        </span>
+      </div>
+      <div className="w-card__body">
+        <div className="row-help" style={{ marginBottom: 12 }}>
+          The wallet caches resolved NFT metadata on disk for 30 days
+          (max 500 entries, LRU eviction). Disk hits skip the gateway
+          chain on subsequent renders. Cache lives at:
+          <div
+            className="mono"
+            style={{
+              fontSize: 11,
+              color: "var(--w-text-3)",
+              marginTop: 4,
+              wordBreak: "break-all",
+            }}
+          >
+            {stats?.cacheDir || "—"}
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 6 }}>
+          <button
+            type="button"
+            className="btn btn--sm btn--ghost"
+            disabled={busy || (stats?.entryCount ?? 0) === 0}
+            onClick={async () => {
+              setBusy(true);
+              try {
+                await ipfsDiskCacheClear();
+                await refresh();
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            {busy ? "Clearing…" : "Clear cache"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(2)} MB`;
 }

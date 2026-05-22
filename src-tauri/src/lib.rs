@@ -13,6 +13,7 @@ use tauri::{Emitter, Manager, WindowEvent};
 use tokio::sync::Mutex;
 
 mod auto_lock;
+mod ipfs_cache;
 mod keychain;
 mod ledger;
 mod vault;
@@ -84,6 +85,11 @@ pub fn run() {
             ledger::ledger_sign_personal_message,
             ledger::ledger_sign_typed_data,
             ledger::ledger_default_hd_path,
+            // Phase 7 — IPFS disk metadata cache.
+            ipfs_cache::ipfs_cache_get,
+            ipfs_cache::ipfs_cache_set,
+            ipfs_cache::ipfs_cache_clear,
+            ipfs_cache::ipfs_cache_stats,
         ])
         .setup(|app| {
             // Phase 5: instantiate the multi-vault store with the
@@ -96,6 +102,15 @@ pub fn run() {
                 .unwrap_or_else(|_| std::env::temp_dir().join("monolythium-wallet"));
             container_path.push("vault.v1.json");
             app.manage(vault_multi::VaultStore::new(container_path));
+
+            // Phase 7 — IPFS disk metadata cache (#D19). Uses the
+            // platform `app_cache_dir` so the cache lives separately
+            // from the vault container.
+            let cache_root = app
+                .path()
+                .app_cache_dir()
+                .unwrap_or_else(|_| std::env::temp_dir().join("monolythium-wallet-cache"));
+            app.manage(ipfs_cache::IpfsCacheState::new(cache_root));
 
             // Phase 7 — wire the platform session-lock dispatcher.
             // The dispatcher fans OS-level events out to every
