@@ -261,7 +261,11 @@ function Shell({
   return (
     <div className="w-app">
       <Sidebar denom={denom} setDenom={setDenom} route={route} setRoute={setRoute} />
-      <Topbar route={route} onLockNow={() => void vaults.lock()} />
+      <Topbar
+        route={route}
+        onLockNow={() => void vaults.lock()}
+        onBadgeClick={() => setRoute("settings")}
+      />
       <main className="w-main">
         {route === "home" ? <Home denom={denom} goto={setRoute} /> : null}
         {route === "activity" ? <Activity denom={denom} /> : null}
