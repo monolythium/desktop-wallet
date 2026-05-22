@@ -68,6 +68,8 @@ pub fn run() {
             vault_multi::commands::vault_rename,
             vault_multi::commands::vault_delete,
             vault_multi::commands::vault_migrate_legacy,
+            vault_multi::export::vault_export_blob,
+            vault_multi::export::vault_import_blob,
             // Phase 6 multisig + proposal commands.
             vault_multi::multisig_commands::multisig_create,
             vault_multi::multisig_commands::multisigs_list,
