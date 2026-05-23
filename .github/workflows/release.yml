@@ -1,0 +1,133 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to attach artifacts to (e.g. v0.1.0). Leave empty for a dry-run build with no release upload."
+        required: false
+        type: string
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-latest,   target: aarch64-apple-darwin,        platform: macos-arm64 }
+          - { os: macos-latest,   target: x86_64-apple-darwin,         platform: macos-x64 }
+          - { os: ubuntu-latest,  target: x86_64-unknown-linux-gnu,    platform: linux-x64 }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc,      platform: windows-x64 }
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ./src-tauri -> target
+
+      - name: Install Linux dependencies
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build (macOS — signed + notarized)
+        if: matrix.os == 'macos-latest'
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPSTORE_CONNECT_ISSUER_ID }}
+          APPLE_API_KEY: ${{ secrets.APPSTORE_CONNECT_KEY_ID }}
+        run: |
+          echo "${{ secrets.APPSTORE_CONNECT_KEY_BASE64 }}" | base64 --decode > /tmp/asc-key.p8
+          export APPLE_API_KEY_PATH=/tmp/asc-key.p8
+          pnpm tauri build --target ${{ matrix.target }}
+
+      - name: Build (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: pnpm tauri build --target ${{ matrix.target }} --bundles deb,appimage
+
+      - name: Build (Windows — unsigned)
+        if: matrix.os == 'windows-latest'
+        run: pnpm tauri build --target ${{ matrix.target }}
+
+      - name: Sign Windows binaries (Azure Trusted Signing)
+        if: matrix.os == 'windows-latest'
+        uses: azure/trusted-signing-action@v0.5.1
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: https://weu.codesigning.azure.net/
+          trusted-signing-account-name: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          certificate-profile-name: ${{ secrets.AZURE_CERT_PROFILE }}
+          files-folder: src-tauri/target/${{ matrix.target }}/release/bundle
+          files-folder-filter: exe,msi
+          files-folder-recurse: true
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+
+      - name: Collect artifacts
+        shell: bash
+        run: |
+          mkdir -p dist-release
+          shopt -s nullglob globstar
+          for f in src-tauri/target/${{ matrix.target }}/release/bundle/**/*.{dmg,app.tar.gz,deb,AppImage,msi,exe}; do
+            cp "$f" dist-release/
+          done
+          ls -la dist-release/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.platform }}
+          path: dist-release/
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/') || inputs.tag != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: ./artifacts
+          merge-multiple: true
+
+      - name: List artifacts
+        run: ls -la ./artifacts
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag || github.ref_name }}
+          files: ./artifacts/*
+          draft: true
+          fail_on_unmatched_files: false
