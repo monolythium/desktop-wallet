@@ -53,6 +53,12 @@ keyring = { version = "3", default-features = false, features = ["windows-native
 [target.'cfg(target_os = "linux")'.dependencies]
 keyring = { version = "3", default-features = false, features = ["sync-secret-service", "crypto-rust"] }
 
+# For O_NOFOLLOW + getuid() in the lyth_mcp shared-store read path
+# (`mcp_bridge.rs`). Unix-only; the Windows path falls back to plain
+# `OpenOptions`.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [features]
 # Default to no custom features. Production builds opt in via `--features custom-protocol`.
 default = ["custom-protocol"]
