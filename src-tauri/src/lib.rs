@@ -13,6 +13,7 @@ use tokio::sync::Mutex;
 
 mod keychain;
 mod ledger;
+mod mcp_bridge;
 mod vault;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -34,6 +35,8 @@ pub fn run() {
             ledger::ledger_sign_personal_message,
             ledger::ledger_sign_typed_data,
             ledger::ledger_default_hd_path,
+            mcp_bridge::mcp_shared_wallet_list,
+            mcp_bridge::mcp_shared_store_exists,
         ])
         .setup(|_app| Ok(()))
         .run(tauri::generate_context!())
