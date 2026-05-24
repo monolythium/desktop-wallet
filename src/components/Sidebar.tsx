@@ -12,6 +12,7 @@ interface NavItem {
   label: string;
   icon: () => ReactElement;
   publicOnly?: boolean;
+  developerOnly?: boolean;
   badge?: string;
 }
 
@@ -59,6 +60,14 @@ const ICON_RISCV = () => (
     <path d="M2 9h2M2 15h2M20 9h2M20 15h2M9 2v2M15 2v2M9 20v2M15 20v2" />
   </svg>
 );
+const ICON_STUDIO = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M4 7h16" />
+    <path d="M7 4v6M17 4v6" />
+    <rect x="4" y="10" width="16" height="10" rx="2" />
+    <path d="M8 14h4M8 17h8" />
+  </svg>
+);
 const ICON_TRADE = () => (
   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M3 17l6-6 4 4 8-8" />
@@ -91,6 +100,7 @@ interface Props {
   setDenom: (d: Denom) => void;
   route: Route;
   setRoute: (r: Route) => void;
+  developerModeEnabled: boolean;
 }
 
 const NAV: NavItem[] = [
@@ -101,6 +111,7 @@ const NAV: NavItem[] = [
   { id: "stake", label: "Stake", icon: ICON_STAKE, publicOnly: true },
   { id: "contacts", label: "Contacts", icon: ICON_CONTACTS },
   { id: "riscv", label: "RISC-V", icon: ICON_RISCV, publicOnly: true },
+  { id: "studio", label: "Studio", icon: ICON_STUDIO, publicOnly: true, developerOnly: true, badge: "dev" },
   { id: "trade", label: "Trade", icon: ICON_TRADE, publicOnly: true },
   { id: "ai-trade", label: "AI Trading", icon: ICON_AI, publicOnly: true, badge: "beta" },
   { id: "news", label: "News", icon: ICON_NEWS },
@@ -110,8 +121,8 @@ const NAV_FOOTER: NavItem[] = [
   { id: "settings", label: "Settings", icon: ICON_SETTINGS },
 ];
 
-export function Sidebar({ denom, setDenom, route, setRoute }: Props) {
-  const visible = NAV.filter((n) => !n.publicOnly || denom === "public");
+export function Sidebar({ denom, setDenom, route, setRoute, developerModeEnabled }: Props) {
+  const visible = NAV.filter((n) => (!n.publicOnly || denom === "public") && (!n.developerOnly || developerModeEnabled));
 
   return (
     <aside className="w-side">

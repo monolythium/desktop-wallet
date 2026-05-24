@@ -18,6 +18,7 @@ const TITLES: Record<Route, string> = {
   stake: "Stake",
   contacts: "Contacts",
   riscv: "RISC-V",
+  studio: "Mono Studio",
   trade: "Trade",
   "ai-trade": "AI Trading",
   news: "News",

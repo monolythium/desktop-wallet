@@ -25,6 +25,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "1"
 tokio = { version = "1", features = ["sync", "macros", "rt"] }
+sha2 = "0.10"
 
 # Vault crypto. Argon2id KDF + AES-256-GCM encryption of the wallet seed.
 # Stable releases of the RustCrypto password-hashes / AEADs lines.
