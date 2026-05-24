@@ -245,8 +245,8 @@ export async function trustWorkspace(path: string): Promise<WorkspaceTrustResult
   return normalizeWorkspaceTrust(await invoke<RawWorkspaceTrustResult>("studio_workspace_trust", { path }));
 }
 
-export async function forgetWorkspace(path: string): Promise<WorkspaceTrustResult> {
-  return normalizeWorkspaceTrust(await invoke<RawWorkspaceTrustResult>("studio_workspace_forget", { path }));
+export async function removeWorkspaceTrust(path: string): Promise<WorkspaceTrustResult> {
+  return normalizeWorkspaceTrust(await invoke<RawWorkspaceTrustResult>("studio_workspace_remove_trust", { path }));
 }
 
 export async function assertWorkspaceTrusted(path: string): Promise<WorkspaceTrustResult> {

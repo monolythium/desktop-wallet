@@ -336,7 +336,7 @@ pub fn studio_workspace_trust(path: String) -> Result<WorkspaceTrustResult, Stud
 }
 
 #[tauri::command]
-pub fn studio_workspace_forget(path: String) -> Result<WorkspaceTrustResult, StudioHostError> {
+pub fn studio_workspace_remove_trust(path: String) -> Result<WorkspaceTrustResult, StudioHostError> {
     let root = canonical_workspace_root(&path)?;
     let store_path = trusted_workspace_store_path()?;
     let mut store = read_trusted_workspaces_at(&store_path)?;
