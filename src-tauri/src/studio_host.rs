@@ -319,6 +319,34 @@ pub fn studio_devkit_send_approval_result(
 }
 
 #[tauri::command]
+pub fn studio_devkit_send_command(
+    state: tauri::State<'_, StudioSidecarState>,
+    request_id: String,
+    command: String,
+    selected_project_root: Option<String>,
+    authority_address: Option<String>,
+    network_id: Option<String>,
+) -> Result<SidecarStatusResult, StudioHostError> {
+    validate_sidecar_command(&command)?;
+    if let Some(root) = selected_project_root.as_deref() {
+        assert_workspace_trusted(root)?;
+    }
+    send_sidecar_message(
+        &state,
+        json!({
+            "direction": "host_to_sidecar",
+            "kind": "devkit_command",
+            "protocolVersion": IPC_PROTOCOL_VERSION,
+            "requestId": request_id,
+            "command": command,
+            "selectedProjectRoot": selected_project_root,
+            "authorityAddress": authority_address,
+            "networkId": network_id,
+        }),
+    )
+}
+
+#[tauri::command]
 pub fn studio_workspace_trust(path: String) -> Result<WorkspaceTrustResult, StudioHostError> {
     let root = canonical_workspace_root(&path)?;
     let store_path = trusted_workspace_store_path()?;
@@ -336,7 +364,9 @@ pub fn studio_workspace_trust(path: String) -> Result<WorkspaceTrustResult, Stud
 }
 
 #[tauri::command]
-pub fn studio_workspace_remove_trust(path: String) -> Result<WorkspaceTrustResult, StudioHostError> {
+pub fn studio_workspace_remove_trust(
+    path: String,
+) -> Result<WorkspaceTrustResult, StudioHostError> {
     let root = canonical_workspace_root(&path)?;
     let store_path = trusted_workspace_store_path()?;
     let mut store = read_trusted_workspaces_at(&store_path)?;
@@ -358,14 +388,8 @@ pub fn studio_workspace_list_trusted() -> Result<TrustedWorkspaces, StudioHostEr
 pub fn studio_workspace_assert_trusted(
     path: String,
 ) -> Result<WorkspaceTrustResult, StudioHostError> {
-    let root = canonical_workspace_root(&path)?;
+    let root = assert_workspace_trusted(&path)?;
     let store = read_trusted_workspaces_at(&trusted_workspace_store_path()?)?;
-    let trusted = store.roots.iter().any(|item| {
-        root == *item || root.starts_with(&format!("{item}{}", std::path::MAIN_SEPARATOR))
-    });
-    if !trusted {
-        return Err(StudioHostError::WorkspaceNotTrusted { path: root });
-    }
     Ok(WorkspaceTrustResult {
         root,
         trusted: true,
@@ -462,6 +486,10 @@ fn start_sidecar_session(
     network_name: Option<String>,
     read_only_wallet_address: Option<String>,
 ) -> Result<SidecarStatusResult, StudioHostError> {
+    let selected_project_root = match selected_project_root {
+        Some(root) => Some(assert_workspace_trusted(&root)?),
+        None => None,
+    };
     let parsed = parse_manifest_at(&install_path)?;
     let compatibility = compatibility_result(&parsed.manifest, HOST_API_VERSION);
     if compatibility.compatibility != "compatible" {
@@ -489,6 +517,13 @@ fn start_sidecar_session(
     if let Some(session) = guard.as_mut() {
         if session.child.try_wait().ok().flatten().is_none() {
             if session.install_path == install_path {
+                send_host_context_to_session(
+                    session,
+                    selected_project_root.clone(),
+                    network_id.clone(),
+                    network_name.clone(),
+                    read_only_wallet_address.clone(),
+                )?;
                 let events = session
                     .events
                     .lock()
@@ -499,7 +534,7 @@ fn start_sidecar_session(
                 return Ok(sidecar_status(
                     "running",
                     Some(session.pid),
-                    "Sidecar process is already running.",
+                    "Sidecar process is already running and host context was updated.",
                     &events,
                 ));
             }
@@ -560,19 +595,12 @@ fn start_sidecar_session(
         stdin,
         events,
     };
-    send_sidecar_message_to_session(
+    send_host_context_to_session(
         &mut session,
-        json!({
-            "direction": "host_to_sidecar",
-            "kind": "host_context",
-            "protocolVersion": IPC_PROTOCOL_VERSION,
-            "selectedProjectRoot": selected_project_root,
-            "activeNetwork": {
-                "networkId": network_id.unwrap_or_else(|| "local-dev".to_owned()),
-                "name": network_name.unwrap_or_else(|| "Local Dev".to_owned()),
-            },
-            "readOnlyWalletAddress": read_only_wallet_address,
-        }),
+        selected_project_root,
+        network_id,
+        network_name,
+        read_only_wallet_address,
     )?;
     let status = {
         let events = session
@@ -709,6 +737,29 @@ fn send_sidecar_message_to_session(
         })
 }
 
+fn send_host_context_to_session(
+    session: &mut SidecarSession,
+    selected_project_root: Option<String>,
+    network_id: Option<String>,
+    network_name: Option<String>,
+    read_only_wallet_address: Option<String>,
+) -> Result<(), StudioHostError> {
+    send_sidecar_message_to_session(
+        session,
+        json!({
+            "direction": "host_to_sidecar",
+            "kind": "host_context",
+            "protocolVersion": IPC_PROTOCOL_VERSION,
+            "selectedProjectRoot": selected_project_root,
+            "activeNetwork": {
+                "networkId": network_id.unwrap_or_else(|| "local-dev".to_owned()),
+                "name": network_name.unwrap_or_else(|| "Local Dev".to_owned()),
+            },
+            "readOnlyWalletAddress": read_only_wallet_address,
+        }),
+    )
+}
+
 fn sidecar_command(binary: &Path) -> Command {
     if binary.extension().and_then(|ext| ext.to_str()) == Some("mjs")
         || binary.extension().and_then(|ext| ext.to_str()) == Some("js")
@@ -800,11 +851,10 @@ fn parse_sidecar_line(line: &str) -> SidecarEventRecord {
             error: Some("sidecar IPC kind is required".to_owned()),
         };
     }
-    if kind == "ready" {
-        let protocol = parsed
-            .get("protocolVersion")
-            .and_then(|value| value.as_str())
-            .unwrap_or_default();
+    if let Some(protocol) = parsed
+        .get("protocolVersion")
+        .and_then(|value| value.as_str())
+    {
         if protocol != IPC_PROTOCOL_VERSION {
             return SidecarEventRecord {
                 valid: false,
@@ -814,6 +864,14 @@ fn parse_sidecar_line(line: &str) -> SidecarEventRecord {
                 error: Some("sidecar IPC protocol is unsupported".to_owned()),
             };
         }
+    } else if kind == "ready" {
+        return SidecarEventRecord {
+            valid: false,
+            raw: line.to_owned(),
+            kind: Some(kind.to_owned()),
+            message: Some(parsed),
+            error: Some("sidecar ready message must include protocolVersion".to_owned()),
+        };
     }
     if kind == "approval_request" && parsed.get("request").is_none() {
         return SidecarEventRecord {
@@ -823,6 +881,25 @@ fn parse_sidecar_line(line: &str) -> SidecarEventRecord {
             message: Some(parsed),
             error: Some("approval_request message must include request".to_owned()),
         };
+    }
+    if kind == "command_result" {
+        let has_command = parsed
+            .get("command")
+            .and_then(|value| value.as_str())
+            .is_some_and(|value| !value.trim().is_empty());
+        let has_request_id = parsed
+            .get("requestId")
+            .and_then(|value| value.as_str())
+            .is_some_and(|value| !value.trim().is_empty());
+        if !has_command || !has_request_id {
+            return SidecarEventRecord {
+                valid: false,
+                raw: line.to_owned(),
+                kind: Some(kind.to_owned()),
+                message: Some(parsed),
+                error: Some("command_result message must include command and requestId".to_owned()),
+            };
+        }
     }
     SidecarEventRecord {
         valid: true,
@@ -1124,7 +1201,12 @@ fn verify_manifest_signature(manifest: &DevkitManifest) -> (bool, String) {
     };
     let signature_bytes = match URL_SAFE_NO_PAD.decode(manifest.archive.signature.as_bytes()) {
         Ok(bytes) => bytes,
-        Err(err) => return (false, format!("Manifest signature is not base64url: {err}.")),
+        Err(err) => {
+            return (
+                false,
+                format!("Manifest signature is not base64url: {err}."),
+            )
+        }
     };
     let signature: [u8; 64] = match signature_bytes.try_into() {
         Ok(bytes) => bytes,
@@ -1141,7 +1223,10 @@ fn verify_manifest_signature(manifest: &DevkitManifest) -> (bool, String) {
             true,
             format!("Manifest signature verified with trust root {trust_root}."),
         ),
-        Err(err) => (false, format!("Manifest signature verification failed: {err}.")),
+        Err(err) => (
+            false,
+            format!("Manifest signature verification failed: {err}."),
+        ),
     }
 }
 
@@ -1152,7 +1237,9 @@ fn trusted_manifest_public_key(
 ) -> Result<VerifyingKey, String> {
     if trust_root == "local-dev" {
         if !matches!(manifest.channel, DevkitChannel::Local) {
-            return Err("local-dev trust root is only allowed for local DevKit channel.".to_owned());
+            return Err(
+                "local-dev trust root is only allowed for local DevKit channel.".to_owned(),
+            );
         }
         let Some(public_key) = manifest.archive.signing_public_key.as_deref() else {
             return Err("local-dev manifest signing public key is missing.".to_owned());
@@ -1161,7 +1248,10 @@ fn trusted_manifest_public_key(
             .decode(public_key.as_bytes())
             .map_err(|err| format!("local-dev signing public key is not base64url: {err}."))?;
         let key: [u8; 32] = bytes.try_into().map_err(|bytes: Vec<u8>| {
-            format!("local-dev signing public key must be 32 bytes, got {}.", bytes.len())
+            format!(
+                "local-dev signing public key must be 32 bytes, got {}.",
+                bytes.len()
+            )
         })?;
         return VerifyingKey::from_bytes(&key)
             .map_err(|err| format!("local-dev signing public key is invalid: {err}."));
@@ -1341,6 +1431,30 @@ fn canonical_workspace_root(path: &str) -> Result<String, StudioHostError> {
         });
     }
     Ok(root.display().to_string())
+}
+
+fn assert_workspace_trusted(path: &str) -> Result<String, StudioHostError> {
+    let root = canonical_workspace_root(path)?;
+    let store = read_trusted_workspaces_at(&trusted_workspace_store_path()?)?;
+    let trusted = store.roots.iter().any(|item| {
+        root == *item || root.starts_with(&format!("{item}{}", std::path::MAIN_SEPARATOR))
+    });
+    if trusted {
+        Ok(root)
+    } else {
+        Err(StudioHostError::WorkspaceNotTrusted { path: root })
+    }
+}
+
+fn validate_sidecar_command(command: &str) -> Result<(), StudioHostError> {
+    match command {
+        "readiness" | "build" | "validate" | "test" | "simulate" | "trace" | "deploy_plan" => {
+            Ok(())
+        }
+        _ => Err(StudioHostError::InvalidArgument {
+            message: format!("unsupported DevKit command: {command}"),
+        }),
+    }
 }
 
 fn read_trusted_workspaces_at(path: &Path) -> Result<TrustedWorkspaces, StudioHostError> {
@@ -1606,6 +1720,21 @@ mod tests {
         );
         assert!(!bad_protocol.valid);
         assert!(bad_protocol.error.unwrap().contains("unsupported"));
+
+        let command_result = parse_sidecar_line(
+            r#"{"direction":"sidecar_to_host","kind":"command_result","protocolVersion":"mono.native-dev.ipc.v1","command":"readiness","requestId":"cmd-1","ok":true,"preview":false}"#,
+        );
+        assert!(command_result.valid);
+        assert_eq!(command_result.kind.as_deref(), Some("command_result"));
+
+        let bad_command_result = parse_sidecar_line(
+            r#"{"direction":"sidecar_to_host","kind":"command_result","protocolVersion":"mono.native-dev.ipc.v1","ok":true}"#,
+        );
+        assert!(!bad_command_result.valid);
+        assert!(bad_command_result
+            .error
+            .unwrap()
+            .contains("command and requestId"));
     }
 
     #[test]
@@ -1635,6 +1764,9 @@ lines.on("line", (line) => {
   if (message.kind === "approval_result") {
     console.log(JSON.stringify({direction:"sidecar_to_host",kind:"project_event",projectId:"test",event:"simulation_finished",summary:"approval accepted"}));
   }
+  if (message.kind === "devkit_command") {
+    console.log(JSON.stringify({direction:"sidecar_to_host",kind:"command_result",protocolVersion:"mono.native-dev.ipc.v1",command:message.command,requestId:message.requestId,ok:true,preview:true,output:{accepted:true}}));
+  }
 });
 setInterval(() => {}, 1000);
 "#,
@@ -1658,6 +1790,17 @@ setInterval(() => {}, 1000);
             &state,
             json!({
                 "direction": "host_to_sidecar",
+                "kind": "devkit_command",
+                "protocolVersion": IPC_PROTOCOL_VERSION,
+                "requestId": "cmd-1",
+                "command": "readiness",
+            }),
+        )
+        .unwrap();
+        send_sidecar_message(
+            &state,
+            json!({
+                "direction": "host_to_sidecar",
                 "kind": "approval_result",
                 "protocolVersion": IPC_PROTOCOL_VERSION,
                 "requestId": "req-1",
@@ -1670,6 +1813,9 @@ setInterval(() => {}, 1000);
         assert!(events
             .iter()
             .any(|event| event.kind.as_deref() == Some("ready")));
+        assert!(events
+            .iter()
+            .any(|event| event.raw.contains("\"command\":\"readiness\"")));
         assert!(events
             .iter()
             .any(|event| event.raw.contains("approval accepted")));
@@ -1714,7 +1860,8 @@ setInterval(() => {}, 1000);
         manifest.archive.signature_scheme = Some("ed25519".to_owned());
         manifest.archive.signing_key_id = Some("local-devkit-test".to_owned());
         manifest.archive.trust_root = Some("local-dev".to_owned());
-        manifest.archive.signing_public_key = Some(URL_SAFE_NO_PAD.encode(verifying_key.as_bytes()));
+        manifest.archive.signing_public_key =
+            Some(URL_SAFE_NO_PAD.encode(verifying_key.as_bytes()));
         let signature = signing_key.sign(manifest_signature_payload(manifest).as_bytes());
         manifest.archive.signature = URL_SAFE_NO_PAD.encode(signature.to_bytes());
     }
