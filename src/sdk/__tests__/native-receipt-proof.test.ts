@@ -20,22 +20,43 @@ const RECEIPTS = [
 const COMPACT_INCLUSION_SCHEMA = "mono.no_evm_receipt_compact_inclusion.v1";
 const COMPACT_TREE_ALGORITHM = "binary-keccak-receipt-tree";
 const COMPACT_PROOF_TYPE = "canonicalReceiptInclusion";
+const NO_EVM_FINALITY_EVIDENCE_SCHEMA = "mono.no_evm_receipt_finality.v1";
+const NO_EVM_FINALITY_EVIDENCE_SOURCE = "blsRoundCertificate";
 const RECEIPT_ROOT_EMPTY_DOMAIN = new TextEncoder().encode(
   "monolythium/v4.1/receipts_root_empty/1",
 );
 const RECEIPT_LEAF_DOMAIN = new TextEncoder().encode("monolythium/v4.1/receipt_leaf/1");
 const RECEIPT_NODE_DOMAIN = new TextEncoder().encode("monolythium/v4.1/receipt_node/1");
 
+interface NoEvmReceiptFinalityEvidence {
+  schema: typeof NO_EVM_FINALITY_EVIDENCE_SCHEMA;
+  source: typeof NO_EVM_FINALITY_EVIDENCE_SOURCE;
+  round: number;
+  certificate: {
+    round: number;
+    signature: string;
+    signersBitmap: string;
+    signerIndices: number[];
+    signerCount: number;
+  };
+}
+
+type DesktopNoEvmReceiptProof = NoEvmReceiptProof & {
+  finalityEvidence?: NoEvmReceiptFinalityEvidence | null;
+};
+
 describe("native receipt proof SDK contract", () => {
-  it("accepts compact proofs reconstructed from the indexer receipt archive", async () => {
-    const proof = compactArchiveProof();
+  it("preserves BLS round certificate finality evidence on archive-backed proofs", async () => {
+    const finalityEvidence = blsRoundFinalityEvidence();
+    const proof = compactArchiveProof({ finalityEvidence });
     const { fetch } = mockNativeReceiptFetch(proof);
     const client = new RpcClient("http://test.invalid", { fetch });
 
     const receipt = await client.lythNativeReceipt(proof.txHash);
-    const verified = verifyNoEvmReceiptProof(receipt.noEvmProof);
+    const noEvmProof = receipt.noEvmProof as DesktopNoEvmReceiptProof | null | undefined;
+    const verified = verifyNoEvmReceiptProof(noEvmProof);
 
-    expect(receipt.noEvmProof).toEqual(proof);
+    expect(noEvmProof).toEqual(proof);
     expect(verified?.proofKind).toBe("compactInclusion");
     expect(verified?.receiptsRoot).toBe(proof.receiptsRoot);
     expect(verified?.targetReceiptHash).toBe(proof.targetReceiptHash);
@@ -48,10 +69,29 @@ describe("native receipt proof SDK contract", () => {
       source: "indexerReceiptArchiveContentDigest",
       signatures: [],
     });
+    expect(noEvmProof?.finalityEvidence).toEqual(finalityEvidence);
+    expect(noEvmProof?.finalityEvidence?.source).toBe(NO_EVM_FINALITY_EVIDENCE_SOURCE);
+  });
+
+  it("accepts archive-backed proofs while live BLS finality evidence is absent", async () => {
+    const proof = compactArchiveProof({ finalityEvidence: null });
+    const { fetch } = mockNativeReceiptFetch(proof);
+    const client = new RpcClient("http://test.invalid", { fetch });
+
+    const receipt = await client.lythNativeReceipt(proof.txHash);
+    const noEvmProof = receipt.noEvmProof as DesktopNoEvmReceiptProof | null | undefined;
+    const verified = verifyNoEvmReceiptProof(noEvmProof);
+
+    expect(noEvmProof?.finalityEvidence).toBeNull();
+    expect(verified?.proofKind).toBe("compactInclusion");
   });
 });
 
-function compactArchiveProof(): NoEvmReceiptProof {
+function compactArchiveProof({
+  finalityEvidence,
+}: {
+  finalityEvidence: NoEvmReceiptFinalityEvidence | null;
+}): DesktopNoEvmReceiptProof {
   const material = compactInclusionMaterial(RECEIPTS, 1);
   return {
     schema: NO_EVM_RECEIPT_PROOF_SCHEMA,
@@ -83,10 +123,26 @@ function compactArchiveProof(): NoEvmReceiptProof {
     txIndex: 1,
     receiptCount: RECEIPTS.length,
     targetReceiptBytes: bytesToHex(RECEIPTS[1]!),
+    finalityEvidence,
   };
 }
 
-function mockNativeReceiptFetch(proof: NoEvmReceiptProof): { fetch: typeof fetch } {
+function blsRoundFinalityEvidence(round = 205): NoEvmReceiptFinalityEvidence {
+  return {
+    schema: NO_EVM_FINALITY_EVIDENCE_SCHEMA,
+    source: NO_EVM_FINALITY_EVIDENCE_SOURCE,
+    round,
+    certificate: {
+      round,
+      signature: `0x${"ab".repeat(96)}`,
+      signersBitmap: "0x0d",
+      signerIndices: [0, 2, 3],
+      signerCount: 3,
+    },
+  };
+}
+
+function mockNativeReceiptFetch(proof: DesktopNoEvmReceiptProof): { fetch: typeof fetch } {
   const fetchStub: typeof fetch = async (_url, init) => {
     if (typeof init?.body !== "string") {
       throw new Error("expected JSON-RPC string body");
