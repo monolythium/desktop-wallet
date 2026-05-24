@@ -333,6 +333,32 @@ body[data-denom="private"] .w-nav__item.is-active::before {
   font-size: 12.5px;
   overflow-wrap: anywhere;
 }
+.w-market-book {
+  display: flex;
+  flex-direction: column;
+  margin-top: 8px;
+  overflow-x: auto;
+}
+.w-market-book__head,
+.w-market-book__row {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(92px, 1fr));
+  gap: 8px;
+  align-items: center;
+  min-width: 420px;
+}
+.w-market-book__head {
+  padding: 0 0 8px;
+  color: var(--fg-500);
+  font-family: var(--f-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+}
+.w-market-book__row {
+  padding: 8px 0;
+  border-top: 1px solid rgba(255,255,255,0.04);
+  font-size: 12px;
+}
 .w-live-form {
   display: grid;
   grid-template-columns: 1fr auto;
