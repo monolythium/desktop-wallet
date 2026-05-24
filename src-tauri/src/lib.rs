@@ -14,6 +14,7 @@ use tokio::sync::Mutex;
 mod keychain;
 mod ledger;
 mod mcp_bridge;
+mod studio_host;
 mod vault;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -37,6 +38,19 @@ pub fn run() {
             ledger::ledger_default_hd_path,
             mcp_bridge::mcp_shared_wallet_list,
             mcp_bridge::mcp_shared_store_exists,
+            studio_host::studio_devkit_parse_manifest,
+            studio_host::studio_devkit_check_compatibility,
+            studio_host::studio_devkit_resolve_install_path,
+            studio_host::studio_devkit_sidecar_status,
+            studio_host::studio_devkit_select_local_path,
+            studio_host::studio_devkit_install_local_archive,
+            studio_host::studio_devkit_rollback,
+            studio_host::studio_devkit_start_sidecar,
+            studio_host::studio_devkit_stop_sidecar,
+            studio_host::studio_workspace_trust,
+            studio_host::studio_workspace_forget,
+            studio_host::studio_workspace_list_trusted,
+            studio_host::studio_workspace_assert_trusted,
         ])
         .setup(|_app| Ok(()))
         .run(tauri::generate_context!())

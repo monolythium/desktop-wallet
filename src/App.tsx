@@ -19,6 +19,7 @@ import { AiTrading } from "./pages/AiTrading";
 import { Contacts } from "./pages/Contacts";
 import { Home } from "./pages/Home";
 import { News } from "./pages/News";
+import { MonoStudio } from "./pages/MonoStudio";
 import { RiscvContracts } from "./pages/RiscvContracts";
 import { Settings } from "./pages/Settings";
 import { Stake } from "./pages/Stake";
@@ -27,6 +28,7 @@ import { Trade } from "./pages/Trade";
 import { Wallets } from "./pages/Wallets";
 import { OperationsProvider } from "./operations/context";
 import { KeychainCallError, PRIMARY_ACCOUNT, unlock } from "./sdk/keychain";
+import { readDeveloperMode, writeDeveloperMode } from "./sdk/studio-host";
 import "./styles/tokens.css";
 import "./styles/wallet.css";
 import type { Denom } from "./data/fixtures";
@@ -73,6 +75,7 @@ function isTauri(): boolean {
 export function App() {
   const [route, setRoute] = useState<Route>(() => readRoute());
   const [denom, setDenom] = useState<Denom>(() => readDenom());
+  const [developerModeEnabled, setDeveloperModeEnabledState] = useState<boolean>(() => readDeveloperMode());
   const [boot, setBoot] = useState<BootState>(() =>
     isTauri() ? { kind: "probing" } : { kind: "ready" },
   );
@@ -111,10 +114,22 @@ export function App() {
     try { localStorage.setItem(DENOM_KEY, denom); } catch { /* ignore */ }
     // Tokens-only route: bounce out if user flipped to private.
     // Public-only routes bounce out when user flips to private denomination.
-    if (denom === "private" && (route === "tokens" || route === "stake" || route === "riscv" || route === "trade" || route === "ai-trade")) {
+    if (denom === "private" && (route === "tokens" || route === "stake" || route === "riscv" || route === "studio" || route === "trade" || route === "ai-trade")) {
       setRoute("home");
     }
   }, [denom, route]);
+
+  useEffect(() => {
+    writeDeveloperMode(developerModeEnabled);
+    if (!developerModeEnabled && route === "studio") {
+      setRoute("settings");
+    }
+  }, [developerModeEnabled, route]);
+
+  const setDeveloperModeEnabled = (enabled: boolean) => {
+    setDeveloperModeEnabledState(enabled);
+    writeDeveloperMode(enabled);
+  };
 
   if (boot.kind === "probing") {
     return <BootSplash label="Checking keychain…" />;
@@ -129,7 +144,13 @@ export function App() {
   return (
     <OperationsProvider>
       <div className="w-app">
-        <Sidebar denom={denom} setDenom={setDenom} route={route} setRoute={setRoute} />
+        <Sidebar
+          denom={denom}
+          setDenom={setDenom}
+          route={route}
+          setRoute={setRoute}
+          developerModeEnabled={developerModeEnabled}
+        />
         <Topbar route={route} />
         <main className="w-main">
           {route === "home" ? <Home denom={denom} goto={setRoute} /> : null}
@@ -139,10 +160,21 @@ export function App() {
           {route === "stake" ? <Stake /> : null}
           {route === "contacts" ? <Contacts denom={denom} /> : null}
           {route === "riscv" ? <RiscvContracts /> : null}
+          {route === "studio" ? (
+            <MonoStudio
+              developerModeEnabled={developerModeEnabled}
+              setRouteSettings={() => setRoute("settings")}
+            />
+          ) : null}
           {route === "trade" ? <Trade /> : null}
           {route === "ai-trade" ? <AiTrading /> : null}
           {route === "news" ? <News /> : null}
-          {route === "settings" ? <Settings /> : null}
+          {route === "settings" ? (
+            <Settings
+              developerModeEnabled={developerModeEnabled}
+              setDeveloperModeEnabled={setDeveloperModeEnabled}
+            />
+          ) : null}
         </main>
       </div>
     </OperationsProvider>

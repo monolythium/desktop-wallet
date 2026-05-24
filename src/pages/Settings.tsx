@@ -4,11 +4,22 @@
 import { useState } from "react";
 import { IDENTITY } from "../data/fixtures";
 import { useOperations } from "../operations/context";
+import {
+  readDevkitChannel,
+  writeDevkitChannel,
+  type NativeDevkitChannel,
+} from "../sdk/studio-host";
 
-export function Settings() {
+interface SettingsProps {
+  developerModeEnabled: boolean;
+  setDeveloperModeEnabled: (enabled: boolean) => void;
+}
+
+export function Settings({ developerModeEnabled, setDeveloperModeEnabled }: SettingsProps) {
   const ops = useOperations();
   const [currency, setCurrency] = useState("USD");
   const [compound, setCompound] = useState("always");
+  const [devkitChannel, setDevkitChannel] = useState<NativeDevkitChannel>(() => readDevkitChannel());
 
   const openRotate = () => {
     ops.open({
@@ -38,6 +49,37 @@ export function Settings() {
       <div className="w-page__header">
         <h1>Settings</h1>
         <div className="sub">Customize how your wallet looks and behaves.</div>
+      </div>
+
+      <div className="w-card">
+        <div className="w-card__head"><h3>Developer Mode</h3></div>
+        <div className="w-card__body">
+          <div className="w-setting-row">
+            <div>
+              <div className="row-label">Enable Mono Studio</div>
+              <div className="row-help">
+                Shows the Studio Host and checks the separately installed DevKit only when enabled.
+              </div>
+            </div>
+            <button
+              type="button"
+              className={`w-chip ${developerModeEnabled ? "is-on" : ""}`}
+              onClick={() => setDeveloperModeEnabled(!developerModeEnabled)}
+            >
+              {developerModeEnabled ? "Enabled" : "Disabled"}
+            </button>
+          </div>
+          <ChipRow
+            label="DevKit channel"
+            help="Stable wallet releases do not bundle the full DevKit. Channel selection controls update checks."
+            value={devkitChannel}
+            options={["stable", "testnet", "local"]}
+            onChange={(value) => {
+              setDevkitChannel(value);
+              writeDevkitChannel(value);
+            }}
+          />
+        </div>
       </div>
 
       <div className="w-card">
