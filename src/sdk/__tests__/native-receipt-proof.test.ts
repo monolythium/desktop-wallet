@@ -7,8 +7,10 @@ import {
   NO_EVM_RECEIPT_ROOT_ALGORITHM,
   RpcClient,
   computeNoEvmTargetReceiptHash,
+  getNoEvmReceiptTrustPolicy,
   verifyNoEvmFinalityEvidenceThreshold,
   verifyNoEvmReceiptProof,
+  verifyNoEvmReceiptProofTrust,
 } from "@monolythium/core-sdk";
 import type { NoEvmFinalityEvidence, NoEvmReceiptProof } from "@monolythium/core-sdk";
 
@@ -32,6 +34,7 @@ const RECEIPT_ROOT_EMPTY_DOMAIN = new TextEncoder().encode(
 );
 const RECEIPT_LEAF_DOMAIN = new TextEncoder().encode("monolythium/v4.1/receipt_leaf/1");
 const RECEIPT_NODE_DOMAIN = new TextEncoder().encode("monolythium/v4.1/receipt_node/1");
+const TESTNET_REGISTRY_NETWORK = "testnet-69420";
 
 type DesktopNoEvmReceiptProof = NoEvmReceiptProof & {
   finalityEvidence?: NoEvmFinalityEvidence | null;
@@ -111,6 +114,33 @@ describe("native receipt proof SDK contract", () => {
     });
     expect(wrongChain.verified).toBe(false);
     expect(wrongChain.signatureValid).toBe(false);
+  });
+
+  it("keeps registry trust absent by default and accepts explicit combined trust policy", async () => {
+    expect(getNoEvmReceiptTrustPolicy(TESTNET_REGISTRY_NETWORK)).toBeNull();
+
+    const proof = compactArchiveProof({ finalityEvidence: verifiedBlsRoundFinalityEvidence() });
+    const { fetch } = mockNativeReceiptFetch(proof);
+    const client = new RpcClient("http://test.invalid", { fetch });
+    const receipt = await client.lythNativeReceipt(proof.txHash);
+    const noEvmProof = receipt.noEvmProof as DesktopNoEvmReceiptProof | null | undefined;
+
+    const result = verifyNoEvmReceiptProofTrust(noEvmProof, {
+      chainId: 69_420,
+      finality: {
+        mode: "cluster",
+        chainId: 69_420,
+        clusterPublicKey: hexToBytes(VERIFIED_BLS_CLUSTER_PUBLIC_KEY),
+        committeeSize: 7,
+        threshold: 1,
+      },
+    });
+
+    expect(result.verified).toBe(true);
+    expect(result.receiptProof?.proofKind).toBe("compactInclusion");
+    expect(result.finalityEvidence?.verified).toBe(true);
+    expect(result.archiveSignatures).toBeNull();
+    expect(result.issues).toEqual([]);
   });
 });
 
