@@ -24,6 +24,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(ledger_state)
+        .manage(studio_host::StudioSidecarState::default())
         .invoke_handler(tauri::generate_handler![
             keychain::keychain_unlock,
             keychain::keychain_store,
@@ -47,6 +48,8 @@ pub fn run() {
             studio_host::studio_devkit_rollback,
             studio_host::studio_devkit_start_sidecar,
             studio_host::studio_devkit_stop_sidecar,
+            studio_host::studio_devkit_drain_sidecar_messages,
+            studio_host::studio_devkit_send_approval_result,
             studio_host::studio_workspace_trust,
             studio_host::studio_workspace_forget,
             studio_host::studio_workspace_list_trusted,

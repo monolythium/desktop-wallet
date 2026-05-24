@@ -1,17 +1,24 @@
-//! Mono Studio Host command stubs.
+//! Mono Studio Host command surface.
 //!
-//! The wallet is the stable host and security boundary. These commands only
-//! parse and verify DevKit component metadata, resolve install paths, and report
-//! sidecar status. They never sign, submit, or expose vault material.
+//! The wallet is the stable host and security boundary. These commands parse
+//! and verify DevKit component metadata, resolve install paths, manage a
+//! less-trusted sidecar process, and route approval requests to the wallet UI.
+//! They never sign, submit, or expose vault material.
 
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::{
     cmp::Ordering,
     env, fs,
-    io::Read,
+    io::{BufRead, BufReader, Read, Write},
     path::{Path, PathBuf},
-    process::Command,
+    process::{Child, ChildStdin, Command, Stdio},
+    sync::{mpsc, Arc, Mutex},
+    thread,
+    time::Duration,
 };
 use thiserror::Error;
 
@@ -19,6 +26,20 @@ const HOST_API_VERSION: &str = "0.1.0";
 const MANIFEST_FILE: &str = "mono-devkit-manifest.json";
 const MANIFEST_SCHEMA_VERSION: u16 = 1;
 const IPC_PROTOCOL_VERSION: &str = "mono.native-dev.ipc.v1";
+const SIDECAR_READY_TIMEOUT_MS: u64 = 2_000;
+
+#[derive(Default)]
+pub struct StudioSidecarState {
+    session: Mutex<Option<SidecarSession>>,
+}
+
+struct SidecarSession {
+    install_path: PathBuf,
+    pid: u32,
+    child: Child,
+    stdin: ChildStdin,
+    events: Arc<Mutex<Vec<SidecarEventRecord>>>,
+}
 
 #[derive(Debug, Error, Serialize)]
 #[serde(tag = "code", rename_all = "snake_case")]
@@ -37,6 +58,8 @@ pub enum StudioHostError {
     Incompatible { message: String },
     #[error("DevKit install failed: {message}")]
     InstallFailed { message: String },
+    #[error("DevKit sidecar IPC failed: {message}")]
+    IpcFailed { message: String },
     #[error("workspace is not trusted: {path}")]
     WorkspaceNotTrusted { path: String },
 }
@@ -64,6 +87,14 @@ pub struct DevkitArchive {
     pub url: String,
     pub sha256: String,
     pub signature: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signature_scheme: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signing_key_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trust_root: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signing_public_key: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub size_bytes: Option<u64>,
 }
@@ -95,6 +126,10 @@ pub struct ParsedDevkitManifest {
     pub manifest_sha256: String,
     pub archive_verified: bool,
     pub archive_verification: String,
+    pub signature_verified: bool,
+    pub signature_verification: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trust_root: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -109,6 +144,22 @@ pub struct SidecarStatusResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pid: Option<u32>,
     pub message: String,
+    pub event_count: usize,
+    pub malformed_count: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_event_kind: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SidecarEventRecord {
+    pub valid: bool,
+    pub raw: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -118,6 +169,7 @@ pub struct DevkitInstallResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub previous_version: Option<String>,
     pub archive_verified: bool,
+    pub signature_verified: bool,
     pub message: String,
 }
 
@@ -168,37 +220,10 @@ pub fn studio_devkit_resolve_install_path(
 
 #[tauri::command]
 pub fn studio_devkit_sidecar_status(
+    state: tauri::State<'_, StudioSidecarState>,
     install_path: Option<String>,
 ) -> Result<SidecarStatusResult, StudioHostError> {
-    let Some(install_path) = install_path else {
-        return Ok(SidecarStatusResult {
-            status: "missing".to_owned(),
-            pid: None,
-            message: "No DevKit path selected.".to_owned(),
-        });
-    };
-    let path = PathBuf::from(install_path);
-    let manifest = manifest_path(&path);
-    if !manifest.exists() {
-        return Ok(SidecarStatusResult {
-            status: "missing".to_owned(),
-            pid: None,
-            message: "DevKit manifest is missing.".to_owned(),
-        });
-    }
-    let sidecar_marker = path.join(".mono-dev-sidecar.pid");
-    if sidecar_marker.exists() {
-        return Ok(SidecarStatusResult {
-            status: "running".to_owned(),
-            pid: read_pid(&sidecar_marker),
-            message: "Sidecar marker file is present.".to_owned(),
-        });
-    }
-    Ok(SidecarStatusResult {
-        status: "stopped".to_owned(),
-        pid: None,
-        message: "Sidecar is not running.".to_owned(),
-    })
+    sidecar_status_for(&state, install_path.as_deref().map(PathBuf::from))
 }
 
 #[tauri::command]
@@ -215,6 +240,11 @@ pub fn studio_devkit_select_local_path(
     if !parsed.archive_verified {
         return Err(StudioHostError::HashVerificationFailed {
             message: parsed.archive_verification,
+        });
+    }
+    if !parsed.signature_verified {
+        return Err(StudioHostError::HashVerificationFailed {
+            message: parsed.signature_verification,
         });
     }
     Ok(parsed)
@@ -236,61 +266,56 @@ pub fn studio_devkit_rollback(
 
 #[tauri::command]
 pub fn studio_devkit_start_sidecar(
+    state: tauri::State<'_, StudioSidecarState>,
     install_path: String,
+    selected_project_root: Option<String>,
+    network_id: Option<String>,
+    network_name: Option<String>,
+    read_only_wallet_address: Option<String>,
 ) -> Result<SidecarStatusResult, StudioHostError> {
-    let install_path = PathBuf::from(install_path);
-    let parsed = parse_manifest_at(&install_path)?;
-    let binary = sidecar_binary_path(&install_path, &parsed.manifest).ok_or_else(|| {
-        StudioHostError::InstallFailed {
-            message: "DevKit sidecar binary is missing.".to_owned(),
-        }
-    })?;
-    let check = if binary.extension().and_then(|ext| ext.to_str()) == Some("mjs") {
-        Command::new(node_binary())
-            .arg(&binary)
-            .arg("sidecar-status")
-            .output()
-    } else {
-        Command::new(&binary).arg("sidecar-status").output()
-    }
-    .map_err(|err| StudioHostError::InstallFailed {
-        message: format!("sidecar readiness check failed: {err}"),
-    })?;
-    if !check.status.success() {
-        return Err(StudioHostError::InstallFailed {
-            message: "sidecar readiness check exited with an error".to_owned(),
-        });
-    }
-    fs::write(
-        sidecar_marker_path(&install_path),
-        std::process::id().to_string(),
+    start_sidecar_session(
+        &state,
+        PathBuf::from(install_path),
+        selected_project_root,
+        network_id,
+        network_name,
+        read_only_wallet_address,
     )
-    .map_err(|err| StudioHostError::InstallFailed {
-        message: err.to_string(),
-    })?;
-    Ok(SidecarStatusResult {
-        status: "running".to_owned(),
-        pid: Some(std::process::id()),
-        message: "Sidecar readiness check passed; host session marker written.".to_owned(),
-    })
 }
 
 #[tauri::command]
 pub fn studio_devkit_stop_sidecar(
+    state: tauri::State<'_, StudioSidecarState>,
     install_path: String,
 ) -> Result<SidecarStatusResult, StudioHostError> {
-    let install_path = PathBuf::from(install_path);
-    let marker = sidecar_marker_path(&install_path);
-    if marker.exists() {
-        fs::remove_file(&marker).map_err(|err| StudioHostError::InstallFailed {
-            message: err.to_string(),
-        })?;
-    }
-    Ok(SidecarStatusResult {
-        status: "stopped".to_owned(),
-        pid: None,
-        message: "Sidecar marker removed.".to_owned(),
-    })
+    stop_sidecar_session(&state, Some(PathBuf::from(install_path)))
+}
+
+#[tauri::command]
+pub fn studio_devkit_drain_sidecar_messages(
+    state: tauri::State<'_, StudioSidecarState>,
+) -> Result<Vec<SidecarEventRecord>, StudioHostError> {
+    drain_sidecar_messages(&state)
+}
+
+#[tauri::command]
+pub fn studio_devkit_send_approval_result(
+    state: tauri::State<'_, StudioSidecarState>,
+    request_id: String,
+    approved: bool,
+    reason: Option<String>,
+) -> Result<SidecarStatusResult, StudioHostError> {
+    send_sidecar_message(
+        &state,
+        json!({
+            "direction": "host_to_sidecar",
+            "kind": "approval_result",
+            "protocolVersion": IPC_PROTOCOL_VERSION,
+            "requestId": request_id,
+            "approved": approved,
+            "reason": reason,
+        }),
+    )
 }
 
 #[tauri::command]
@@ -348,6 +373,482 @@ pub fn studio_workspace_assert_trusted(
     })
 }
 
+fn sidecar_status_for(
+    state: &StudioSidecarState,
+    install_path: Option<PathBuf>,
+) -> Result<SidecarStatusResult, StudioHostError> {
+    if let Some(path) = &install_path {
+        if !manifest_path(path).exists() {
+            return Ok(sidecar_status(
+                "missing",
+                None,
+                "DevKit manifest is missing.",
+                &[],
+            ));
+        }
+    } else {
+        return Ok(sidecar_status(
+            "missing",
+            None,
+            "No DevKit path selected.",
+            &[],
+        ));
+    }
+
+    let mut guard = state
+        .session
+        .lock()
+        .map_err(|err| StudioHostError::IpcFailed {
+            message: err.to_string(),
+        })?;
+    let Some(session) = guard.as_mut() else {
+        return Ok(sidecar_status(
+            "stopped",
+            None,
+            "Sidecar is not running.",
+            &[],
+        ));
+    };
+    if let Some(expected) = install_path {
+        if session.install_path != expected {
+            return Ok(sidecar_status(
+                "stopped",
+                None,
+                "A sidecar session is running for a different DevKit path.",
+                &[],
+            ));
+        }
+    }
+    let events = session
+        .events
+        .lock()
+        .map_err(|err| StudioHostError::IpcFailed {
+            message: err.to_string(),
+        })?
+        .clone();
+    match session.child.try_wait() {
+        Ok(None) => Ok(sidecar_status(
+            "running",
+            Some(session.pid),
+            "Sidecar process is running.",
+            &events,
+        )),
+        Ok(Some(status)) => {
+            *guard = None;
+            Ok(sidecar_status(
+                "unhealthy",
+                None,
+                &format!("Sidecar process exited with {status}."),
+                &events,
+            ))
+        }
+        Err(err) => {
+            *guard = None;
+            Ok(sidecar_status(
+                "unhealthy",
+                None,
+                &format!("Sidecar status check failed: {err}."),
+                &events,
+            ))
+        }
+    }
+}
+
+fn start_sidecar_session(
+    state: &StudioSidecarState,
+    install_path: PathBuf,
+    selected_project_root: Option<String>,
+    network_id: Option<String>,
+    network_name: Option<String>,
+    read_only_wallet_address: Option<String>,
+) -> Result<SidecarStatusResult, StudioHostError> {
+    let parsed = parse_manifest_at(&install_path)?;
+    let compatibility = compatibility_result(&parsed.manifest, HOST_API_VERSION);
+    if compatibility.compatibility != "compatible" {
+        return Err(StudioHostError::Incompatible {
+            message: compatibility.message,
+        });
+    }
+    if !parsed.archive_verified {
+        return Err(StudioHostError::HashVerificationFailed {
+            message: parsed.archive_verification,
+        });
+    }
+    if !parsed.signature_verified {
+        return Err(StudioHostError::HashVerificationFailed {
+            message: parsed.signature_verification,
+        });
+    }
+
+    let mut guard = state
+        .session
+        .lock()
+        .map_err(|err| StudioHostError::IpcFailed {
+            message: err.to_string(),
+        })?;
+    if let Some(session) = guard.as_mut() {
+        if session.child.try_wait().ok().flatten().is_none() {
+            if session.install_path == install_path {
+                let events = session
+                    .events
+                    .lock()
+                    .map_err(|err| StudioHostError::IpcFailed {
+                        message: err.to_string(),
+                    })?
+                    .clone();
+                return Ok(sidecar_status(
+                    "running",
+                    Some(session.pid),
+                    "Sidecar process is already running.",
+                    &events,
+                ));
+            }
+            return Err(StudioHostError::IpcFailed {
+                message: "a sidecar session is already running for another DevKit path".to_owned(),
+            });
+        }
+        *guard = None;
+    }
+
+    let binary = sidecar_binary_path(&install_path, &parsed.manifest).ok_or_else(|| {
+        StudioHostError::InstallFailed {
+            message: "DevKit sidecar binary is missing.".to_owned(),
+        }
+    })?;
+    let mut command = sidecar_command(&binary);
+    command.arg("sidecar");
+    let mut child = command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|err| StudioHostError::InstallFailed {
+            message: format!("could not start sidecar: {err}"),
+        })?;
+    let stdin = child
+        .stdin
+        .take()
+        .ok_or_else(|| StudioHostError::IpcFailed {
+            message: "sidecar stdin was not available".to_owned(),
+        })?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| StudioHostError::IpcFailed {
+            message: "sidecar stdout was not available".to_owned(),
+        })?;
+    let pid = child.id();
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let (ready_tx, ready_rx) = mpsc::channel();
+    spawn_sidecar_reader(stdout, Arc::clone(&events), ready_tx);
+    let ready = ready_rx
+        .recv_timeout(Duration::from_millis(SIDECAR_READY_TIMEOUT_MS))
+        .map_err(|_| {
+            let _ = child.kill();
+            StudioHostError::IpcFailed {
+                message: "sidecar did not emit a ready message before timeout".to_owned(),
+            }
+        })?;
+    if let Err(message) = ready {
+        let _ = child.kill();
+        return Err(StudioHostError::IpcFailed { message });
+    }
+    let mut session = SidecarSession {
+        install_path,
+        pid,
+        child,
+        stdin,
+        events,
+    };
+    send_sidecar_message_to_session(
+        &mut session,
+        json!({
+            "direction": "host_to_sidecar",
+            "kind": "host_context",
+            "protocolVersion": IPC_PROTOCOL_VERSION,
+            "selectedProjectRoot": selected_project_root,
+            "activeNetwork": {
+                "networkId": network_id.unwrap_or_else(|| "local-dev".to_owned()),
+                "name": network_name.unwrap_or_else(|| "Local Dev".to_owned()),
+            },
+            "readOnlyWalletAddress": read_only_wallet_address,
+        }),
+    )?;
+    let status = {
+        let events = session
+            .events
+            .lock()
+            .map_err(|err| StudioHostError::IpcFailed {
+                message: err.to_string(),
+            })?
+            .clone();
+        sidecar_status(
+            "running",
+            Some(session.pid),
+            "Sidecar process is running and host context was sent.",
+            &events,
+        )
+    };
+    *guard = Some(session);
+    Ok(status)
+}
+
+fn stop_sidecar_session(
+    state: &StudioSidecarState,
+    install_path: Option<PathBuf>,
+) -> Result<SidecarStatusResult, StudioHostError> {
+    let mut guard = state
+        .session
+        .lock()
+        .map_err(|err| StudioHostError::IpcFailed {
+            message: err.to_string(),
+        })?;
+    let Some(mut session) = guard.take() else {
+        return Ok(sidecar_status(
+            "stopped",
+            None,
+            "Sidecar is not running.",
+            &[],
+        ));
+    };
+    if let Some(expected) = install_path {
+        if session.install_path != expected {
+            let pid = session.pid;
+            *guard = Some(session);
+            return Ok(sidecar_status(
+                "running",
+                Some(pid),
+                "Sidecar session is running for a different DevKit path.",
+                &[],
+            ));
+        }
+    }
+    let events = session
+        .events
+        .lock()
+        .map_err(|err| StudioHostError::IpcFailed {
+            message: err.to_string(),
+        })?
+        .clone();
+    let _ = session.child.kill();
+    let _ = session.child.wait();
+    Ok(sidecar_status(
+        "stopped",
+        None,
+        "Sidecar process stopped.",
+        &events,
+    ))
+}
+
+fn drain_sidecar_messages(
+    state: &StudioSidecarState,
+) -> Result<Vec<SidecarEventRecord>, StudioHostError> {
+    let guard = state
+        .session
+        .lock()
+        .map_err(|err| StudioHostError::IpcFailed {
+            message: err.to_string(),
+        })?;
+    let Some(session) = guard.as_ref() else {
+        return Ok(vec![]);
+    };
+    let mut events = session
+        .events
+        .lock()
+        .map_err(|err| StudioHostError::IpcFailed {
+            message: err.to_string(),
+        })?;
+    Ok(events.drain(..).collect())
+}
+
+fn send_sidecar_message(
+    state: &StudioSidecarState,
+    message: serde_json::Value,
+) -> Result<SidecarStatusResult, StudioHostError> {
+    let mut guard = state
+        .session
+        .lock()
+        .map_err(|err| StudioHostError::IpcFailed {
+            message: err.to_string(),
+        })?;
+    let Some(session) = guard.as_mut() else {
+        return Err(StudioHostError::IpcFailed {
+            message: "sidecar is not running".to_owned(),
+        });
+    };
+    send_sidecar_message_to_session(session, message)?;
+    let events = session
+        .events
+        .lock()
+        .map_err(|err| StudioHostError::IpcFailed {
+            message: err.to_string(),
+        })?
+        .clone();
+    Ok(sidecar_status(
+        "running",
+        Some(session.pid),
+        "Message sent to sidecar.",
+        &events,
+    ))
+}
+
+fn send_sidecar_message_to_session(
+    session: &mut SidecarSession,
+    message: serde_json::Value,
+) -> Result<(), StudioHostError> {
+    let line = serde_json::to_vec(&message).map_err(|err| StudioHostError::IpcFailed {
+        message: err.to_string(),
+    })?;
+    session
+        .stdin
+        .write_all(&line)
+        .and_then(|_| session.stdin.write_all(b"\n"))
+        .and_then(|_| session.stdin.flush())
+        .map_err(|err| StudioHostError::IpcFailed {
+            message: format!("could not write sidecar IPC: {err}"),
+        })
+}
+
+fn sidecar_command(binary: &Path) -> Command {
+    if binary.extension().and_then(|ext| ext.to_str()) == Some("mjs")
+        || binary.extension().and_then(|ext| ext.to_str()) == Some("js")
+    {
+        let mut command = Command::new(node_binary());
+        command.arg(binary);
+        return command;
+    }
+    Command::new(binary)
+}
+
+fn spawn_sidecar_reader(
+    stdout: std::process::ChildStdout,
+    events: Arc<Mutex<Vec<SidecarEventRecord>>>,
+    ready_tx: mpsc::Sender<Result<(), String>>,
+) {
+    thread::spawn(move || {
+        let mut ready_sent = false;
+        for line in BufReader::new(stdout).lines() {
+            let record = match line {
+                Ok(line) => parse_sidecar_line(&line),
+                Err(err) => SidecarEventRecord {
+                    valid: false,
+                    raw: String::new(),
+                    kind: None,
+                    message: None,
+                    error: Some(err.to_string()),
+                },
+            };
+            if !ready_sent {
+                if record.valid && record.kind.as_deref() == Some("ready") {
+                    let _ = ready_tx.send(Ok(()));
+                    ready_sent = true;
+                } else if !record.valid {
+                    let _ = ready_tx
+                        .send(Err(record.error.clone().unwrap_or_else(|| {
+                            "sidecar emitted malformed ready message".to_owned()
+                        })));
+                    ready_sent = true;
+                }
+            }
+            if let Ok(mut guard) = events.lock() {
+                guard.push(record);
+                if guard.len() > 100 {
+                    let overflow = guard.len() - 100;
+                    guard.drain(0..overflow);
+                }
+            }
+        }
+    });
+}
+
+fn parse_sidecar_line(line: &str) -> SidecarEventRecord {
+    let parsed: serde_json::Value = match serde_json::from_str(line) {
+        Ok(value) => value,
+        Err(err) => {
+            return SidecarEventRecord {
+                valid: false,
+                raw: line.to_owned(),
+                kind: None,
+                message: None,
+                error: Some(format!("invalid JSON: {err}")),
+            };
+        }
+    };
+    let direction = parsed
+        .get("direction")
+        .and_then(|value| value.as_str())
+        .unwrap_or_default();
+    if direction != "sidecar_to_host" {
+        return SidecarEventRecord {
+            valid: false,
+            raw: line.to_owned(),
+            kind: None,
+            message: Some(parsed),
+            error: Some("sidecar IPC direction must be sidecar_to_host".to_owned()),
+        };
+    }
+    let kind = parsed
+        .get("kind")
+        .and_then(|value| value.as_str())
+        .unwrap_or_default();
+    if kind.is_empty() {
+        return SidecarEventRecord {
+            valid: false,
+            raw: line.to_owned(),
+            kind: None,
+            message: Some(parsed),
+            error: Some("sidecar IPC kind is required".to_owned()),
+        };
+    }
+    if kind == "ready" {
+        let protocol = parsed
+            .get("protocolVersion")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default();
+        if protocol != IPC_PROTOCOL_VERSION {
+            return SidecarEventRecord {
+                valid: false,
+                raw: line.to_owned(),
+                kind: Some(kind.to_owned()),
+                message: Some(parsed),
+                error: Some("sidecar IPC protocol is unsupported".to_owned()),
+            };
+        }
+    }
+    if kind == "approval_request" && parsed.get("request").is_none() {
+        return SidecarEventRecord {
+            valid: false,
+            raw: line.to_owned(),
+            kind: Some(kind.to_owned()),
+            message: Some(parsed),
+            error: Some("approval_request message must include request".to_owned()),
+        };
+    }
+    SidecarEventRecord {
+        valid: true,
+        raw: line.to_owned(),
+        kind: Some(kind.to_owned()),
+        message: Some(parsed),
+        error: None,
+    }
+}
+
+fn sidecar_status(
+    status: &str,
+    pid: Option<u32>,
+    message: &str,
+    events: &[SidecarEventRecord],
+) -> SidecarStatusResult {
+    SidecarStatusResult {
+        status: status.to_owned(),
+        pid,
+        message: message.to_owned(),
+        event_count: events.len(),
+        malformed_count: events.iter().filter(|event| !event.valid).count(),
+        last_event_kind: events.iter().rev().find_map(|event| event.kind.clone()),
+    }
+}
+
 fn parse_manifest_at(path: &Path) -> Result<ParsedDevkitManifest, StudioHostError> {
     let manifest_path = manifest_path(path);
     if !manifest_path.exists() {
@@ -365,11 +866,16 @@ fn parse_manifest_at(path: &Path) -> Result<ParsedDevkitManifest, StudioHostErro
     validate_manifest_shape(&manifest)?;
     let manifest_sha256 = hex_sha256(&bytes);
     let (archive_verified, archive_verification) = verify_archive_hash(&manifest, &manifest_path)?;
+    let (signature_verified, signature_verification) = verify_manifest_signature(&manifest);
+    let trust_root = manifest.archive.trust_root.clone();
     Ok(ParsedDevkitManifest {
         manifest,
         manifest_sha256,
         archive_verified,
         archive_verification,
+        signature_verified,
+        signature_verification,
+        trust_root,
     })
 }
 
@@ -388,6 +894,11 @@ fn install_local_archive_at(
     if !parsed.archive_verified {
         return Err(StudioHostError::HashVerificationFailed {
             message: parsed.archive_verification,
+        });
+    }
+    if !parsed.signature_verified {
+        return Err(StudioHostError::HashVerificationFailed {
+            message: parsed.signature_verification,
         });
     }
     let Some(archive_path) = archive_file_path(&parsed.manifest.archive.url, &manifest_path) else {
@@ -446,6 +957,7 @@ fn install_local_archive_at(
         install_path: install_path.display().to_string(),
         previous_version,
         archive_verified: true,
+        signature_verified: true,
         message: "DevKit archive verified and installed.".to_owned(),
     })
 }
@@ -485,6 +997,7 @@ fn rollback_at(
         install_path: install_path.display().to_string(),
         previous_version: current_version,
         archive_verified: true,
+        signature_verified: true,
         message: "Rolled back to previous DevKit version.".to_owned(),
     })
 }
@@ -508,6 +1021,41 @@ fn validate_manifest_shape(manifest: &DevkitManifest) -> Result<(), StudioHostEr
     if manifest.archive.signature.trim().is_empty() {
         return Err(StudioHostError::MalformedManifest {
             message: "archive signature is required".to_owned(),
+        });
+    }
+    if manifest
+        .archive
+        .signature_scheme
+        .as_deref()
+        .unwrap_or_default()
+        != "ed25519"
+    {
+        return Err(StudioHostError::MalformedManifest {
+            message: "archive signature scheme must be ed25519".to_owned(),
+        });
+    }
+    if manifest
+        .archive
+        .signing_key_id
+        .as_deref()
+        .unwrap_or_default()
+        .trim()
+        .is_empty()
+    {
+        return Err(StudioHostError::MalformedManifest {
+            message: "archive signing key id is required".to_owned(),
+        });
+    }
+    if manifest
+        .archive
+        .trust_root
+        .as_deref()
+        .unwrap_or_default()
+        .trim()
+        .is_empty()
+    {
+        return Err(StudioHostError::MalformedManifest {
+            message: "archive trust root is required".to_owned(),
         });
     }
     Ok(())
@@ -561,6 +1109,113 @@ fn verify_archive_hash(
         ));
     }
     Ok((true, "Archive hash verified.".to_owned()))
+}
+
+fn verify_manifest_signature(manifest: &DevkitManifest) -> (bool, String) {
+    let Some(trust_root) = manifest.archive.trust_root.as_deref() else {
+        return (false, "Manifest trust root is missing.".to_owned());
+    };
+    let Some(signing_key_id) = manifest.archive.signing_key_id.as_deref() else {
+        return (false, "Manifest signing key id is missing.".to_owned());
+    };
+    let public_key = match trusted_manifest_public_key(manifest, trust_root, signing_key_id) {
+        Ok(key) => key,
+        Err(message) => return (false, message),
+    };
+    let signature_bytes = match URL_SAFE_NO_PAD.decode(manifest.archive.signature.as_bytes()) {
+        Ok(bytes) => bytes,
+        Err(err) => return (false, format!("Manifest signature is not base64url: {err}.")),
+    };
+    let signature: [u8; 64] = match signature_bytes.try_into() {
+        Ok(bytes) => bytes,
+        Err(bytes) => {
+            return (
+                false,
+                format!("Manifest signature must be 64 bytes, got {}.", bytes.len()),
+            )
+        }
+    };
+    let signature = Signature::from_bytes(&signature);
+    match public_key.verify(manifest_signature_payload(manifest).as_bytes(), &signature) {
+        Ok(()) => (
+            true,
+            format!("Manifest signature verified with trust root {trust_root}."),
+        ),
+        Err(err) => (false, format!("Manifest signature verification failed: {err}.")),
+    }
+}
+
+fn trusted_manifest_public_key(
+    manifest: &DevkitManifest,
+    trust_root: &str,
+    signing_key_id: &str,
+) -> Result<VerifyingKey, String> {
+    if trust_root == "local-dev" {
+        if !matches!(manifest.channel, DevkitChannel::Local) {
+            return Err("local-dev trust root is only allowed for local DevKit channel.".to_owned());
+        }
+        let Some(public_key) = manifest.archive.signing_public_key.as_deref() else {
+            return Err("local-dev manifest signing public key is missing.".to_owned());
+        };
+        let bytes = URL_SAFE_NO_PAD
+            .decode(public_key.as_bytes())
+            .map_err(|err| format!("local-dev signing public key is not base64url: {err}."))?;
+        let key: [u8; 32] = bytes.try_into().map_err(|bytes: Vec<u8>| {
+            format!("local-dev signing public key must be 32 bytes, got {}.", bytes.len())
+        })?;
+        return VerifyingKey::from_bytes(&key)
+            .map_err(|err| format!("local-dev signing public key is invalid: {err}."));
+    }
+
+    if let Some(encoded) = trusted_release_public_key(signing_key_id, trust_root) {
+        let bytes = URL_SAFE_NO_PAD
+            .decode(encoded.as_bytes())
+            .map_err(|err| format!("trusted release key is malformed: {err}."))?;
+        let key: [u8; 32] = bytes.try_into().map_err(|bytes: Vec<u8>| {
+            format!("trusted release key must be 32 bytes, got {}.", bytes.len())
+        })?;
+        return VerifyingKey::from_bytes(&key)
+            .map_err(|err| format!("trusted release key is invalid: {err}."));
+    }
+    Err(format!(
+        "No trusted DevKit signing key for trust root {trust_root} and key id {signing_key_id}."
+    ))
+}
+
+fn trusted_release_public_key(_signing_key_id: &str, _trust_root: &str) -> Option<&'static str> {
+    None
+}
+
+fn manifest_signature_payload(manifest: &DevkitManifest) -> String {
+    format!(
+        concat!(
+            "mono-devkit-manifest-v1\n",
+            "schema_version={}\n",
+            "devkit_version={}\n",
+            "channel={}\n",
+            "minimum_wallet_host_api={}\n",
+            "maximum_wallet_host_api={}\n",
+            "mono_core_commit={}\n",
+            "mono_core_sdk_commit={}\n",
+            "archive_url={}\n",
+            "archive_sha256={}\n",
+            "sidecar_binary_name={}\n",
+            "sidecar_ipc_protocol_version={}\n",
+            "release_notes_url={}\n",
+        ),
+        manifest.schema_version,
+        manifest.devkit_version,
+        manifest.channel.as_dir(),
+        manifest.minimum_wallet_host_api,
+        manifest.maximum_wallet_host_api,
+        manifest.mono_core_commit,
+        manifest.mono_core_sdk_commit,
+        manifest.archive.url,
+        manifest.archive.sha256,
+        manifest.sidecar.binary_name,
+        manifest.sidecar.ipc_protocol_version,
+        manifest.release_notes_url.as_deref().unwrap_or(""),
+    )
 }
 
 fn archive_file_path(url: &str, manifest_path: &Path) -> Option<PathBuf> {
@@ -642,10 +1297,6 @@ fn read_current_version_at(channel_dir: &Path) -> Result<Option<String>, StudioH
             message: err.to_string(),
         }),
     }
-}
-
-fn sidecar_marker_path(install_path: &Path) -> PathBuf {
-    install_path.join(".mono-dev-sidecar.pid")
 }
 
 fn sidecar_binary_path(install_path: &Path, manifest: &DevkitManifest) -> Option<PathBuf> {
@@ -738,10 +1389,6 @@ fn home_missing() -> StudioHostError {
     }
 }
 
-fn read_pid(path: &Path) -> Option<u32> {
-    fs::read_to_string(path).ok()?.trim().parse().ok()
-}
-
 fn sha256_file(path: &Path) -> Result<String, StudioHostError> {
     let mut file = fs::File::open(path).map_err(|err| StudioHostError::ReadFailed {
         message: err.to_string(),
@@ -797,6 +1444,7 @@ fn parse_version_parts(value: &str) -> [u64; 3] {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ed25519_dalek::{Signer, SigningKey};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
@@ -826,6 +1474,50 @@ mod tests {
             err,
             StudioHostError::HashVerificationFailed { .. }
         ));
+        fs::remove_dir_all(temp).unwrap();
+    }
+
+    #[test]
+    fn parse_manifest_reports_signature_failure() {
+        let temp = temp_dir("signature-failure");
+        fs::create_dir_all(&temp).unwrap();
+        let archive = temp.join("mono-devkit-0.1.0.tar");
+        fs::write(&archive, b"archive-bytes").unwrap();
+        let mut manifest = test_manifest("0.1.0", sha256_file(&archive).unwrap());
+        manifest.archive.signature = URL_SAFE_NO_PAD.encode([9_u8; 64]);
+        fs::write(
+            temp.join(MANIFEST_FILE),
+            serde_json::to_vec_pretty(&manifest).unwrap(),
+        )
+        .unwrap();
+        let parsed = parse_manifest_at(&temp).unwrap();
+        assert!(parsed.archive_verified);
+        assert!(!parsed.signature_verified);
+        assert!(parsed.signature_verification.contains("failed"));
+        let err = install_local_archive_at(&temp, &temp.join("install-root")).unwrap_err();
+        assert!(matches!(
+            err,
+            StudioHostError::HashVerificationFailed { .. }
+        ));
+        fs::remove_dir_all(temp).unwrap();
+    }
+
+    #[test]
+    fn install_rejects_incompatible_host_api() {
+        let temp = temp_dir("incompatible");
+        fs::create_dir_all(&temp).unwrap();
+        let archive = temp.join("mono-devkit-0.1.0.tar");
+        fs::write(&archive, b"archive-bytes").unwrap();
+        let mut manifest = test_manifest("0.1.0", sha256_file(&archive).unwrap());
+        manifest.minimum_wallet_host_api = "9.0.0".to_owned();
+        sign_manifest(&mut manifest);
+        fs::write(
+            temp.join(MANIFEST_FILE),
+            serde_json::to_vec_pretty(&manifest).unwrap(),
+        )
+        .unwrap();
+        let err = install_local_archive_at(&temp, &temp.join("install-root")).unwrap_err();
+        assert!(matches!(err, StudioHostError::Incompatible { .. }));
         fs::remove_dir_all(temp).unwrap();
     }
 
@@ -867,6 +1559,7 @@ mod tests {
         let mut manifest_b = test_manifest("0.2.0", sha256_file(&archive_b).unwrap());
         manifest_b.archive.url = "mono-devkit-0.2.0.tar".to_owned();
         manifest_b.maximum_wallet_host_api = "0.1.9".to_owned();
+        sign_manifest(&mut manifest_b);
         fs::write(
             release.join(MANIFEST_FILE),
             serde_json::to_vec_pretty(&manifest_b).unwrap(),
@@ -896,8 +1589,98 @@ mod tests {
         fs::remove_dir_all(temp).unwrap();
     }
 
+    #[test]
+    fn sidecar_ipc_parser_accepts_ready_and_rejects_malformed() {
+        let ready = parse_sidecar_line(
+            r#"{"direction":"sidecar_to_host","kind":"ready","protocolVersion":"mono.native-dev.ipc.v1","devkitVersion":"0.1.0"}"#,
+        );
+        assert!(ready.valid);
+        assert_eq!(ready.kind.as_deref(), Some("ready"));
+
+        let bad_json = parse_sidecar_line("{not-json");
+        assert!(!bad_json.valid);
+        assert!(bad_json.error.unwrap().contains("invalid JSON"));
+
+        let bad_protocol = parse_sidecar_line(
+            r#"{"direction":"sidecar_to_host","kind":"ready","protocolVersion":"mono.native-dev.ipc.v0","devkitVersion":"0.1.0"}"#,
+        );
+        assert!(!bad_protocol.valid);
+        assert!(bad_protocol.error.unwrap().contains("unsupported"));
+    }
+
+    #[test]
+    fn sidecar_lifecycle_uses_child_process() {
+        let temp = temp_dir("sidecar-lifecycle");
+        fs::create_dir_all(temp.join("bin")).unwrap();
+        let archive = temp.join("mono-devkit-0.1.0.tar");
+        fs::write(&archive, b"sidecar-archive").unwrap();
+        let mut manifest = test_manifest("0.1.0", sha256_file(&archive).unwrap());
+        manifest.archive.url = "mono-devkit-0.1.0.tar".to_owned();
+        fs::write(
+            temp.join(MANIFEST_FILE),
+            serde_json::to_vec_pretty(&manifest).unwrap(),
+        )
+        .unwrap();
+        fs::write(
+            temp.join("bin/mono-dev.mjs"),
+            r#"#!/usr/bin/env node
+import { createInterface } from "node:readline";
+console.log(JSON.stringify({direction:"sidecar_to_host",kind:"ready",protocolVersion:"mono.native-dev.ipc.v1",devkitVersion:"0.1.0"}));
+const lines = createInterface({ input: process.stdin });
+lines.on("line", (line) => {
+  const message = JSON.parse(line);
+  if (message.kind === "host_context") {
+    console.log(JSON.stringify({direction:"sidecar_to_host",kind:"project_event",projectId:"test",event:"opened",summary:"context accepted"}));
+  }
+  if (message.kind === "approval_result") {
+    console.log(JSON.stringify({direction:"sidecar_to_host",kind:"project_event",projectId:"test",event:"simulation_finished",summary:"approval accepted"}));
+  }
+});
+setInterval(() => {}, 1000);
+"#,
+        )
+        .unwrap();
+
+        let state = StudioSidecarState::default();
+        let started = start_sidecar_session(
+            &state,
+            temp.clone(),
+            None,
+            Some("local-dev".to_owned()),
+            Some("Local Dev".to_owned()),
+            None,
+        )
+        .unwrap();
+        assert_eq!(started.status, "running");
+        assert!(started.pid.is_some());
+
+        send_sidecar_message(
+            &state,
+            json!({
+                "direction": "host_to_sidecar",
+                "kind": "approval_result",
+                "protocolVersion": IPC_PROTOCOL_VERSION,
+                "requestId": "req-1",
+                "approved": true,
+            }),
+        )
+        .unwrap();
+        thread::sleep(Duration::from_millis(100));
+        let events = drain_sidecar_messages(&state).unwrap();
+        assert!(events
+            .iter()
+            .any(|event| event.kind.as_deref() == Some("ready")));
+        assert!(events
+            .iter()
+            .any(|event| event.raw.contains("approval accepted")));
+
+        let stopped = stop_sidecar_session(&state, Some(temp.clone())).unwrap();
+        assert_eq!(stopped.status, "stopped");
+        fs::remove_dir_all(temp).unwrap();
+    }
+
     fn test_manifest(version: &str, sha256: String) -> DevkitManifest {
-        DevkitManifest {
+        let mut manifest = DevkitManifest {
             schema_version: MANIFEST_SCHEMA_VERSION,
             devkit_version: version.to_owned(),
             channel: DevkitChannel::Local,
@@ -908,7 +1691,11 @@ mod tests {
             archive: DevkitArchive {
                 url: "mono-devkit-0.1.0.tar".to_owned(),
                 sha256,
-                signature: "test-signature".to_owned(),
+                signature: String::new(),
+                signature_scheme: Some("ed25519".to_owned()),
+                signing_key_id: Some("local-devkit-test".to_owned()),
+                trust_root: Some("local-dev".to_owned()),
+                signing_public_key: None,
                 size_bytes: None,
             },
             sidecar: DevkitSidecarManifest {
@@ -916,7 +1703,20 @@ mod tests {
                 ipc_protocol_version: IPC_PROTOCOL_VERSION.to_owned(),
             },
             release_notes_url: None,
-        }
+        };
+        sign_manifest(&mut manifest);
+        manifest
+    }
+
+    fn sign_manifest(manifest: &mut DevkitManifest) {
+        let signing_key = SigningKey::from_bytes(&[7_u8; 32]);
+        let verifying_key = signing_key.verifying_key();
+        manifest.archive.signature_scheme = Some("ed25519".to_owned());
+        manifest.archive.signing_key_id = Some("local-devkit-test".to_owned());
+        manifest.archive.trust_root = Some("local-dev".to_owned());
+        manifest.archive.signing_public_key = Some(URL_SAFE_NO_PAD.encode(verifying_key.as_bytes()));
+        let signature = signing_key.sign(manifest_signature_payload(manifest).as_bytes());
+        manifest.archive.signature = URL_SAFE_NO_PAD.encode(signature.to_bytes());
     }
 
     fn temp_dir(name: &str) -> PathBuf {

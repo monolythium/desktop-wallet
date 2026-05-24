@@ -1,7 +1,13 @@
-import { useEffect, useMemo, useState } from "react";
-import type { StudioHostStatus } from "@monolythium/core-sdk";
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  assertNativeDevWalletApprovalRequest,
+  typedBech32ToAddress,
+  type NativeDevWalletApprovalRequest,
+  type StudioHostStatus,
+} from "@monolythium/core-sdk";
 import { useOperations } from "../operations/context";
 import {
+  drainSidecarMessages,
   loadStudioHostStatus,
   previewStudioHostStatus,
   readDevkitChannel,
@@ -9,10 +15,12 @@ import {
   installLocalDevkitArchive,
   rollbackDevkit,
   selectLocalDevkitPath,
+  sendDevkitApprovalResult,
   startDevkitSidecar,
   stopDevkitSidecar,
   trustWorkspace,
   type NativeDevkitChannel,
+  type SidecarEventRecord,
 } from "../sdk/studio-host";
 
 interface MonoStudioProps {
@@ -31,6 +39,7 @@ export function MonoStudio({ developerModeEnabled, setRouteSettings }: MonoStudi
   );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const handledApprovalRequests = useRef(new Set<string>());
   const statusLabel = useMemo(() => status.state.replaceAll("_", " "), [status.state]);
 
   useEffect(() => {
@@ -130,7 +139,12 @@ export function MonoStudio({ developerModeEnabled, setRouteSettings }: MonoStudi
     if (!status.devkit.installPath) return;
     setBusy(true);
     try {
-      await startDevkitSidecar(status.devkit.installPath);
+      await startDevkitSidecar({
+        installPath: status.devkit.installPath,
+        selectedProjectRoot: workspacePath.trim() || undefined,
+        networkId: "local-dev",
+        networkName: "Local Dev",
+      });
       setStatus(await loadStudioHostStatus({
         developerModeEnabled,
         channel,
@@ -143,6 +157,31 @@ export function MonoStudio({ developerModeEnabled, setRouteSettings }: MonoStudi
       setBusy(false);
     }
   };
+
+  useEffect(() => {
+    if (status.devkit.sidecarStatus !== "running") return;
+    let cancelled = false;
+    const drain = async () => {
+      try {
+        const events = await drainSidecarMessages();
+        if (cancelled) return;
+        for (const event of events) {
+          const request = approvalRequestFromEvent(event);
+          if (!request || handledApprovalRequests.current.has(request.id)) continue;
+          handledApprovalRequests.current.add(request.id);
+          openSidecarApprovalRequest(request);
+        }
+      } catch (cause) {
+        if (!cancelled) setError((cause as Error).message);
+      }
+    };
+    void drain();
+    const id = window.setInterval(() => void drain(), 1_500);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [status.devkit.sidecarStatus]);
 
   const stopSidecar = async () => {
     if (!status.devkit.installPath) return;
@@ -198,6 +237,37 @@ export function MonoStudio({ developerModeEnabled, setRouteSettings }: MonoStudi
         detail: "Real deploy execution waits for a verified DevKit plan.",
       }),
     });
+  };
+
+  const openSidecarApprovalRequest = (request: NativeDevWalletApprovalRequest) => {
+    try {
+      assertNativeDevWalletApprovalRequest(request);
+      validateApprovalPayload(request);
+      ops.open({
+        title: request.title,
+        subtitle: request.summary,
+        auth: "none",
+        diff: approvalDiff(request),
+        effects: [
+          { text: "This request was prepared outside the wallet and validated before display." },
+          { text: "Approval returns a decision to the DevKit sidecar only; execution remains stubbed until canonical deploy/call wiring lands.", level: "info" },
+        ],
+        execute: async () => {
+          await sendDevkitApprovalResult({ requestId: request.id, approved: true });
+          return {
+            headline: "Approval decision sent",
+            detail: "The wallet returned an approval result to the DevKit sidecar without signing or submitting.",
+          };
+        },
+      });
+    } catch (cause) {
+      setError((cause as Error).message);
+      void sendDevkitApprovalResult({
+        requestId: request.id,
+        approved: false,
+        reason: (cause as Error).message,
+      }).catch(() => undefined);
+    }
   };
 
   if (!developerModeEnabled) {
@@ -341,6 +411,60 @@ export function MonoStudio({ developerModeEnabled, setRouteSettings }: MonoStudi
       </div>
     </div>
   );
+}
+
+function approvalRequestFromEvent(event: SidecarEventRecord): NativeDevWalletApprovalRequest | null {
+  if (!event.valid || event.kind !== "approval_request") return null;
+  const message = event.message as { request?: NativeDevWalletApprovalRequest } | undefined;
+  return message?.request ?? null;
+}
+
+function approvalDiff(request: NativeDevWalletApprovalRequest) {
+  const payload = request.payload ?? {};
+  return [
+    { k: "Request", v: request.id, kind: "value" as const },
+    { k: "Network", v: request.networkId, kind: "value" as const },
+    { k: "Authority", v: request.authorityAddress, kind: "value" as const },
+    { k: "Expected address", v: stringPayload(payload, "expectedContractAddress", "Not provided"), kind: "value" as const },
+    { k: "Artifact hash", v: stringPayload(payload, "artifactHash", "Not provided"), kind: "value" as const },
+    { k: "Value", v: `${stringPayload(payload, "valueLythoshi", "0")} lythoshi`, kind: "value" as const },
+    { k: "Execution units", v: stringPayload(payload, "executionUnitLimit", "Not provided"), kind: "value" as const },
+    { k: "Maximum execution fee", v: `${stringPayload(payload, "maxExecutionFeeLythoshi", "Not provided")} lythoshi`, kind: "fee" as const },
+  ];
+}
+
+function stringPayload(payload: Record<string, unknown>, key: string, fallback: string): string {
+  const value = payload[key];
+  return typeof value === "string" && value.length > 0 ? value : fallback;
+}
+
+function validateApprovalPayload(request: NativeDevWalletApprovalRequest): void {
+  if (request.kind !== "mrv_deploy") return;
+  const payload = request.payload ?? {};
+  typedBech32ToAddress(requiredPayload(payload, "expectedContractAddress"), "contract");
+  assertHashPayload(payload, "artifactHash");
+  assertHashPayload(payload, "abiHash");
+  assertWholeNumberPayload(payload, "valueLythoshi");
+  assertWholeNumberPayload(payload, "executionUnitLimit");
+  assertWholeNumberPayload(payload, "maxExecutionFeeLythoshi");
+}
+
+function requiredPayload(payload: Record<string, unknown>, key: string): string {
+  const value = payload[key];
+  if (typeof value !== "string" || value.length === 0) {
+    throw new Error(`approval payload ${key} is required`);
+  }
+  return value;
+}
+
+function assertHashPayload(payload: Record<string, unknown>, key: string): void {
+  const value = requiredPayload(payload, key);
+  if (!/^[0-9a-f]{64}$/.test(value)) throw new Error(`approval payload ${key} must be a lowercase sha256 hash`);
+}
+
+function assertWholeNumberPayload(payload: Record<string, unknown>, key: string): void {
+  const value = requiredPayload(payload, key);
+  if (!/^(0|[1-9][0-9]*)$/.test(value)) throw new Error(`approval payload ${key} must be a whole number string`);
 }
 
 function KV({ k, v, mono }: { k: string; v: string; mono?: boolean }) {
