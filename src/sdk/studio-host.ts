@@ -19,6 +19,10 @@ interface RawArchive {
   url: string;
   sha256: string;
   signature: string;
+  signature_scheme?: string | null;
+  signing_key_id?: string | null;
+  trust_root?: string | null;
+  signing_public_key?: string | null;
   size_bytes?: number | null;
 }
 
@@ -45,12 +49,18 @@ interface RawParsedManifest {
   manifest_sha256: string;
   archive_verified: boolean;
   archive_verification: string;
+  signature_verified: boolean;
+  signature_verification: string;
+  trust_root?: string | null;
 }
 
 interface RawSidecarStatus {
   status: NativeDevkitSidecarStatus;
   pid?: number | null;
   message: string;
+  event_count?: number;
+  malformed_count?: number;
+  last_event_kind?: string | null;
 }
 
 interface RawInstallResult {
@@ -58,6 +68,7 @@ interface RawInstallResult {
   install_path: string;
   previous_version?: string | null;
   archive_verified: boolean;
+  signature_verified?: boolean;
   message: string;
 }
 
@@ -72,12 +83,18 @@ export interface ParsedDevkitManifest {
   manifestSha256: string;
   archiveVerified: boolean;
   archiveVerification: string;
+  signatureVerified: boolean;
+  signatureVerification: string;
+  trustRoot?: string;
 }
 
 export interface SidecarStatusResult {
   status: NativeDevkitSidecarStatus;
   pid?: number;
   message: string;
+  eventCount: number;
+  malformedCount: number;
+  lastEventKind?: string;
 }
 
 export interface DevkitInstallResult {
@@ -85,6 +102,7 @@ export interface DevkitInstallResult {
   installPath: string;
   previousVersion?: string;
   archiveVerified: boolean;
+  signatureVerified: boolean;
   message: string;
 }
 
@@ -92,6 +110,14 @@ export interface WorkspaceTrustResult {
   root: string;
   trusted: boolean;
   trustedRoots: string[];
+}
+
+export interface SidecarEventRecord {
+  valid: boolean;
+  raw: string;
+  kind?: string;
+  message?: unknown;
+  error?: string;
 }
 
 export function readDeveloperMode(): boolean {
@@ -156,11 +182,7 @@ export async function resolveDevkitInstallPath(channel: NativeDevkitChannel, ver
 
 export async function getDevkitSidecarStatus(installPath?: string): Promise<SidecarStatusResult> {
   const raw = await invoke<RawSidecarStatus>("studio_devkit_sidecar_status", { installPath: installPath ?? null });
-  return {
-    status: raw.status,
-    pid: raw.pid ?? undefined,
-    message: raw.message,
-  };
+  return normalizeSidecarStatus(raw);
 }
 
 export async function selectLocalDevkitPath(path: string): Promise<ParsedDevkitManifest> {
@@ -181,22 +203,42 @@ export async function rollbackDevkit(channel: NativeDevkitChannel): Promise<Devk
   return normalizeInstallResult(raw);
 }
 
-export async function startDevkitSidecar(installPath: string): Promise<SidecarStatusResult> {
-  const raw = await invoke<RawSidecarStatus>("studio_devkit_start_sidecar", { installPath });
-  return {
-    status: raw.status,
-    pid: raw.pid ?? undefined,
-    message: raw.message,
-  };
+export async function startDevkitSidecar(args: {
+  installPath: string;
+  selectedProjectRoot?: string;
+  networkId?: string;
+  networkName?: string;
+  readOnlyWalletAddress?: string;
+}): Promise<SidecarStatusResult> {
+  const raw = await invoke<RawSidecarStatus>("studio_devkit_start_sidecar", {
+    installPath: args.installPath,
+    selectedProjectRoot: args.selectedProjectRoot ?? null,
+    networkId: args.networkId ?? null,
+    networkName: args.networkName ?? null,
+    readOnlyWalletAddress: args.readOnlyWalletAddress ?? null,
+  });
+  return normalizeSidecarStatus(raw);
 }
 
 export async function stopDevkitSidecar(installPath: string): Promise<SidecarStatusResult> {
   const raw = await invoke<RawSidecarStatus>("studio_devkit_stop_sidecar", { installPath });
-  return {
-    status: raw.status,
-    pid: raw.pid ?? undefined,
-    message: raw.message,
-  };
+  return normalizeSidecarStatus(raw);
+}
+
+export async function drainSidecarMessages(): Promise<SidecarEventRecord[]> {
+  return await invoke<SidecarEventRecord[]>("studio_devkit_drain_sidecar_messages");
+}
+
+export async function sendDevkitApprovalResult(args: {
+  requestId: string;
+  approved: boolean;
+  reason?: string;
+}): Promise<SidecarStatusResult> {
+  return normalizeSidecarStatus(await invoke<RawSidecarStatus>("studio_devkit_send_approval_result", {
+    requestId: args.requestId,
+    approved: args.approved,
+    reason: args.reason ?? null,
+  }));
 }
 
 export async function trustWorkspace(path: string): Promise<WorkspaceTrustResult> {
@@ -229,7 +271,7 @@ export async function loadStudioHostStatus(args: {
     try {
       const parsed = await parseDevkitManifest(args.localDevkitPath);
       const sidecar = await getDevkitSidecarStatus(args.localDevkitPath);
-      if (!parsed.archiveVerified) {
+      if (!parsed.archiveVerified || !parsed.signatureVerified) {
         return resolveStudioHostStatus({
           developerModeEnabled: true,
           channel: "local",
@@ -254,7 +296,7 @@ export async function loadStudioHostStatus(args: {
   try {
     const parsed = await parseDevkitManifest(installPath);
     const sidecar = await getDevkitSidecarStatus(installPath);
-    if (!parsed.archiveVerified) {
+    if (!parsed.archiveVerified || !parsed.signatureVerified) {
       return previewStudioHostStatus({ developerModeEnabled: true, channel: args.channel, localDevkitPath: installPath });
     }
     return resolveStudioHostStatus({
@@ -289,6 +331,9 @@ function normalizeParsedManifest(raw: RawParsedManifest): ParsedDevkitManifest {
     manifestSha256: raw.manifest_sha256,
     archiveVerified: raw.archive_verified,
     archiveVerification: raw.archive_verification,
+    signatureVerified: raw.signature_verified,
+    signatureVerification: raw.signature_verification,
+    trustRoot: raw.trust_root ?? undefined,
   };
 }
 
@@ -308,6 +353,10 @@ function normalizeManifest(raw: RawManifest): NativeDevkitManifest {
       url: raw.archive.url,
       sha256: raw.archive.sha256,
       signature: raw.archive.signature,
+      signatureScheme: raw.archive.signature_scheme === "ed25519" ? "ed25519" : undefined,
+      signingKeyId: raw.archive.signing_key_id ?? undefined,
+      trustRoot: raw.archive.trust_root ?? undefined,
+      signingPublicKey: raw.archive.signing_public_key ?? undefined,
       sizeBytes: raw.archive.size_bytes ?? undefined,
     },
     sidecar: {
@@ -324,7 +373,19 @@ function normalizeInstallResult(raw: RawInstallResult): DevkitInstallResult {
     installPath: raw.install_path,
     previousVersion: raw.previous_version ?? undefined,
     archiveVerified: raw.archive_verified,
+    signatureVerified: raw.signature_verified ?? raw.archive_verified,
     message: raw.message,
+  };
+}
+
+function normalizeSidecarStatus(raw: RawSidecarStatus): SidecarStatusResult {
+  return {
+    status: raw.status,
+    pid: raw.pid ?? undefined,
+    message: raw.message,
+    eventCount: raw.event_count ?? 0,
+    malformedCount: raw.malformed_count ?? 0,
+    lastEventKind: raw.last_event_kind ?? undefined,
   };
 }
 
