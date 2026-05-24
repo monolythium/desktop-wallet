@@ -19,6 +19,7 @@ import { AiTrading } from "./pages/AiTrading";
 import { Contacts } from "./pages/Contacts";
 import { Home } from "./pages/Home";
 import { News } from "./pages/News";
+import { RiscvContracts } from "./pages/RiscvContracts";
 import { Settings } from "./pages/Settings";
 import { Stake } from "./pages/Stake";
 import { Tokens } from "./pages/Tokens";
@@ -110,7 +111,7 @@ export function App() {
     try { localStorage.setItem(DENOM_KEY, denom); } catch { /* ignore */ }
     // Tokens-only route: bounce out if user flipped to private.
     // Public-only routes bounce out when user flips to private denomination.
-    if (denom === "private" && (route === "tokens" || route === "stake" || route === "trade" || route === "ai-trade")) {
+    if (denom === "private" && (route === "tokens" || route === "stake" || route === "riscv" || route === "trade" || route === "ai-trade")) {
       setRoute("home");
     }
   }, [denom, route]);
@@ -137,6 +138,7 @@ export function App() {
           {route === "tokens" ? <Tokens /> : null}
           {route === "stake" ? <Stake /> : null}
           {route === "contacts" ? <Contacts denom={denom} /> : null}
+          {route === "riscv" ? <RiscvContracts /> : null}
           {route === "trade" ? <Trade /> : null}
           {route === "ai-trade" ? <AiTrading /> : null}
           {route === "news" ? <News /> : null}
