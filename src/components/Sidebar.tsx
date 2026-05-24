@@ -52,6 +52,13 @@ const ICON_CONTACTS = () => (
     <path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" />
   </svg>
 );
+const ICON_RISCV = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="4" y="4" width="16" height="16" rx="2" />
+    <path d="M9 9h6M9 15h6M9 12h6" />
+    <path d="M2 9h2M2 15h2M20 9h2M20 15h2M9 2v2M15 2v2M9 20v2M15 20v2" />
+  </svg>
+);
 const ICON_TRADE = () => (
   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M3 17l6-6 4 4 8-8" />
@@ -93,6 +100,7 @@ const NAV: NavItem[] = [
   { id: "tokens", label: "Tokens", icon: ICON_TOKENS, publicOnly: true },
   { id: "stake", label: "Stake", icon: ICON_STAKE, publicOnly: true },
   { id: "contacts", label: "Contacts", icon: ICON_CONTACTS },
+  { id: "riscv", label: "RISC-V", icon: ICON_RISCV, publicOnly: true },
   { id: "trade", label: "Trade", icon: ICON_TRADE, publicOnly: true },
   { id: "ai-trade", label: "AI Trading", icon: ICON_AI, publicOnly: true, badge: "beta" },
   { id: "news", label: "News", icon: ICON_NEWS },
