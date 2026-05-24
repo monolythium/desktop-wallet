@@ -7,9 +7,10 @@ import {
   NO_EVM_RECEIPT_ROOT_ALGORITHM,
   RpcClient,
   computeNoEvmTargetReceiptHash,
+  verifyNoEvmFinalityEvidenceThreshold,
   verifyNoEvmReceiptProof,
 } from "@monolythium/core-sdk";
-import type { NoEvmReceiptProof } from "@monolythium/core-sdk";
+import type { NoEvmFinalityEvidence, NoEvmReceiptProof } from "@monolythium/core-sdk";
 
 const RECEIPTS = [
   new Uint8Array([0x01, 0x02, 0x03]),
@@ -22,27 +23,18 @@ const COMPACT_TREE_ALGORITHM = "binary-keccak-receipt-tree";
 const COMPACT_PROOF_TYPE = "canonicalReceiptInclusion";
 const NO_EVM_FINALITY_EVIDENCE_SCHEMA = "mono.no_evm_receipt_finality.v1";
 const NO_EVM_FINALITY_EVIDENCE_SOURCE = "blsRoundCertificate";
+const VERIFIED_BLS_CLUSTER_PUBLIC_KEY =
+  "0xb77f27a88bfe18988cfcf68ba7462d188a0e655bdd68318c706a3b51887a61fa7d7a9c8843e26f91c91446819925db97";
+const VERIFIED_BLS_FINALITY_SIGNATURE =
+  "0xb52a7567f736afbda5e09d5af4bd8da36cff89c3e8d09ca4c98f8bffe5fbdca7af2437f1fbf92e4f52df8a54ed1c2de71954d1134637a675734db73acb4c0c545f4b3cd39577b4985e8a26b767a68d825c48f0a90e606d8ccbbd8885ef27fcd7";
 const RECEIPT_ROOT_EMPTY_DOMAIN = new TextEncoder().encode(
   "monolythium/v4.1/receipts_root_empty/1",
 );
 const RECEIPT_LEAF_DOMAIN = new TextEncoder().encode("monolythium/v4.1/receipt_leaf/1");
 const RECEIPT_NODE_DOMAIN = new TextEncoder().encode("monolythium/v4.1/receipt_node/1");
 
-interface NoEvmReceiptFinalityEvidence {
-  schema: typeof NO_EVM_FINALITY_EVIDENCE_SCHEMA;
-  source: typeof NO_EVM_FINALITY_EVIDENCE_SOURCE;
-  round: number;
-  certificate: {
-    round: number;
-    signature: string;
-    signersBitmap: string;
-    signerIndices: number[];
-    signerCount: number;
-  };
-}
-
 type DesktopNoEvmReceiptProof = NoEvmReceiptProof & {
-  finalityEvidence?: NoEvmReceiptFinalityEvidence | null;
+  finalityEvidence?: NoEvmFinalityEvidence | null;
 };
 
 describe("native receipt proof SDK contract", () => {
@@ -85,12 +77,47 @@ describe("native receipt proof SDK contract", () => {
     expect(noEvmProof?.finalityEvidence).toBeNull();
     expect(verified?.proofKind).toBe("compactInclusion");
   });
+
+  it("verifies BLS finality evidence with a trusted cluster key policy", async () => {
+    const proof = compactArchiveProof({ finalityEvidence: verifiedBlsRoundFinalityEvidence() });
+    const { fetch } = mockNativeReceiptFetch(proof);
+    const client = new RpcClient("http://test.invalid", { fetch });
+
+    const receipt = await client.lythNativeReceipt(proof.txHash);
+    const noEvmProof = receipt.noEvmProof as DesktopNoEvmReceiptProof | null | undefined;
+    const result = verifyNoEvmFinalityEvidenceThreshold(noEvmProof!.finalityEvidence!, {
+      chainId: 69_420,
+      clusterPublicKey: hexToBytes(VERIFIED_BLS_CLUSTER_PUBLIC_KEY),
+      committeeSize: 7,
+      threshold: 1,
+    });
+
+    expect(result).toMatchObject({
+      verified: true,
+      signerCountMatches: true,
+      signerBitmapMatchesIndices: true,
+      signerIndicesInRange: true,
+      thresholdMet: true,
+      signatureValid: true,
+      acceptedSignatureCount: 1,
+      requiredSignatureCount: 1,
+    });
+
+    const wrongChain = verifyNoEvmFinalityEvidenceThreshold(noEvmProof!.finalityEvidence!, {
+      chainId: 69_421,
+      clusterPublicKey: hexToBytes(VERIFIED_BLS_CLUSTER_PUBLIC_KEY),
+      committeeSize: 7,
+      threshold: 1,
+    });
+    expect(wrongChain.verified).toBe(false);
+    expect(wrongChain.signatureValid).toBe(false);
+  });
 });
 
 function compactArchiveProof({
   finalityEvidence,
 }: {
-  finalityEvidence: NoEvmReceiptFinalityEvidence | null;
+  finalityEvidence: NoEvmFinalityEvidence | null;
 }): DesktopNoEvmReceiptProof {
   const material = compactInclusionMaterial(RECEIPTS, 1);
   return {
@@ -127,7 +154,7 @@ function compactArchiveProof({
   };
 }
 
-function blsRoundFinalityEvidence(round = 205): NoEvmReceiptFinalityEvidence {
+function blsRoundFinalityEvidence(round = 205): NoEvmFinalityEvidence {
   return {
     schema: NO_EVM_FINALITY_EVIDENCE_SCHEMA,
     source: NO_EVM_FINALITY_EVIDENCE_SOURCE,
@@ -138,6 +165,21 @@ function blsRoundFinalityEvidence(round = 205): NoEvmReceiptFinalityEvidence {
       signersBitmap: "0x0d",
       signerIndices: [0, 2, 3],
       signerCount: 3,
+    },
+  };
+}
+
+function verifiedBlsRoundFinalityEvidence(): NoEvmFinalityEvidence {
+  return {
+    schema: NO_EVM_FINALITY_EVIDENCE_SCHEMA,
+    source: NO_EVM_FINALITY_EVIDENCE_SOURCE,
+    round: 58,
+    certificate: {
+      round: 58,
+      signature: VERIFIED_BLS_FINALITY_SIGNATURE,
+      signersBitmap: "0x08",
+      signerIndices: [3],
+      signerCount: 1,
     },
   };
 }
@@ -273,4 +315,13 @@ function bytesToHex(bytes: Uint8Array): string {
     out += bytes[index]!.toString(16).padStart(2, "0");
   }
   return out;
+}
+
+function hexToBytes(hex: string): Uint8Array {
+  const body = hex.startsWith("0x") ? hex.slice(2) : hex;
+  const bytes = new Uint8Array(body.length / 2);
+  for (let index = 0; index < body.length; index += 2) {
+    bytes[index / 2] = Number.parseInt(body.slice(index, index + 2), 16);
+  }
+  return bytes;
 }
