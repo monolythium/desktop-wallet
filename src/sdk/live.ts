@@ -1,6 +1,19 @@
-import { formatLyth } from "@monolythium/core-sdk";
+import { ApiClient, formatLyth } from "@monolythium/core-sdk";
+import type {
+  ApiCapabilitiesResponse,
+  ApiEnvelope,
+  ApiHealthResponse,
+  ApiQueryValue,
+  ApiStreamsIndexResponse,
+  ClobMarketsResponse,
+  ClobOrderBookResponse,
+  ClobTradesResponse,
+  NativeMarketStateResponse,
+  PrecompileCatalogueResponse,
+} from "@monolythium/core-sdk";
 import { MlDsa65Backend } from "@monolythium/core-sdk/crypto";
 import { getProvider } from "./client";
+import { selectNativeSpotMarket, type SelectedNativeSpotMarket } from "./market";
 
 export interface RpcOutcome<T> {
   ok: boolean;
@@ -48,6 +61,27 @@ export interface LiveTokenStatus {
   tokenBalances: RpcOutcome<Array<{ tokenId: string; balance: string; updatedAtBlock: bigint }>>;
   addressLabel: RpcOutcome<{ address: string; category: string; displayName: string | null; updatedAtBlock: bigint } | null>;
   assetPolicy: RpcOutcome<Record<string, unknown>>;
+}
+
+export interface LiveTradeStatus {
+  endpoint: string;
+  apiBaseUrl: string;
+  activePrecompiles: RpcOutcome<PrecompileCatalogueResponse>;
+  nativeMarketState: RpcOutcome<NativeMarketStateResponse>;
+  clobMarkets: RpcOutcome<ClobMarketsResponse>;
+  clobOrderBook: RpcOutcome<ClobOrderBookResponse>;
+  clobTrades: RpcOutcome<ClobTradesResponse>;
+  apiHealth: RpcOutcome<ApiHealthResponse>;
+  apiCapabilities: RpcOutcome<ApiCapabilitiesResponse>;
+  apiStreams: RpcOutcome<ApiStreamsIndexResponse>;
+  orderBookReplay: RpcOutcome<NativeMarketOrderBookReplayResponse>;
+  selectedMarket: SelectedNativeSpotMarket | null;
+}
+
+export interface NativeMarketOrderBookReplayResponse {
+  replay: true;
+  streamTopic: string;
+  deltas: unknown[];
 }
 
 export interface LiveAddressActivityRow {
@@ -170,6 +204,65 @@ export async function loadLiveTokenStatus(wallet: string): Promise<LiveTokenStat
   };
 }
 
+export async function loadLiveTradeStatus(): Promise<LiveTradeStatus> {
+  const client = getProvider().rpcClient;
+  const api = new ApiClient(client.endpoint);
+  const [
+    activePrecompiles,
+    nativeMarketState,
+    clobMarkets,
+    apiHealth,
+    apiCapabilities,
+    apiStreams,
+    blockHeight,
+  ] = await Promise.all([
+    capture(() => client.lythListActivePrecompiles()),
+    capture(() => client.lythNativeMarketState({ includeSpotOrders: false, limit: 25 })),
+    capture(() => client.lythClobMarkets(25)),
+    capture(() => api.health()),
+    capture(() => api.capabilities()),
+    capture(() => api.streams()),
+    capture(() => client.ethBlockNumber()),
+  ]);
+
+  const selectedMarket = selectNativeSpotMarket(
+    nativeMarketState.ok ? nativeMarketState.value : null,
+    clobMarkets.ok ? clobMarkets.value?.markets : null,
+  );
+
+  const clobOrderBook: RpcOutcome<ClobOrderBookResponse> = selectedMarket
+    ? await capture(() => client.lythClobOrderBook(selectedMarket.marketId, 20))
+    : emptyOutcome("No native spot market is available.");
+  const clobTrades: RpcOutcome<ClobTradesResponse> = selectedMarket
+    ? await capture(() => client.lythClobTrades(selectedMarket.marketId, 20))
+    : emptyOutcome("No native spot market is available.");
+  const orderBookReplay: RpcOutcome<NativeMarketOrderBookReplayResponse> = selectedMarket && blockHeight.ok
+    ? await capture(() =>
+        api.get<ApiEnvelope<NativeMarketOrderBookReplayResponse>>("/native-market-orderbook-deltas", nativeMarketOrderBookDeltasQuery({
+          fromBlock: blockHeight.value ?? 0n,
+          toBlock: blockHeight.value ?? 0n,
+          limit: 20,
+          marketId: selectedMarket.marketId,
+        })).then((response) => response.data),
+      )
+    : emptyOutcome(blockHeight.ok ? "No native spot market is available." : blockHeight.error ?? "Block height unavailable.");
+
+  return {
+    endpoint: client.endpoint,
+    apiBaseUrl: api.baseUrl,
+    activePrecompiles,
+    nativeMarketState,
+    clobMarkets,
+    clobOrderBook,
+    clobTrades,
+    apiHealth,
+    apiCapabilities,
+    apiStreams,
+    orderBookReplay,
+    selectedMarket,
+  };
+}
+
 export async function loadLiveAddressActivity(wallet: string): Promise<RpcOutcome<LiveAddressActivityRow[]>> {
   return capture(() => getProvider().rpcClient.lythGetAddressActivity(wallet, 30));
 }
@@ -211,6 +304,24 @@ export function formatOutcome<T>(outcome: RpcOutcome<T>, render: (value: T) => s
 
 export function errorMessage(cause: unknown): string {
   return (cause as Error)?.message ?? String(cause);
+}
+
+function emptyOutcome<T>(error: string): RpcOutcome<T> {
+  return { ok: false, error };
+}
+
+function nativeMarketOrderBookDeltasQuery(filter: {
+  fromBlock: number | bigint | string;
+  toBlock: number | bigint | string;
+  limit?: number | bigint | string | null;
+  marketId?: string | null;
+}): Record<string, ApiQueryValue> {
+  return {
+    fromBlock: filter.fromBlock,
+    toBlock: filter.toBlock,
+    limit: filter.limit,
+    marketId: filter.marketId,
+  };
 }
 
 function normalizeBalanceHex(balance: unknown): string {
