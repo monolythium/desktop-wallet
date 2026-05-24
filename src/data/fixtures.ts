@@ -41,7 +41,7 @@ export interface Balances {
 }
 
 export const TOKENS: Token[] = [
-  { sym: "LYTH",  name: "Monolythium",     amount: 4128.42, priceUsd: 8.42,  chg24h:  2.4, primary: true, note: "native · gas + staking" },
+  { sym: "LYTH",  name: "Monolythium",     amount: 4128.42, priceUsd: 8.42,  chg24h:  2.4, primary: true, note: "native · fees + staking" },
   { sym: "wLYTH", name: "Wrapped LYTH",    amount:   90.00, priceUsd: 8.40,  chg24h:  2.3, note: "bridged · Solana" },
   { sym: "USDL",  name: "USD-Lyth stable", amount:  612.18, priceUsd: 1.00,  chg24h:  0.0, note: "stablecoin · 1:1 USD" },
   { sym: "CZN",   name: "Coinzen",         amount:  240.00, priceUsd: 1.74,  chg24h: -1.1, note: "exchange token" },

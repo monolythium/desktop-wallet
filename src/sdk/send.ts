@@ -7,18 +7,17 @@
 //
 // Stages of a real send:
 //   1. read sender nonce + fee data from the provider (no key access yet);
-//   2. build an EIP-1559 TransactionRequest with explicit gas limits;
+//   2. build a compatibility TransactionRequest with explicit execution limits;
 //   3. ask the signer for a fully-signed RLP (Ledger flow approves on-device);
 //   4. broadcastTransaction via the provider; the SDK transport carries it.
 //
 // We deliberately do NOT swap to legacy txs even when the provider's
-// `feeData()` reports a zero `maxFeePerGas` — Monolythium v4.0 is
-// EIP-1559-only at the wire level. If the node doesn't surface fee data
-// (sandbox / fresh devnet), we surface that as an error instead of
-// falling back to a legacy tx the chain wouldn't accept.
+// `feeData()` reports a zero `maxFeePerGas` — the compatibility signer
+// still uses ethers field names, but the amount value is native lythoshi
+// and the UI surfaces execution fees instead of gas controls.
 
-import { parseEther } from "ethers";
 import type { TransactionRequest } from "ethers";
+import { parseLythToLythoshi } from "@monolythium/core-sdk";
 import type { MonolythiumSigner } from "@monolythium/core-sdk";
 import { getProvider } from "./client";
 
@@ -27,9 +26,9 @@ export interface SendLythArgs {
   from: string;
   /** EIP-55 lowercase recipient. */
   to: string;
-  /** Decimal LYTH string, e.g. "12.5". 1 LYTH = 1e18 wei. */
+  /** Decimal LYTH string, e.g. "12.5". 1 LYTH = 10^8 lythoshi. */
   amountLyth: string;
-  /** Optional gas limit override (default 21_000 for a plain transfer). */
+  /** Optional compatibility execution limit override. */
   gasLimit?: bigint;
   /**
    * Optional explicit chain id. When omitted we use whatever the
@@ -70,7 +69,7 @@ export async function sendLyth(
 
   if (feeData.maxFeePerGas === null || feeData.maxPriorityFeePerGas === null) {
     throw new Error(
-      "node did not surface EIP-1559 fee data (maxFeePerGas / maxPriorityFeePerGas) — check that the node implements eth_feeHistory",
+      "node did not surface execution fee data (maxFeePerGas / maxPriorityFeePerGas) — check that the node implements eth_feeHistory",
     );
   }
 
@@ -83,7 +82,7 @@ export async function sendLyth(
     nonce,
     from: args.from,
     to: args.to,
-    value: parseEther(args.amountLyth),
+    value: parseLythToLythoshi(args.amountLyth),
     data: args.data ?? "0x",
     gasLimit: args.gasLimit ?? 21_000n,
     maxFeePerGas: feeData.maxFeePerGas,

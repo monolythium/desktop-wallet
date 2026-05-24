@@ -84,7 +84,7 @@ export function Home({ denom, goto }: Props) {
       ],
       effects: [
         { text: `Releases ${SEND_DEMO.amountLyth} LYTH from the public denomination.` },
-        { text: "Reads sender nonce + EIP-1559 fee data via @monolythium/core-sdk." },
+        { text: "Reads sender nonce and execution fee data via @monolythium/core-sdk." },
         { text: "Signs on Ledger device, broadcasts via MonolythiumProvider." },
       ],
       execute: async () => {
@@ -184,7 +184,7 @@ export function Home({ denom, goto }: Props) {
         }
         return {
           headline: `chain id ${snap.chainId} · height ${snap.blockHeight ?? "?"}`,
-          detail: `balance ${snap.balanceWei} wei (${snap.balanceLyth.toFixed(4)} LYTH)`,
+          detail: `balance ${snap.balanceLyth} LYTH (${snap.balanceLythoshi} lythoshi)`,
         };
       },
     });
