@@ -3,6 +3,7 @@ import {
   NATIVE_DEV_HOST_API_VERSION,
   NATIVE_DEV_MANIFEST_SCHEMA_VERSION,
   resolveStudioHostStatus,
+  type NativeDevCommandName,
   type NativeDevkitChannel,
   type NativeDevkitManifest,
   type NativeDevkitSidecarStatus,
@@ -12,8 +13,9 @@ import {
 export const STUDIO_DEVELOPER_MODE_KEY = "wallet.developerMode";
 export const STUDIO_DEVKIT_CHANNEL_KEY = "wallet.devkitChannel";
 export const STUDIO_LOCAL_DEVKIT_PATH_KEY = "wallet.localDevkitPath";
+export const STUDIO_WORKSPACE_PATH_KEY = "wallet.studioWorkspacePath";
 
-export type { NativeDevkitChannel, NativeDevkitManifest, NativeDevkitSidecarStatus, StudioHostStatus };
+export type { NativeDevCommandName, NativeDevkitChannel, NativeDevkitManifest, NativeDevkitSidecarStatus, StudioHostStatus };
 
 interface RawArchive {
   url: string;
@@ -120,6 +122,14 @@ export interface SidecarEventRecord {
   error?: string;
 }
 
+export interface SidecarCommandArgs {
+  requestId: string;
+  command: NativeDevCommandName;
+  selectedProjectRoot?: string;
+  authorityAddress?: string;
+  networkId?: string;
+}
+
 export function readDeveloperMode(): boolean {
   try {
     return localStorage.getItem(STUDIO_DEVELOPER_MODE_KEY) === "true";
@@ -166,6 +176,23 @@ export function writeLocalDevkitPath(path: string | undefined): void {
   try {
     if (path) localStorage.setItem(STUDIO_LOCAL_DEVKIT_PATH_KEY, path);
     else localStorage.removeItem(STUDIO_LOCAL_DEVKIT_PATH_KEY);
+  } catch {
+    // Browser storage can be disabled in previews.
+  }
+}
+
+export function readStudioWorkspacePath(): string | undefined {
+  try {
+    return localStorage.getItem(STUDIO_WORKSPACE_PATH_KEY) || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function writeStudioWorkspacePath(path: string | undefined): void {
+  try {
+    if (path) localStorage.setItem(STUDIO_WORKSPACE_PATH_KEY, path);
+    else localStorage.removeItem(STUDIO_WORKSPACE_PATH_KEY);
   } catch {
     // Browser storage can be disabled in previews.
   }
@@ -238,6 +265,16 @@ export async function sendDevkitApprovalResult(args: {
     requestId: args.requestId,
     approved: args.approved,
     reason: args.reason ?? null,
+  }));
+}
+
+export async function sendDevkitCommand(args: SidecarCommandArgs): Promise<SidecarStatusResult> {
+  return normalizeSidecarStatus(await invoke<RawSidecarStatus>("studio_devkit_send_command", {
+    requestId: args.requestId,
+    command: args.command,
+    selectedProjectRoot: args.selectedProjectRoot ?? null,
+    authorityAddress: args.authorityAddress ?? null,
+    networkId: args.networkId ?? null,
   }));
 }
 

@@ -50,6 +50,7 @@ pub fn run() {
             studio_host::studio_devkit_stop_sidecar,
             studio_host::studio_devkit_drain_sidecar_messages,
             studio_host::studio_devkit_send_approval_result,
+            studio_host::studio_devkit_send_command,
             studio_host::studio_workspace_trust,
             studio_host::studio_workspace_remove_trust,
             studio_host::studio_workspace_list_trusted,
