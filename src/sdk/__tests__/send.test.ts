@@ -194,15 +194,16 @@ describe("sendLyth", () => {
     expect(methods).toContain("eth_sendRawTransaction");
 
     // The TransactionRequest snapshot returned to the caller carries
-    // EIP-1559 fee fields (the only mode the chain accepts) and the
-    // testnet chain id.
+    // compatibility fee fields, native lythoshi value, and the testnet
+    // chain id.
     expect(result.request.type).toBe(2);
     expect(result.request.chainId).toBe(MONOLYTHIUM_TESTNET_CHAIN_ID);
+    expect(result.request.value).toBe(100_000n);
     expect(result.request.maxFeePerGas).toBeDefined();
     expect(result.request.maxPriorityFeePerGas).toBeDefined();
   });
 
-  it("throws when the node has no EIP-1559 fee data", async () => {
+  it("throws when the node has no execution fee data", async () => {
     // Build a fetch stub that returns null fee fields; ethers' getFeeData
     // surfaces null/null in that case, which our send composer must reject
     // (the chain is EIP-1559-only).
@@ -278,6 +279,6 @@ describe("sendLyth", () => {
         to: "0x000000000000000000000000000000000000dead",
         amountLyth: "0.001",
       }),
-    ).rejects.toThrow(/EIP-1559 fee data/);
+    ).rejects.toThrow(/execution fee data/);
   });
 });

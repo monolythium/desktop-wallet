@@ -7,7 +7,7 @@
 // `provider.broadcastTransaction`) flow straight through; native callers
 // can still reach `lyth_*` methods via `provider.rpcClient.call(...)`.
 
-import { MonolythiumProvider, SdkError, getRpcEndpoints } from "@monolythium/core-sdk";
+import { MonolythiumProvider, SdkError, formatLyth, getRpcEndpoints } from "@monolythium/core-sdk";
 import type { MonolythiumProviderOptions } from "@monolythium/core-sdk";
 
 /**
@@ -60,10 +60,10 @@ export function setProviderForTest(provider: MonolythiumProvider): void {
 export type ChainSnapshot = {
   endpoint: string;
   chainId: bigint;
-  /** decimal balance of the bound address as a JS number; for display only. */
-  balanceLyth: number;
-  /** raw `0x`-quantity string straight off the wire. */
-  balanceWei: string;
+  /** canonical LYTH numeric display without the unit suffix. */
+  balanceLyth: string;
+  /** native atomic balance in lythoshi. */
+  balanceLythoshi: string;
   /** `null` while loading, otherwise the latest committed block height. */
   blockHeight: bigint | null;
   /** Errors are stringified for UI consumption; the original SdkError is preserved. */
@@ -83,18 +83,18 @@ export async function loadChainSnapshot(address: string): Promise<ChainSnapshot>
   const provider = getProvider();
   const endpoint = provider.rpcClient.endpoint;
   try {
-    const [network, blockHeight, balanceWei] = await Promise.all([
+    const [network, blockHeight, balanceAtomic] = await Promise.all([
       provider.getNetwork(),
       provider.getBlockNumber(),
       provider.getBalance(address),
     ]);
-    const wei = `0x${balanceWei.toString(16)}`;
+    const lythoshi = balanceQuantityToLythoshi(`0x${balanceAtomic.toString(16)}`);
     return {
       endpoint,
       chainId: network.chainId,
       blockHeight: BigInt(blockHeight),
-      balanceWei: wei,
-      balanceLyth: weiToLyth(wei),
+      balanceLythoshi: lythoshi,
+      balanceLyth: formatLyth(lythoshi, { includeUnit: false }),
       error: null,
     };
   } catch (cause) {
@@ -103,8 +103,8 @@ export async function loadChainSnapshot(address: string): Promise<ChainSnapshot>
       endpoint,
       chainId: 0n,
       blockHeight: null,
-      balanceWei: "0x0",
-      balanceLyth: 0,
+      balanceLythoshi: "0",
+      balanceLyth: "0",
       error: err,
     };
   }
@@ -131,19 +131,19 @@ function unwrapError(cause: unknown): { kind: string; message: string } {
   return { kind: "unknown", message };
 }
 
-/** Convert a `0x`-quantity wei string to a LYTH JS number (1 LYTH = 1e18 wei). */
-export function weiToLyth(hex: string): number {
-  if (!hex || hex === "0x" || hex === "0x0") return 0;
-  // BigInt to keep precision through the divide; final cast loses precision for
-  // display purposes only — never settle accounting decisions on this value.
+/** Convert a `0x` quantity from RPC into canonical decimal lythoshi text. */
+export function balanceQuantityToLythoshi(hex: string): string {
+  if (!hex || hex === "0x" || hex === "0x0") return "0";
   try {
-    const wei = BigInt(hex);
-    const lythWhole = wei / 1_000_000_000_000_000_000n;
-    const lythFrac = wei % 1_000_000_000_000_000_000n;
-    return Number(lythWhole) + Number(lythFrac) / 1e18;
+    return BigInt(hex).toString();
   } catch {
-    return 0;
+    return "0";
   }
+}
+
+/** Convert a native RPC quantity directly into canonical LYTH display text. */
+export function balanceQuantityToLyth(hex: string): string {
+  return formatLyth(balanceQuantityToLythoshi(hex), { includeUnit: false });
 }
 
 export { SdkError };

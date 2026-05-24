@@ -1,4 +1,4 @@
-import { formatEther } from "ethers";
+import { formatLyth } from "@monolythium/core-sdk";
 import { MlDsa65Backend } from "@monolythium/core-sdk/crypto";
 import { getProvider } from "./client";
 
@@ -73,7 +73,7 @@ export interface LiveWalletIdentity {
 export interface LiveWalletBalance {
   address: string;
   nonce: bigint;
-  balanceWei: string;
+  balanceLythoshi: string;
   balanceLyth: string;
 }
 
@@ -155,7 +155,7 @@ export async function loadLiveTokenStatus(wallet: string): Promise<LiveTokenStat
   const [nativeBalance, tokenBalances, addressLabel, assetPolicy] = await Promise.all([
     capture(async () => {
       const result = await client.ethGetBalance(wallet);
-      return formatEther(normalizeBalanceHex(result));
+      return formatLyth(BigInt(normalizeBalanceHex(result)).toString(), { includeUnit: false });
     }),
     capture(() => client.lythGetTokenBalances(wallet)),
     capture(() => client.lythGetAddressLabel(wallet)),
@@ -185,11 +185,12 @@ export async function loadLiveWalletBalance(address: string): Promise<LiveWallet
     client.ethGetBalance(address),
   ]);
   const rawBalance = normalizeBalanceHex(balance);
+  const lythoshi = BigInt(rawBalance).toString();
   return {
     address,
     nonce,
-    balanceWei: rawBalance,
-    balanceLyth: formatEther(rawBalance),
+    balanceLythoshi: lythoshi,
+    balanceLyth: formatLyth(lythoshi, { includeUnit: false }),
   };
 }
 
