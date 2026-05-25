@@ -582,6 +582,23 @@ pub async fn stele_convert_history(
 // proxy in a later slice (API key would live in OS keychain, not env).
 // ============================================================
 
+#[derive(Debug, Serialize)]
+pub struct AppVersion {
+    pub version: String,
+    pub name: String,
+}
+
+/// Return wallet binary name + version. Mirrors stele-desktop's
+/// `app_version` so the merged build reports the same shape to anything
+/// the prototype screens read it from.
+#[tauri::command]
+pub fn stele_app_version() -> AppVersion {
+    AppVersion {
+        version: env!("CARGO_PKG_VERSION").to_string(),
+        name: env!("CARGO_PKG_NAME").to_string(),
+    }
+}
+
 #[tauri::command]
 pub async fn stele_search_complete(prompt: String) -> Result<String> {
     let _ = prompt;
