@@ -17,6 +17,7 @@ use tauri::Manager;
 mod keychain;
 mod ledger;
 mod mcp_bridge;
+mod name_registry;
 mod studio_host;
 mod vault;
 
@@ -56,6 +57,7 @@ pub fn run() {
         ledger::ledger_default_hd_path,
         mcp_bridge::mcp_shared_wallet_list,
         mcp_bridge::mcp_shared_store_exists,
+        name_registry::name_check_availability,
         studio_host::studio_devkit_parse_manifest,
         studio_host::studio_devkit_check_compatibility,
         studio_host::studio_devkit_resolve_install_path,
