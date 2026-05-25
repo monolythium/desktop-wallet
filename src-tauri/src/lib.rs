@@ -17,14 +17,26 @@ mod mcp_bridge;
 mod studio_host;
 mod vault;
 
+#[cfg(feature = "stele")]
+mod stele;
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let ledger_state: ledger::LedgerState = Arc::new(Mutex::new(()));
 
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(ledger_state)
-        .manage(studio_host::StudioSidecarState::default())
+        .manage(studio_host::StudioSidecarState::default());
+
+    #[cfg(feature = "stele")]
+    let builder = builder
+        .plugin(tauri_plugin_notification::init())
+        .manage(stele::SidecarHandle::default())
+        .manage(stele::ApprovalBridgeHandle::default())
+        .manage(stele::OutboundMcpHandle::default());
+
+    builder
         .invoke_handler(tauri::generate_handler![
             keychain::keychain_unlock,
             keychain::keychain_store,

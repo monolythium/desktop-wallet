@@ -28,6 +28,21 @@ tokio = { version = "1", features = ["sync", "macros", "rt"] }
 sha2 = "0.10"
 ed25519-dalek = "2"
 
+# --- Stele marketplace (settings-gated feature; opt in via `--features stele`) ---
+# The Stele tab in the UI is gated by a TypeScript localStorage flag; this
+# Cargo feature controls whether the Stele backend (MCP sidecar, approval
+# bridge, outbound MCP server, marketplace commands) is compiled into the
+# binary. Default builds today do not bundle Stele while the merge is in
+# flight; ship-time builds set --features stele.
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio", "query"], optional = true }
+futures-util = { version = "0.3", optional = true }
+uuid = { version = "1", features = ["v4"], optional = true }
+bip39 = { version = "2", default-features = false, features = ["std", "zeroize"], optional = true }
+sha3 = { version = "0.10", optional = true }
+bech32 = { version = "0.11", default-features = false, features = ["alloc"], optional = true }
+fips204 = { version = "0.4.6", default-features = false, features = ["ml-dsa-65"], optional = true }
+tauri-plugin-notification = { version = "2", optional = true }
+
 # Vault crypto. Argon2id KDF + AES-256-GCM encryption of the wallet seed.
 # Stable releases of the RustCrypto password-hashes / AEADs lines.
 argon2 = { version = "0.5", default-features = false, features = ["alloc", "password-hash"] }
@@ -65,3 +80,21 @@ libc = "0.2"
 # Default to no custom features. Production builds opt in via `--features custom-protocol`.
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
+
+# Stele marketplace backend. Default off until the screens port is far
+# enough along to enable in shipped binaries. Independent of the
+# `wallet.steleEnabled` localStorage flag — that flag controls UI
+# visibility, this feature controls backend compilation.
+stele = [
+    "dep:axum",
+    "dep:bech32",
+    "dep:bip39",
+    "dep:fips204",
+    "dep:futures-util",
+    "dep:sha3",
+    "dep:tauri-plugin-notification",
+    "dep:uuid",
+    "tokio/io-util",
+    "tokio/process",
+    "tokio/rt-multi-thread",
+]
