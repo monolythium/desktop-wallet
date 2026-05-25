@@ -128,3 +128,39 @@ pub async fn stele_addressbook_remove(
     )
     .await
 }
+
+// ============================================================
+// Marketplace browse — proxy into lyth_mcp `vendor_search`.
+// ============================================================
+
+#[derive(Debug, Deserialize)]
+pub struct ListingSearchInput {
+    pub query: Option<String>,
+    pub category: Option<String>,
+    /// Client-side filters not yet supported by lyth_mcp; we accept them
+    /// for forward-compat and let the UI apply them after the call.
+    pub min_rating: Option<u8>,
+    pub max_price_lyth: Option<String>,
+    pub near_lat: Option<f64>,
+    pub near_lng: Option<f64>,
+}
+
+/// Search the on-chain discovery registry via the lyth_mcp `vendor_search`
+/// tool. Filters beyond query+category are post-processed client-side
+/// until lyth_mcp grows native support (see lyth-mcp-gaps §6).
+#[tauri::command]
+pub async fn stele_listing_search(
+    input: ListingSearchInput,
+    sidecar: State<'_, SidecarHandle>,
+) -> Result<serde_json::Value> {
+    let _ = (input.min_rating, input.max_price_lyth, input.near_lat, input.near_lng);
+    call_sidecar_tool(
+        &sidecar,
+        "vendor_search",
+        serde_json::json!({
+            "query": input.query,
+            "category": input.category,
+        }),
+    )
+    .await
+}

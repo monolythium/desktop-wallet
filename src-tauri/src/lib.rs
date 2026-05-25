@@ -82,6 +82,8 @@ pub fn run() {
         stele::commands::stele_addressbook_lookup,
         #[cfg(feature = "stele")]
         stele::commands::stele_addressbook_remove,
+        #[cfg(feature = "stele")]
+        stele::commands::stele_listing_search,
     ]);
 
     builder
