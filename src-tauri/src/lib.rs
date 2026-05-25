@@ -102,6 +102,12 @@ pub fn run() {
         stele::commands::stele_booking_release,
         #[cfg(feature = "stele")]
         stele::commands::stele_booking_dispute,
+        #[cfg(feature = "stele")]
+        stele::commands::stele_outbound_mcp_status,
+        #[cfg(feature = "stele")]
+        stele::commands::stele_outbound_mcp_start,
+        #[cfg(feature = "stele")]
+        stele::commands::stele_outbound_mcp_stop,
     ]);
 
     builder

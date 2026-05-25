@@ -6,10 +6,10 @@
 //! port across in later slices so each move stays reviewable.
 
 use serde::{Deserialize, Serialize};
-use tauri::State;
+use tauri::{AppHandle, State};
 use thiserror::Error;
 
-use super::SidecarHandle;
+use super::{outbound_mcp, OutboundMcpHandle, SidecarHandle};
 
 /// Tiny Stele-side error enum. Grows as more commands port — for now,
 /// every Stele command either fails at the input boundary or at the
@@ -322,4 +322,101 @@ pub async fn stele_booking_dispute(
         }),
     )
     .await
+}
+
+// ============================================================
+// Outbound MCP server — exposes Stele's surface to external AI clients
+// (Claude Desktop / Cursor / Claude Code) on a per-session loopback
+// HTTP endpoint. User toggles this from Settings → Stele → MCP.
+// ============================================================
+
+#[derive(Debug, Serialize)]
+pub struct McpOutboundStatus {
+    pub enabled: bool,
+    pub url: Option<String>,
+    pub auth_token: Option<String>,
+    pub scopes: Vec<String>,
+}
+
+fn outbound_scopes() -> Vec<String> {
+    vec![
+        "search_services".into(),
+        "request_booking".into(),
+        "list_my_bookings".into(),
+        "accept_booking".into(),
+        "release_booking".into(),
+        "wallet_summary".into(),
+        "convert_estimate".into(),
+    ]
+}
+
+#[tauri::command]
+pub async fn stele_outbound_mcp_status(
+    outbound: State<'_, OutboundMcpHandle>,
+) -> Result<McpOutboundStatus> {
+    let s = outbound.0.lock().await;
+    Ok(match s.as_ref() {
+        Some(srv) => McpOutboundStatus {
+            enabled: true,
+            url: Some(srv.url.clone()),
+            auth_token: Some(srv.auth_token.clone()),
+            scopes: outbound_scopes(),
+        },
+        None => McpOutboundStatus {
+            enabled: false,
+            url: None,
+            auth_token: None,
+            scopes: vec![],
+        },
+    })
+}
+
+#[tauri::command]
+pub async fn stele_outbound_mcp_start(
+    app: AppHandle,
+    sidecar: State<'_, SidecarHandle>,
+    outbound: State<'_, OutboundMcpHandle>,
+) -> Result<McpOutboundStatus> {
+    {
+        let s = outbound.0.lock().await;
+        if let Some(srv) = s.as_ref() {
+            return Ok(McpOutboundStatus {
+                enabled: true,
+                url: Some(srv.url.clone()),
+                auth_token: Some(srv.auth_token.clone()),
+                scopes: outbound_scopes(),
+            });
+        }
+    }
+    let server = outbound_mcp::OutboundMcpServer::start(app, sidecar.0.clone())
+        .await
+        .map_err(|e| SteleError::Input(format!("outbound MCP start failed: {e}")))?;
+    let url = server.url.clone();
+    let token = server.auth_token.clone();
+    {
+        let mut s = outbound.0.lock().await;
+        *s = Some(server);
+    }
+    Ok(McpOutboundStatus {
+        enabled: true,
+        url: Some(url),
+        auth_token: Some(token),
+        scopes: outbound_scopes(),
+    })
+}
+
+#[tauri::command]
+pub async fn stele_outbound_mcp_stop(
+    outbound: State<'_, OutboundMcpHandle>,
+) -> Result<McpOutboundStatus> {
+    let mut s = outbound.0.lock().await;
+    if let Some(srv) = s.take() {
+        srv.stop();
+    }
+    Ok(McpOutboundStatus {
+        enabled: false,
+        url: None,
+        auth_token: None,
+        scopes: vec![],
+    })
 }
