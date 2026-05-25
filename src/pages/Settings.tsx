@@ -13,9 +13,11 @@ import {
 interface SettingsProps {
   developerModeEnabled: boolean;
   setDeveloperModeEnabled: (enabled: boolean) => void;
+  steleEnabled: boolean;
+  setSteleEnabled: (enabled: boolean) => void;
 }
 
-export function Settings({ developerModeEnabled, setDeveloperModeEnabled }: SettingsProps) {
+export function Settings({ developerModeEnabled, setDeveloperModeEnabled, steleEnabled, setSteleEnabled }: SettingsProps) {
   const ops = useOperations();
   const [currency, setCurrency] = useState("USD");
   const [compound, setCompound] = useState("always");
@@ -49,6 +51,27 @@ export function Settings({ developerModeEnabled, setDeveloperModeEnabled }: Sett
       <div className="w-page__header">
         <h1>Settings</h1>
         <div className="sub">Customize how your wallet looks and behaves.</div>
+      </div>
+
+      <div className="w-card">
+        <div className="w-card__head"><h3>Stele marketplace</h3><span className="w-todo__pill">early access</span></div>
+        <div className="w-card__body">
+          <div className="w-setting-row">
+            <div>
+              <div className="row-label">Enable Stele marketplace</div>
+              <div className="row-help">
+                Shows the Stele, Inbox, and Provider tabs. Lets the same key that holds your LYTH browse, book, and sell services on-chain. Off by default while the marketplace surface is in early access.
+              </div>
+            </div>
+            <button
+              type="button"
+              className={`w-chip ${steleEnabled ? "is-on" : ""}`}
+              onClick={() => setSteleEnabled(!steleEnabled)}
+            >
+              {steleEnabled ? "Enabled" : "Disabled"}
+            </button>
+          </div>
+        </div>
       </div>
 
       <div className="w-card">

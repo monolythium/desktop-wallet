@@ -18,17 +18,21 @@ import { Activity } from "./pages/Activity";
 import { AiTrading } from "./pages/AiTrading";
 import { Contacts } from "./pages/Contacts";
 import { Home } from "./pages/Home";
+import { Inbox } from "./pages/Inbox";
 import { News } from "./pages/News";
 import { MonoStudio } from "./pages/MonoStudio";
+import { Provider } from "./pages/Provider";
 import { RiscvContracts } from "./pages/RiscvContracts";
 import { Settings } from "./pages/Settings";
 import { Stake } from "./pages/Stake";
+import { Stele } from "./pages/Stele";
 import { Tokens } from "./pages/Tokens";
 import { Trade } from "./pages/Trade";
 import { Wallets } from "./pages/Wallets";
 import { OperationsProvider } from "./operations/context";
 import { KeychainCallError, PRIMARY_ACCOUNT, unlock } from "./sdk/keychain";
 import { readDeveloperMode, writeDeveloperMode } from "./sdk/studio-host";
+import { readSteleEnabled, writeSteleEnabled } from "./sdk/feature-flags";
 import "./styles/tokens.css";
 import "./styles/wallet.css";
 import type { Denom } from "./data/fixtures";
@@ -76,6 +80,7 @@ export function App() {
   const [route, setRoute] = useState<Route>(() => readRoute());
   const [denom, setDenom] = useState<Denom>(() => readDenom());
   const [developerModeEnabled, setDeveloperModeEnabledState] = useState<boolean>(() => readDeveloperMode());
+  const [steleEnabled, setSteleEnabledState] = useState<boolean>(() => readSteleEnabled());
   const [boot, setBoot] = useState<BootState>(() =>
     isTauri() ? { kind: "probing" } : { kind: "ready" },
   );
@@ -126,9 +131,21 @@ export function App() {
     }
   }, [developerModeEnabled, route]);
 
+  useEffect(() => {
+    writeSteleEnabled(steleEnabled);
+    if (!steleEnabled && (route === "stele" || route === "inbox" || route === "provider")) {
+      setRoute("home");
+    }
+  }, [steleEnabled, route]);
+
   const setDeveloperModeEnabled = (enabled: boolean) => {
     setDeveloperModeEnabledState(enabled);
     writeDeveloperMode(enabled);
+  };
+
+  const setSteleEnabled = (enabled: boolean) => {
+    setSteleEnabledState(enabled);
+    writeSteleEnabled(enabled);
   };
 
   if (boot.kind === "probing") {
@@ -150,6 +167,7 @@ export function App() {
           route={route}
           setRoute={setRoute}
           developerModeEnabled={developerModeEnabled}
+          steleEnabled={steleEnabled}
         />
         <Topbar route={route} />
         <main className="w-main">
@@ -169,10 +187,15 @@ export function App() {
           {route === "trade" ? <Trade /> : null}
           {route === "ai-trade" ? <AiTrading /> : null}
           {route === "news" ? <News /> : null}
+          {route === "stele" && steleEnabled ? <Stele /> : null}
+          {route === "inbox" && steleEnabled ? <Inbox /> : null}
+          {route === "provider" && steleEnabled ? <Provider /> : null}
           {route === "settings" ? (
             <Settings
               developerModeEnabled={developerModeEnabled}
               setDeveloperModeEnabled={setDeveloperModeEnabled}
+              steleEnabled={steleEnabled}
+              setSteleEnabled={setSteleEnabled}
             />
           ) : null}
         </main>

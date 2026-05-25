@@ -13,6 +13,7 @@ interface NavItem {
   icon: () => ReactElement;
   publicOnly?: boolean;
   developerOnly?: boolean;
+  steleOnly?: boolean;
   badge?: string;
 }
 
@@ -88,6 +89,27 @@ const ICON_NEWS = () => (
     <path d="M7 8h10M7 12h10M7 16h6" />
   </svg>
 );
+const ICON_STELE = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M8 21h8" />
+    <path d="M9 21V8a3 3 0 0 1 6 0v13" />
+    <path d="M9 5h6" />
+    <path d="M10 11h4M10 14h4M10 17h4" />
+  </svg>
+);
+const ICON_INBOX = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M22 12h-6l-2 3h-4l-2-3H2" />
+    <path d="M5.5 5h13L22 12v6a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-6Z" />
+  </svg>
+);
+const ICON_PROVIDER = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M3 21V8l9-5 9 5v13" />
+    <path d="M9 21v-7h6v7" />
+    <path d="M3 21h18" />
+  </svg>
+);
 const ICON_SETTINGS = () => (
   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <circle cx="12" cy="12" r="3" />
@@ -101,6 +123,7 @@ interface Props {
   route: Route;
   setRoute: (r: Route) => void;
   developerModeEnabled: boolean;
+  steleEnabled: boolean;
 }
 
 const NAV: NavItem[] = [
@@ -114,6 +137,9 @@ const NAV: NavItem[] = [
   { id: "studio", label: "Studio", icon: ICON_STUDIO, publicOnly: true, developerOnly: true, badge: "dev" },
   { id: "trade", label: "Trade", icon: ICON_TRADE, publicOnly: true },
   { id: "ai-trade", label: "AI Trading", icon: ICON_AI, publicOnly: true, badge: "beta" },
+  { id: "stele", label: "Stele", icon: ICON_STELE, steleOnly: true, badge: "early" },
+  { id: "inbox", label: "Inbox", icon: ICON_INBOX, steleOnly: true },
+  { id: "provider", label: "Provider", icon: ICON_PROVIDER, steleOnly: true },
   { id: "news", label: "News", icon: ICON_NEWS },
 ];
 
@@ -121,8 +147,13 @@ const NAV_FOOTER: NavItem[] = [
   { id: "settings", label: "Settings", icon: ICON_SETTINGS },
 ];
 
-export function Sidebar({ denom, setDenom, route, setRoute, developerModeEnabled }: Props) {
-  const visible = NAV.filter((n) => (!n.publicOnly || denom === "public") && (!n.developerOnly || developerModeEnabled));
+export function Sidebar({ denom, setDenom, route, setRoute, developerModeEnabled, steleEnabled }: Props) {
+  const visible = NAV.filter(
+    (n) =>
+      (!n.publicOnly || denom === "public") &&
+      (!n.developerOnly || developerModeEnabled) &&
+      (!n.steleOnly || steleEnabled),
+  );
 
   return (
     <aside className="w-side">
