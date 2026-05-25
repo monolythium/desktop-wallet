@@ -118,6 +118,46 @@ pub fn run() {
         stele::commands::stele_convert_status,
         #[cfg(feature = "stele")]
         stele::commands::stele_convert_history,
+        #[cfg(feature = "stele")]
+        stele::commands::stele_search_complete,
+        #[cfg(feature = "stele")]
+        stele::commands::stele_attestation_list,
+        #[cfg(feature = "stele")]
+        stele::commands::stele_mcp_inbound_test,
+        #[cfg(feature = "stele")]
+        stele::commands::stele_flight_search,
+        #[cfg(feature = "stele")]
+        stele::commands::stele_flight_offer_get,
+        #[cfg(feature = "stele")]
+        stele::commands::stele_flight_order_hold,
+        #[cfg(feature = "stele")]
+        stele::commands::stele_flight_order_list,
+        #[cfg(feature = "stele")]
+        stele::commands::stele_x402_policy_set,
+        #[cfg(feature = "stele")]
+        stele::commands::stele_x402_policy_list,
+        #[cfg(feature = "stele")]
+        stele::commands::stele_x402_policy_get,
+        #[cfg(feature = "stele")]
+        stele::commands::stele_x402_policy_remove,
+        #[cfg(feature = "stele")]
+        stele::commands::stele_x402_pay,
+        #[cfg(feature = "stele")]
+        stele::commands::stele_agent_wallet_create,
+        #[cfg(feature = "stele")]
+        stele::commands::stele_agent_wallet_list,
+        #[cfg(feature = "stele")]
+        stele::commands::stele_agent_wallet_limits,
+        #[cfg(feature = "stele")]
+        stele::commands::stele_agent_wallet_pause,
+        #[cfg(feature = "stele")]
+        stele::commands::stele_agent_wallet_delete,
+        #[cfg(feature = "stele")]
+        stele::commands::stele_spend_coinsbee_guide,
+        #[cfg(feature = "stele")]
+        stele::commands::stele_spend_coinsbee_invoice,
+        #[cfg(feature = "stele")]
+        stele::commands::stele_booking_invoice_create,
     ]);
 
     builder

@@ -575,3 +575,469 @@ pub async fn stele_convert_history(
     )
     .await
 }
+
+// ============================================================
+// Natural-language search assistant — NL-search bridge.
+// Returns hardcoded JSON today; real call wires through an provider
+// proxy in a later slice (API key would live in OS keychain, not env).
+// ============================================================
+
+#[tauri::command]
+pub async fn stele_search_complete(prompt: String) -> Result<String> {
+    let _ = prompt;
+    Ok(r#"{"category":"legal","min_rating":4,"availability":"this-week","max_price":5000}"#
+        .to_string())
+}
+
+// ============================================================
+// Attestations — list view. lyth_mcp does not yet expose attestation
+// tools; returns an empty list until that lands (tracked in
+// stele-desktop docs/lyth-mcp-gaps.md §attestations).
+// ============================================================
+
+#[derive(Debug, Serialize)]
+pub struct Attestation {
+    pub id: String,
+    pub kind: String,
+    pub issuer: String,
+    pub issued_iso: String,
+    pub expires_iso: Option<String>,
+    pub claims: serde_json::Value,
+}
+
+#[tauri::command]
+pub async fn stele_attestation_list() -> Result<Vec<Attestation>> {
+    Ok(vec![])
+}
+
+// ============================================================
+// MCP inbound — probe a remote MCP server before attaching it to an
+// agent. Stubbed until rmcp client integration lands.
+// ============================================================
+
+#[derive(Debug, Deserialize)]
+pub struct McpInboundTestInput {
+    pub url: String,
+    pub auth_token: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct McpInboundTestOutput {
+    pub ok: bool,
+    pub server_name: Option<String>,
+    pub tools: Vec<String>,
+}
+
+#[tauri::command]
+pub async fn stele_mcp_inbound_test(input: McpInboundTestInput) -> Result<McpInboundTestOutput> {
+    let _ = input;
+    Err(SteleError::NotImplemented("stele_mcp_inbound_test".into()))
+}
+
+// ============================================================
+// Flights — proxy into lyth_mcp `flight_*` tools (Duffel-backed).
+// ============================================================
+
+#[derive(Debug, Deserialize)]
+pub struct FlightSearchInput {
+    pub origin: String,
+    pub destination: String,
+    pub departure_date: String,
+    pub return_date: Option<String>,
+    pub passengers: Option<u32>,
+    pub cabin: Option<String>,
+}
+
+#[tauri::command]
+pub async fn stele_flight_search(
+    input: FlightSearchInput,
+    sidecar: State<'_, SidecarHandle>,
+) -> Result<serde_json::Value> {
+    let mut slices = vec![serde_json::json!({
+        "origin": input.origin,
+        "destination": input.destination,
+        "departureDate": input.departure_date,
+    })];
+    if let Some(rd) = input.return_date.as_ref() {
+        slices.push(serde_json::json!({
+            "origin": input.destination,
+            "destination": input.origin,
+            "departureDate": rd,
+        }));
+    }
+    let pax_count = input.passengers.unwrap_or(1).max(1);
+    let passengers: Vec<serde_json::Value> = (0..pax_count)
+        .map(|_| serde_json::json!({ "type": "adult" }))
+        .collect();
+    let cabin = input
+        .cabin
+        .unwrap_or_else(|| "economy".into())
+        .replace('-', "_");
+    call_sidecar_tool(
+        &sidecar,
+        "flight_search",
+        serde_json::json!({
+            "slices": slices,
+            "passengers": passengers,
+            "cabinClass": cabin,
+        }),
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn stele_flight_offer_get(
+    offer_id: String,
+    sidecar: State<'_, SidecarHandle>,
+) -> Result<serde_json::Value> {
+    call_sidecar_tool(
+        &sidecar,
+        "flight_offer_get",
+        serde_json::json!({ "offerId": offer_id }),
+    )
+    .await
+}
+
+#[derive(Debug, Deserialize)]
+pub struct FlightOrderInput {
+    pub offer_id: String,
+    pub passenger_profiles: Option<Vec<String>>,
+    pub passengers: Option<serde_json::Value>,
+}
+
+#[tauri::command]
+pub async fn stele_flight_order_hold(
+    input: FlightOrderInput,
+    sidecar: State<'_, SidecarHandle>,
+) -> Result<serde_json::Value> {
+    if input.passenger_profiles.as_ref().map(|v| v.is_empty()).unwrap_or(true)
+        && input.passengers.is_none()
+    {
+        return Err(SteleError::Input(
+            "flight_order_hold needs either passenger_profiles or passengers".into(),
+        ));
+    }
+    call_sidecar_tool(
+        &sidecar,
+        "flight_order_create_hold",
+        serde_json::json!({
+            "offerId": input.offer_id,
+            "passengerProfiles": input.passenger_profiles,
+            "passengers": input.passengers,
+            "confirm": "CREATE_FLIGHT_HOLD",
+        }),
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn stele_flight_order_list(
+    sidecar: State<'_, SidecarHandle>,
+) -> Result<serde_json::Value> {
+    call_sidecar_tool(&sidecar, "flight_order_list", serde_json::json!({})).await
+}
+
+// ============================================================
+// x402 — per-request agent payments. Vendor sets a policy; consumer
+// pays through the policy with the wallet that owns the agent.
+// ============================================================
+
+#[derive(Debug, Deserialize)]
+pub struct X402PolicySet {
+    pub vendor_id: String,
+    pub wallet_name: String,
+    pub origin_allowlist: Vec<String>,
+    pub allowed_assets: Vec<String>,
+    pub max_payment_per_request: serde_json::Value,
+    pub notes: Option<String>,
+}
+
+#[tauri::command]
+pub async fn stele_x402_policy_set(
+    input: X402PolicySet,
+    sidecar: State<'_, SidecarHandle>,
+) -> Result<serde_json::Value> {
+    call_sidecar_tool(
+        &sidecar,
+        "x402_vendor_policy_set",
+        serde_json::json!({
+            "vendorId": input.vendor_id,
+            "walletName": input.wallet_name,
+            "originAllowlist": input.origin_allowlist,
+            "allowedAssets": input.allowed_assets,
+            "maxPaymentPerRequest": input.max_payment_per_request,
+            "notes": input.notes,
+        }),
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn stele_x402_policy_list(
+    sidecar: State<'_, SidecarHandle>,
+) -> Result<serde_json::Value> {
+    call_sidecar_tool(&sidecar, "x402_vendor_policy_list", serde_json::json!({})).await
+}
+
+#[tauri::command]
+pub async fn stele_x402_policy_get(
+    vendor_id: String,
+    sidecar: State<'_, SidecarHandle>,
+) -> Result<serde_json::Value> {
+    call_sidecar_tool(
+        &sidecar,
+        "x402_vendor_policy_get",
+        serde_json::json!({ "vendorId": vendor_id }),
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn stele_x402_policy_remove(
+    vendor_id: String,
+    sidecar: State<'_, SidecarHandle>,
+) -> Result<serde_json::Value> {
+    call_sidecar_tool(
+        &sidecar,
+        "x402_vendor_policy_remove",
+        serde_json::json!({ "vendorId": vendor_id }),
+    )
+    .await
+}
+
+#[derive(Debug, Deserialize)]
+pub struct X402PayInput {
+    pub vendor_id: String,
+    pub url: String,
+    pub method: Option<String>,
+    pub headers: Option<serde_json::Value>,
+    pub body: Option<serde_json::Value>,
+    pub asset_symbol_hint: Option<String>,
+    pub dry_run: Option<bool>,
+}
+
+#[tauri::command]
+pub async fn stele_x402_pay(
+    input: X402PayInput,
+    sidecar: State<'_, SidecarHandle>,
+) -> Result<serde_json::Value> {
+    call_sidecar_tool(
+        &sidecar,
+        "x402_pay",
+        serde_json::json!({
+            "vendorId": input.vendor_id,
+            "url": input.url,
+            "method": input.method.unwrap_or_else(|| "GET".into()),
+            "headers": input.headers,
+            "body": input.body,
+            "assetSymbolHint": input.asset_symbol_hint,
+            "dryRun": input.dry_run,
+        }),
+    )
+    .await
+}
+
+// ============================================================
+// Agent wallets — sub-accounts that can transact within capped limits.
+// ============================================================
+
+#[derive(Debug, Deserialize)]
+pub struct AgentWalletCreateInput {
+    pub name: String,
+    pub purpose: String,
+    pub max_balance: Option<String>,
+    pub low_value_max_amount: Option<String>,
+    pub low_value_daily_limit: Option<String>,
+    pub allowed_categories: Option<Vec<String>>,
+    pub allowed_counterparties: Option<Vec<String>>,
+    pub expires_at: Option<String>,
+    pub fallback_approval: Option<String>,
+}
+
+#[tauri::command]
+pub async fn stele_agent_wallet_create(
+    input: AgentWalletCreateInput,
+    sidecar: State<'_, SidecarHandle>,
+) -> Result<serde_json::Value> {
+    call_sidecar_tool(
+        &sidecar,
+        "agent_wallet_create",
+        serde_json::json!({
+            "name": input.name,
+            "purpose": input.purpose,
+            "confirm": "CREATE_AGENT_WALLET",
+            "maxBalance": input.max_balance,
+            "lowValueMaxAmount": input.low_value_max_amount,
+            "lowValueDailyLimit": input.low_value_daily_limit,
+            "allowedCounterparties": input.allowed_counterparties,
+            "allowedCategories": input.allowed_categories,
+            "expiresAt": input.expires_at,
+            "fallbackApproval": input.fallback_approval,
+        }),
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn stele_agent_wallet_list(
+    sidecar: State<'_, SidecarHandle>,
+) -> Result<serde_json::Value> {
+    call_sidecar_tool(&sidecar, "wallet_list", serde_json::json!({})).await
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AgentWalletLimitsInput {
+    pub name: String,
+    pub low_value_max_amount: Option<String>,
+    pub low_value_daily_limit: Option<String>,
+    pub max_balance: Option<String>,
+    pub allowed_counterparties: Option<Vec<String>>,
+    pub allowed_categories: Option<Vec<String>>,
+    pub expires_at: Option<String>,
+    pub fallback_approval: Option<String>,
+}
+
+#[tauri::command]
+pub async fn stele_agent_wallet_limits(
+    input: AgentWalletLimitsInput,
+    sidecar: State<'_, SidecarHandle>,
+) -> Result<serde_json::Value> {
+    call_sidecar_tool(
+        &sidecar,
+        "agent_wallet_limits",
+        serde_json::json!({
+            "name": input.name,
+            "confirm": "UPDATE_AGENT_WALLET_LIMITS",
+            "lowValueMaxAmount": input.low_value_max_amount,
+            "lowValueDailyLimit": input.low_value_daily_limit,
+            "maxBalance": input.max_balance,
+            "allowedCounterparties": input.allowed_counterparties,
+            "allowedCategories": input.allowed_categories,
+            "expiresAt": input.expires_at,
+            "fallbackApproval": input.fallback_approval,
+        }),
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn stele_agent_wallet_pause(
+    name: String,
+    sidecar: State<'_, SidecarHandle>,
+) -> Result<serde_json::Value> {
+    call_sidecar_tool(
+        &sidecar,
+        "agent_wallet_pause",
+        serde_json::json!({
+            "name": name,
+            "confirm": "PAUSE_AGENT_WALLET",
+        }),
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn stele_agent_wallet_delete(
+    name: String,
+    confirm_name: String,
+    sidecar: State<'_, SidecarHandle>,
+) -> Result<serde_json::Value> {
+    if name != confirm_name {
+        return Err(SteleError::Input(
+            "confirm_name must exactly equal name".into(),
+        ));
+    }
+    call_sidecar_tool(
+        &sidecar,
+        "agent_wallet_delete",
+        serde_json::json!({
+            "name": name,
+            "confirmName": confirm_name,
+            "confirm": "DELETE_AGENT_WALLET",
+        }),
+    )
+    .await
+}
+
+// ============================================================
+// Spend — Coinsbee gift cards via NowPayments invoice.
+// ============================================================
+
+#[derive(Debug, Deserialize)]
+pub struct CoinsbeeGuideInput {
+    pub category: Option<String>,
+}
+
+#[tauri::command]
+pub async fn stele_spend_coinsbee_guide(
+    input: CoinsbeeGuideInput,
+    sidecar: State<'_, SidecarHandle>,
+) -> Result<serde_json::Value> {
+    call_sidecar_tool(
+        &sidecar,
+        "coinsbee_guide",
+        serde_json::json!({ "category": input.category }),
+    )
+    .await
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SpendCoinsbeeInvoiceInput {
+    pub usd_amount: f64,
+    pub pay_currency: String,
+    pub description: Option<String>,
+}
+
+#[tauri::command]
+pub async fn stele_spend_coinsbee_invoice(
+    input: SpendCoinsbeeInvoiceInput,
+    sidecar: State<'_, SidecarHandle>,
+) -> Result<serde_json::Value> {
+    call_sidecar_tool(
+        &sidecar,
+        "nowpayments_invoice_create",
+        serde_json::json!({
+            "priceAmount": input.usd_amount,
+            "priceCurrency": "usd",
+            "payCurrency": input.pay_currency.to_lowercase(),
+            "orderId": format!("stele-spend-{}", uuid::Uuid::new_v4()),
+            "orderDescription": input
+                .description
+                .unwrap_or_else(|| "Stele spend — Coinsbee gift card".into()),
+        }),
+    )
+    .await
+}
+
+// ============================================================
+// Booking invoice — NowPayments invoice for a booking's USD price.
+// ============================================================
+
+#[derive(Debug, Deserialize)]
+pub struct BookingInvoiceInput {
+    pub booking_id: String,
+    pub price_usd: f64,
+    pub pay_currency: String,
+}
+
+#[tauri::command]
+pub async fn stele_booking_invoice_create(
+    input: BookingInvoiceInput,
+    sidecar: State<'_, SidecarHandle>,
+) -> Result<serde_json::Value> {
+    call_sidecar_tool(
+        &sidecar,
+        "nowpayments_invoice_create",
+        serde_json::json!({
+            "priceAmount": input.price_usd,
+            "priceCurrency": "usd",
+            "payCurrency": input.pay_currency.to_lowercase(),
+            "orderId": format!("stele-booking-{}", input.booking_id),
+            "orderDescription": format!(
+                "Stele booking {} — payment in {}",
+                input.booking_id, input.pay_currency
+            ),
+        }),
+    )
+    .await
+}
