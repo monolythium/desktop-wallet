@@ -108,6 +108,8 @@ pub fn run() {
         stele::commands::stele_outbound_mcp_start,
         #[cfg(feature = "stele")]
         stele::commands::stele_outbound_mcp_stop,
+        #[cfg(feature = "stele")]
+        stele::commands::stele_approval_resolve,
     ]);
 
     builder

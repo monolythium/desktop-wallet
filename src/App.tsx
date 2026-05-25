@@ -11,6 +11,7 @@
 // skipping the probe entirely and treating the wallet as already set up.
 
 import { useEffect, useState } from "react";
+import { ApprovalOverlay } from "./components/ApprovalOverlay";
 import { Onboarding } from "./components/Onboarding";
 import { Sidebar } from "./components/Sidebar";
 import { Topbar } from "./components/Topbar";
@@ -199,6 +200,7 @@ export function App() {
             />
           ) : null}
         </main>
+        {steleEnabled ? <ApprovalOverlay /> : null}
       </div>
     </OperationsProvider>
   );
