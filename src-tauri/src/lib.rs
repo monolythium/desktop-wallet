@@ -92,6 +92,16 @@ pub fn run() {
         stele::commands::stele_tx_outbox_retry,
         #[cfg(feature = "stele")]
         stele::commands::stele_tx_outbox_forget,
+        #[cfg(feature = "stele")]
+        stele::commands::stele_booking_request,
+        #[cfg(feature = "stele")]
+        stele::commands::stele_booking_counter,
+        #[cfg(feature = "stele")]
+        stele::commands::stele_booking_accept,
+        #[cfg(feature = "stele")]
+        stele::commands::stele_booking_release,
+        #[cfg(feature = "stele")]
+        stele::commands::stele_booking_dispute,
     ]);
 
     builder

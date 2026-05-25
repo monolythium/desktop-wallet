@@ -23,6 +23,8 @@ pub enum SteleError {
     SidecarNotRunning,
     #[error("lyth_mcp tool '{tool}' failed: {message}")]
     SidecarTool { tool: String, message: String },
+    #[error("not implemented yet: {0}")]
+    NotImplemented(String),
 }
 
 type Result<T> = std::result::Result<T, SteleError>;
@@ -198,4 +200,126 @@ pub async fn stele_tx_outbox_forget(
     sidecar: State<'_, SidecarHandle>,
 ) -> Result<serde_json::Value> {
     call_sidecar_tool(&sidecar, "tx_outbox_forget", serde_json::json!({ "id": id })).await
+}
+
+// ============================================================
+// Bookings — proxies into lyth_mcp's booking_* tools.
+// Mirror the stele-desktop wrappers so the same booking record on
+// lyth_mcp's side is identifiable across both apps during the merge.
+// ============================================================
+
+#[derive(Debug, Deserialize)]
+pub struct BookingRequestInput {
+    pub provider_id: String,
+    pub service_id: String,
+    pub date_iso: String,
+    pub description: String,
+    pub proposed_price_lyth: String,
+    pub arbiter_id: String,
+}
+
+/// Proxy to lyth_mcp `booking_request_create`. Stele uses "provider"
+/// terminology (per design brief); lyth_mcp uses "vendor" — same
+/// concept, mapped here at the wire boundary.
+#[tauri::command]
+pub async fn stele_booking_request(
+    input: BookingRequestInput,
+    sidecar: State<'_, SidecarHandle>,
+) -> Result<serde_json::Value> {
+    call_sidecar_tool(
+        &sidecar,
+        "booking_request_create",
+        serde_json::json!({
+            "vendorId": input.provider_id,
+            "service": input.description,
+            "itemId": input.service_id,
+            "amount": input.proposed_price_lyth,
+            "requestedWindow": input.date_iso,
+            "bookingFields": {},
+            "notes": format!("arbiter: {}", input.arbiter_id),
+        }),
+    )
+    .await
+}
+
+#[derive(Debug, Deserialize)]
+pub struct BookingCounterInput {
+    pub booking_id: String,
+    pub price_lyth: Option<String>,
+    pub date_iso: Option<String>,
+    pub note: Option<String>,
+}
+
+/// **Blocked on lyth_mcp** — needs a `booking_counter_offer` tool. Surfaces
+/// a typed error pointing at the gap doc so the UI can render an honest
+/// "negotiation not wired yet" message rather than a silent failure.
+#[tauri::command]
+pub async fn stele_booking_counter(input: BookingCounterInput) -> Result<()> {
+    let _ = input;
+    Err(SteleError::NotImplemented(
+        "booking_counter — lyth_mcp needs a booking_counter_offer tool first \
+         (tracked in stele-desktop docs/lyth-mcp-gaps.md §4)".into(),
+    ))
+}
+
+/// Proxy to lyth_mcp `booking_accept_demo`. The literal `confirm` string
+/// is a lyth_mcp schema safety check — Stele's approval bridge has
+/// already gated the click, but the literal is still required.
+#[tauri::command]
+pub async fn stele_booking_accept(
+    booking_id: String,
+    sidecar: State<'_, SidecarHandle>,
+) -> Result<serde_json::Value> {
+    call_sidecar_tool(
+        &sidecar,
+        "booking_accept_demo",
+        serde_json::json!({
+            "bookingId": booking_id,
+            "confirm": "ACCEPT_DEMO_BOOKING",
+        }),
+    )
+    .await
+}
+
+/// Proxy to lyth_mcp `booking_mark_paid` — the off-chain release marker.
+/// Requires the on-chain tx hash of the escrow-release transaction as
+/// proof, so the frontend must capture it from the signing-ceremony
+/// success path before calling this.
+#[tauri::command]
+pub async fn stele_booking_release(
+    booking_id: String,
+    tx_hash: String,
+    sidecar: State<'_, SidecarHandle>,
+) -> Result<serde_json::Value> {
+    if tx_hash.is_empty() {
+        return Err(SteleError::Input(
+            "booking_release needs the tx_hash from the escrow-release transaction".into(),
+        ));
+    }
+    call_sidecar_tool(
+        &sidecar,
+        "booking_mark_paid",
+        serde_json::json!({ "bookingId": booking_id, "txHash": tx_hash }),
+    )
+    .await
+}
+
+/// Proxy to lyth_mcp `booking_dispute_demo`. The schema uses `reason`
+/// (design brief calls this "evidence" — same field, different label).
+#[tauri::command]
+pub async fn stele_booking_dispute(
+    booking_id: String,
+    evidence: String,
+    sidecar: State<'_, SidecarHandle>,
+) -> Result<serde_json::Value> {
+    call_sidecar_tool(
+        &sidecar,
+        "booking_dispute_demo",
+        serde_json::json!({
+            "bookingId": booking_id,
+            "reason": evidence,
+            "confirm": "OPEN_DEMO_DISPUTE",
+        }),
+    )
+    .await
 }

@@ -1,9 +1,9 @@
 // Tx-outbox bridge — proxies through the Stele backend's lyth_mcp
-// sidecar. Same not-tauri / not-compiled / sidecar-not-running envelope
-// as addressbook + stele-search; refactor into a shared helper once a
-// third or fourth proxy needs the same shape.
+// sidecar. Shared error envelope + Tauri detection live in `stele-base.ts`.
 
-import { invoke } from "@tauri-apps/api/core";
+import { callStele, SteleProxyCallError } from "./stele-base";
+
+export { SteleProxyCallError as TxOutboxCallError };
 
 export interface TxOutboxEntry {
   id?: string;
@@ -17,78 +17,19 @@ export interface TxOutboxEntry {
   notes?: string | null;
 }
 
-export type TxOutboxError =
-  | { code: "input"; message: string }
-  | { code: "sidecar_not_running" }
-  | { code: "sidecar_tool"; tool: string; message: string }
-  | { code: "not_compiled" }
-  | { code: "not_tauri" };
-
-export class TxOutboxCallError extends Error {
-  override readonly cause: TxOutboxError;
-  constructor(cause: TxOutboxError) {
-    super(messageFor(cause));
-    this.name = "TxOutboxCallError";
-    this.cause = cause;
-  }
-}
-
-function messageFor(e: TxOutboxError): string {
-  switch (e.code) {
-    case "not_tauri":
-      return "Tx outbox runs in the native Tauri binary; browser preview can't reach it.";
-    case "not_compiled":
-      return "The Stele backend isn't compiled into this build. Pass --features stele to enable it.";
-    case "sidecar_not_running":
-      return "lyth_mcp isn't running. Install it and restart the wallet to view the tx outbox.";
-    case "sidecar_tool":
-      return `lyth_mcp '${e.tool}' failed: ${e.message}`;
-    case "input":
-      return `Invalid input: ${e.message}`;
-  }
-}
-
-function isTauri(): boolean {
-  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
-}
-
-function normalizeError(raw: unknown): TxOutboxCallError {
-  if (raw && typeof raw === "object" && "code" in raw) {
-    return new TxOutboxCallError(raw as TxOutboxError);
-  }
-  const message = typeof raw === "string" ? raw : (raw as Error)?.message ?? String(raw);
-  if (message.includes("not found") || message.includes("not allowed")) {
-    return new TxOutboxCallError({ code: "not_compiled" });
-  }
-  return new TxOutboxCallError({ code: "input", message });
-}
+const SURFACE = "Tx outbox";
 
 export async function txOutboxList(): Promise<TxOutboxEntry[]> {
-  if (!isTauri()) throw new TxOutboxCallError({ code: "not_tauri" });
-  try {
-    const raw = await invoke<unknown>("stele_tx_outbox_list");
-    return normalizeListResult(raw);
-  } catch (raw) {
-    throw normalizeError(raw);
-  }
+  const raw = await callStele<unknown>("stele_tx_outbox_list", undefined, SURFACE);
+  return normalizeListResult(raw);
 }
 
 export async function txOutboxRetry(id: string): Promise<unknown> {
-  if (!isTauri()) throw new TxOutboxCallError({ code: "not_tauri" });
-  try {
-    return await invoke<unknown>("stele_tx_outbox_retry", { id });
-  } catch (raw) {
-    throw normalizeError(raw);
-  }
+  return callStele<unknown>("stele_tx_outbox_retry", { id }, SURFACE);
 }
 
 export async function txOutboxForget(id: string): Promise<unknown> {
-  if (!isTauri()) throw new TxOutboxCallError({ code: "not_tauri" });
-  try {
-    return await invoke<unknown>("stele_tx_outbox_forget", { id });
-  } catch (raw) {
-    throw normalizeError(raw);
-  }
+  return callStele<unknown>("stele_tx_outbox_forget", { id }, SURFACE);
 }
 
 function normalizeListResult(raw: unknown): TxOutboxEntry[] {
