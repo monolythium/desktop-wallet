@@ -76,6 +76,12 @@ pub fn run() {
         studio_host::studio_workspace_assert_trusted,
         #[cfg(feature = "stele")]
         stele::commands::stele_sidecar_status,
+        #[cfg(feature = "stele")]
+        stele::commands::stele_addressbook_add,
+        #[cfg(feature = "stele")]
+        stele::commands::stele_addressbook_lookup,
+        #[cfg(feature = "stele")]
+        stele::commands::stele_addressbook_remove,
     ]);
 
     builder
