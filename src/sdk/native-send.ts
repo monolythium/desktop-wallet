@@ -26,8 +26,6 @@ export interface SendNativeLythArgs {
   to: string;
   amountLyth: string;
   executionUnitLimit?: bigint;
-  /** Compatibility alias for callers still using the old ethers name. */
-  gasLimit?: bigint;
 }
 
 export interface SendNativeLythResult {
@@ -91,7 +89,7 @@ export async function sendNativeLyth(args: SendNativeLythArgs): Promise<SendNati
     to: args.to,
     amountLyth: args.amountLyth,
     executionUnitPriceLythoshi: executionUnitPrice,
-    executionUnitLimit: args.executionUnitLimit ?? args.gasLimit,
+    executionUnitLimit: args.executionUnitLimit,
   });
 
   const wrapped = await buildEncryptedSubmission({
