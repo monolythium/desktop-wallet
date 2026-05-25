@@ -2,6 +2,8 @@
 // These are the visual contract for Stage 2; live data replaces them
 // once the SDK round-trips against a real mono-core node.
 
+import { addressToTypedBech32 } from "@monolythium/core-sdk";
+
 export type Denom = "public" | "private";
 
 export interface Token {
@@ -39,6 +41,15 @@ export interface Balances {
   staked: number;
   apr: number;
 }
+
+const DEMO_WALLET_ADDRESS = addressToTypedBech32(
+  "user",
+  "0x4a1e9b3c0a9e7d64e5b5b8f5b2f8c4a6e3f2fee0",
+);
+const DEMO_SEND_RECIPIENT = addressToTypedBech32(
+  "user",
+  "0x000000000000000000000000000000000000dead",
+);
 
 export const TOKENS: Token[] = [
   { sym: "LYTH",  name: "Monolythium",     amount: 4128.42, priceUsd: 8.42,  chg24h:  2.4, primary: true, note: "native · fees + staking" },
@@ -81,9 +92,9 @@ export const TXS_PRIVATE: Tx[] = [
 
 export const IDENTITY: Identity = {
   handle: "John Doe",
-  // Demo address. Real mainnet wallets present an EIP-55 checksum address;
-  // SDK's eth_getBalance accepts the same shape.
-  address: "0x4a1e9b3c0a9e7d64e5b5b8f5b2f8c4a6e3f2fee0",
+  // Demo address. Public wallet surfaces present ADR-0038 typed addresses;
+  // internal compatibility calls convert to 0x only at the wire boundary.
+  address: DEMO_WALLET_ADDRESS,
   pairedDevice: "Framework Desktop · Talos node",
   since: "19 months",
 };
@@ -100,6 +111,6 @@ export const BALANCES: Record<Denom, Balances> = {
  * field, execution-fee selector) this fixture goes away.
  */
 export const SEND_DEMO: { to: string; amountLyth: string } = {
-  to: "0x000000000000000000000000000000000000dead",
+  to: DEMO_SEND_RECIPIENT,
   amountLyth: "0.001",
 };
