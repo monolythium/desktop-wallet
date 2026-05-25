@@ -119,6 +119,8 @@ pub fn run() {
         #[cfg(feature = "stele")]
         stele::commands::stele_convert_history,
         #[cfg(feature = "stele")]
+        stele::commands::stele_app_version,
+        #[cfg(feature = "stele")]
         stele::commands::stele_claude_complete,
         #[cfg(feature = "stele")]
         stele::commands::stele_attestation_list,
