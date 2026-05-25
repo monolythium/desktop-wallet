@@ -16,7 +16,14 @@ import {
   type ConvertCreateInput,
   type ConvertEstimateInput,
 } from "../sdk/convert";
+import { flightSearch, FlightCallError, type FlightSearchInput } from "../sdk/flights";
 import { checkName, type NameCheckResult } from "../sdk/name-registry";
+import {
+  spendCoinsbeeGuide,
+  spendCoinsbeeInvoice,
+  SpendCallError,
+  type SpendCoinsbeeInvoiceInput,
+} from "../sdk/spend";
 import { querySteleBackend, type SteleBackendResult } from "../sdk/stele";
 import { listingSearch, StereSearchCallError, type ListingHit } from "../sdk/stele-search";
 
@@ -56,6 +63,10 @@ export function Stele() {
 
       <ConvertCard />
 
+      <TravelCard />
+
+      <SpendCard />
+
       <TodoSection
         title="Booking"
         items={[
@@ -67,6 +78,178 @@ export function Stele() {
       />
     </div>
   );
+}
+
+function TravelCard() {
+  const [origin, setOrigin] = useState("");
+  const [destination, setDestination] = useState("");
+  const [departureDate, setDepartureDate] = useState("");
+  const [returnDate, setReturnDate] = useState("");
+  const [passengers, setPassengers] = useState("1");
+  const [cabin, setCabin] = useState<"economy" | "premium-economy" | "business" | "first">("economy");
+  const [results, setResults] = useState<unknown | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const onSearch = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!origin.trim() || !destination.trim() || !departureDate.trim()) return;
+    setBusy(true);
+    setError(null);
+    setResults(null);
+    try {
+      const input: FlightSearchInput = {
+        origin: origin.trim().toUpperCase(),
+        destination: destination.trim().toUpperCase(),
+        departure_date: departureDate.trim(),
+        return_date: returnDate.trim() || null,
+        passengers: parseInt(passengers, 10) || 1,
+        cabin,
+      };
+      const raw = await flightSearch(input);
+      setResults(raw);
+    } catch (cause) {
+      if (cause instanceof FlightCallError) setError(cause.message);
+      else setError(String(cause));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="w-card">
+      <div className="w-card__head">
+        <h3>Travel · Flights</h3>
+        <span className="w-todo__pill">{results ? "results" : "draft"}</span>
+      </div>
+      <div className="w-card__body">
+        {error ? (
+          <div className="row-help" style={{ color: "var(--w-text-2, #999)", marginBottom: 12 }}>{error}</div>
+        ) : null}
+        <form onSubmit={onSearch} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <div style={{ display: "flex", gap: 8 }}>
+            <input type="text" placeholder="From (IATA, e.g. YVR)" value={origin} onChange={(e) => setOrigin(e.target.value)} style={{ ...travelInput(), flex: 1 }} />
+            <input type="text" placeholder="To (IATA, e.g. NRT)" value={destination} onChange={(e) => setDestination(e.target.value)} style={{ ...travelInput(), flex: 1 }} />
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <input type="date" value={departureDate} onChange={(e) => setDepartureDate(e.target.value)} style={travelInput()} />
+            <input type="date" value={returnDate} onChange={(e) => setReturnDate(e.target.value)} style={travelInput()} placeholder="Return (optional)" />
+            <input type="number" min={1} max={9} value={passengers} onChange={(e) => setPassengers(e.target.value)} style={{ ...travelInput(), width: 80 }} />
+            <select value={cabin} onChange={(e) => setCabin(e.target.value as typeof cabin)} style={travelInput()}>
+              <option value="economy">Economy</option>
+              <option value="premium-economy">Premium economy</option>
+              <option value="business">Business</option>
+              <option value="first">First</option>
+            </select>
+            <button type="submit" className="btn btn--sm" disabled={busy}>{busy ? "Searching…" : "Search"}</button>
+          </div>
+        </form>
+        {results ? (
+          <pre style={preStyle()}>{JSON.stringify(results, null, 2)}</pre>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function SpendCard() {
+  const [guide, setGuide] = useState<unknown | null>(null);
+  const [category, setCategory] = useState("");
+  const [amountUsd, setAmountUsd] = useState("");
+  const [payCurrency, setPayCurrency] = useState("usdc");
+  const [invoice, setInvoice] = useState<unknown | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const onGuide = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const g = await spendCoinsbeeGuide({ category: category.trim() || null });
+      setGuide(g);
+    } catch (cause) {
+      if (cause instanceof SpendCallError) setError(cause.message);
+      else setError(String(cause));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onInvoice = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const usd = parseFloat(amountUsd);
+    if (!isFinite(usd) || usd <= 0) {
+      setError("Enter a positive USD amount.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const input: SpendCoinsbeeInvoiceInput = {
+        usd_amount: usd,
+        pay_currency: payCurrency.trim().toLowerCase(),
+      };
+      const inv = await spendCoinsbeeInvoice(input);
+      setInvoice(inv);
+    } catch (cause) {
+      if (cause instanceof SpendCallError) setError(cause.message);
+      else setError(String(cause));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="w-card">
+      <div className="w-card__head">
+        <h3>Spend · Coinsbee gift cards</h3>
+        <span className="w-todo__pill">{invoice ? "invoice" : guide ? "guide" : "draft"}</span>
+      </div>
+      <div className="w-card__body">
+        {error ? (
+          <div className="row-help" style={{ color: "var(--w-text-2, #999)", marginBottom: 12 }}>{error}</div>
+        ) : null}
+        <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+          <input type="text" placeholder="Category (amazon, uber-eats, …)" value={category} onChange={(e) => setCategory(e.target.value)} style={{ ...travelInput(), flex: 1 }} />
+          <button type="button" className="btn btn--sm" onClick={onGuide} disabled={busy}>Fetch guide</button>
+        </div>
+        {guide ? <pre style={preStyle()}>{JSON.stringify(guide, null, 2)}</pre> : null}
+
+        <form onSubmit={onInvoice} style={{ display: "flex", gap: 8, marginTop: 12 }}>
+          <input type="number" step="any" min="1" placeholder="USD" value={amountUsd} onChange={(e) => setAmountUsd(e.target.value)} style={travelInput()} />
+          <input type="text" placeholder="Pay in (usdc, btc, …)" value={payCurrency} onChange={(e) => setPayCurrency(e.target.value)} style={travelInput()} />
+          <button type="submit" className="btn btn--sm" disabled={busy}>Create invoice</button>
+        </form>
+        {invoice ? <pre style={preStyle()}>{JSON.stringify(invoice, null, 2)}</pre> : null}
+      </div>
+    </div>
+  );
+}
+
+function travelInput(): React.CSSProperties {
+  return {
+    padding: "8px 10px",
+    borderRadius: 6,
+    border: "1px solid var(--w-border, #2a2a2a)",
+    background: "var(--w-bg-2, #161616)",
+    color: "var(--w-text, #e6e6e6)",
+    fontFamily: "var(--w-font-mono, ui-monospace, SFMono-Regular, monospace)",
+    fontSize: 13,
+  };
+}
+
+function preStyle(): React.CSSProperties {
+  return {
+    background: "var(--w-bg-2, #161616)",
+    border: "1px solid var(--w-border, #2a2a2a)",
+    borderRadius: 6,
+    padding: 10,
+    fontFamily: "var(--w-font-mono, ui-monospace, monospace)",
+    fontSize: 11,
+    maxHeight: 220,
+    overflow: "auto",
+    margin: "8px 0 0",
+  };
 }
 
 const CONVERT_CURRENCIES = [
