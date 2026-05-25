@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
 use thiserror::Error;
 
-use super::{outbound_mcp, OutboundMcpHandle, SidecarHandle};
+use super::{approval_bridge, outbound_mcp, ApprovalBridgeHandle, OutboundMcpHandle, SidecarHandle};
 
 /// Tiny Stele-side error enum. Grows as more commands port — for now,
 /// every Stele command either fails at the input boundary or at the
@@ -419,4 +419,49 @@ pub async fn stele_outbound_mcp_stop(
         auth_token: None,
         scopes: vec![],
     })
+}
+
+// ============================================================
+// Approval bridge — frontend resolves pending HTTP requests from
+// lyth_mcp. The bridge emits `approval-required` Tauri events with
+// an ApprovalEvent payload; the React overlay calls this command
+// once the user approves or rejects.
+// ============================================================
+
+#[derive(Debug, Deserialize)]
+pub struct ApprovalResolveInput {
+    pub request_id: String,
+    pub approved: bool,
+    pub wallet_passphrase: Option<String>,
+    pub reason: Option<String>,
+}
+
+/// Forward the user's decision into the pending approval-bridge channel
+/// so the lyth_mcp HTTP request unblocks with the right response.
+#[tauri::command]
+pub async fn stele_approval_resolve(
+    input: ApprovalResolveInput,
+    bridge: State<'_, ApprovalBridgeHandle>,
+) -> Result<()> {
+    let guard = bridge.0.lock().await;
+    let b = guard.as_ref().ok_or_else(|| {
+        SteleError::Input("approval bridge not running — restart the wallet".into())
+    })?;
+    let ok = b
+        .resolve(
+            &input.request_id,
+            approval_bridge::ApprovalDecision {
+                approved: input.approved,
+                wallet_passphrase: input.wallet_passphrase,
+                reason: input.reason,
+            },
+        )
+        .await;
+    if !ok {
+        return Err(SteleError::Input(format!(
+            "no pending approval matched request_id {}",
+            input.request_id
+        )));
+    }
+    Ok(())
 }
