@@ -7,10 +7,11 @@
 // so the user can see whether the marketplace backend is live before the
 // real screens ship.
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { TodoSection } from "../components/TodoSection";
 import { checkName, type NameCheckResult } from "../sdk/name-registry";
 import { querySteleBackend, type SteleBackendResult } from "../sdk/stele";
+import { listingSearch, StereSearchCallError, type ListingHit } from "../sdk/stele-search";
 
 export function Stele() {
   const [backend, setBackend] = useState<SteleBackendResult | null>(null);
@@ -44,14 +45,8 @@ export function Stele() {
 
       <NameChecker />
 
-      <TodoSection
-        title="Browse"
-        items={[
-          "Natural-language search bar",
-          "Category chips · Featured · Near you · Top rated · Recently used",
-          "Provider profile pages with reputation + attestations",
-        ]}
-      />
+      <BrowseCard />
+
       <TodoSection
         title="Booking"
         items={[
@@ -61,6 +56,144 @@ export function Stele() {
           "Dispute flow",
         ]}
       />
+    </div>
+  );
+}
+
+const CATEGORIES = [
+  "all",
+  "food",
+  "legal",
+  "business",
+  "tech",
+  "creative",
+  "influencers",
+  "health",
+  "home",
+  "auto",
+] as const;
+
+function BrowseCard() {
+  const [query, setQuery] = useState("");
+  const [category, setCategory] = useState<(typeof CATEGORIES)[number]>("all");
+  const [hits, setHits] = useState<ListingHit[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const search = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const results = await listingSearch({
+        query: query.trim() || null,
+        category: category === "all" ? null : category,
+      });
+      setHits(results);
+    } catch (cause) {
+      if (cause instanceof StereSearchCallError) {
+        setError(cause.message);
+        setHits(null);
+      } else {
+        setError(String(cause));
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, [query, category]);
+
+  const onSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    search();
+  };
+
+  const pillLabel = loading
+    ? "searching"
+    : hits == null
+      ? "ready"
+      : hits.length === 0
+        ? "no matches"
+        : `${hits.length} found`;
+
+  return (
+    <div className="w-card">
+      <div className="w-card__head">
+        <h3>Browse</h3>
+        <span className="w-todo__pill">{pillLabel}</span>
+      </div>
+      <div className="w-card__body">
+        {error ? (
+          <div className="row-help" style={{ color: "var(--w-text-2, #999)", marginBottom: 12 }}>
+            {error}
+          </div>
+        ) : null}
+
+        <form onSubmit={onSubmit} style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+          <input
+            type="text"
+            placeholder="What do you need?"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            style={{
+              flex: 1,
+              padding: "8px 10px",
+              borderRadius: 6,
+              border: "1px solid var(--w-border, #2a2a2a)",
+              background: "var(--w-bg-2, #161616)",
+              color: "var(--w-text, #e6e6e6)",
+              fontSize: 13,
+            }}
+          />
+          <select
+            value={category}
+            onChange={(e) => setCategory(e.target.value as (typeof CATEGORIES)[number])}
+            style={{
+              padding: "8px 10px",
+              borderRadius: 6,
+              border: "1px solid var(--w-border, #2a2a2a)",
+              background: "var(--w-bg-2, #161616)",
+              color: "var(--w-text, #e6e6e6)",
+              fontSize: 13,
+            }}
+          >
+            {CATEGORIES.map((c) => (
+              <option key={c} value={c}>{c}</option>
+            ))}
+          </select>
+          <button type="submit" className="btn btn--sm" disabled={loading}>
+            Search
+          </button>
+        </form>
+
+        {hits && hits.length > 0 ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {hits.map((h, i) => (
+              <HitRow key={h.provider_id ?? h.mono_name ?? String(i)} hit={h} />
+            ))}
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function HitRow({ hit }: { hit: ListingHit }) {
+  const title = hit.title ?? hit.mono_name ?? hit.provider_id ?? "Unnamed listing";
+  const subtitle = [
+    hit.mono_name,
+    hit.category,
+    hit.rating != null ? `★${hit.rating.toFixed(1)}` : null,
+    hit.reviews != null ? `${hit.reviews} reviews` : null,
+    hit.price_from_lyth ? `from ${hit.price_from_lyth} LYTH` : null,
+    hit.availability_hint,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  return (
+    <div className="w-setting-row" style={{ alignItems: "flex-start", padding: "8px 0" }}>
+      <div style={{ flex: 1 }}>
+        <div className="row-label">{title}</div>
+        {subtitle ? <div className="row-help">{subtitle}</div> : null}
+      </div>
     </div>
   );
 }
