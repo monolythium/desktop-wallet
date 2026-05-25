@@ -84,6 +84,14 @@ pub fn run() {
         stele::commands::stele_addressbook_remove,
         #[cfg(feature = "stele")]
         stele::commands::stele_listing_search,
+        #[cfg(feature = "stele")]
+        stele::commands::stele_tx_outbox_list,
+        #[cfg(feature = "stele")]
+        stele::commands::stele_tx_outbox_get,
+        #[cfg(feature = "stele")]
+        stele::commands::stele_tx_outbox_retry,
+        #[cfg(feature = "stele")]
+        stele::commands::stele_tx_outbox_forget,
     ]);
 
     builder
