@@ -97,7 +97,7 @@ export const BALANCES: Record<Denom, Balances> = {
  * Demo recipient + amount used by the Send button on Home. The drawer
  * shows these in the diff and feeds them straight to `sendLyth`. When
  * Stage 5 lands a real "compose tx" surface (recipient picker, amount
- * field, gas chooser) this fixture goes away.
+ * field, execution-fee selector) this fixture goes away.
  */
 export const SEND_DEMO: { to: string; amountLyth: string } = {
   to: "0x000000000000000000000000000000000000dead",
