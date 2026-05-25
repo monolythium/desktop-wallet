@@ -32,6 +32,7 @@
 //! for the full picking list and phase order.
 
 pub mod approval_bridge;
+pub mod commands;
 pub mod mcp_sidecar;
 pub mod outbound_mcp;
 
