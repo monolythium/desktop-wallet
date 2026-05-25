@@ -9,6 +9,13 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { TodoSection } from "../components/TodoSection";
+import {
+  convertCreate,
+  convertEstimate,
+  ConvertCallError,
+  type ConvertCreateInput,
+  type ConvertEstimateInput,
+} from "../sdk/convert";
 import { checkName, type NameCheckResult } from "../sdk/name-registry";
 import { querySteleBackend, type SteleBackendResult } from "../sdk/stele";
 import { listingSearch, StereSearchCallError, type ListingHit } from "../sdk/stele-search";
@@ -47,17 +54,201 @@ export function Stele() {
 
       <BrowseCard />
 
+      <ConvertCard />
+
       <TodoSection
         title="Booking"
         items={[
-          "Request form → review → sign ceremony",
-          "Counter-offer thread (Negotiating state)",
-          "In-progress · submitted · release · rate",
-          "Dispute flow",
+          "Request form lives on the Inbox page today",
+          "Counter-offer thread (Negotiating state — blocked on lyth_mcp adding booking_counter_offer)",
+          "Signing-ceremony animation around the release tx",
+          "Dispute flow with evidence upload",
         ]}
       />
     </div>
   );
+}
+
+const CONVERT_CURRENCIES = [
+  { code: "btc", label: "Bitcoin (BTC)" },
+  { code: "eth", label: "Ethereum (ETH)" },
+  { code: "usdt", label: "Tether (USDT)" },
+  { code: "usdc", label: "USD Coin (USDC)" },
+  { code: "sol", label: "Solana (SOL)" },
+  { code: "ltc", label: "Litecoin (LTC)" },
+  { code: "doge", label: "Dogecoin (DOGE)" },
+  { code: "matic", label: "Polygon (MATIC)" },
+] as const;
+
+function ConvertCard() {
+  const [fromCurrency, setFromCurrency] = useState("btc");
+  const [toCurrency, setToCurrency] = useState("eth");
+  const [fromAmount, setFromAmount] = useState("");
+  const [payoutAddress, setPayoutAddress] = useState("");
+  const [quote, setQuote] = useState<unknown | null>(null);
+  const [created, setCreated] = useState<unknown | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const onQuote = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const amt = parseFloat(fromAmount);
+    if (!isFinite(amt) || amt <= 0) {
+      setError("Enter a positive from-amount.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    setQuote(null);
+    try {
+      const input: ConvertEstimateInput = {
+        from_currency: fromCurrency,
+        to_currency: toCurrency,
+        from_amount: amt,
+        flow: "standard",
+      };
+      const result = await convertEstimate(input);
+      setQuote(result);
+    } catch (cause) {
+      if (cause instanceof ConvertCallError) setError(cause.message);
+      else setError(String(cause));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onCreate = async () => {
+    const amt = parseFloat(fromAmount);
+    if (!isFinite(amt) || amt <= 0 || !payoutAddress.trim()) return;
+    setBusy(true);
+    setError(null);
+    setCreated(null);
+    try {
+      const input: ConvertCreateInput = {
+        from_currency: fromCurrency,
+        to_currency: toCurrency,
+        from_amount: amt,
+        payout_address: payoutAddress.trim(),
+        flow: "standard",
+      };
+      const result = await convertCreate(input);
+      setCreated(result);
+    } catch (cause) {
+      if (cause instanceof ConvertCallError) setError(cause.message);
+      else setError(String(cause));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="w-card">
+      <div className="w-card__head">
+        <h3>Convert</h3>
+        <span className="w-todo__pill">{created ? "swap created" : quote ? "quote ready" : "draft"}</span>
+      </div>
+      <div className="w-card__body">
+        {error ? (
+          <div className="row-help" style={{ color: "var(--w-text-2, #999)", marginBottom: 12 }}>
+            {error}
+          </div>
+        ) : null}
+
+        <form onSubmit={onQuote} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <select value={fromCurrency} onChange={(e) => setFromCurrency(e.target.value)} style={inputStyle()}>
+              {CONVERT_CURRENCIES.map((c) => (
+                <option key={c.code} value={c.code}>{c.label}</option>
+              ))}
+            </select>
+            <input
+              type="number"
+              step="any"
+              placeholder="Amount"
+              value={fromAmount}
+              onChange={(e) => setFromAmount(e.target.value)}
+              style={{ ...inputStyle(), flex: 1 }}
+            />
+            <span style={{ opacity: 0.6 }}>→</span>
+            <select value={toCurrency} onChange={(e) => setToCurrency(e.target.value)} style={inputStyle()}>
+              {CONVERT_CURRENCIES.map((c) => (
+                <option key={c.code} value={c.code}>{c.label}</option>
+              ))}
+            </select>
+            <button type="submit" className="btn btn--sm" disabled={busy}>
+              {busy && !quote ? "…" : "Quote"}
+            </button>
+          </div>
+
+          {quote ? (
+            <pre
+              style={{
+                background: "var(--w-bg-2, #161616)",
+                border: "1px solid var(--w-border, #2a2a2a)",
+                borderRadius: 6,
+                padding: 10,
+                fontFamily: "var(--w-font-mono, ui-monospace, monospace)",
+                fontSize: 11,
+                maxHeight: 180,
+                overflow: "auto",
+                margin: 0,
+              }}
+            >
+              {JSON.stringify(quote, null, 2)}
+            </pre>
+          ) : null}
+
+          <div style={{ display: "flex", gap: 8 }}>
+            <input
+              type="text"
+              placeholder={`Payout ${toCurrency.toUpperCase()} address`}
+              value={payoutAddress}
+              onChange={(e) => setPayoutAddress(e.target.value)}
+              style={{ ...inputStyle(), flex: 1 }}
+            />
+            <button
+              type="button"
+              className="btn btn--sm"
+              onClick={onCreate}
+              disabled={busy || !quote || !payoutAddress.trim()}
+            >
+              {busy && quote ? "Creating…" : "Create swap"}
+            </button>
+          </div>
+
+          {created ? (
+            <pre
+              style={{
+                background: "var(--w-bg-2, #161616)",
+                border: "1px solid var(--w-border, #2a2a2a)",
+                borderRadius: 6,
+                padding: 10,
+                fontFamily: "var(--w-font-mono, ui-monospace, monospace)",
+                fontSize: 11,
+                maxHeight: 220,
+                overflow: "auto",
+                margin: 0,
+              }}
+            >
+              {JSON.stringify(created, null, 2)}
+            </pre>
+          ) : null}
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function inputStyle(): React.CSSProperties {
+  return {
+    padding: "8px 10px",
+    borderRadius: 6,
+    border: "1px solid var(--w-border, #2a2a2a)",
+    background: "var(--w-bg-2, #161616)",
+    color: "var(--w-text, #e6e6e6)",
+    fontFamily: "var(--w-font-mono, ui-monospace, SFMono-Regular, monospace)",
+    fontSize: 13,
+  };
 }
 
 const CATEGORIES = [

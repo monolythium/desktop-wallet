@@ -465,3 +465,113 @@ pub async fn stele_approval_resolve(
     }
     Ok(())
 }
+
+// ============================================================
+// Convert (ChangeNow) — crypto + fiat off-ramp proxies into
+// lyth_mcp's changenow_* tools.
+// ============================================================
+
+#[derive(Debug, Deserialize)]
+pub struct ConvertEstimateInput {
+    pub from_currency: String,
+    pub to_currency: String,
+    pub from_amount: Option<f64>,
+    pub to_amount: Option<f64>,
+    pub flow: Option<String>,
+    pub from_network: Option<String>,
+    pub to_network: Option<String>,
+}
+
+#[tauri::command]
+pub async fn stele_convert_estimate(
+    input: ConvertEstimateInput,
+    sidecar: State<'_, SidecarHandle>,
+) -> Result<serde_json::Value> {
+    call_sidecar_tool(
+        &sidecar,
+        "changenow_estimate",
+        serde_json::json!({
+            "fromCurrency": input.from_currency,
+            "toCurrency": input.to_currency,
+            "fromAmount": input.from_amount,
+            "toAmount": input.to_amount,
+            "fromNetwork": input.from_network,
+            "toNetwork": input.to_network,
+            "flow": input.flow.unwrap_or_else(|| "standard".into()),
+        }),
+    )
+    .await
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ConvertCreateInput {
+    pub from_currency: String,
+    pub to_currency: String,
+    pub from_amount: f64,
+    pub payout_address: String,
+    pub payout_extra_id: Option<String>,
+    pub refund_address: Option<String>,
+    pub flow: Option<String>,
+    pub rate_id: Option<String>,
+    pub from_network: Option<String>,
+    pub to_network: Option<String>,
+}
+
+#[tauri::command]
+pub async fn stele_convert_create(
+    input: ConvertCreateInput,
+    sidecar: State<'_, SidecarHandle>,
+) -> Result<serde_json::Value> {
+    call_sidecar_tool(
+        &sidecar,
+        "changenow_swap_create",
+        serde_json::json!({
+            "fromCurrency": input.from_currency,
+            "toCurrency": input.to_currency,
+            "fromAmount": input.from_amount,
+            "fromNetwork": input.from_network,
+            "toNetwork": input.to_network,
+            "payoutAddress": input.payout_address,
+            "payoutExtraId": input.payout_extra_id,
+            "refundAddress": input.refund_address,
+            "flow": input.flow.unwrap_or_else(|| "standard".into()),
+            "rateId": input.rate_id,
+        }),
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn stele_convert_status(
+    swap_id: String,
+    sidecar: State<'_, SidecarHandle>,
+) -> Result<serde_json::Value> {
+    call_sidecar_tool(
+        &sidecar,
+        "changenow_swap_status",
+        serde_json::json!({ "id": swap_id }),
+    )
+    .await
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ConvertHistoryInput {
+    pub limit: Option<u32>,
+    pub offset: Option<u32>,
+}
+
+#[tauri::command]
+pub async fn stele_convert_history(
+    input: ConvertHistoryInput,
+    sidecar: State<'_, SidecarHandle>,
+) -> Result<serde_json::Value> {
+    call_sidecar_tool(
+        &sidecar,
+        "changenow_swap_list",
+        serde_json::json!({
+            "limit": input.limit.unwrap_or(25),
+            "offset": input.offset.unwrap_or(0),
+        }),
+    )
+    .await
+}
