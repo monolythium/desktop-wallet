@@ -14,6 +14,13 @@ import {
   AddressBookCallError,
   type AddressBookEntry,
 } from "../sdk/addressbook";
+import {
+  txOutboxForget,
+  txOutboxList,
+  txOutboxRetry,
+  TxOutboxCallError,
+  type TxOutboxEntry,
+} from "../sdk/tx-outbox";
 
 export function Inbox() {
   return (
@@ -25,6 +32,8 @@ export function Inbox() {
 
       <AddressBookCard />
 
+      <TxOutboxCard />
+
       <TodoSection
         title="Bookings"
         items={[
@@ -33,14 +42,124 @@ export function Inbox() {
           "Booking detail with state-machine timeline + contextual actions",
         ]}
       />
-      <TodoSection
-        title="Tx outbox"
-        items={[
-          "Pending Tauri-signed transactions awaiting confirmation",
-          "Retry / release / forget controls per row",
-          "Badge on sidebar Inbox entry with unread count",
-        ]}
-      />
+    </div>
+  );
+}
+
+function TxOutboxCard() {
+  const [entries, setEntries] = useState<TxOutboxEntry[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const list = await txOutboxList();
+      setEntries(list);
+    } catch (cause) {
+      if (cause instanceof TxOutboxCallError) {
+        setError(cause.message);
+        setEntries(null);
+      } else {
+        setError(String(cause));
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  const onRetry = async (id: string) => {
+    setError(null);
+    try {
+      await txOutboxRetry(id);
+      await refresh();
+    } catch (cause) {
+      if (cause instanceof TxOutboxCallError) setError(cause.message);
+      else setError(String(cause));
+    }
+  };
+
+  const onForget = async (id: string) => {
+    setError(null);
+    try {
+      await txOutboxForget(id);
+      await refresh();
+    } catch (cause) {
+      if (cause instanceof TxOutboxCallError) setError(cause.message);
+      else setError(String(cause));
+    }
+  };
+
+  return (
+    <div className="w-card">
+      <div className="w-card__head">
+        <h3>Tx outbox</h3>
+        <span className="w-todo__pill">
+          {loading ? "loading" : entries ? `${entries.length} pending` : "offline"}
+        </span>
+      </div>
+      <div className="w-card__body">
+        {error ? (
+          <div className="row-help" style={{ color: "var(--w-text-2, #999)", marginBottom: 12 }}>
+            {error}
+          </div>
+        ) : null}
+        {entries && entries.length > 0 ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {entries.map((e, i) => {
+              const id = e.id ?? String(i);
+              return (
+                <div
+                  key={id}
+                  className="w-setting-row"
+                  style={{ alignItems: "flex-start", padding: "8px 0" }}
+                >
+                  <div style={{ flex: 1 }}>
+                    <div className="row-label">{e.intent ?? id}</div>
+                    <div
+                      className="row-help"
+                      style={{ fontFamily: "var(--w-font-mono, ui-monospace, monospace)", fontSize: 12 }}
+                    >
+                      {[
+                        e.status,
+                        e.hash ? `tx ${e.hash}` : null,
+                        e.attempts != null ? `${e.attempts} attempts` : null,
+                        e.updated_at,
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </div>
+                    {e.last_error ? (
+                      <div className="row-help" style={{ marginTop: 4 }}>
+                        {e.last_error}
+                      </div>
+                    ) : null}
+                  </div>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    {e.id ? (
+                      <button type="button" className="btn btn--sm" onClick={() => onRetry(e.id!)}>
+                        Retry
+                      </button>
+                    ) : null}
+                    {e.id ? (
+                      <button type="button" className="btn btn--sm" onClick={() => onForget(e.id!)}>
+                        Forget
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : entries && entries.length === 0 ? (
+          <div className="row-help">No pending transactions.</div>
+        ) : null}
+      </div>
     </div>
   );
 }

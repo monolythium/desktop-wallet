@@ -164,3 +164,38 @@ pub async fn stele_listing_search(
     )
     .await
 }
+
+// ============================================================
+// Tx outbox — proxies into the lyth_mcp `tx_outbox_*` tools.
+// ============================================================
+
+#[tauri::command]
+pub async fn stele_tx_outbox_list(
+    sidecar: State<'_, SidecarHandle>,
+) -> Result<serde_json::Value> {
+    call_sidecar_tool(&sidecar, "tx_outbox_list", serde_json::json!({})).await
+}
+
+#[tauri::command]
+pub async fn stele_tx_outbox_get(
+    id: String,
+    sidecar: State<'_, SidecarHandle>,
+) -> Result<serde_json::Value> {
+    call_sidecar_tool(&sidecar, "tx_outbox_get", serde_json::json!({ "id": id })).await
+}
+
+#[tauri::command]
+pub async fn stele_tx_outbox_retry(
+    id: String,
+    sidecar: State<'_, SidecarHandle>,
+) -> Result<serde_json::Value> {
+    call_sidecar_tool(&sidecar, "tx_outbox_retry", serde_json::json!({ "id": id })).await
+}
+
+#[tauri::command]
+pub async fn stele_tx_outbox_forget(
+    id: String,
+    sidecar: State<'_, SidecarHandle>,
+) -> Result<serde_json::Value> {
+    call_sidecar_tool(&sidecar, "tx_outbox_forget", serde_json::json!({ "id": id })).await
+}
