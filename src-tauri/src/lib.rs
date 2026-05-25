@@ -110,6 +110,14 @@ pub fn run() {
         stele::commands::stele_outbound_mcp_stop,
         #[cfg(feature = "stele")]
         stele::commands::stele_approval_resolve,
+        #[cfg(feature = "stele")]
+        stele::commands::stele_convert_estimate,
+        #[cfg(feature = "stele")]
+        stele::commands::stele_convert_create,
+        #[cfg(feature = "stele")]
+        stele::commands::stele_convert_status,
+        #[cfg(feature = "stele")]
+        stele::commands::stele_convert_history,
     ]);
 
     builder
