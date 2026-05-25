@@ -1,9 +1,16 @@
 // Settings — Stage 2 ships preference stubs. Real persistence + keychain
 // rotation arrive with Stage 3 / Stage 4.
 
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { IDENTITY } from "../data/fixtures";
 import { useOperations } from "../operations/context";
+import {
+  outboundMcpStart,
+  outboundMcpStatus,
+  outboundMcpStop,
+  OutboundMcpCallError,
+  type McpOutboundStatus,
+} from "../sdk/outbound-mcp";
 import {
   readDevkitChannel,
   writeDevkitChannel,
@@ -73,6 +80,8 @@ export function Settings({ developerModeEnabled, setDeveloperModeEnabled, steleE
           </div>
         </div>
       </div>
+
+      {steleEnabled ? <OutboundMcpCard /> : null}
 
       <div className="w-card">
         <div className="w-card__head"><h3>Developer Mode</h3></div>
@@ -157,6 +166,126 @@ export function Settings({ developerModeEnabled, setDeveloperModeEnabled, steleE
             </div>
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function OutboundMcpCard() {
+  const [status, setStatus] = useState<McpOutboundStatus | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [showToken, setShowToken] = useState(false);
+
+  const refresh = useCallback(async () => {
+    setError(null);
+    try {
+      const s = await outboundMcpStatus();
+      setStatus(s);
+    } catch (cause) {
+      if (cause instanceof OutboundMcpCallError) {
+        setError(cause.message);
+        setStatus(null);
+      } else {
+        setError(String(cause));
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  const toggle = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const next = status?.enabled ? await outboundMcpStop() : await outboundMcpStart();
+      setStatus(next);
+    } catch (cause) {
+      if (cause instanceof OutboundMcpCallError) setError(cause.message);
+      else setError(String(cause));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const copyJson = () => {
+    if (!status?.enabled || !status.url || !status.auth_token) return;
+    const config = {
+      mcpServers: {
+        "monolythium-wallet": {
+          url: status.url,
+          headers: { Authorization: `Bearer ${status.auth_token}` },
+        },
+      },
+    };
+    navigator.clipboard?.writeText(JSON.stringify(config, null, 2));
+  };
+
+  return (
+    <div className="w-card">
+      <div className="w-card__head">
+        <h3>Outbound MCP</h3>
+        <span className="w-todo__pill">
+          {status == null ? "loading" : status.enabled ? "running" : "stopped"}
+        </span>
+      </div>
+      <div className="w-card__body">
+        {error ? (
+          <div className="row-help" style={{ color: "var(--w-text-2, #999)", marginBottom: 12 }}>
+            {error}
+          </div>
+        ) : null}
+
+        <div className="w-setting-row">
+          <div>
+            <div className="row-label">Expose this wallet as an MCP server</div>
+            <div className="row-help">
+              Lets desktop MCP clients call Stele tools (search providers,
+              request bookings, query balance) on your behalf. Loopback-only with a per-session
+              bearer token. Every destructive call still routes through the approval bridge.
+            </div>
+          </div>
+          <button
+            type="button"
+            className={`w-chip ${status?.enabled ? "is-on" : ""}`}
+            onClick={toggle}
+            disabled={busy}
+          >
+            {busy ? "…" : status?.enabled ? "Stop" : "Start"}
+          </button>
+        </div>
+
+        {status?.enabled && status.url ? (
+          <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 6 }}>
+            <div className="row-help">
+              <div className="row-label">URL</div>
+              <code>{status.url}</code>
+            </div>
+            <div className="row-help">
+              <div className="row-label">Auth token</div>
+              <code>{showToken ? status.auth_token : "•".repeat(24)}</code>
+              <button
+                type="button"
+                className="btn btn--sm"
+                onClick={() => setShowToken((v) => !v)}
+                style={{ marginLeft: 8 }}
+              >
+                {showToken ? "Hide" : "Reveal"}
+              </button>
+            </div>
+            <div className="row-help">
+              <div className="row-label">Scopes</div>
+              {status.scopes.join(" · ")}
+            </div>
+            <div>
+              <button type="button" className="btn btn--sm" onClick={copyJson}>
+                Copy MCP client config
+              </button>
+            </div>
+          </div>
+        ) : null}
       </div>
     </div>
   );
