@@ -7,6 +7,7 @@
 import {
   MONOLYTHIUM_TESTNET_CHAIN_ID,
   RpcClient,
+  addressToTypedBech32,
   formatLyth,
   parseLythToLythoshi,
 } from "@monolythium/core-sdk";
@@ -17,12 +18,14 @@ import {
   submitEncryptedEnvelope,
 } from "@monolythium/core-sdk/crypto";
 import type { NativeEvmTxFields } from "@monolythium/core-sdk/crypto";
+import { requireTypedUserAddressHex } from "./address";
 import { getProvider } from "./client";
 
 const SPRINTNET_TRANSFER_EXECUTION_UNIT_LIMIT = 30_000n;
 
 export interface SendNativeLythArgs {
   seed: Uint8Array;
+  /** Typed `mono1...` recipient. */
   to: string;
   amountLyth: string;
   executionUnitLimit?: bigint;
@@ -40,6 +43,7 @@ export interface SendNativeLythResult {
 export interface NativeLythTransferPlanArgs {
   chainId: bigint;
   nonce: bigint;
+  /** Typed `mono1...` recipient. */
   to: string;
   amountLyth: string;
   executionUnitPriceLythoshi: bigint;
@@ -56,6 +60,7 @@ export interface NativeLythTransferPlan {
 export function buildNativeLythTransferPlan(args: NativeLythTransferPlanArgs): NativeLythTransferPlan {
   const amountLythoshi = parseLythToLythoshi(args.amountLyth).toString();
   const executionUnitLimit = args.executionUnitLimit ?? SPRINTNET_TRANSFER_EXECUTION_UNIT_LIMIT;
+  const toHex = requireTypedUserAddressHex(args.to, "to");
   return {
     amountLythoshi,
     amountDisplay: formatLyth(amountLythoshi, { includeUnit: false }),
@@ -65,7 +70,7 @@ export function buildNativeLythTransferPlan(args: NativeLythTransferPlanArgs): N
       maxFeePerGas: args.executionUnitPriceLythoshi,
       maxPriorityFeePerGas: args.priorityTipLythoshi ?? args.executionUnitPriceLythoshi,
       gasLimit: executionUnitLimit,
-      to: args.to,
+      to: toHex,
       value: amountLythoshi,
       input: "0x",
     },
@@ -76,10 +81,10 @@ export async function sendNativeLyth(args: SendNativeLythArgs): Promise<SendNati
   const backend = MlDsa65Backend.fromSeed(args.seed);
   const provider = getProvider();
   const client = new RpcClient(provider.rpcClient.endpoint);
-  const from = backend.getAddress();
+  const fromHex = backend.getAddress();
 
   const [nonce, executionUnitPrice, encryptionKey] = await Promise.all([
-    client.ethGetTransactionCount(from, "pending"),
+    client.ethGetTransactionCount(fromHex, "pending"),
     client.ethGasPrice(),
     fetchEncryptionKey(client),
   ]);
@@ -101,7 +106,7 @@ export async function sendNativeLyth(args: SendNativeLythArgs): Promise<SendNati
   const txHash = await submitEncryptedEnvelope(client, wrapped.envelopeWireHex);
   return {
     txHash,
-    from,
+    from: addressToTypedBech32("user", fromHex),
     amountLythoshi: plan.amountLythoshi,
     amountDisplay: plan.amountDisplay,
     innerSighashHex: wrapped.innerSighashHex,

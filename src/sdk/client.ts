@@ -9,6 +9,7 @@
 
 import { MonolythiumProvider, SdkError, formatLyth, getRpcEndpoints } from "@monolythium/core-sdk";
 import type { MonolythiumProviderOptions } from "@monolythium/core-sdk";
+import { requireTypedUserAddressHex } from "./address";
 
 /**
  * Default RPC endpoint. Honors `VITE_MONO_RPC_URL` at build time so the
@@ -82,11 +83,12 @@ export type ChainSnapshot = {
 export async function loadChainSnapshot(address: string): Promise<ChainSnapshot> {
   const provider = getProvider();
   const endpoint = provider.rpcClient.endpoint;
+  const addressHex = requireTypedUserAddressHex(address);
   try {
     const [network, blockHeight, balanceAtomic] = await Promise.all([
       provider.getNetwork(),
       provider.getBlockNumber(),
-      provider.getBalance(address),
+      provider.getBalance(addressHex),
     ]);
     const lythoshi = balanceQuantityToLythoshi(`0x${balanceAtomic.toString(16)}`);
     return {

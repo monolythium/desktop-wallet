@@ -13,6 +13,7 @@ import type {
 } from "@monolythium/core-sdk";
 import { MlDsa65Backend } from "@monolythium/core-sdk/crypto";
 import { getProvider } from "./client";
+import { requireTypedUserAddress, requireTypedUserAddressHex } from "./address";
 import { selectNativeSpotMarket, type SelectedNativeSpotMarket } from "./market";
 
 export interface RpcOutcome<T> {
@@ -164,14 +165,15 @@ export async function loadLiveNetworkStatus(): Promise<LiveNetworkStatus> {
 
 export async function loadLiveStakeStatus(wallet: string): Promise<LiveStakeStatus> {
   const client = getProvider().rpcClient;
+  const typedWallet = requireTypedUserAddress(wallet, "wallet");
   const clusterPage = await capture(() => client.lythClusterDirectory(0, 100));
   const clusterRows = clusterPage.ok ? clusterPage.value?.clusters ?? [] : [];
   const activeClusterRows = clusterRows.filter((cluster) => cluster.active);
   const healthyClusterRows = activeClusterRows.filter((cluster) => cluster.aggregateHealth === "ok");
   const [delegationCap, delegations, delegationHistory] = await Promise.all([
     capture(() => client.lythGetDelegationCap()),
-    capture(() => client.lythGetDelegations(wallet)),
-    capture(() => client.lythGetDelegationHistory(wallet, 25)),
+    capture(() => client.lythGetDelegations(typedWallet)),
+    capture(() => client.lythGetDelegationHistory(typedWallet, 25)),
   ]);
   return {
     endpoint: client.endpoint,
@@ -186,13 +188,15 @@ export async function loadLiveStakeStatus(wallet: string): Promise<LiveStakeStat
 
 export async function loadLiveTokenStatus(wallet: string): Promise<LiveTokenStatus> {
   const client = getProvider().rpcClient;
+  const typedWallet = requireTypedUserAddress(wallet, "wallet");
+  const walletHex = requireTypedUserAddressHex(wallet, "wallet");
   const [nativeBalance, tokenBalances, addressLabel, assetPolicy] = await Promise.all([
     capture(async () => {
-      const result = await client.ethGetBalance(wallet);
+      const result = await client.ethGetBalance(walletHex);
       return formatLyth(BigInt(normalizeBalanceHex(result)).toString(), { includeUnit: false });
     }),
-    capture(() => client.lythGetTokenBalances(wallet)),
-    capture(() => client.lythGetAddressLabel(wallet)),
+    capture(() => client.lythGetTokenBalances(typedWallet)),
+    capture(() => client.lythGetAddressLabel(typedWallet)),
     capture(() => client.lythGetAssetPolicy("LYTH") as Promise<Record<string, unknown>>),
   ]);
   return {
@@ -264,18 +268,20 @@ export async function loadLiveTradeStatus(): Promise<LiveTradeStatus> {
 }
 
 export async function loadLiveAddressActivity(wallet: string): Promise<RpcOutcome<LiveAddressActivityRow[]>> {
-  return capture(() => getProvider().rpcClient.lythGetAddressActivity(wallet, 30));
+  const typedWallet = requireTypedUserAddress(wallet, "wallet");
+  return capture(() => getProvider().rpcClient.lythGetAddressActivity(typedWallet, 30));
 }
 
 export async function loadAccountPolicy(address: string) {
-  return getProvider().rpcClient.lythGetAccountPolicy(address);
+  return getProvider().rpcClient.lythGetAccountPolicy(requireTypedUserAddress(address, "account policy address"));
 }
 
 export async function loadLiveWalletBalance(address: string): Promise<LiveWalletBalance> {
   const client = getProvider().rpcClient;
+  const addressHex = requireTypedUserAddressHex(address, "wallet");
   const [nonce, balance] = await Promise.all([
-    client.ethGetTransactionCount(address, "pending"),
-    client.ethGetBalance(address),
+    client.ethGetTransactionCount(addressHex, "pending"),
+    client.ethGetBalance(addressHex),
   ]);
   const rawBalance = normalizeBalanceHex(balance);
   const lythoshi = BigInt(rawBalance).toString();

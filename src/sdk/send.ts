@@ -17,12 +17,13 @@
 
 import type { TransactionRequest } from "ethers";
 import { parseLythToLythoshi, type MonolythiumSigner } from "@monolythium/core-sdk";
+import { requireTypedUserAddressHex } from "./address";
 import { getProvider } from "./client";
 
 export interface SendLythArgs {
-  /** EIP-55 lowercase address to debit. Must match the signer's address. */
+  /** Typed `mono1...` address to debit. Must match the signer's address. */
   from: string;
-  /** EIP-55 lowercase recipient. */
+  /** Typed `mono1...` recipient. */
   to: string;
   /** Decimal LYTH string, e.g. "12.5". 1 LYTH = 10^8 lythoshi. */
   amountLyth: string;
@@ -57,10 +58,12 @@ export async function sendLyth(
   args: SendLythArgs,
 ): Promise<SendLythResult> {
   const provider = getProvider();
+  const fromHex = requireTypedUserAddressHex(args.from, "from");
+  const toHex = requireTypedUserAddressHex(args.to, "to");
 
   // 1. Sender nonce + native fee data + chain id, in parallel.
   const [nonce, feeData, network] = await Promise.all([
-    provider.getTransactionCount(args.from, "pending"),
+    provider.getTransactionCount(fromHex, "pending"),
     provider.getFeeData(),
     provider.getNetwork(),
   ]);
@@ -79,8 +82,8 @@ export async function sendLyth(
     type: 2, // EIP-1559
     chainId,
     nonce,
-    from: args.from,
-    to: args.to,
+    from: fromHex,
+    to: toHex,
     value: parseLythToLythoshi(args.amountLyth),
     data: args.data ?? "0x",
     gasLimit: executionUnitLimit,

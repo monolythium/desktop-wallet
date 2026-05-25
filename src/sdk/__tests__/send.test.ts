@@ -23,6 +23,7 @@ import {
   MonolythiumProvider,
   MonolythiumSigner,
   RpcClient,
+  addressToTypedBech32,
   parseLythToLythoshi,
 } from "@monolythium/core-sdk";
 import { sendLyth } from "../send";
@@ -171,10 +172,12 @@ describe("sendLyth", () => {
     // any node would accept (modulo balance/state).
     const wallet = new Wallet(TEST_PRIVKEY);
     const signer = MonolythiumSigner.fromEthersWallet(wallet, provider);
+    const from = addressToTypedBech32("user", wallet.address);
+    const to = addressToTypedBech32("user", "0x000000000000000000000000000000000000dead");
 
     const result = await sendLyth(signer, {
-      from: wallet.address,
-      to: "0x000000000000000000000000000000000000dead",
+      from,
+      to,
       amountLyth: "0.001",
     });
 
@@ -277,10 +280,27 @@ describe("sendLyth", () => {
     const signer = MonolythiumSigner.fromEthersWallet(wallet, provider);
     await expect(
       sendLyth(signer, {
-        from: wallet.address,
-        to: "0x000000000000000000000000000000000000dead",
+        from: addressToTypedBech32("user", wallet.address),
+        to: addressToTypedBech32("user", "0x000000000000000000000000000000000000dead"),
         amountLyth: "0.001",
       }),
     ).rejects.toThrow(/native execution fee data/);
+  });
+
+  it("rejects raw 0x public send arguments before composing the wire tx", async () => {
+    const provider = new MonolythiumProvider(
+      new RpcClient("http://test.invalid", { fetch: buildMockFetch(state) }),
+    );
+    setProviderForTest(provider);
+    const wallet = new Wallet(TEST_PRIVKEY);
+    const signer = MonolythiumSigner.fromEthersWallet(wallet, provider);
+
+    await expect(
+      sendLyth(signer, {
+        from: wallet.address,
+        to: addressToTypedBech32("user", "0x000000000000000000000000000000000000dead"),
+        amountLyth: "0.001",
+      }),
+    ).rejects.toThrow(/from raw 0x addresses are retired/);
   });
 });

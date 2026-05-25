@@ -2,9 +2,9 @@
 // public denom shows on-chain addresses; private denom shows view-keys.
 
 import { useState } from "react";
-import { normalizeAddressHex } from "@monolythium/core-sdk";
 import { TodoSection } from "../components/TodoSection";
 import { IDENTITY } from "../data/fixtures";
+import { requireTypedUserAddress } from "../sdk/address";
 import { errorMessage, loadAccountPolicy } from "../sdk/live";
 
 interface Props {
@@ -22,9 +22,9 @@ export function Contacts({ denom }: Props) {
     setError(null);
     setPolicy(null);
     try {
-      const normalized = normalizeAddressHex(address);
-      setAddress(normalized);
-      setPolicy(await loadAccountPolicy(normalized) as Record<string, unknown>);
+      const typed = requireTypedUserAddress(address, "account policy address");
+      setAddress(typed);
+      setPolicy(await loadAccountPolicy(typed) as Record<string, unknown>);
     } catch (cause) {
       setError(errorMessage(cause));
     } finally {
@@ -54,7 +54,7 @@ export function Contacts({ denom }: Props) {
               className="w-live-input mono"
               value={address}
               onChange={(event) => setAddress(event.currentTarget.value)}
-              placeholder="0x…"
+              placeholder="mono1…"
             />
             <button className="btn btn--sm" onClick={lookupPolicy} disabled={busy}>
               {busy ? "Checking…" : "Check"}
@@ -71,7 +71,7 @@ export function Contacts({ denom }: Props) {
               <LiveCell label="Flags" value={String(policy.flags ?? "0x00")} mono />
             </div>
           ) : (
-            <div className="row-help">Reads lyth_getAccountPolicy for a pasted address.</div>
+            <div className="row-help">Reads lyth_getAccountPolicy for a typed mono1 address.</div>
           )}
         </div>
       </div>
@@ -89,7 +89,7 @@ export function Contacts({ denom }: Props) {
       <TodoSection
         title="Add contact"
         items={[
-          "TODO — paste address · resolve to lyth_getAccountPolicy preview",
+          "TODO — paste typed mono1 address · resolve to lyth_getAccountPolicy preview",
           "TODO — receiver-flag check before allowing private contact (Privacy Rule 3)",
           "TODO — ENS-equivalent resolver (if/when surfaced)",
           "TODO — import from CSV / signed contact card",
