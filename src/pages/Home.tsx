@@ -3,11 +3,13 @@
 // Private denom: hero with amount-hidden disclosure + activity preview.
 
 import { useEffect, useState } from "react";
+import { addressToTypedBech32 } from "@monolythium/core-sdk";
 import { useOperations } from "../operations/context";
 import { loadChainSnapshot } from "../sdk/client";
 import { useChainSnapshot } from "../sdk/useChainSnapshot";
-import { sendNativeLyth } from "../sdk/native-send";
-import { BALANCES, IDENTITY, SEND_DEMO, TOKENS, TXS_PRIVATE, TXS_PUBLIC } from "../data/fixtures";
+import { ReceiveModal } from "../components/ReceiveModal";
+import { SendComposeModal } from "../components/SendComposeModal";
+import { BALANCES, IDENTITY, TOKENS, TXS_PRIVATE, TXS_PUBLIC } from "../data/fixtures";
 import type { Denom } from "../data/fixtures";
 import { TokenRow } from "../components/TokenRow";
 import { TxRow } from "../components/TxRow";
@@ -33,6 +35,10 @@ export function Home({ denom, goto }: Props) {
   const totalUsd = TOKENS.reduce((a, t) => a + t.amount * t.priceUsd, 0);
   const [liveTokens, setLiveTokens] = useState<LiveTokenStatus | null>(null);
   const [liveActivity, setLiveActivity] = useState<RpcOutcome<LiveAddressActivityRow[]> | null>(null);
+  const [sendOpen, setSendOpen] = useState(false);
+  const [receiveOpen, setReceiveOpen] = useState(false);
+
+  const selfBech32m = addressToTypedBech32("user", IDENTITY.address);
 
   // Live SDK call: chain id + balance for the bound address. The result is
   // surfaced through the topbar (see Topbar.tsx); the hook is mounted here so
@@ -55,54 +61,8 @@ export function Home({ denom, goto }: Props) {
     };
   }, [isPub]);
 
-  const openNativeSend = () => {
-    ops.open({
-      title: `Send ${SEND_DEMO.amountLyth} LYTH`,
-      subtitle: "Native ML-DSA encrypted Sprintnet send",
-      auth: "keychain",
-      diff: [
-        { k: "From",      v: "Unlocked vault address" },
-        { k: "To",        v: SEND_DEMO.to },
-        { k: "Token",     v: "LYTH" },
-        { k: "Amount",    v: `${SEND_DEMO.amountLyth} LYTH` },
-        { k: "Network",   v: chain.snapshot ? `chain ${chain.snapshot.chainId}` : "Sprintnet" },
-        { k: "Endpoint",  v: chain.snapshot?.endpoint ?? "(default RPC)" },
-      ],
-      effects: [
-        { text: "Unlocks the local vault for this operation only." },
-        { text: "Derives an ML-DSA-65 signer with @monolythium/core-sdk/crypto." },
-        { text: "Wraps the native transaction in an encrypted envelope and submits lyth_submitEncrypted." },
-      ],
-      execute: async (ctx) => {
-        if (!ctx?.vaultSeed) {
-          throw new Error("vault seed unavailable after keychain authorization");
-        }
-        const result = await sendNativeLyth({
-          seed: ctx.vaultSeed,
-          to: SEND_DEMO.to,
-          amountLyth: SEND_DEMO.amountLyth,
-        });
-        return {
-          headline: `Broadcast ${SEND_DEMO.amountLyth} LYTH`,
-          detail: `${result.txHash} · from ${result.from}`,
-        };
-      },
-    });
-  };
-
-  const openReceive = () => {
-    ops.open({
-      title: "Receive",
-      subtitle: "Share your address",
-      auth: "none",
-      diff: [{ k: "Address", v: IDENTITY.address }],
-      effects: [{ text: "No on-chain action — copy and share with the sender." }],
-      execute: () => Promise.resolve({
-        headline: "Address ready to share",
-        detail: IDENTITY.address,
-      }),
-    });
-  };
+  const openNativeSend = () => setSendOpen(true);
+  const openReceive = () => setReceiveOpen(true);
 
   const openChainProbe = () => {
     ops.open({
@@ -259,6 +219,19 @@ export function Home({ denom, goto }: Props) {
             {TXS_PRIVATE.slice(0, 4).map((tx) => <TxRow key={tx.id} tx={tx} />)}
           </div>
         </div>
+      )}
+
+      {sendOpen && (
+        <SendComposeModal
+          fromBech32m={selfBech32m}
+          onClose={() => setSendOpen(false)}
+        />
+      )}
+      {receiveOpen && (
+        <ReceiveModal
+          address={selfBech32m}
+          onClose={() => setReceiveOpen(false)}
+        />
       )}
     </div>
   );

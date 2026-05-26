@@ -1,0 +1,218 @@
+// Send compose modal — collects recipient (typed `mono1…` bech32m) and
+// amount (decimal LYTH), then opens the OperationsDrawer with the
+// populated descriptor. The drawer prompts for password, unlocks the
+// vault, and hands the seed to `sendNativeLyth` for the actual write.
+
+import { useEffect, useMemo, useState } from "react";
+import {
+  ADDRESS_KIND_HRPS,
+  typedBech32ToAddress,
+} from "@monolythium/core-sdk";
+import { useOperations } from "../operations/context";
+import { sendNativeLyth } from "../sdk/native-send";
+
+interface Props {
+  /** Typed `mono1…` address shown in the From line. Use the same
+   *  identity the wallet displays everywhere else. */
+  fromBech32m: string;
+  onClose: () => void;
+}
+
+const USER_HRP = ADDRESS_KIND_HRPS.user;
+
+export function SendComposeModal({ fromBech32m, onClose }: Props) {
+  const ops = useOperations();
+  const [recipient, setRecipient] = useState("");
+  const [amount, setAmount] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const validate = useMemo(
+    () => () => {
+      const trimmedTo = recipient.trim();
+      if (!trimmedTo) return "Recipient address is required.";
+      if (!trimmedTo.toLowerCase().startsWith(`${USER_HRP}1`)) {
+        return `Recipient must be a typed ${USER_HRP}1… address.`;
+      }
+      try {
+        typedBech32ToAddress(trimmedTo, "user");
+      } catch (cause) {
+        return cause instanceof Error ? cause.message : String(cause);
+      }
+      const trimmedAmt = amount.trim();
+      if (!trimmedAmt) return "Amount is required.";
+      if (!/^\d+(\.\d{1,8})?$/.test(trimmedAmt)) {
+        return "Amount must have at most 8 decimal places.";
+      }
+      if (Number(trimmedAmt) === 0) return "Amount must be greater than 0.";
+      if (trimmedTo.toLowerCase() === fromBech32m.toLowerCase()) {
+        return "Recipient cannot be the wallet's own address.";
+      }
+      return null;
+    },
+    [recipient, amount, fromBech32m],
+  );
+
+  const onReview = () => {
+    const err = validate();
+    setError(err);
+    if (err) return;
+
+    const toBech32m = recipient.trim();
+    const amountLyth = amount.trim();
+
+    ops.open({
+      title: `Send ${amountLyth} LYTH`,
+      subtitle: "Native ML-DSA encrypted Monolythium send",
+      auth: "keychain",
+      diff: [
+        { k: "From", v: fromBech32m },
+        { k: "To", v: toBech32m },
+        { k: "Token", v: "LYTH" },
+        { k: "Amount", v: `${amountLyth} LYTH` },
+      ],
+      effects: [
+        { text: "Unlocks the local vault for this operation only." },
+        { text: "Derives an ML-DSA-65 signer with @monolythium/core-sdk/crypto." },
+        {
+          text: "Wraps the native transaction in an encrypted envelope and submits lyth_submitEncrypted.",
+        },
+      ],
+      execute: async (ctx) => {
+        if (!ctx?.vaultSeed) {
+          throw new Error("vault seed unavailable after keychain authorization");
+        }
+        const result = await sendNativeLyth({
+          seed: ctx.vaultSeed,
+          to: toBech32m,
+          amountLyth,
+        });
+        return {
+          headline: `Broadcast ${amountLyth} LYTH`,
+          detail: `${result.txHash} · from ${result.from}`,
+        };
+      },
+    });
+    onClose();
+  };
+
+  return (
+    <div
+      role="presentation"
+      onClick={onClose}
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(0,0,0,0.55)",
+        backdropFilter: "blur(6px)",
+        zIndex: 30,
+        display: "grid",
+        placeItems: "center",
+        padding: 24,
+      }}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Send LYTH"
+        onClick={(e) => e.stopPropagation()}
+        className="w-card"
+        style={{ maxWidth: 460, width: "100%" }}
+      >
+        <div className="w-card__head">
+          <h3>Send LYTH</h3>
+        </div>
+
+        <p
+          style={{
+            margin: "0 0 18px",
+            fontSize: 13,
+            color: "var(--w-text-2)",
+            lineHeight: 1.5,
+          }}
+        >
+          From <span style={{ fontFamily: "var(--f-mono)" }}>{shortAddr(fromBech32m)}</span>
+        </p>
+
+        <label style={fieldLabel}>Recipient</label>
+        <input
+          type="text"
+          autoFocus
+          autoCapitalize="none"
+          spellCheck={false}
+          value={recipient}
+          onChange={(e) => setRecipient(e.target.value)}
+          placeholder={`${USER_HRP}1…`}
+          aria-label="Recipient typed bech32m address"
+          style={inputStyle}
+        />
+
+        <label style={{ ...fieldLabel, marginTop: 12 }}>Amount (LYTH)</label>
+        <input
+          type="text"
+          inputMode="decimal"
+          autoCapitalize="none"
+          spellCheck={false}
+          value={amount}
+          onChange={(e) => setAmount(e.target.value)}
+          placeholder="0.0"
+          aria-label="Amount in LYTH"
+          style={inputStyle}
+        />
+
+        {error && (
+          <p style={{ margin: "12px 0 0", fontSize: 12, color: "var(--err)", lineHeight: 1.5 }}>
+            {error}
+          </p>
+        )}
+
+        <div style={{ display: "flex", gap: 8, marginTop: 20 }}>
+          <button className="btn" onClick={onClose} style={{ flex: 1 }}>
+            Cancel
+          </button>
+          <button
+            className="btn btn--primary"
+            onClick={onReview}
+            style={{ flex: 1 }}
+            disabled={!recipient.trim() || !amount.trim()}
+          >
+            Review
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const fieldLabel: React.CSSProperties = {
+  display: "block",
+  fontSize: 11,
+  letterSpacing: "0.06em",
+  textTransform: "uppercase",
+  color: "var(--fg-400)",
+  marginBottom: 6,
+};
+
+const inputStyle: React.CSSProperties = {
+  width: "100%",
+  padding: "11px 12px",
+  fontSize: 14,
+  fontFamily: "var(--f-mono)",
+  background: "rgba(255,255,255,0.04)",
+  border: "1px solid rgba(255,255,255,0.12)",
+  borderRadius: 10,
+  color: "var(--fg-100)",
+  outline: "none",
+};
+
+function shortAddr(s: string): string {
+  if (s.length <= 16) return s;
+  return `${s.slice(0, 10)}…${s.slice(-6)}`;
+}
