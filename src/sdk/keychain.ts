@@ -95,12 +95,26 @@ export async function store(account: string, secret: Uint8Array): Promise<void> 
   }
 }
 
+export interface CreateVaultOptions {
+  /** Import an existing PQM-1 v1 mnemonic instead of generating one.
+   *  pqm1MnemonicToMlDsa65Seed validates algo + version tags + word
+   *  count; non-PQM-1-v1 phrases throw before any vault is created. */
+  importMnemonic?: string;
+}
+
 /**
- * Onboarding helper: generate a fresh PQM-1 mnemonic, derive the ML-DSA-65
- * seed in the TypeScript SDK, then persist an Argon2id-protected vault.
+ * Onboarding helper: generate a fresh PQM-1 mnemonic (or accept an
+ * imported one), derive the ML-DSA-65 seed in the TypeScript SDK, then
+ * persist an Argon2id-protected vault.
  */
-export async function createAndStoreVault(account: string, password: string): Promise<{ mnemonic: string }> {
-  const mnemonic = generatePqm1Mnemonic();
+export async function createAndStoreVault(
+  account: string,
+  password: string,
+  options: CreateVaultOptions = {},
+): Promise<{ mnemonic: string }> {
+  const mnemonic = options.importMnemonic
+    ? options.importMnemonic.trim()
+    : generatePqm1Mnemonic();
   const seed = pqm1MnemonicToMlDsa65Seed(mnemonic);
   const blob = await createVaultFromSeed(password, seed);
   seed.fill(0);
