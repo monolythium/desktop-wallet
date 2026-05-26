@@ -80,7 +80,7 @@ export function Stake() {
       ],
       effects: [
         { text: "Unlocks the local vault for this operation only." },
-        { text: "Encodes a delegate(clusterId, weightBps) call to the §5.4 precompile." },
+        { text: "Encodes a delegate(clusterId, weightBps) call to the delegation precompile." },
         { text: "Wraps the native transaction in an encrypted envelope and submits lyth_submitEncrypted." },
         {
           text: "Chain may reject at the precompile gate if delegation isn't activated yet on this network — the rejection is surfaced verbatim.",
