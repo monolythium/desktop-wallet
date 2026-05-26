@@ -16,8 +16,10 @@ import {
   KeychainCallError,
   PRIMARY_ACCOUNT,
   createAndStoreVault,
+  setActiveAccount,
 } from "../sdk/keychain";
 import { VaultCallError } from "../sdk/vault";
+import { registerVault } from "../sdk/vaultCatalog";
 import { MnemonicGrid } from "./MnemonicGrid";
 import { VerifyPhrase } from "./VerifyPhrase";
 
@@ -90,6 +92,23 @@ export function Onboarding({ onDone }: Props) {
       // Drop the password from state as soon as the vault is sealed.
       setPassword("");
       setConfirm("");
+      // First-install catalog entry. The Wallets page later supports
+      // renaming and adding more vaults; this seeds the catalog so the
+      // OperationsDrawer / Wallets / Receive all see a known slot.
+      try {
+        await registerVault(
+          {
+            slot: PRIMARY_ACCOUNT,
+            name: "Main wallet",
+            addressHex: result.addressHex,
+          },
+          { setActive: true },
+        );
+        setActiveAccount(PRIMARY_ACCOUNT);
+      } catch {
+        // Catalog write failures (no app-data path) shouldn't block
+        // onboarding — the vault is still in the keychain.
+      }
       if (isImport) {
         // Imported wallets skip show + verify — the user already has the
         // phrase by definition. Finish straight to the wallet shell.

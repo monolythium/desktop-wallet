@@ -31,7 +31,16 @@ import { Tokens } from "./pages/Tokens";
 import { Trade } from "./pages/Trade";
 import { Wallets } from "./pages/Wallets";
 import { OperationsProvider } from "./operations/context";
-import { KeychainCallError, PRIMARY_ACCOUNT, unlock } from "./sdk/keychain";
+import {
+  KeychainCallError,
+  PRIMARY_ACCOUNT,
+  setActiveAccount,
+  unlock,
+} from "./sdk/keychain";
+import {
+  ensureLegacyVaultRegistered,
+  loadCatalog,
+} from "./sdk/vaultCatalog";
 import { readDeveloperMode, writeDeveloperMode } from "./sdk/studio-host";
 import { readSteleEnabled, writeSteleEnabled } from "./sdk/feature-flags";
 import "./styles/tokens.css";
@@ -90,19 +99,46 @@ export function App() {
     if (boot.kind !== "probing") return;
     let cancelled = false;
     (async () => {
+      // Resolve the active vault slot before probing. Empty catalog +
+      // legacy keychain → seed the catalog with a Main wallet entry
+      // pointing at PRIMARY_ACCOUNT. Empty catalog + empty keychain →
+      // onboarding step writes the first catalog entry.
+      let catalog = await loadCatalog().catch(() => null);
+      let activeSlot = catalog?.activeSlot ?? PRIMARY_ACCOUNT;
+
       try {
-        await unlock(PRIMARY_ACCOUNT);
+        await unlock(activeSlot);
+        // Active slot has a vault — make sure the catalog reflects it.
+        if (catalog && Object.keys(catalog.vaults).length === 0) {
+          await ensureLegacyVaultRegistered(activeSlot).catch(() => {});
+          catalog = await loadCatalog().catch(() => null);
+          activeSlot = catalog?.activeSlot ?? activeSlot;
+        }
+        setActiveAccount(activeSlot);
         if (!cancelled) setBoot({ kind: "ready" });
       } catch (cause) {
         if (cancelled) return;
         if (cause instanceof KeychainCallError && cause.cause.code === "not_found") {
+          // Catalog may still know about other vaults; if so the user
+          // can pick one from the Wallets page. For the boot probe we
+          // only bounce into onboarding when there's truly nothing to
+          // sign with.
+          if (
+            catalog &&
+            Object.values(catalog.vaults).length > 0 &&
+            activeSlot !== PRIMARY_ACCOUNT
+          ) {
+            setActiveAccount(activeSlot);
+            setBoot({ kind: "ready" });
+            return;
+          }
           setBoot({ kind: "needs_onboarding" });
           return;
         }
         // Any other failure (locked keychain, missing libsecret) is
         // recoverable by retrying — we still let the user into the shell
-        // because read-only views don't need a key. The OperationsDrawer
-        // re-runs the probe on every authorize.
+        // because read-only views don't need a key.
+        setActiveAccount(activeSlot);
         setBoot({ kind: "ready" });
       }
     })();
