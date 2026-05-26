@@ -22,6 +22,7 @@ import {
   type LiveWalletIdentity,
 } from "../sdk/live";
 import {
+  deleteAccount,
   getActiveAccount,
   setActiveAccount as setActiveAccountInMemory,
 } from "../sdk/keychain";
@@ -97,6 +98,11 @@ export function Wallets() {
   const onConfirmRemove = async () => {
     if (!removingSlot) return;
     try {
+      // Wipe the keychain blob first; if the keychain rejects (locked,
+      // missing libsecret) we leave the catalog row in place so the
+      // user can retry rather than ending up with an orphaned blob and
+      // no UI reference to it.
+      await deleteAccount(removingSlot);
       await removeVaultFromCatalog(removingSlot);
       setRemovingSlot(null);
       await refreshCatalog();
@@ -336,12 +342,11 @@ export function Wallets() {
               className="row-help"
               style={{ color: "var(--warn)", marginTop: 8, lineHeight: 1.55 }}
             >
-              Removing a wallet drops it from this list. The encrypted
-              blob in the OS keychain is left in place — without its
-              password it&apos;s unusable, but the disk slot won&apos;t
-              be reused until a future keychain-delete command lands.
-              Make sure you have the 24-word recovery phrase before
-              removing.
+              Removing wipes both the catalog entry AND the encrypted
+              blob from the OS keychain. The only way to bring this
+              wallet back afterward is to import its 24-word recovery
+              phrase. Make sure you have it written down before
+              continuing.
             </div>
           )}
         </div>
