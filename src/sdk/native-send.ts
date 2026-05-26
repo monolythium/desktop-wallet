@@ -20,6 +20,7 @@ import {
 import type { NativeEvmTxFields } from "@monolythium/core-sdk/crypto";
 import { requireTypedUserAddressHex } from "./address";
 import { getProvider } from "./client";
+import { getExecutionUnitPriceLythoshi, getNativeTransactionCount } from "./native-rpc";
 
 const SPRINTNET_TRANSFER_EXECUTION_UNIT_LIMIT = 30_000n;
 
@@ -84,8 +85,8 @@ export async function sendNativeLyth(args: SendNativeLythArgs): Promise<SendNati
   const fromHex = backend.getAddress();
 
   const [nonce, executionUnitPrice, encryptionKey] = await Promise.all([
-    client.ethGetTransactionCount(fromHex, "pending"),
-    client.ethGasPrice(),
+    getNativeTransactionCount(client, fromHex),
+    getExecutionUnitPriceLythoshi(client),
     fetchEncryptionKey(client),
   ]);
   const plan = buildNativeLythTransferPlan({

@@ -93,7 +93,7 @@ function mockRpc(options: {
       case "eth_chainId":
         result = `0x${chainId.toString(16)}`;
         break;
-      case "eth_getTransactionCount":
+      case "lyth_getTransactionCount":
         result = `0x${nonce.toString(16)}`;
         nonce += 1n;
         break;
@@ -184,7 +184,7 @@ describe("MRV desktop-wallet SDK layer", () => {
     expect(appJson(plan)).not.toMatch(/\b(gas|gwei|wei)\b/i);
     expect(calls.map((call) => call.method)).toEqual([
       "eth_chainId",
-      "eth_getTransactionCount",
+      "lyth_getTransactionCount",
       "eth_gasPrice",
     ]);
   });
@@ -222,7 +222,7 @@ describe("MRV desktop-wallet SDK layer", () => {
     expect(appJson(plan)).not.toMatch(/\b(gas|gwei|wei)\b/i);
     expect(calls.map((call) => call.method)).toEqual([
       "eth_chainId",
-      "eth_getTransactionCount",
+      "lyth_getTransactionCount",
     ]);
   });
 
@@ -277,7 +277,7 @@ describe("MRV desktop-wallet SDK layer", () => {
 
     const methods = calls.map((callRecord) => callRecord.method);
     expect(methods.filter((method) => method === "eth_chainId")).toHaveLength(2);
-    expect(methods.filter((method) => method === "eth_getTransactionCount")).toHaveLength(2);
+    expect(methods.filter((method) => method === "lyth_getTransactionCount")).toHaveLength(2);
     expect(methods.filter((method) => method === "lyth_getEncryptionKey")).toHaveLength(2);
     expect(methods.filter((method) => method === "lyth_submitEncrypted")).toHaveLength(2);
   });

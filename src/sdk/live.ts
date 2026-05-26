@@ -13,6 +13,7 @@ import type {
 } from "@monolythium/core-sdk";
 import { MlDsa65Backend } from "@monolythium/core-sdk/crypto";
 import { getProvider } from "./client";
+import { getNativeTransactionCount } from "./native-rpc";
 import { requireTypedUserAddress, requireTypedUserAddressHex } from "./address";
 import { selectNativeSpotMarket, type SelectedNativeSpotMarket } from "./market";
 
@@ -280,7 +281,7 @@ export async function loadLiveWalletBalance(address: string): Promise<LiveWallet
   const client = getProvider().rpcClient;
   const addressHex = requireTypedUserAddressHex(address, "wallet");
   const [nonce, balance] = await Promise.all([
-    client.ethGetTransactionCount(addressHex, "pending"),
+    getNativeTransactionCount(client, addressHex),
     client.ethGetBalance(addressHex),
   ]);
   const rawBalance = normalizeBalanceHex(balance);

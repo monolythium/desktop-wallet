@@ -257,7 +257,7 @@ const CONVERT_CURRENCIES = [
   { code: "eth", label: "Ethereum (ETH)" },
   { code: "usdt", label: "Tether (USDT)" },
   { code: "usdc", label: "USD Coin (USDC)" },
-  { code: "sol", label: "Solana (SOL)" },
+  { code: "link", label: "Chainlink (LINK)" },
   { code: "ltc", label: "Litecoin (LTC)" },
   { code: "doge", label: "Dogecoin (DOGE)" },
   { code: "matic", label: "Polygon (MATIC)" },
