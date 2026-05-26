@@ -1,14 +1,15 @@
 // SDK seam — every chain I/O the wallet performs goes through here.
 //
 // We construct a single `MonolythiumProvider` (the ethers v6 shim that
-// `@monolythium/core-sdk` ships as of Stage 3) so every chain read and
+// `@monolythium/core-sdk/ethers` ships) so every chain read and
 // every signed broadcast share one transport, one network registration,
 // and one error-shape contract. Ethers callers (`provider.getBlockNumber`,
 // `provider.broadcastTransaction`) flow straight through; native callers
 // can still reach `lyth_*` methods via `provider.rpcClient.call(...)`.
 
-import { MonolythiumProvider, SdkError, formatLyth, getRpcEndpoints } from "@monolythium/core-sdk";
-import type { MonolythiumProviderOptions } from "@monolythium/core-sdk";
+import { SdkError, formatLyth, getRpcEndpoints } from "@monolythium/core-sdk";
+import { MonolythiumProvider } from "@monolythium/core-sdk/ethers";
+import type { MonolythiumProviderOptions } from "@monolythium/core-sdk/ethers";
 import { requireTypedUserAddressHex } from "./address";
 
 /**

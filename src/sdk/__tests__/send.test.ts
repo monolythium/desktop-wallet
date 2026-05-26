@@ -20,12 +20,11 @@ import { describe, expect, it, beforeEach } from "vitest";
 import { Wallet, keccak256 } from "ethers";
 import {
   MONOLYTHIUM_TESTNET_CHAIN_ID,
-  MonolythiumProvider,
-  MonolythiumSigner,
   RpcClient,
   addressToTypedBech32,
   parseLythToLythoshi,
 } from "@monolythium/core-sdk";
+import { MonolythiumProvider, MonolythiumSigner } from "@monolythium/core-sdk/ethers";
 import { sendLyth } from "../send";
 import { resetProviderForTest, setProviderForTest } from "../client";
 

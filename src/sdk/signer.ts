@@ -27,7 +27,7 @@
 import {
   MonolythiumSigner,
   type MonolythiumSignerBackend,
-} from "@monolythium/core-sdk";
+} from "@monolythium/core-sdk/ethers";
 import {
   Signature,
   Transaction,
