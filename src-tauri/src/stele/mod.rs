@@ -27,9 +27,6 @@
 //! Marketplace commands (`booking_*`, `vendor_search`, `convert_*`,
 //! `flight_*`, `x402_*`, etc.) port across in a later wave so each
 //! move stays reviewable on its own.
-//!
-//! See `the Stele integration design notes (internal)`
-//! for the full picking list and phase order.
 
 pub mod approval_bridge;
 pub mod commands;
