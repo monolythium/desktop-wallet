@@ -13,13 +13,32 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import {
+  MlDsa65Backend,
   generatePqm1Mnemonic,
   pqm1MnemonicToMlDsa65Seed,
 } from "@monolythium/core-sdk/crypto";
 import { createVaultFromSeed, unlockVault, VaultCallError } from "./vault";
 
-/** The canonical identity slot for the primary signing key. */
+/** Legacy / first-install slot. New vaults mint fresh slot ids via
+ *  `mintVaultSlot()` in vaultCatalog.ts; this constant stays as the
+ *  migration anchor for installs that predate the multi-vault catalog. */
 export const PRIMARY_ACCOUNT = "kc:lyth:primary:v1";
+
+/**
+ * In-memory active-slot cache. Boot (`App.tsx`) loads the catalog and
+ * calls `setActiveAccount(catalog.activeSlot)`; the OperationsDrawer
+ * + Onboarding read this synchronously so a write operation always
+ * targets the slot the UI is showing as active.
+ */
+let _activeAccount = PRIMARY_ACCOUNT;
+
+export function getActiveAccount(): string {
+  return _activeAccount;
+}
+
+export function setActiveAccount(slot: string): void {
+  _activeAccount = slot;
+}
 
 /** Discriminated union of every typed error the Rust side may return. */
 export type KeychainError =
@@ -105,21 +124,30 @@ export interface CreateVaultOptions {
 /**
  * Onboarding helper: generate a fresh PQM-1 mnemonic (or accept an
  * imported one), derive the ML-DSA-65 seed in the TypeScript SDK, then
- * persist an Argon2id-protected vault.
+ * persist an Argon2id-protected vault. Returns the mnemonic + the
+ * 20-byte address (`0x…`) the seed maps to so callers can show + verify
+ * the phrase AND register the vault in the catalog without a second
+ * unlock.
  */
 export async function createAndStoreVault(
   account: string,
   password: string,
   options: CreateVaultOptions = {},
-): Promise<{ mnemonic: string }> {
+): Promise<{ mnemonic: string; addressHex: string }> {
   const mnemonic = options.importMnemonic
     ? options.importMnemonic.trim()
     : generatePqm1Mnemonic();
   const seed = pqm1MnemonicToMlDsa65Seed(mnemonic);
-  const blob = await createVaultFromSeed(password, seed);
-  seed.fill(0);
-  await store(account, blob);
-  return { mnemonic };
+  let addressHex: string;
+  try {
+    const backend = MlDsa65Backend.fromSeed(seed);
+    addressHex = backend.getAddress().toLowerCase();
+    const blob = await createVaultFromSeed(password, seed);
+    await store(account, blob);
+  } finally {
+    seed.fill(0);
+  }
+  return { mnemonic, addressHex };
 }
 
 /**
