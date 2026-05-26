@@ -1,6 +1,6 @@
 // The Operations drawer.
 //
-// State machine (per CLAUDE §2 of designs/design_handoff_monarch/README.md):
+// State machine:
 //
 //   preview  → auth  → executing → done
 //        \-> error  (from any stage)

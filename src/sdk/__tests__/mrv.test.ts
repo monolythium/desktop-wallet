@@ -97,8 +97,14 @@ function mockRpc(options: {
         result = `0x${nonce.toString(16)}`;
         nonce += 1n;
         break;
-      case "eth_gasPrice":
-        result = `0x${executionFee.toString(16)}`;
+      case "lyth_executionUnitPrice":
+        result = {
+          executionUnitPriceLythoshi: executionFee.toString(),
+          basePricePerExecutionUnitLythoshi: executionFee.toString(),
+          priorityTipLythoshi: "0",
+          blockNumber: 1,
+          source: "test",
+        };
         break;
       case "lyth_getEncryptionKey":
         result = {
@@ -185,7 +191,7 @@ describe("MRV desktop-wallet SDK layer", () => {
     expect(calls.map((call) => call.method)).toEqual([
       "eth_chainId",
       "lyth_getTransactionCount",
-      "eth_gasPrice",
+      "lyth_executionUnitPrice",
     ]);
   });
 

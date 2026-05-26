@@ -1,22 +1,24 @@
-import type { RpcClient } from "@monolythium/core-sdk";
+import { addressToTypedBech32, type RpcClient } from "@monolythium/core-sdk";
 
 export async function getNativeTransactionCount(
   client: RpcClient,
   address: string,
 ): Promise<bigint> {
-  try {
-    return normalizeRpcQuantity(
-      await client.call<number | string | bigint>("lyth_getTransactionCount", [address]),
-      "lyth_getTransactionCount",
-    );
-  } catch (cause) {
-    if (!isMethodMissing(cause)) throw cause;
-    return client.ethGetTransactionCount(address, "pending");
-  }
+  return client.lythGetTransactionCount(userAddressForRpc(address));
 }
 
 export async function getExecutionUnitPriceLythoshi(client: RpcClient): Promise<bigint> {
-  return normalizeRpcQuantity(await client.call<string>("eth_gasPrice", []), "eth_gasPrice");
+  const quote = await client.lythExecutionUnitPrice();
+  return normalizeRpcQuantity(
+    quote.executionUnitPriceLythoshi,
+    "lyth_executionUnitPrice.executionUnitPriceLythoshi",
+  );
+}
+
+function userAddressForRpc(address: string): string {
+  return address.startsWith("0x") || address.startsWith("0X")
+    ? addressToTypedBech32("user", address)
+    : address;
 }
 
 function normalizeRpcQuantity(value: number | string | bigint, field: string): bigint {
@@ -33,12 +35,4 @@ function normalizeRpcQuantity(value: number | string | bigint, field: string): b
   if (/^0x[0-9a-fA-F]+$/.test(value)) return BigInt(value);
   if (/^[0-9]+$/.test(value)) return BigInt(value);
   throw new Error(`${field} returned an invalid quantity`);
-}
-
-function isMethodMissing(cause: unknown): boolean {
-  const err = cause as { code?: number; message?: string; cause?: unknown };
-  if (err?.code === -32601) return true;
-  if (typeof err?.message === "string" && /method not found/i.test(err.message)) return true;
-  if (err?.cause !== undefined && err.cause !== cause) return isMethodMissing(err.cause);
-  return false;
 }
