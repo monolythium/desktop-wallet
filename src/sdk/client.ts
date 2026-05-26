@@ -74,7 +74,7 @@ export type ChainSnapshot = {
 
 /**
  * Pull the public chain snapshot the wallet needs at boot:
- * `eth_chainId` + `eth_blockNumber` + `eth_getBalance` for the bound address.
+ * chain id, native height, and the balance envelope for the bound address.
  * Returns a discriminated value rather than throwing so the caller can render
  * an offline state without unwinding.
  *
@@ -86,16 +86,16 @@ export async function loadChainSnapshot(address: string): Promise<ChainSnapshot>
   const endpoint = provider.rpcClient.endpoint;
   const addressHex = requireTypedUserAddressHex(address);
   try {
-    const [network, blockHeight, balanceAtomic] = await Promise.all([
+    const [network, round, balanceAtomic] = await Promise.all([
       provider.getNetwork(),
-      provider.getBlockNumber(),
+      provider.rpcClient.lythCurrentRound(),
       provider.getBalance(addressHex),
     ]);
     const lythoshi = balanceQuantityToLythoshi(`0x${balanceAtomic.toString(16)}`);
     return {
       endpoint,
       chainId: network.chainId,
-      blockHeight: BigInt(blockHeight),
+      blockHeight: round.height,
       balanceLythoshi: lythoshi,
       balanceLyth: formatLyth(lythoshi, { includeUnit: false }),
       error: null,

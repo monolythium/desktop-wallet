@@ -7,9 +7,6 @@ import { useOperations } from "../operations/context";
 import { loadChainSnapshot } from "../sdk/client";
 import { useChainSnapshot } from "../sdk/useChainSnapshot";
 import { sendNativeLyth } from "../sdk/native-send";
-import { sendLyth } from "../sdk/send";
-import { makeLedgerSigner } from "../sdk/signer";
-import { enumerateDevices, getAddress as ledgerGetAddress } from "../sdk/ledger";
 import { BALANCES, IDENTITY, SEND_DEMO, TOKENS, TXS_PRIVATE, TXS_PUBLIC } from "../data/fixtures";
 import type { Denom } from "../data/fixtures";
 import { TokenRow } from "../components/TokenRow";
@@ -57,63 +54,6 @@ export function Home({ denom, goto }: Props) {
       cancelled = true;
     };
   }, [isPub]);
-
-  // Hardware signer path. The drawer's hardware flow
-  // enumerates the device + confirms the address; once the user approves,
-  // `descriptor.execute()` builds a live TransactionRequest and broadcasts
-  // through `MonolythiumProvider`.
-  const openSend = () => {
-    ops.open({
-      title: `Send ${SEND_DEMO.amountLyth} LYTH`,
-      subtitle: `From ${IDENTITY.handle} via hardware signer`,
-      auth: "hardware",
-      ledger: {
-        // Default hardware account path; the drawer surfaces a hard error if
-        // the device-derived address doesn't match `expectedAddress`.
-        // We don't pin `expectedAddress` here yet because the demo
-        // identity address is a fixture; once the unlocked vault owns this
-        // row, wire the expected address here.
-      },
-      diff: [
-        { k: "From",      v: IDENTITY.address },
-        { k: "To",        v: SEND_DEMO.to },
-        { k: "Token",     v: "LYTH" },
-        { k: "Amount",    v: `${SEND_DEMO.amountLyth} LYTH` },
-        { k: "Network",   v: chain.snapshot ? `chain ${chain.snapshot.chainId}` : "(querying)" },
-        { k: "Endpoint",  v: chain.snapshot?.endpoint ?? "(unknown)" },
-      ],
-      effects: [
-        { text: `Releases ${SEND_DEMO.amountLyth} LYTH from the public denomination.` },
-        { text: "Reads sender nonce and execution fee data via @monolythium/core-sdk." },
-        { text: "Signs on hardware device, broadcasts via MonolythiumProvider." },
-      ],
-      execute: async () => {
-        // Enumerate the device the drawer already negotiated, then
-        // build a hardware-backed signer over our HID bridge.
-        const devices = await enumerateDevices();
-        const device = devices[0];
-        if (!device) {
-          throw new Error("Hardware signer detached between auth and execute; reconnect and retry");
-        }
-        const hdPath = "m/44'/60'/0'/0/0";
-        const address = await ledgerGetAddress(device.deviceId, hdPath);
-        const signer = makeLedgerSigner({
-          deviceId: device.deviceId,
-          hdPath,
-          address: address.toLowerCase(),
-        });
-        const result = await sendLyth(signer, {
-          from: address,
-          to: SEND_DEMO.to,
-          amountLyth: SEND_DEMO.amountLyth,
-        });
-        return {
-          headline: `Broadcast ${SEND_DEMO.amountLyth} LYTH`,
-          detail: result.txHash,
-        };
-      },
-    });
-  };
 
   const openNativeSend = () => {
     ops.open({
@@ -232,14 +172,6 @@ export function Home({ denom, goto }: Props) {
               <path d="M22 2 11 13" />
             </svg>
             <span>Send</span>
-          </button>
-          <button className="w-hbtn" onClick={openSend}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M12 2v20" />
-              <path d="m17 5-5-3-5 3" />
-              <path d="m17 19-5 3-5-3" />
-            </svg>
-            <span>Hardware</span>
           </button>
           <button className="w-hbtn" onClick={openReceive}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

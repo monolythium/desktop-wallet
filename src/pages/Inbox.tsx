@@ -1,9 +1,7 @@
 // Inbox — Stele bookings + tx outbox + address book. Settings-gated
 // alongside Stele.
 //
-// Today only the address-book section is live (proxies to the lyth_mcp
-// sidecar when --features stele is on). Bookings + tx outbox screens
-// port across in later slices.
+// Today only the address-book section is live through the lyth_mcp sidecar.
 
 import { useCallback, useEffect, useState } from "react";
 import { TodoSection } from "../components/TodoSection";
