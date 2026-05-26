@@ -15,10 +15,12 @@
 import { useEffect, useRef, useState } from "react";
 import {
   KeychainCallError,
-  PRIMARY_ACCOUNT,
   fetchAndUnlockVault,
+  getActiveAccount,
 } from "../sdk/keychain";
 import { VaultCallError } from "../sdk/vault";
+import { captureAddressOnUnlock } from "../sdk/vaultCatalog";
+import { MlDsa65Backend } from "@monolythium/core-sdk/crypto";
 import {
   LedgerCallError,
   enumerateDevices,
@@ -139,8 +141,20 @@ export function OperationsDrawer({ descriptor, onClose }: Props) {
       setAuthBusy(true);
       setAuthError(null);
       let vaultSeed: Uint8Array;
+      const activeSlot = getActiveAccount();
       try {
-        vaultSeed = await fetchAndUnlockVault(PRIMARY_ACCOUNT, password);
+        vaultSeed = await fetchAndUnlockVault(activeSlot, password);
+        // Best-effort: backfill the catalog with the derived address so
+        // legacy installs (catalog entry with addressHex: null) and any
+        // future address-corruption recovery picks up the live answer.
+        try {
+          const addressHex = MlDsa65Backend.fromSeed(vaultSeed)
+            .getAddress()
+            .toLowerCase();
+          void captureAddressOnUnlock(activeSlot, addressHex).catch(() => {});
+        } catch {
+          // Never let an address-backfill failure break the unlock path.
+        }
       } catch (cause) {
         if (cause instanceof KeychainCallError) {
           setAuthError({ kind: "keychain", cause });
