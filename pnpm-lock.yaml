@@ -20,6 +20,9 @@ importers:
       '@noble/post-quantum':
         specifier: ^0.6.1
         version: 0.6.1
+      '@scure/bip39':
+        specifier: ^2.2.0
+        version: 2.2.0
       '@tauri-apps/api':
         specifier: ^2.1.1
         version: 2.10.1
