@@ -114,6 +114,19 @@ export async function store(account: string, secret: Uint8Array): Promise<void> 
   }
 }
 
+/**
+ * Delete the keychain entry for `account`. Idempotent — no error if the
+ * entry doesn't exist. Used by the Wallets-page Remove flow so dropping
+ * a vault from the catalog also wipes the underlying encrypted blob.
+ */
+export async function deleteAccount(account: string): Promise<void> {
+  try {
+    await invoke<void>("keychain_delete", { account });
+  } catch (raw) {
+    throw normalizeError(raw);
+  }
+}
+
 export interface CreateVaultOptions {
   /** Import an existing PQM-1 v1 mnemonic instead of generating one.
    *  pqm1MnemonicToMlDsa65Seed validates algo + version tags + word

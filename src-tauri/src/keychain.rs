@@ -113,3 +113,18 @@ pub fn keychain_store(account: String, secret: Vec<u8>) -> Result<(), KeychainEr
     entry.set_secret(&secret)?;
     Ok(())
 }
+
+/// Delete the secret stored under `account` from the OS keychain. Returns
+/// Ok even if no entry exists (idempotent) so the Wallets-page Remove
+/// flow can wipe the catalog row + the keychain blob in a single pass
+/// without a separate "is it there?" probe.
+#[tauri::command]
+pub fn keychain_delete(account: String) -> Result<(), KeychainError> {
+    validate_account(&account)?;
+    let entry = Entry::new(SERVICE, &account)?;
+    match entry.delete_credential() {
+        Ok(()) => Ok(()),
+        Err(keyring::Error::NoEntry) => Ok(()),
+        Err(other) => Err(other.into()),
+    }
+}

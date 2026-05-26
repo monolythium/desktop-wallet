@@ -1,7 +1,7 @@
 // Stage 4 entry point.
 //
 // Registers the Tauri command surface for the wallet:
-// - `keychain_unlock` / `keychain_store` — OS keychain bridge.
+// - `keychain_unlock` / `keychain_store` / `keychain_delete` — OS keychain bridge.
 // - `vault_create` / `vault_seal_seed` / `vault_unlock` — seed vault.
 // - `ledger_*`                           — HID hardware signer (Stage 4).
 //
@@ -47,6 +47,7 @@ pub fn run() {
     let builder = builder.invoke_handler(tauri::generate_handler![
         keychain::keychain_unlock,
         keychain::keychain_store,
+        keychain::keychain_delete,
         vault::vault_create,
         vault::vault_seal_seed,
         vault::vault_unlock,
