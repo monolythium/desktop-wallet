@@ -5,7 +5,7 @@
 // OperationsDrawer's `descriptor.execute()` can call. The drawer owns UI
 // state; this module owns "what does Send actually do on the wire."
 //
-// Stages of a real send:
+// Real send flow:
 //   1. read sender nonce + native fee data from the provider (no key access yet);
 //   2. build a compatibility TransactionRequest with explicit execution limits;
 //   3. ask the signer for a fully-signed RLP (Ledger flow approves on-device);
@@ -16,7 +16,8 @@
 // execution fees instead of legacy fee controls.
 
 import type { TransactionRequest } from "ethers";
-import { parseLythToLythoshi, type MonolythiumSigner } from "@monolythium/core-sdk";
+import { parseLythToLythoshi } from "@monolythium/core-sdk";
+import type { MonolythiumSigner } from "@monolythium/core-sdk/ethers";
 import { requireTypedUserAddressHex } from "./address";
 import { getProvider } from "./client";
 
@@ -32,7 +33,7 @@ export interface SendLythArgs {
   /**
    * Optional explicit chain id. When omitted we use whatever the
    * provider's `getNetwork()` returns — that's the right answer for the
-   * happy path and avoids drift if Stage 5 wires multi-network support.
+   * happy path and avoids drift when multi-network support is wired.
    */
   chainId?: bigint;
   /** Optional hex data payload; most plain transfers leave this empty. */
