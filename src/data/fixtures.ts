@@ -1,5 +1,5 @@
-// Demo fixtures lifted from designs/src/wallet-data.jsx.
-// These are the visual contract for Stage 2; live data replaces them
+// Demo fixtures for offline UI.
+// These fixtures define the offline visual contract; live data replaces them
 // once the SDK round-trips against a real mono-core node.
 
 import { addressToTypedBech32 } from "@monolythium/core-sdk";
@@ -53,7 +53,7 @@ const DEMO_SEND_RECIPIENT = addressToTypedBech32(
 
 export const TOKENS: Token[] = [
   { sym: "LYTH",  name: "Monolythium",     amount: 4128.42, priceUsd: 8.42,  chg24h:  2.4, primary: true, note: "native · fees + staking" },
-  { sym: "wLYTH", name: "Wrapped LYTH",    amount:   90.00, priceUsd: 8.40,  chg24h:  2.3, note: "bridged · Solana" },
+  { sym: "wLYTH", name: "Wrapped LYTH",    amount:   90.00, priceUsd: 8.40,  chg24h:  2.3, note: "bridged · CCIP" },
   { sym: "USDL",  name: "USD-Lyth stable", amount:  612.18, priceUsd: 1.00,  chg24h:  0.0, note: "stablecoin · 1:1 USD" },
   { sym: "CZN",   name: "Coinzen",         amount:  240.00, priceUsd: 1.74,  chg24h: -1.1, note: "exchange token" },
   { sym: "ORBT",  name: "Orbital",         amount: 1820.0,  priceUsd: 0.082, chg24h:  8.7, note: "spot protocol" },
@@ -81,7 +81,7 @@ export const TXS_PUBLIC: Tx[] = [
   tx({ when: "yesterday", direction: "out", amount: 12.5,   token: "LYTH", counterparty: "friend · John Doe",         kind: "transfer", memo: "splitting dinner" }),
   tx({ when: "2d ago",    direction: "in",  amount: 520.0,  token: "LYTH", counterparty: "Coinzen withdrawal",        kind: "transfer" }),
   tx({ when: "5d ago",    direction: "in",  amount: 1820.0, token: "ORBT", counterparty: "Orbital · claim",           kind: "transfer", memo: "trading rebate" }),
-  tx({ when: "9d ago",    direction: "out", amount: 90.0,   token: "LYTH", counterparty: "Solana bridge",             kind: "transfer", memo: "to wLYTH" }),
+  tx({ when: "9d ago",    direction: "out", amount: 90.0,   token: "LYTH", counterparty: "CCIP bridge",               kind: "transfer", memo: "LINK fee route" }),
 ];
 
 export const TXS_PRIVATE: Tx[] = [
@@ -92,7 +92,7 @@ export const TXS_PRIVATE: Tx[] = [
 
 export const IDENTITY: Identity = {
   handle: "John Doe",
-  // Demo address. Public wallet surfaces present ADR-0038 typed addresses;
+  // Demo address. Public wallet surfaces present typed addresses;
   // internal compatibility calls convert to 0x only at the wire boundary.
   address: DEMO_WALLET_ADDRESS,
   pairedDevice: "Framework Desktop · Talos node",
@@ -106,9 +106,9 @@ export const BALANCES: Record<Denom, Balances> = {
 
 /**
  * Demo recipient + amount used by the Send button on Home. The drawer
- * shows these in the diff and feeds them straight to `sendLyth`. When
- * Stage 5 lands a real "compose tx" surface (recipient picker, amount
- * field, execution-fee selector) this fixture goes away.
+ * shows these in the diff and feeds them straight to the native send helper.
+ * Once the compose surface owns recipient, amount, and execution-fee input,
+ * this fixture goes away.
  */
 export const SEND_DEMO: { to: string; amountLyth: string } = {
   to: DEMO_SEND_RECIPIENT,

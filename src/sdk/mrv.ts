@@ -2,8 +2,7 @@
 //
 // The core SDK owns the MRV request builders, native tx adapter fields, and
 // encrypted-envelope signing. This module keeps the desktop-wallet surface
-// app-facing: typed MRV requests, lythoshi values, and fee previews. The raw
-// EVM compatibility tx shape stays inside this file.
+// app-facing: typed MRV requests, lythoshi values, and fee previews.
 
 import {
   assertMrvCallNativeSubmissionPlan,
@@ -42,6 +41,7 @@ import type {
   NativeEvmTxFields,
 } from "@monolythium/core-sdk/crypto";
 import { getProvider } from "./client";
+import { getExecutionUnitPriceLythoshi, getNativeTransactionCount } from "./native-rpc";
 
 export const MRV_DEFAULT_DEPLOY_EXECUTION_UNIT_LIMIT = 1_000_000n;
 export const MRV_DEFAULT_CALL_EXECUTION_UNIT_LIMIT = 100_000n;
@@ -315,10 +315,10 @@ async function resolveNativeContext(
       ? client.ethChainId()
       : Promise.resolve(normalizeU64("chainId", args.chainId)),
     args.nonce === undefined
-      ? client.ethGetTransactionCount(fromHex, "pending")
+      ? getNativeTransactionCount(client, fromHex)
       : Promise.resolve(normalizeU64("nonce", args.nonce)),
     args.maxExecutionFeeLythoshi === undefined
-      ? client.ethGasPrice().then((value) => value.toString())
+      ? getExecutionUnitPriceLythoshi(client).then((value) => value.toString())
       : Promise.resolve(normalizeLythoshi("maxExecutionFeeLythoshi", args.maxExecutionFeeLythoshi)),
   ]);
 

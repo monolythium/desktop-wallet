@@ -1,4 +1,4 @@
-// Home — port of designs/src/wallet-pages.jsx WHome.
+// Home wallet overview.
 // Public denom: hero balance + token preview + activity preview.
 // Private denom: hero with amount-hidden disclosure + activity preview.
 
@@ -6,8 +6,8 @@ import { useEffect, useState } from "react";
 import { useOperations } from "../operations/context";
 import { loadChainSnapshot } from "../sdk/client";
 import { useChainSnapshot } from "../sdk/useChainSnapshot";
-import { sendLyth } from "../sdk/send";
 import { sendNativeLyth } from "../sdk/native-send";
+import { sendLyth } from "../sdk/send";
 import { makeLedgerSigner } from "../sdk/signer";
 import { enumerateDevices, getAddress as ledgerGetAddress } from "../sdk/ledger";
 import { BALANCES, IDENTITY, SEND_DEMO, TOKENS, TXS_PRIVATE, TXS_PUBLIC } from "../data/fixtures";
@@ -58,21 +58,21 @@ export function Home({ denom, goto }: Props) {
     };
   }, [isPub]);
 
-  // Send LYTH — existing hardware-signer path. The drawer's hardware flow
+  // Hardware signer path. The drawer's hardware flow
   // enumerates the device + confirms the address; once the user approves,
   // `descriptor.execute()` builds a live TransactionRequest and broadcasts
   // through `MonolythiumProvider`.
   const openSend = () => {
     ops.open({
       title: `Send ${SEND_DEMO.amountLyth} LYTH`,
-      subtitle: `From ${IDENTITY.handle} via Ledger`,
+      subtitle: `From ${IDENTITY.handle} via hardware signer`,
       auth: "hardware",
       ledger: {
-        // Default Ethereum HD path; the drawer surfaces a hard error if
+        // Default hardware account path; the drawer surfaces a hard error if
         // the device-derived address doesn't match `expectedAddress`.
         // We don't pin `expectedAddress` here yet because the demo
-        // identity address is a fixture — once Stage 5 binds an address
-        // from the unlocked vault, we'll wire that in.
+        // identity address is a fixture; once the unlocked vault owns this
+        // row, wire the expected address here.
       },
       diff: [
         { k: "From",      v: IDENTITY.address },
@@ -85,15 +85,15 @@ export function Home({ denom, goto }: Props) {
       effects: [
         { text: `Releases ${SEND_DEMO.amountLyth} LYTH from the public denomination.` },
         { text: "Reads sender nonce and execution fee data via @monolythium/core-sdk." },
-        { text: "Signs on Ledger device, broadcasts via MonolythiumProvider." },
+        { text: "Signs on hardware device, broadcasts via MonolythiumProvider." },
       ],
       execute: async () => {
         // Enumerate the device the drawer already negotiated, then
-        // build a real ethers Signer over our HID bridge.
+        // build a hardware-backed signer over our HID bridge.
         const devices = await enumerateDevices();
         const device = devices[0];
         if (!device) {
-          throw new Error("Ledger detached between auth and execute — reconnect and retry");
+          throw new Error("Hardware signer detached between auth and execute; reconnect and retry");
         }
         const hdPath = "m/44'/60'/0'/0/0";
         const address = await ledgerGetAddress(device.deviceId, hdPath);
@@ -174,7 +174,7 @@ export function Home({ denom, goto }: Props) {
         { k: "Address",  v: IDENTITY.address },
       ],
       effects: [
-        { text: "Calls eth_chainId + eth_blockNumber + eth_getBalance." },
+        { text: "Reads chain, block, and balance data." },
         { text: "No keychain access. No outbound transaction." },
       ],
       execute: async () => {
@@ -226,20 +226,20 @@ export function Home({ denom, goto }: Props) {
         </div>
 
         <div className="w-hero__bar">
-          <button className="w-hbtn w-hbtn--primary" onClick={openSend}>
+          <button className="w-hbtn w-hbtn--primary" onClick={openNativeSend}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="m22 2-7 20-4-9-9-4Z" />
               <path d="M22 2 11 13" />
             </svg>
             <span>Send</span>
           </button>
-          <button className="w-hbtn" onClick={openNativeSend}>
+          <button className="w-hbtn" onClick={openSend}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M12 2v20" />
               <path d="m17 5-5-3-5 3" />
               <path d="m17 19-5 3-5-3" />
             </svg>
-            <span>Native</span>
+            <span>Hardware</span>
           </button>
           <button className="w-hbtn" onClick={openReceive}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
