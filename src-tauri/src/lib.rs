@@ -30,6 +30,7 @@ pub fn run() {
 
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_store::Builder::default().build())
         .manage(ledger_state)
         .manage(studio_host::StudioSidecarState::default());
 

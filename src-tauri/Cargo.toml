@@ -21,6 +21,10 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
+# Per-app key-value JSON store, used for the multi-vault catalog
+# (sdk/vaultCatalog.ts). The plugin is mobile-and-desktop; on desktop it
+# writes to the OS-standard app-data dir.
+tauri-plugin-store = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "1"
