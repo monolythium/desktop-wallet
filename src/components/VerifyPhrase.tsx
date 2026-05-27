@@ -10,11 +10,11 @@ interface VerifyPhraseProps {
   onBack?: () => void;
 }
 
-// Number of slots to hide. 6 hidden positions × ~11-word bank ≈ 10^6
-// random-guess hit rate when the user has no real memory, while staying
-// fast enough that someone who actually wrote down 24 words finishes in
-// under a minute.
-const HIDDEN_COUNT = 6;
+// Number of slots to hide. 3 hidden positions × ~8-word bank ≈ 5×10^2
+// random-guess hit rate — tight enough to gate "did the user actually
+// write it down", loose enough to be solvable in seconds for someone
+// who did. Matches browser-wallet's 0439943 tuning.
+const HIDDEN_COUNT = 3;
 // BIP-39 distractors mixed into the bank alongside the 6 hidden words.
 // Total bank size = 6 + DISTRACTOR_COUNT.
 const DISTRACTOR_COUNT = 5;

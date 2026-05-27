@@ -13,6 +13,11 @@
 
 import { useState } from "react";
 import {
+  generatePqm1Mnemonic,
+  pqm1MnemonicToMlDsa65Seed,
+  MlDsa65Backend,
+} from "@monolythium/core-sdk/crypto";
+import {
   KeychainCallError,
   PRIMARY_ACCOUNT,
   createAndStoreVault,
@@ -79,54 +84,73 @@ export function Onboarding({ onDone }: Props) {
     setStep("password");
   };
 
+  const persistVault = async (mnemonicToSeal: string) => {
+    // Single persistence point — runs ONLY after verify-success for
+    // the Create path, or directly after password collection for the
+    // Import path (the user already has the phrase by definition).
+    const result = await createAndStoreVault(
+      PRIMARY_ACCOUNT,
+      password,
+      { importMnemonic: mnemonicToSeal },
+    );
+    // Drop password material from state immediately after the seal.
+    setPassword("");
+    setConfirm("");
+    try {
+      await registerVault(
+        {
+          slot: PRIMARY_ACCOUNT,
+          name: "Main wallet",
+          addressHex: result.addressHex,
+        },
+        { setActive: true },
+      );
+      setActiveAccount(PRIMARY_ACCOUNT);
+    } catch {
+      // Catalog write failures (no app-data path) shouldn't block
+      // onboarding — the vault is still in the keychain.
+    }
+  };
+
   const submit = async () => {
     if (!canSubmit) return;
     setBusy(true);
     setError(null);
     try {
-      const result = await createAndStoreVault(
-        PRIMARY_ACCOUNT,
-        password,
-        isImport && mnemonic ? { importMnemonic: mnemonic } : {},
-      );
-      // Drop the password from state as soon as the vault is sealed.
-      setPassword("");
-      setConfirm("");
-      // First-install catalog entry. The Wallets page later supports
-      // renaming and adding more vaults; this seeds the catalog so the
-      // OperationsDrawer / Wallets / Receive all see a known slot.
-      try {
-        await registerVault(
-          {
-            slot: PRIMARY_ACCOUNT,
-            name: "Main wallet",
-            addressHex: result.addressHex,
-          },
-          { setActive: true },
-        );
-        setActiveAccount(PRIMARY_ACCOUNT);
-      } catch {
-        // Catalog write failures (no app-data path) shouldn't block
-        // onboarding — the vault is still in the keychain.
-      }
       if (isImport) {
-        // Imported wallets skip show + verify — the user already has the
-        // phrase by definition. Finish straight to the wallet shell.
+        // Import path: phrase already collected, persist now. The user
+        // explicitly already has the phrase, so there's no abandon-
+        // after-show risk to mitigate.
+        if (!mnemonic) {
+          setError("Recovery phrase missing — re-enter it.");
+          setStep("import-phrase");
+          setBusy(false);
+          return;
+        }
+        await persistVault(mnemonic);
         setMnemonic(null);
         setBusy(false);
         onDone();
         return;
       }
-      setMnemonic(result.mnemonic);
+      // Create path: generate mnemonic in-memory, validate it can
+      // produce a real ML-DSA-65 keypair (catches SDK regressions
+      // early), then transition to show-phrase. NOTHING is persisted
+      // here — the vault gets sealed only after verify-success.
+      const fresh = generatePqm1Mnemonic();
+      const seed = pqm1MnemonicToMlDsa65Seed(fresh);
+      try {
+        MlDsa65Backend.fromSeed(seed); // sanity check; throws if SDK broken
+      } finally {
+        seed.fill(0);
+      }
+      setMnemonic(fresh);
       setStep("show-phrase");
       setBusy(false);
     } catch (cause) {
       if (cause instanceof KeychainCallError || cause instanceof VaultCallError) {
         setError(cause.message);
       } else {
-        // pqm1MnemonicToMlDsa65Seed surfaces typed Pqm1Error on bad
-        // algo / version / word count. Bounce back to the import step
-        // so the user can correct the phrase.
         const msg = (cause as Error)?.message ?? String(cause);
         if (isImport) {
           setImportError(`Phrase rejected: ${msg}`);
@@ -134,6 +158,32 @@ export function Onboarding({ onDone }: Props) {
         } else {
           setError(msg);
         }
+      }
+      setBusy(false);
+    }
+  };
+
+  const onVerified = async () => {
+    // Only now — after the user has correctly placed the missing
+    // words — do we touch disk. Browser-wallet 2f83e28 fixed the
+    // same persist-before-verify bug; this is the desktop port.
+    if (!mnemonic) {
+      setError("Lost the recovery phrase — restart onboarding.");
+      setStep("choose-path");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await persistVault(mnemonic);
+      setMnemonic(null);
+      setBusy(false);
+      onDone();
+    } catch (cause) {
+      if (cause instanceof KeychainCallError || cause instanceof VaultCallError) {
+        setError(cause.message);
+      } else {
+        setError((cause as Error)?.message ?? String(cause));
       }
       setBusy(false);
     }
@@ -237,7 +287,7 @@ export function Onboarding({ onDone }: Props) {
             </div>
           </>
         ) : step === "verify-phrase" && mnemonic ? (
-          <VerifyPhrase mnemonic={mnemonic} onVerified={onDone} />
+          <VerifyPhrase mnemonic={mnemonic} onVerified={() => void onVerified()} />
         ) : (
           <>
             <div className="cap" style={{ marginBottom: 8 }}>First-run setup</div>
