@@ -1,25 +1,13 @@
 // SDK seam — every chain I/O the wallet performs goes through here.
 //
-// We construct a single `MonolythiumProvider` (the ethers v6 shim that
-// `@monolythium/core-sdk/ethers` ships) so every chain read and
-// every signed broadcast share one transport, one network registration,
-// and one error-shape contract. Ethers callers (`provider.getBlockNumber`,
-// `provider.broadcastTransaction`) flow straight through; native callers
-// can still reach `lyth_*` methods via `provider.rpcClient.call(...)`.
+// We hold a single `RpcClient` from `@monolythium/core-sdk` so every
+// chain read and every signed broadcast share one transport and one
+// error-shape contract. Callers reach native `lyth_*` and read-only
+// `eth_*` methods via `provider.rpcClient.<method>`.
 
-import { SdkError, formatLyth, getRpcEndpoints } from "@monolythium/core-sdk";
-import { MonolythiumProvider } from "@monolythium/core-sdk/ethers";
-import type { MonolythiumProviderOptions } from "@monolythium/core-sdk/ethers";
-import { requireTypedUserAddressHex } from "./address";
+import { RpcClient, SdkError, formatLyth, getRpcEndpoints } from "@monolythium/core-sdk";
+import type { RpcClientOptions } from "@monolythium/core-sdk";
 
-/**
- * Default RPC endpoint. Honors `VITE_MONO_RPC_URL` at build time so the
- * Tauri release bundle can pin to a specific endpoint without a code change.
- *
- * The fallback points at the SDK-bundled chain-registry testnet endpoint
- * (chain id 69420), not localhost. Local/private nodes still override with
- * `VITE_MONO_RPC_URL`.
- */
 function defaultEndpoint(): string {
   const fromEnv = import.meta.env.VITE_MONO_RPC_URL;
   if (typeof fromEnv === "string" && fromEnv.length > 0) return fromEnv;
@@ -27,99 +15,67 @@ function defaultEndpoint(): string {
   return getRpcEndpoints("testnet-69420")[0]?.url ?? "http://localhost:8548";
 }
 
-let _provider: MonolythiumProvider | null = null;
+export interface MonolythiumClient {
+  readonly rpcClient: RpcClient;
+  readonly endpoint: string;
+}
 
-/**
- * Lazily-constructed singleton ethers `MonolythiumProvider`. The shim
- * registers the `monolythium-testnet` network with ethers' global
- * registry on first use; subsequent calls reuse the same instance and
- * the same underlying `RpcClient` transport.
- */
-export function getProvider(options: MonolythiumProviderOptions = {}): MonolythiumProvider {
-  if (_provider === null) {
-    _provider = new MonolythiumProvider(defaultEndpoint(), options);
+let _client: MonolythiumClient | null = null;
+
+export function getProvider(options: RpcClientOptions = {}): MonolythiumClient {
+  if (_client === null) {
+    const rpcClient = new RpcClient(defaultEndpoint(), options);
+    _client = { rpcClient, endpoint: rpcClient.endpoint };
   }
-  return _provider;
+  return _client;
 }
 
-/**
- * Reset the singleton — used by tests so each case can stand up its own
- * provider with a stub `fetch`. Production code never calls this.
- */
 export function resetProviderForTest(): void {
-  _provider = null;
+  _client = null;
 }
 
-/**
- * Inject a fully-constructed `MonolythiumProvider` as the singleton.
- * Test-only; production code goes through `getProvider()` and lets the
- * lazy initializer pick up `VITE_MONO_RPC_URL`.
- */
-export function setProviderForTest(provider: MonolythiumProvider): void {
-  _provider = provider;
+export function setProviderForTest(client: MonolythiumClient): void {
+  _client = client;
 }
 
 export type ChainSnapshot = {
   endpoint: string;
   chainId: bigint;
-  /** canonical LYTH numeric display without the unit suffix. */
   balanceLyth: string;
-  /** native atomic balance in lythoshi. */
   balanceLythoshi: string;
-  /** `null` while loading, otherwise the latest committed block height. */
   blockHeight: bigint | null;
-  /** Errors are stringified for UI consumption; the original SdkError is preserved. */
   error: { kind: string; message: string } | null;
 };
 
-/**
- * Pull the public chain snapshot the wallet needs at boot:
- * chain id, native height, and the balance envelope for the bound address.
- * Returns a discriminated value rather than throwing so the caller can render
- * an offline state without unwinding.
- *
- * Round-trips through `MonolythiumProvider`, which delegates to the SDK's
- * `RpcClient.call` under the hood — same transport as a direct ethers caller.
- */
 export async function loadChainSnapshot(address: string): Promise<ChainSnapshot> {
-  const provider = getProvider();
-  const endpoint = provider.rpcClient.endpoint;
-  const addressHex = requireTypedUserAddressHex(address);
+  const { rpcClient, endpoint } = getProvider();
   try {
-    const [network, round, balanceAtomic] = await Promise.all([
-      provider.getNetwork(),
-      provider.rpcClient.lythCurrentRound(),
-      provider.getBalance(addressHex),
+    const [chainId, round, profile] = await Promise.all([
+      rpcClient.ethChainId(),
+      rpcClient.lythCurrentRound(),
+      rpcClient.lythAddressProfile(address),
     ]);
-    const lythoshi = balanceQuantityToLythoshi(`0x${balanceAtomic.toString(16)}`);
+    const lythoshi = profile.account.nativeBalance;
     return {
       endpoint,
-      chainId: network.chainId,
+      chainId,
       blockHeight: round.height,
       balanceLythoshi: lythoshi,
       balanceLyth: formatLyth(lythoshi, { includeUnit: false }),
       error: null,
     };
   } catch (cause) {
-    const err = unwrapError(cause);
     return {
       endpoint,
       chainId: 0n,
       blockHeight: null,
       balanceLythoshi: "0",
       balanceLyth: "0",
-      error: err,
+      error: unwrapError(cause),
     };
   }
 }
 
-/**
- * Normalize whatever the ethers/SDK transport surfaced into a plain
- * `{ kind, message }` pair the UI can render. Ethers wraps SDK errors in
- * its own envelope, so we unwrap one level (`error.error.error.error` is
- * a known ethers idiom for transport stacks); we don't try to be smarter
- * than that.
- */
 function unwrapError(cause: unknown): { kind: string; message: string } {
   if (cause instanceof SdkError) {
     return { kind: cause.kind, message: cause.message };
@@ -134,7 +90,6 @@ function unwrapError(cause: unknown): { kind: string; message: string } {
   return { kind: "unknown", message };
 }
 
-/** Convert a `0x` quantity from RPC into canonical decimal lythoshi text. */
 export function balanceQuantityToLythoshi(hex: string): string {
   if (!hex || hex === "0x" || hex === "0x0") return "0";
   try {
@@ -144,7 +99,6 @@ export function balanceQuantityToLythoshi(hex: string): string {
   }
 }
 
-/** Convert a native RPC quantity directly into canonical LYTH display text. */
 export function balanceQuantityToLyth(hex: string): string {
   return formatLyth(balanceQuantityToLythoshi(hex), { includeUnit: false });
 }
