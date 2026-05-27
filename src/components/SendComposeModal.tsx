@@ -10,6 +10,7 @@ import {
 } from "@monolythium/core-sdk";
 import { useOperations } from "../operations/context";
 import { sendNativeLyth } from "../sdk/native-send";
+import { ContactsPickerModal } from "./ContactsPickerModal";
 
 interface Props {
   /** Typed `mono1…` address shown in the From line. Use the same
@@ -25,6 +26,12 @@ export function SendComposeModal({ fromBech32m, onClose }: Props) {
   const [recipient, setRecipient] = useState("");
   const [amount, setAmount] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  // When the user picks a contact, hold the resolved name so the
+  // review pane can render "Send to Alice (mono1…)" rather than the
+  // bare address. Cleared on any manual edit of the recipient field
+  // so a stale name never travels with a fresh address.
+  const [resolvedContactName, setResolvedContactName] = useState<string | null>(null);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -74,7 +81,12 @@ export function SendComposeModal({ fromBech32m, onClose }: Props) {
       auth: "keychain",
       diff: [
         { k: "From", v: fromBech32m },
-        { k: "To", v: toBech32m },
+        {
+          k: "To",
+          v: resolvedContactName
+            ? `${resolvedContactName} · ${toBech32m}`
+            : toBech32m,
+        },
         { k: "Token", v: "LYTH" },
         { k: "Amount", v: `${amountLyth} LYTH` },
       ],
@@ -141,18 +153,52 @@ export function SendComposeModal({ fromBech32m, onClose }: Props) {
           From <span style={{ fontFamily: "var(--f-mono)" }}>{shortAddr(fromBech32m)}</span>
         </p>
 
-        <label style={fieldLabel}>Recipient</label>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            marginBottom: 6,
+          }}
+        >
+          <label style={{ ...fieldLabel, marginBottom: 0 }}>Recipient</label>
+          <button
+            type="button"
+            className="btn btn--sm btn--ghost"
+            onClick={() => setPickerOpen(true)}
+            style={{ padding: "4px 10px", fontSize: 11 }}
+          >
+            From contacts
+          </button>
+        </div>
         <input
           type="text"
           autoFocus
           autoCapitalize="none"
           spellCheck={false}
           value={recipient}
-          onChange={(e) => setRecipient(e.target.value)}
+          onChange={(e) => {
+            setRecipient(e.target.value);
+            // Any manual edit clears the resolved-contact name so a
+            // stale name never travels with a fresh address.
+            if (resolvedContactName !== null) setResolvedContactName(null);
+          }}
           placeholder={`${USER_HRP}1…`}
           aria-label="Recipient typed bech32m address"
           style={inputStyle}
         />
+        {resolvedContactName && (
+          <div
+            style={{
+              marginTop: 6,
+              fontSize: 11,
+              color: "var(--fg-400)",
+              letterSpacing: "0.04em",
+            }}
+          >
+            Saved as <strong style={{ color: "var(--fg-200)" }}>{resolvedContactName}</strong>
+          </div>
+        )}
 
         <label style={{ ...fieldLabel, marginTop: 12 }}>Amount (LYTH)</label>
         <input
@@ -187,6 +233,17 @@ export function SendComposeModal({ fromBech32m, onClose }: Props) {
           </button>
         </div>
       </div>
+      {pickerOpen && (
+        <ContactsPickerModal
+          onSelect={(entry) => {
+            setRecipient(entry.address);
+            setResolvedContactName(entry.name);
+            setError(null);
+            setPickerOpen(false);
+          }}
+          onClose={() => setPickerOpen(false)}
+        />
+      )}
     </div>
   );
 }
