@@ -2,8 +2,10 @@
 // rotation arrive with Stage 3 / Stage 4.
 
 import { useCallback, useEffect, useState } from "react";
+import type { ChainInfo } from "@monolythium/core-sdk";
 import { IDENTITY } from "../data/fixtures";
 import { useOperations } from "../operations/context";
+import { fetchLiveTestnetRegistry } from "../sdk/live-registry";
 import {
   outboundMcpStart,
   outboundMcpStatus,
@@ -59,6 +61,8 @@ export function Settings({ developerModeEnabled, setDeveloperModeEnabled, steleE
         <h1>Settings</h1>
         <div className="sub">Customize how your wallet looks and behaves.</div>
       </div>
+
+      <ChainRegistryCard />
 
       <div className="w-card">
         <div className="w-card__head"><h3>Stele marketplace</h3><span className="w-todo__pill">early access</span></div>
@@ -315,6 +319,84 @@ function ChipRow<T extends string>({ label, help, value, options, onChange }: {
             {o}
           </button>
         ))}
+      </div>
+    </div>
+  );
+}
+
+function shortHex(s: string, head = 10, tail = 6): string {
+  if (s.length <= head + tail + 1) return s;
+  return `${s.slice(0, head)}…${s.slice(-tail)}`;
+}
+
+/**
+ * Live testnet chain-registry card. Pulls the canonical genesis_hash
+ * and binary_sha from the GitHub chain-registry repo so the wallet
+ * reflects the latest registry push without needing an SDK rebuild +
+ * wallet bump. Falls back to a "fetching…" state until the network
+ * call resolves; on persistent failure the value stays as a dash so
+ * the card never displays stale info.
+ */
+function ChainRegistryCard() {
+  const [registry, setRegistry] = useState<ChainInfo | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const info = await fetchLiveTestnetRegistry();
+      if (cancelled) return;
+      setRegistry(info);
+      setLoading(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return (
+    <div className="w-card">
+      <div className="w-card__head">
+        <h3>Chain registry</h3>
+        <span className="w-live-pill">live</span>
+      </div>
+      <div className="w-card__body">
+        <div className="w-kv">
+          <span className="k">Network</span>
+          <span className="v">{registry?.display_name ?? "testnet-69420"}</span>
+        </div>
+        <div className="w-kv">
+          <span className="k">Chain id</span>
+          <span className="v mono">{registry?.chain_id ?? "—"}</span>
+        </div>
+        <div className="w-kv">
+          <span className="k">Genesis hash</span>
+          <span
+            className="v mono"
+            title={registry?.genesis_hash ?? ""}
+            style={{ fontSize: 12 }}
+          >
+            {loading
+              ? "fetching…"
+              : registry
+                ? shortHex(registry.genesis_hash)
+                : "registry unreachable"}
+          </span>
+        </div>
+        <div className="w-kv">
+          <span className="k">Binary sha</span>
+          <span className="v mono" style={{ fontSize: 12 }}>
+            {loading
+              ? "fetching…"
+              : registry?.binary_sha ?? "registry unreachable"}
+          </span>
+        </div>
+        <div className="row-help" style={{ marginTop: 8 }}>
+          Live read from{" "}
+          <span className="mono">github.com/monolythium/chain-registry</span>{" "}
+          (5-minute cache). The wallet&apos;s pinned trust anchors stay
+          compile-time; this card is informational.
+        </div>
       </div>
     </div>
   );
