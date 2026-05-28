@@ -15,6 +15,10 @@
 import {
   MONOLYTHIUM_TESTNET_CHAIN_ID,
   RpcClient,
+  encodeClaimCalldata,
+  encodeDelegateCalldata,
+  encodeRedelegateCalldata,
+  encodeUndelegateCalldata,
 } from "@monolythium/core-sdk";
 import type {
   ClusterDirectoryPageResponse,
@@ -38,18 +42,14 @@ import {
 export const DELEGATION_PRECOMPILE =
   "0x000000000000000000000000000000000000100a";
 
-export const STAKING_SELECTORS = {
-  delegate: "d9a34952",
-  undelegate: "634b91e3",
-  redelegate: "0e184c84",
-  claimRewards: "372500ab",
-} as const;
-
-const STAKING_EXECUTION_UNIT_LIMIT = 50_000n;
+const STAKING_EXECUTION_UNIT_LIMIT = 150_000n;
 
 export interface SubmitStakingTxArgs {
   seed: Uint8Array;
   data: string;
+  /** msg.value in lythoshi. For `delegate` this is the principal stake;
+   *  for every other staking op pass `0n`. */
+  valueLythoshi?: bigint;
   executionUnitLimit?: bigint;
 }
 
@@ -58,46 +58,27 @@ export interface SubmitStakingTxResult {
   innerSighashHex: string;
 }
 
-function encodeUint256(value: number | bigint): string {
-  let n: bigint;
-  if (typeof value === "bigint") n = value;
-  else {
-    if (!Number.isFinite(value) || value < 0 || !Number.isInteger(value)) {
-      throw new RangeError(`encodeUint256: not a non-negative integer (${value})`);
-    }
-    n = BigInt(value);
-  }
-  if (n < 0n) throw new RangeError("encodeUint256: negative");
-  if (n >= 1n << 256n) throw new RangeError("encodeUint256: overflow");
-  return n.toString(16).padStart(64, "0");
-}
-
 export function buildDelegateCalldata(
   clusterId: number,
   weightBps: number,
 ): string {
-  return (
-    "0x" +
-    STAKING_SELECTORS.delegate +
-    encodeUint256(clusterId) +
-    encodeUint256(weightBps)
-  );
+  return encodeDelegateCalldata(clusterId, weightBps);
 }
 
-export function buildUndelegateCalldata(
-  clusterId: number,
+export function buildUndelegateCalldata(clusterId: number): string {
+  return encodeUndelegateCalldata(clusterId);
+}
+
+export function buildRedelegateCalldata(
+  fromCluster: number,
+  toCluster: number,
   weightBps: number,
 ): string {
-  return (
-    "0x" +
-    STAKING_SELECTORS.undelegate +
-    encodeUint256(clusterId) +
-    encodeUint256(weightBps)
-  );
+  return encodeRedelegateCalldata(fromCluster, toCluster, weightBps);
 }
 
 export function buildClaimRewardsCalldata(): string {
-  return "0x" + STAKING_SELECTORS.claimRewards;
+  return encodeClaimCalldata();
 }
 
 export async function fetchClusterDirectory(
@@ -140,7 +121,7 @@ export async function submitStakingTx(
     maxFeePerGas: executionUnitPrice,
     maxPriorityFeePerGas: executionUnitPrice,
     to: DELEGATION_PRECOMPILE,
-    value: "0x0",
+    value: args.valueLythoshi ?? 0n,
     input: args.data,
   };
 
