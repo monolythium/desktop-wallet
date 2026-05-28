@@ -108,14 +108,21 @@ jobs:
       - name: Collect artifacts
         shell: bash
         run: |
+          set -euo pipefail
           mkdir -p dist-release
-          shopt -s nullglob globstar
+          # macOS runners default to bash 3.2 which doesn't support
+          # `shopt -s globstar`, so we use `find` for portability.
           # User-facing installers + the updater bundles + their .sig files.
           # The .sig files are produced when TAURI_SIGNING_PRIVATE_KEY is set;
           # the latest-json job downstream reads them to build the manifest.
-          for f in src-tauri/target/${{ matrix.target }}/release/bundle/**/*.{dmg,app.tar.gz,app.tar.gz.sig,deb,AppImage,AppImage.tar.gz,AppImage.tar.gz.sig,msi,msi.zip,msi.zip.sig,exe,nsis.zip,nsis.zip.sig}; do
-            cp "$f" dist-release/
-          done
+          bundle_dir="src-tauri/target/${{ matrix.target }}/release/bundle"
+          find "$bundle_dir" -type f \
+            \( -name '*.dmg' -o -name '*.app.tar.gz' -o -name '*.app.tar.gz.sig' \
+               -o -name '*.deb' -o -name '*.AppImage' \
+               -o -name '*.AppImage.tar.gz' -o -name '*.AppImage.tar.gz.sig' \
+               -o -name '*.msi' -o -name '*.msi.zip' -o -name '*.msi.zip.sig' \
+               -o -name '*.exe' -o -name '*.nsis.zip' -o -name '*.nsis.zip.sig' \) \
+            -exec cp -f {} dist-release/ \;
           ls -la dist-release/
 
       - uses: actions/upload-artifact@v4
