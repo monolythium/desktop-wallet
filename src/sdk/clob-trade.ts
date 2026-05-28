@@ -14,6 +14,7 @@ import {
   RpcClient,
   addressToTypedBech32,
   deriveClobMarketId,
+  encodeCancelOrderCalldata,
   encodePlaceLimitOrderCalldata,
   type SpotLimitOrderSide,
 } from "@monolythium/core-sdk";
@@ -28,6 +29,7 @@ import { getProvider } from "./client";
 import { getExecutionUnitPriceLythoshi, getNativeTransactionCount } from "./native-rpc";
 
 const SPOT_LIMIT_ORDER_EXECUTION_UNIT_LIMIT = 250_000n;
+const CLOB_CANCEL_EXECUTION_UNIT_LIMIT = 80_000n;
 
 export interface PlaceClobLimitOrderArgs {
   /** Wallet's ML-DSA-65 seed (32 bytes). */
@@ -112,3 +114,58 @@ export async function placeClobLimitOrder(
 // Re-export the selector so the Trade UI can show it next to the
 // submit button for transparency / forensic logging.
 export const CLOB_PLACE_LIMIT_ORDER_SELECTOR = CLOB_SELECTORS.placeLimitOrder;
+
+export interface CancelClobOrderArgs {
+  seed: Uint8Array;
+  /** 32-byte order id (`0x…`). */
+  orderIdHex: string;
+  executionUnitLimit?: bigint;
+}
+
+export interface CancelClobOrderResult {
+  txHash: string;
+  from: string;
+  innerSighashHex: string;
+  envelopeWireBytes: number;
+  calldataBytes: number;
+}
+
+export async function cancelClobOrder(
+  args: CancelClobOrderArgs,
+): Promise<CancelClobOrderResult> {
+  const backend = MlDsa65Backend.fromSeed(args.seed);
+  const provider = getProvider();
+  const client = new RpcClient(provider.rpcClient.endpoint);
+  const fromHex = backend.getAddress();
+
+  const [nonce, executionUnitPrice, encryptionKey] = await Promise.all([
+    getNativeTransactionCount(client, fromHex),
+    getExecutionUnitPriceLythoshi(client),
+    fetchEncryptionKey(client),
+  ]);
+
+  const calldataHex = encodeCancelOrderCalldata({ orderId: args.orderIdHex });
+
+  const tx: NativeEvmTxFields = {
+    chainId: MONOLYTHIUM_TESTNET_CHAIN_ID,
+    nonce,
+    maxFeePerGas: executionUnitPrice,
+    maxPriorityFeePerGas: executionUnitPrice,
+    gasLimit: args.executionUnitLimit ?? CLOB_CANCEL_EXECUTION_UNIT_LIMIT,
+    to: PRECOMPILE_ADDRESSES.CLOB,
+    value: 0n,
+    input: calldataHex,
+  };
+
+  const wrapped = await buildEncryptedSubmission({ backend, encryptionKey, tx });
+  const txHash = await submitEncryptedEnvelope(client, wrapped.envelopeWireHex);
+  return {
+    txHash,
+    from: addressToTypedBech32("user", fromHex),
+    innerSighashHex: wrapped.innerSighashHex,
+    envelopeWireBytes: (wrapped.envelopeWireHex.length - 2) / 2,
+    calldataBytes: (calldataHex.length - 2) / 2,
+  };
+}
+
+export const CLOB_CANCEL_ORDER_SELECTOR = CLOB_SELECTORS.cancelOrder;
