@@ -17,6 +17,7 @@ import { Sidebar } from "./components/Sidebar";
 import { Topbar } from "./components/Topbar";
 import { Activity } from "./pages/Activity";
 import { AiTrading } from "./pages/AiTrading";
+import { Bridges } from "./pages/Bridges";
 import { Contacts } from "./pages/Contacts";
 import { Home } from "./pages/Home";
 import { Inbox } from "./pages/Inbox";
@@ -213,6 +214,7 @@ export function App() {
           {route === "wallets" ? <Wallets /> : null}
           {route === "tokens" ? <Tokens /> : null}
           {route === "stake" ? <Stake /> : null}
+          {route === "bridges" ? <Bridges /> : null}
           {route === "contacts" ? <Contacts denom={denom} /> : null}
           {route === "riscv" ? <RiscvContracts /> : null}
           {route === "studio" ? (

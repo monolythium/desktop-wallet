@@ -47,6 +47,14 @@ const ICON_STAKE = () => (
     <path d="M8.2 11.2l7.6-3.8M8.2 12.8l7.6 3.8" />
   </svg>
 );
+const ICON_BRIDGES = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M3 18c2-4 5-6 9-6s7 2 9 6" />
+    <path d="M5 18V8" />
+    <path d="M19 18V8" />
+    <path d="M9 14l3-2 3 2" />
+  </svg>
+);
 const ICON_CONTACTS = () => (
   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
@@ -132,6 +140,7 @@ const NAV: NavItem[] = [
   { id: "wallets", label: "Wallets", icon: ICON_WALLETS },
   { id: "tokens", label: "Tokens", icon: ICON_TOKENS, publicOnly: true },
   { id: "stake", label: "Stake", icon: ICON_STAKE, publicOnly: true },
+  { id: "bridges", label: "Bridges", icon: ICON_BRIDGES, publicOnly: true },
   { id: "contacts", label: "Contacts", icon: ICON_CONTACTS },
   { id: "riscv", label: "RISC-V", icon: ICON_RISCV, publicOnly: true },
   { id: "studio", label: "Studio", icon: ICON_STUDIO, publicOnly: true, developerOnly: true, badge: "dev" },
