@@ -1,9 +1,18 @@
-// Trade page — read-only native CLOB spot readiness. Public denom only.
+// Trade page — native CLOB spot. Read-only telemetry plus a
+// single-pair place-limit-order panel that signs through the
+// operations drawer's keychain unlock and posts via the encrypted
+// mempool.
 
 import { useEffect, useState } from "react";
-import type { ClobOrderBookResponse, NativeSpotMarketStateRecord } from "@monolythium/core-sdk";
+import type {
+  ClobOrderBookResponse,
+  NativeSpotMarketStateRecord,
+  SpotLimitOrderSide,
+} from "@monolythium/core-sdk";
 import { findOrderBookStreamTopic } from "../sdk/market";
 import { formatOutcome, loadLiveTradeStatus, type LiveTradeStatus } from "../sdk/live";
+import { placeClobLimitOrder } from "../sdk/clob-trade";
+import { useOperations } from "../operations/context";
 
 export function Trade() {
   const [status, setStatus] = useState<LiveTradeStatus | null>(null);
@@ -146,6 +155,15 @@ export function Trade() {
         </div>
       </div>
 
+      <PlaceLimitOrderCard
+        marketId={selected?.marketId ?? null}
+        baseTokenIdHex={nativeMarket?.baseAssetId ?? null}
+        quoteTokenIdHex={nativeMarket?.quoteAssetId ?? null}
+        bestBidPrice={book?.bids?.[0]?.price ?? null}
+        bestAskPrice={book?.asks?.[0]?.price ?? null}
+        lastPrice={trades[0]?.price ?? null}
+      />
+
       <div className="w-card">
         <div className="w-card__head">
           <h3>State scope</h3>
@@ -158,7 +176,155 @@ export function Trade() {
             <LiveCell label="NFT listings" value={nativeState ? nativeState.nftListings.length.toString() : status?.nativeMarketState.error ?? "loading"} />
             <LiveCell label="Royalties" value={nativeState ? nativeState.collectionRoyalties.length.toString() : status?.nativeMarketState.error ?? "loading"} />
           </div>
-          <div className="row-help">Order entry, open orders, and balances are intentionally hidden here until account-scoped CLOB state is available.</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PlaceLimitOrderCard({
+  marketId,
+  baseTokenIdHex,
+  quoteTokenIdHex,
+  bestBidPrice,
+  bestAskPrice,
+  lastPrice,
+}: {
+  marketId: string | null;
+  baseTokenIdHex: string | null;
+  quoteTokenIdHex: string | null;
+  bestBidPrice: string | null;
+  bestAskPrice: string | null;
+  lastPrice: string | null;
+}) {
+  const ops = useOperations();
+  const [side, setSide] = useState<SpotLimitOrderSide>("buy");
+  const [price, setPrice] = useState<string>("");
+  const [quantity, setQuantity] = useState<string>("");
+  const [error, setError] = useState<string | null>(null);
+
+  // Seed the price field with the touching side once we have book data.
+  useEffect(() => {
+    if (price) return;
+    const seed = side === "buy" ? bestAskPrice ?? lastPrice : bestBidPrice ?? lastPrice;
+    if (seed) setPrice(seed);
+  }, [side, bestBidPrice, bestAskPrice, lastPrice, price]);
+
+  const canSubmit =
+    Boolean(baseTokenIdHex && quoteTokenIdHex) &&
+    /^\d+$/.test(price.trim()) &&
+    /^\d+$/.test(quantity.trim()) &&
+    BigInt(price || "0") > 0n &&
+    BigInt(quantity || "0") > 0n;
+
+  const submit = () => {
+    if (!baseTokenIdHex || !quoteTokenIdHex) {
+      setError("Market metadata is still loading.");
+      return;
+    }
+    setError(null);
+    const priceStr = price.trim();
+    const qtyStr = quantity.trim();
+    ops.open({
+      title: `${side === "buy" ? "Buy" : "Sell"} ${qtyStr} base atoms @ ${priceStr}`,
+      subtitle: "Native CLOB placeLimitOrder, encrypted-mempool submit",
+      auth: "keychain",
+      diff: [
+        { k: "Side", v: side === "buy" ? "BUY" : "SELL" },
+        { k: "Base token", v: baseTokenIdHex },
+        { k: "Quote token", v: quoteTokenIdHex },
+        { k: "Limit price", v: `${priceStr} quote atoms / base atom` },
+        { k: "Quantity", v: `${qtyStr} base atoms` },
+      ],
+      effects: [
+        { text: "Unlocks the local vault for this operation only." },
+        { text: "Encodes placeLimitOrder calldata via @monolythium/core-sdk." },
+        { text: "Signs with ML-DSA-65 and posts via lyth_submitEncrypted (CLOB @ 0x1001)." },
+        { text: "Crossing fills emit OrderMatched -> swaps; remainder rests on the book." },
+      ],
+      execute: async (ctx) => {
+        if (!ctx?.vaultSeed) {
+          throw new Error("vault seed unavailable after keychain authorization");
+        }
+        const result = await placeClobLimitOrder({
+          seed: ctx.vaultSeed,
+          baseTokenIdHex,
+          quoteTokenIdHex,
+          side,
+          price: priceStr,
+          quantity: qtyStr,
+        });
+        return {
+          headline: `Submitted ${side} @ ${priceStr}`,
+          detail: `${result.txHash} · from ${result.from} · ${result.envelopeWireBytes} bytes envelope`,
+        };
+      },
+    });
+  };
+
+  return (
+    <div className="w-card">
+      <div className="w-card__head">
+        <h3>Place limit order</h3>
+        <span className={`w-live-pill ${marketId ? "" : "is-muted"}`}>
+          {marketId ? "encrypted submit" : "market required"}
+        </span>
+      </div>
+      <div className="w-card__body" style={{ display: "grid", gap: 10 }}>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button
+            type="button"
+            onClick={() => setSide("buy")}
+            className={`btn btn--sm ${side === "buy" ? "btn--primary" : ""}`}
+          >
+            Buy
+          </button>
+          <button
+            type="button"
+            onClick={() => setSide("sell")}
+            className={`btn btn--sm ${side === "sell" ? "btn--primary" : ""}`}
+          >
+            Sell
+          </button>
+        </div>
+        <label style={{ display: "grid", gap: 4 }}>
+          <span className="row-label">Limit price (quote atoms per base atom)</span>
+          <input
+            type="text"
+            inputMode="numeric"
+            value={price}
+            onChange={(e) => setPrice(e.target.value)}
+            placeholder="e.g. 1000000001"
+            className="mono"
+          />
+        </label>
+        <label style={{ display: "grid", gap: 4 }}>
+          <span className="row-label">Quantity (base atoms)</span>
+          <input
+            type="text"
+            inputMode="numeric"
+            value={quantity}
+            onChange={(e) => setQuantity(e.target.value)}
+            placeholder="e.g. 2000000000"
+            className="mono"
+          />
+        </label>
+        {baseTokenIdHex ? <div className="row-help">Base token: <span className="mono">{baseTokenIdHex}</span></div> : null}
+        {quoteTokenIdHex ? <div className="row-help">Quote token: <span className="mono">{quoteTokenIdHex}</span></div> : null}
+        {error ? <div className="w-live-error">{error}</div> : null}
+        <button
+          type="button"
+          onClick={submit}
+          disabled={!canSubmit}
+          className="btn btn--primary"
+          style={{ justifySelf: "flex-start" }}
+        >
+          Place {side === "buy" ? "BUY" : "SELL"} limit
+        </button>
+        <div className="row-help">
+          Notional <code className="mono">price × quantity</code> must exceed the market's
+          <code className="mono">min_notional_atoms</code> (1 quote-atom floor by default; on
+          testnet 1e18). Crossing fills happen at the resting maker's price.
         </div>
       </div>
     </div>
