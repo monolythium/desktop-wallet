@@ -38,5 +38,13 @@
     "category": "Finance",
     "shortDescription": "Monolythium desktop wallet",
     "longDescription": "Monolythium desktop wallet (macOS, Windows, Linux). Hold and move MNLX, manage keys via the OS keychain, and route every destructive action through a typed Operations drawer."
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/monolythium/desktop-wallet/releases/latest/download/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDQxRDY5OERDMTY4MTRBOTQKUldTVVNvRVczSmpXUWNrWUZ2dXlIZDZaMjNiUHR1K01iSjlLakdJV1RqYlpKcXpmbG02cXBZMlAK"
+    }
   }
 }

@@ -15,6 +15,8 @@ import { ApprovalOverlay } from "./components/ApprovalOverlay";
 import { Onboarding } from "./components/Onboarding";
 import { Sidebar } from "./components/Sidebar";
 import { Topbar } from "./components/Topbar";
+import { UpdateBanner } from "./components/UpdateBanner";
+import { checkForUpdate, type UpdateAvailable } from "./sdk/updater";
 import { Activity } from "./pages/Activity";
 import { AiTrading } from "./pages/AiTrading";
 import { Bridges } from "./pages/Bridges";
@@ -95,6 +97,24 @@ export function App() {
   const [boot, setBoot] = useState<BootState>(() =>
     isTauri() ? { kind: "probing" } : { kind: "ready" },
   );
+  // Pending self-update, if the launch-time check found one. Banner
+  // renders only when set; dismissal clears it until the next launch.
+  const [pendingUpdate, setPendingUpdate] = useState<UpdateAvailable | null>(null);
+
+  // Self-update check — fires once the wallet is ready (post-boot,
+  // post-onboarding). We don't run it during onboarding so the user
+  // never sees an update banner on their first-ever launch screen.
+  useEffect(() => {
+    if (boot.kind !== "ready") return;
+    let cancelled = false;
+    void checkForUpdate().then((result) => {
+      if (cancelled || !result.available) return;
+      setPendingUpdate(result);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [boot.kind]);
 
   useEffect(() => {
     if (boot.kind !== "probing") return;
@@ -239,6 +259,12 @@ export function App() {
           ) : null}
         </main>
         {steleEnabled ? <ApprovalOverlay /> : null}
+        {pendingUpdate ? (
+          <UpdateBanner
+            update={pendingUpdate}
+            onDismiss={() => setPendingUpdate(null)}
+          />
+        ) : null}
       </div>
     </OperationsProvider>
   );
