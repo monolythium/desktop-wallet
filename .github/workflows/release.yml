@@ -67,6 +67,8 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           APPLE_API_ISSUER: ${{ secrets.APPSTORE_CONNECT_ISSUER_ID }}
           APPLE_API_KEY: ${{ secrets.APPSTORE_CONNECT_KEY_ID }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           echo "${{ secrets.APPSTORE_CONNECT_KEY_BASE64 }}" | base64 --decode > /tmp/asc-key.p8
           export APPLE_API_KEY_PATH=/tmp/asc-key.p8
@@ -74,10 +76,16 @@ jobs:
 
       - name: Build (Linux)
         if: matrix.os == 'ubuntu-latest'
-        run: pnpm tauri build --target ${{ matrix.target }} --bundles deb,appimage
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: pnpm tauri build --target ${{ matrix.target }} --bundles deb,appimage,updater
 
       - name: Build (Windows — unsigned)
         if: matrix.os == 'windows-latest'
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: pnpm tauri build --target ${{ matrix.target }}
 
       - name: Sign Windows binaries (Azure Trusted Signing)
@@ -102,7 +110,10 @@ jobs:
         run: |
           mkdir -p dist-release
           shopt -s nullglob globstar
-          for f in src-tauri/target/${{ matrix.target }}/release/bundle/**/*.{dmg,app.tar.gz,deb,AppImage,msi,exe}; do
+          # User-facing installers + the updater bundles + their .sig files.
+          # The .sig files are produced when TAURI_SIGNING_PRIVATE_KEY is set;
+          # the latest-json job downstream reads them to build the manifest.
+          for f in src-tauri/target/${{ matrix.target }}/release/bundle/**/*.{dmg,app.tar.gz,app.tar.gz.sig,deb,AppImage,AppImage.tar.gz,AppImage.tar.gz.sig,msi,msi.zip,msi.zip.sig,exe,nsis.zip,nsis.zip.sig}; do
             cp "$f" dist-release/
           done
           ls -la dist-release/
@@ -117,6 +128,8 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/') || github.event.inputs.tag != ''
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+
       - uses: actions/download-artifact@v4
         with:
           path: ./artifacts
@@ -124,6 +137,77 @@ jobs:
 
       - name: List artifacts
         run: ls -la ./artifacts
+
+      # latest.json is the manifest tauri-plugin-updater fetches from
+      # the GitHub Releases endpoint configured in tauri.conf.json. It
+      # tells the running app which version is current and where to
+      # download the signed update bundle from. The pubkey on the
+      # device side verifies these signatures against the corresponding
+      # private key held in TAURI_SIGNING_PRIVATE_KEY.
+      - name: Generate latest.json (updater manifest)
+        env:
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          VERSION="${TAG#v}"
+          REPO="${{ github.repository }}"
+          BASE="https://github.com/${REPO}/releases/download/${TAG}"
+
+          cd artifacts
+
+          read_sig() {
+            # Echo the trimmed contents of $1 if it exists, else empty.
+            if [ -f "$1" ]; then
+              tr -d '\n\r' < "$1"
+            fi
+          }
+
+          # Find each platform's updater bundle + sig. Tauri produces:
+          #   macOS:   <name>.app.tar.gz + .sig
+          #   Linux:   <name>.AppImage.tar.gz + .sig
+          #   Windows: <name>.nsis.zip + .sig  (or .msi.zip + .sig)
+          DARWIN_ARM_BUNDLE=$(ls *aarch64*.app.tar.gz 2>/dev/null | head -1 || true)
+          DARWIN_ARM_SIG="${DARWIN_ARM_BUNDLE}.sig"
+          DARWIN_X64_BUNDLE=$(ls *x86_64*.app.tar.gz 2>/dev/null | head -1 || true)
+          DARWIN_X64_SIG="${DARWIN_X64_BUNDLE}.sig"
+          LINUX_BUNDLE=$(ls *.AppImage.tar.gz 2>/dev/null | head -1 || true)
+          LINUX_SIG="${LINUX_BUNDLE}.sig"
+          WIN_BUNDLE=$(ls *.nsis.zip 2>/dev/null | head -1 || ls *.msi.zip 2>/dev/null | head -1 || true)
+          WIN_SIG="${WIN_BUNDLE}.sig"
+
+          # Build per-platform entries only when a signed bundle exists,
+          # so a partial release (e.g. macOS-only) still produces a
+          # valid manifest the plugin can parse.
+          PLATFORMS_JSON="{}"
+          add_platform() {
+            local key="$1" bundle="$2" sig="$3"
+            if [ -n "$bundle" ] && [ -f "$sig" ]; then
+              local sig_data
+              sig_data=$(read_sig "$sig")
+              PLATFORMS_JSON=$(jq \
+                --arg k "$key" \
+                --arg s "$sig_data" \
+                --arg u "${BASE}/${bundle}" \
+                '. + {($k): {signature: $s, url: $u}}' \
+                <<<"$PLATFORMS_JSON")
+            fi
+          }
+
+          add_platform "darwin-aarch64" "$DARWIN_ARM_BUNDLE" "$DARWIN_ARM_SIG"
+          add_platform "darwin-x86_64"  "$DARWIN_X64_BUNDLE" "$DARWIN_X64_SIG"
+          add_platform "linux-x86_64"   "$LINUX_BUNDLE"      "$LINUX_SIG"
+          add_platform "windows-x86_64" "$WIN_BUNDLE"        "$WIN_SIG"
+
+          jq -n \
+            --arg v "$VERSION" \
+            --arg d "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --arg n "Monolythium desktop wallet ${TAG}" \
+            --argjson p "$PLATFORMS_JSON" \
+            '{version: $v, pub_date: $d, notes: $n, platforms: $p}' \
+            > latest.json
+
+          echo "=== latest.json ==="
+          cat latest.json
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
