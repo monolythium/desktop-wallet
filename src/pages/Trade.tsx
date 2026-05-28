@@ -11,7 +11,7 @@ import type {
 } from "@monolythium/core-sdk";
 import { findOrderBookStreamTopic } from "../sdk/market";
 import { formatOutcome, loadLiveTradeStatus, type LiveTradeStatus } from "../sdk/live";
-import { placeClobLimitOrder } from "../sdk/clob-trade";
+import { cancelClobOrder, placeClobLimitOrder } from "../sdk/clob-trade";
 import { useOperations } from "../operations/context";
 
 // LYTHt / USDCt testnet pair pinned to the v0.0.13 fresh genesis. The
@@ -176,6 +176,8 @@ export function Trade() {
         lastPrice={trades[0]?.price ?? null}
       />
 
+      <CancelOrderCard />
+
       <div className="w-card">
         <div className="w-card__head">
           <h3>State scope</h3>
@@ -337,6 +339,78 @@ function PlaceLimitOrderCard({
           Notional <code className="mono">price × quantity</code> must exceed the market's
           <code className="mono">min_notional_atoms</code> (1 quote-atom floor by default; on
           testnet 1e18). Crossing fills happen at the resting maker's price.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CancelOrderCard() {
+  const ops = useOperations();
+  const [orderId, setOrderId] = useState<string>("");
+  const [error, setError] = useState<string | null>(null);
+  const trimmed = orderId.trim();
+  const canSubmit = /^0x[0-9a-fA-F]{64}$/.test(trimmed);
+  const submit = () => {
+    setError(null);
+    if (!canSubmit) {
+      setError("Order id must be 32 bytes of hex prefixed with 0x.");
+      return;
+    }
+    ops.open({
+      title: `Cancel order ${trimmed.slice(0, 18)}…`,
+      subtitle: "Native CLOB cancelOrder, encrypted-mempool submit",
+      auth: "keychain",
+      diff: [{ k: "Order id", v: trimmed }],
+      effects: [
+        { text: "Unlocks the local vault for this operation only." },
+        { text: "Encodes cancelOrder calldata via @monolythium/core-sdk." },
+        { text: "Signs with ML-DSA-65 and posts via lyth_submitEncrypted (CLOB @ 0x1001)." },
+        { text: "Emits OrderCancelled(orderId, owner, refundedBase, refundedQuote) — indexed into the events table." },
+      ],
+      execute: async (ctx) => {
+        if (!ctx?.vaultSeed) {
+          throw new Error("vault seed unavailable after keychain authorization");
+        }
+        const result = await cancelClobOrder({ seed: ctx.vaultSeed, orderIdHex: trimmed });
+        return {
+          headline: `Submitted cancelOrder`,
+          detail: `${result.txHash} · from ${result.from} · ${result.envelopeWireBytes} bytes envelope`,
+        };
+      },
+    });
+  };
+  return (
+    <div className="w-card">
+      <div className="w-card__head">
+        <h3>Cancel order</h3>
+        <span className="w-live-pill">encrypted submit</span>
+      </div>
+      <div className="w-card__body" style={{ display: "grid", gap: 10 }}>
+        <label style={{ display: "grid", gap: 4 }}>
+          <span className="row-label">Order id (32-byte hex)</span>
+          <input
+            type="text"
+            value={orderId}
+            onChange={(e) => setOrderId(e.target.value)}
+            placeholder="0x…"
+            className="mono"
+          />
+        </label>
+        {error ? <div className="w-live-error">{error}</div> : null}
+        <button
+          type="button"
+          onClick={submit}
+          disabled={!canSubmit}
+          className="btn btn--primary"
+          style={{ justifySelf: "flex-start" }}
+        >
+          Cancel order
+        </button>
+        <div className="row-help">
+          Only the order's <code className="mono">owner</code> can cancel. Refunded escrow returns to the
+          owner's wallet; the on-chain log <code className="mono">OrderCancelled</code> is
+          indexed into the generic events table.
         </div>
       </div>
     </div>
