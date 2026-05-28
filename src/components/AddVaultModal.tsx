@@ -17,6 +17,7 @@ import {
   setActiveAccount,
 } from "../sdk/keychain";
 import { VaultCallError } from "../sdk/vault";
+import { explainImportError } from "../lib/import-error";
 import {
   mintVaultSlot,
   registerVault,
@@ -110,7 +111,8 @@ export function AddVaultModal({ onClose, onAdded }: Props) {
       if (cause instanceof VaultCallError) {
         setError(cause.message);
       } else {
-        setError((cause as Error)?.message ?? String(cause));
+        const msg = (cause as Error)?.message ?? String(cause);
+        setError(mode === "import" ? explainImportError(msg) : msg);
       }
       setBusy(false);
     }

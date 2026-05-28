@@ -25,6 +25,7 @@ import {
 } from "../sdk/keychain";
 import { VaultCallError } from "../sdk/vault";
 import { registerVault } from "../sdk/vaultCatalog";
+import { explainImportError } from "../lib/import-error";
 import { MnemonicGrid } from "./MnemonicGrid";
 import { VerifyPhrase } from "./VerifyPhrase";
 
@@ -153,7 +154,7 @@ export function Onboarding({ onDone }: Props) {
       } else {
         const msg = (cause as Error)?.message ?? String(cause);
         if (isImport) {
-          setImportError(`Phrase rejected: ${msg}`);
+          setImportError(explainImportError(msg));
           setStep("import-phrase");
         } else {
           setError(msg);
