@@ -30,9 +30,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # pnpm version is read from package.json `packageManager` field;
+      # do not pass `version:` here or pnpm/action-setup@v4 errors with
+      # ERR_PNPM_BAD_PM_VERSION on the duplicate spec.
       - uses: pnpm/action-setup@v4
-        with:
-          version: 10
 
       - uses: actions/setup-node@v4
         with:
