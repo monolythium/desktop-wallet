@@ -30,6 +30,7 @@ export function Stake() {
   const [directoryError, setDirectoryError] = useState<string | null>(null);
   const [openForm, setOpenForm] = useState<number | null>(null);
   const [draftWeightBps, setDraftWeightBps] = useState("1000");
+  const [draftPrincipalLyth, setDraftPrincipalLyth] = useState("100");
   const [draftError, setDraftError] = useState<string | null>(null);
 
   const refresh = async () => {
@@ -66,24 +67,27 @@ export function Stake() {
 
   const selfBech32m = addressToTypedBech32("user", IDENTITY.address);
 
-  const openDelegate = (clusterId: number, weightBps: number) => {
+  const openDelegate = (clusterId: number, weightBps: number, principalLyth: bigint) => {
     const weightLabel = `${(weightBps / 100).toFixed(2)}%`;
+    const principalLythoshi = principalLyth * 100_000_000n; // 1 LYTH = 1e8 lythoshi
     ops.open({
-      title: `Delegate to cluster ${clusterId}`,
-      subtitle: `Stake ${weightLabel} of wallet weight to a DVT cluster`,
+      title: `Delegate ${principalLyth} LYTH to cluster ${clusterId}`,
+      subtitle: `Stake ${weightLabel} of wallet weight, ${principalLyth} LYTH principal`,
       auth: "keychain",
       diff: [
         { k: "From", v: selfBech32m },
         { k: "Cluster", v: String(clusterId) },
         { k: "Weight", v: weightLabel },
+        { k: "Principal", v: `${principalLyth} LYTH (${principalLythoshi.toString()} lythoshi)` },
         { k: "Precompile", v: "0x…100a" },
       ],
       effects: [
         { text: "Unlocks the local vault for this operation only." },
-        { text: "Encodes a delegate(clusterId, weightBps) call to the delegation precompile." },
-        { text: "Wraps the native transaction in an encrypted envelope and submits lyth_submitEncrypted." },
+        { text: "Encodes delegate(uint32 clusterId, uint16 weightBps) calldata via @monolythium/core-sdk." },
+        { text: `Travels msg.value=${principalLythoshi.toString()} lythoshi — this is the principal stake.` },
+        { text: "Wraps the native tx in an encrypted envelope; submits via lyth_submitEncrypted." },
         {
-          text: "Chain may reject at the precompile gate if delegation isn't activated yet on this network — the rejection is surfaced verbatim.",
+          text: "Chain rejects at the precompile gate if delegation is gated off, the cluster is inactive, or the per-cluster cap would be exceeded — verbatim error surfaces here.",
           level: "warn",
         },
       ],
@@ -95,9 +99,10 @@ export function Stake() {
         const result = await submitStakingTx({
           seed: ctx.vaultSeed,
           data: calldata,
+          valueLythoshi: principalLythoshi,
         });
         return {
-          headline: `Delegated ${weightLabel} to cluster ${clusterId}`,
+          headline: `Delegated ${principalLyth} LYTH @ ${weightLabel} to cluster ${clusterId}`,
           detail: result.txHash,
         };
       },
@@ -350,6 +355,36 @@ export function Stake() {
                         outline: "none",
                       }}
                     />
+                    <label
+                      style={{
+                        fontSize: 11,
+                        letterSpacing: "0.06em",
+                        textTransform: "uppercase",
+                        color: "var(--fg-400)",
+                      }}
+                    >
+                      Principal (whole LYTH)
+                    </label>
+                    <input
+                      type="number"
+                      inputMode="numeric"
+                      min={1}
+                      value={draftPrincipalLyth}
+                      onChange={(e) => {
+                        setDraftPrincipalLyth(e.target.value);
+                        setDraftError(null);
+                      }}
+                      style={{
+                        padding: "8px 10px",
+                        fontSize: 14,
+                        fontFamily: "var(--f-mono)",
+                        background: "rgba(255,255,255,0.04)",
+                        border: "1px solid rgba(255,255,255,0.12)",
+                        borderRadius: 8,
+                        color: "var(--fg-100)",
+                        outline: "none",
+                      }}
+                    />
                     {draftError && (
                       <div className="row-help" style={{ color: "var(--err)" }}>
                         {draftError}
@@ -376,7 +411,18 @@ export function Stake() {
                             );
                             return;
                           }
-                          openDelegate(c.clusterId, bps);
+                          let principal: bigint;
+                          try {
+                            principal = BigInt(draftPrincipalLyth);
+                          } catch {
+                            setDraftError("Principal must be a positive integer of whole LYTH.");
+                            return;
+                          }
+                          if (principal <= 0n) {
+                            setDraftError("Principal must be > 0 whole LYTH.");
+                            return;
+                          }
+                          openDelegate(c.clusterId, bps, principal);
                         }}
                         style={{ flex: 1 }}
                       >
