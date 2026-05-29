@@ -1,7 +1,7 @@
 {
   "name": "desktop-wallet",
   "private": true,
-  "version": "0.0.2",
+  "version": "0.0.3",
   "type": "module",
   "description": "Monolythium desktop wallet (Tauri 2, React 19)",
   "license": "Apache-2.0",
