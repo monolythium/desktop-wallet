@@ -10,6 +10,8 @@ import {
 } from "@monolythium/core-sdk";
 import { useOperations } from "../operations/context";
 import { sendNativeLyth } from "../sdk/native-send";
+import { addressbookLookup } from "../sdk/addressbook";
+import { fetchFinalityPosture } from "../sdk/finality";
 import { ContactsPickerModal } from "./ContactsPickerModal";
 
 interface Props {
@@ -27,6 +29,7 @@ export function SendComposeModal({ fromBech32m, onClose }: Props) {
   const [amount, setAmount] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [reviewing, setReviewing] = useState(false);
   // When the user picks a contact, hold the resolved name so the
   // review pane can render "Send to Alice (mono1…)" rather than the
   // bare address. Cleared on any manual edit of the recipient field
@@ -67,7 +70,25 @@ export function SendComposeModal({ fromBech32m, onClose }: Props) {
     [recipient, amount, fromBech32m],
   );
 
-  const onReview = () => {
+  // §25.2 item 6 — best-effort, local-only recipient-name resolution. There
+  // is NO on-chain reverse-name RPC in 0.3.10, so this only consults the
+  // local address book (and, when the recipient was typed as a `.mono`
+  // name, the client-side name validator). Never blocks the send.
+  const resolveRecipientName = async (toBech32m: string): Promise<string | null> => {
+    if (resolvedContactName) return resolvedContactName;
+    try {
+      const entries = await addressbookLookup(toBech32m);
+      const match = entries.find(
+        (e) => e.address.toLowerCase() === toBech32m.toLowerCase(),
+      );
+      if (match?.name) return match.name;
+    } catch {
+      // address book unavailable (no Stele sidecar / browser preview).
+    }
+    return null;
+  };
+
+  const onReview = async () => {
     const err = validate();
     setError(err);
     if (err) return;
@@ -75,20 +96,29 @@ export function SendComposeModal({ fromBech32m, onClose }: Props) {
     const toBech32m = recipient.trim();
     const amountLyth = amount.trim();
 
+    setReviewing(true);
+    // Best-effort disclosures — neither read gates the send; both fall
+    // back to a safe default on any failure.
+    const [recipientName, finality] = await Promise.all([
+      resolveRecipientName(toBech32m),
+      fetchFinalityPosture().catch(() => ({ label: "anchor-level", height: null })),
+    ]);
+    setReviewing(false);
+
+    const toLine = recipientName
+      ? `${recipientName} · ${toBech32m}`
+      : toBech32m;
+
     ops.open({
       title: `Send ${amountLyth} LYTH`,
       subtitle: "Native ML-DSA encrypted Monolythium send",
       auth: "keychain",
       diff: [
         { k: "From", v: fromBech32m },
-        {
-          k: "To",
-          v: resolvedContactName
-            ? `${resolvedContactName} · ${toBech32m}`
-            : toBech32m,
-        },
+        { k: "To", v: toLine },
         { k: "Token", v: "LYTH" },
         { k: "Amount", v: `${amountLyth} LYTH` },
+        { k: "Finality", v: finality.label, kind: "value" },
       ],
       effects: [
         { text: "Unlocks the local vault for this operation only." },
@@ -225,11 +255,11 @@ export function SendComposeModal({ fromBech32m, onClose }: Props) {
           </button>
           <button
             className="btn btn--primary"
-            onClick={onReview}
+            onClick={() => void onReview()}
             style={{ flex: 1 }}
-            disabled={!recipient.trim() || !amount.trim()}
+            disabled={!recipient.trim() || !amount.trim() || reviewing}
           >
-            Review
+            {reviewing ? "Checking…" : "Review"}
           </button>
         </div>
       </div>

@@ -8,7 +8,10 @@
 
 import { useEffect, useState } from "react";
 import { addressToTypedBech32 } from "@monolythium/core-sdk";
-import type { ClusterDirectoryEntryResponse } from "@monolythium/core-sdk";
+import type {
+  ClusterDirectoryEntryResponse,
+  ClusterDiversityView,
+} from "@monolythium/core-sdk";
 import { IDENTITY } from "../data/fixtures";
 import { useOperations } from "../operations/context";
 import {
@@ -16,6 +19,12 @@ import {
   fetchClusterDirectory,
   submitStakingTx,
 } from "../sdk/staking";
+import {
+  buildAutovotePlan,
+  fetchClusterDiversities,
+  submitAutovotePlan,
+  type AutovoteMode,
+} from "../sdk/autovote";
 import {
   formatOutcome,
   loadLiveStakeStatus,
@@ -32,6 +41,17 @@ export function Stake() {
   const [draftWeightBps, setDraftWeightBps] = useState("1000");
   const [draftPrincipalLyth, setDraftPrincipalLyth] = useState("100");
   const [draftError, setDraftError] = useState<string | null>(null);
+  // Read-only per-cluster diversity scores (lyth_getClusterDiversity, PF-6),
+  // keyed by clusterId. Drives both the directory column and the autovote
+  // Max Diversity / Max Decentralization planners.
+  const [diversities, setDiversities] = useState<
+    Map<number, ClusterDiversityView>
+  >(new Map());
+  // Autovote (§25.1): total principal to spread + weight cap + last-built plan.
+  const [autoPrincipalLyth, setAutoPrincipalLyth] = useState("100");
+  const [autoCapBps, setAutoCapBps] = useState("5000");
+  const [autovoteBusy, setAutovoteBusy] = useState(false);
+  const [autovoteError, setAutovoteError] = useState<string | null>(null);
 
   const refresh = async () => {
     setBusy(true);
@@ -47,6 +67,11 @@ export function Stake() {
       if (dir) {
         setDirectory(dir.clusters);
         setDirectoryError(null);
+        // Fan out the per-cluster diversity reads; tolerant of per-cluster
+        // failures (a missing score just renders "—").
+        fetchClusterDiversities(dir.clusters)
+          .then(setDiversities)
+          .catch(() => setDiversities(new Map()));
       }
     } finally {
       setBusy(false);
@@ -109,6 +134,98 @@ export function Stake() {
     });
     setOpenForm(null);
     setDraftError(null);
+  };
+
+  const runAutovote = (mode: Exclude<AutovoteMode, "custom">) => {
+    setAutovoteError(null);
+
+    let totalPrincipal: bigint;
+    try {
+      totalPrincipal = BigInt(autoPrincipalLyth);
+    } catch {
+      setAutovoteError("Total principal must be a positive integer of whole LYTH.");
+      return;
+    }
+    if (totalPrincipal <= 0n) {
+      setAutovoteError("Total principal must be > 0 whole LYTH.");
+      return;
+    }
+    const capBps = parseInt(autoCapBps, 10);
+    if (!Number.isFinite(capBps) || capBps <= 0 || capBps > 10_000) {
+      setAutovoteError("Weight cap must be 1-10000 basis points (0.01% – 100%).");
+      return;
+    }
+
+    const plan = buildAutovotePlan({
+      mode,
+      clusters: directory,
+      diversities,
+      totalPrincipalLyth: totalPrincipal,
+      capBps,
+    });
+
+    if (plan.allocations.length === 0) {
+      setAutovoteError(
+        plan.warnings[0] ?? "No active clusters available for an autovote plan.",
+      );
+      return;
+    }
+
+    const modeLabel: Record<Exclude<AutovoteMode, "custom">, string> = {
+      maxYield: "Max Yield",
+      maxDiversity: "Max Diversity",
+      maxDecentralization: "Max Decentralization",
+    };
+
+    ops.open({
+      title: `Autovote · ${modeLabel[mode]}`,
+      subtitle: `Spread ${totalPrincipal} LYTH across ${plan.allocations.length} clusters (${plan.totalWeightBps} bps total)`,
+      auth: "keychain",
+      diff: [
+        { k: "From", v: selfBech32m },
+        { k: "Mode", v: modeLabel[mode] },
+        { k: "Clusters", v: String(plan.allocations.length) },
+        { k: "Total weight", v: `${(plan.totalWeightBps / 100).toFixed(2)}%` },
+        ...plan.allocations.map((a) => ({
+          k: `Cluster ${a.clusterId}`,
+          v: `${(a.weightBps / 100).toFixed(2)}% · ${a.principalLyth} LYTH`,
+        })),
+      ],
+      effects: [
+        { text: "Unlocks the local vault for this operation only." },
+        {
+          text: `Submits ${plan.allocations.length} sequential delegate(uint32 clusterId, uint16 weightBps) calls via @monolythium/core-sdk.`,
+        },
+        ...(mode === "maxYield"
+          ? [
+              {
+                text: "Max Yield ranks by cluster health (no per-cluster APR exists on-chain in this SDK), not a guaranteed return.",
+                level: "warn" as const,
+              },
+            ]
+          : []),
+        ...plan.warnings.map((w) => ({ text: w, level: "warn" as const })),
+        {
+          text: "Each call may be rejected at the precompile gate if delegation is gated off, a cluster is inactive, or a per-cluster cap would be exceeded — verbatim errors surface here.",
+          level: "warn",
+        },
+      ],
+      execute: async (ctx) => {
+        if (!ctx?.vaultSeed) {
+          throw new Error("vault seed unavailable after keychain authorization");
+        }
+        setAutovoteBusy(true);
+        try {
+          const result = await submitAutovotePlan(plan, ctx.vaultSeed);
+          return {
+            headline: `Autovote ${modeLabel[mode]} · ${result.txHashes.length} delegations submitted`,
+            detail: result.txHashes.join(", "),
+          };
+        } finally {
+          setAutovoteBusy(false);
+        }
+      },
+    });
   };
 
   return (
@@ -244,6 +361,120 @@ export function Stake() {
 
       <div className="w-card">
         <div className="w-card__head">
+          <h3>Autovote</h3>
+          <span className="w-card__head__spacer" />
+          <span className="row-help mono">
+            {diversities.size > 0
+              ? `${diversities.size} diversity reads`
+              : "diversity loading"}
+          </span>
+        </div>
+        <div className="w-card__body">
+          <div className="row-help" style={{ marginBottom: 10, lineHeight: 1.5 }}>
+            Spread a principal across active clusters by a chosen objective.
+            Diversity / Decentralization consume live per-cluster diversity
+            scoring; Custom keeps the per-cluster Delegate form below.
+          </div>
+          <div
+            style={{
+              display: "flex",
+              gap: 10,
+              flexWrap: "wrap",
+              marginBottom: 12,
+            }}
+          >
+            <div style={{ flex: "1 1 160px" }}>
+              <label
+                style={{
+                  display: "block",
+                  fontSize: 11,
+                  letterSpacing: "0.06em",
+                  textTransform: "uppercase",
+                  color: "var(--fg-400)",
+                  marginBottom: 6,
+                }}
+              >
+                Total principal (whole LYTH)
+              </label>
+              <input
+                type="number"
+                inputMode="numeric"
+                min={1}
+                value={autoPrincipalLyth}
+                onChange={(e) => {
+                  setAutoPrincipalLyth(e.target.value);
+                  setAutovoteError(null);
+                }}
+                style={autovoteInputStyle}
+              />
+            </div>
+            <div style={{ flex: "1 1 160px" }}>
+              <label
+                style={{
+                  display: "block",
+                  fontSize: 11,
+                  letterSpacing: "0.06em",
+                  textTransform: "uppercase",
+                  color: "var(--fg-400)",
+                  marginBottom: 6,
+                }}
+              >
+                Weight cap (bps · 100 = 1%)
+              </label>
+              <input
+                type="number"
+                inputMode="numeric"
+                min={1}
+                max={10000}
+                value={autoCapBps}
+                onChange={(e) => {
+                  setAutoCapBps(e.target.value);
+                  setAutovoteError(null);
+                }}
+                style={autovoteInputStyle}
+              />
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button
+              className="btn btn--sm"
+              disabled={autovoteBusy || directory.length === 0}
+              onClick={() => runAutovote("maxYield")}
+            >
+              Max Yield
+            </button>
+            <button
+              className="btn btn--sm"
+              disabled={autovoteBusy || directory.length === 0}
+              onClick={() => runAutovote("maxDiversity")}
+            >
+              Max Diversity
+            </button>
+            <button
+              className="btn btn--sm"
+              disabled={autovoteBusy || directory.length === 0}
+              onClick={() => runAutovote("maxDecentralization")}
+            >
+              Max Decentralization
+            </button>
+            <button
+              className="btn btn--sm btn--ghost"
+              title="Use the per-cluster Delegate forms below for a manual allocation"
+              disabled
+            >
+              Custom (use rows below)
+            </button>
+          </div>
+          {autovoteError && (
+            <div className="row-help" style={{ color: "var(--err)", marginTop: 10 }}>
+              {autovoteError}
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="w-card">
+        <div className="w-card__head">
           <h3>Cluster directory</h3>
           <span className="w-card__head__spacer" />
           <span className="row-help mono">
@@ -291,6 +522,21 @@ export function Stake() {
                     <div className="row-help mono">
                       {c.threshold}-of-{c.size} · health {c.aggregateHealth}
                     </div>
+                    {(() => {
+                      const div = diversities.get(c.clusterId);
+                      return (
+                        <div className="row-help mono">
+                          Diversity ·{" "}
+                          {div
+                            ? `${(div.score / 100).toFixed(1)}% (ASN ${(
+                                div.asnVariance / 100
+                              ).toFixed(0)} · geo ${(div.geoVariance / 100).toFixed(
+                                0,
+                              )} · host ${(div.hostingSpread / 100).toFixed(0)})`
+                            : "—"}
+                        </div>
+                      );
+                    })()}
                     {c.regionDiversity && c.regionDiversity.length > 0 && (
                       <div className="row-help">
                         Regions · {c.regionDiversity.join(", ")}
@@ -448,3 +694,15 @@ function LiveCell({ label, value }: { label: string; value: string }) {
     </div>
   );
 }
+
+const autovoteInputStyle: React.CSSProperties = {
+  width: "100%",
+  padding: "8px 10px",
+  fontSize: 14,
+  fontFamily: "var(--f-mono)",
+  background: "rgba(255,255,255,0.04)",
+  border: "1px solid rgba(255,255,255,0.12)",
+  borderRadius: 8,
+  color: "var(--fg-100)",
+  outline: "none",
+};
