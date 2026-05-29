@@ -31,7 +31,12 @@ import {
   type LiveStakeStatus,
 } from "../sdk/live";
 
-export function Stake() {
+interface StakeProps {
+  /** Gate the autovote planner + per-cluster diversity column (experimental). */
+  experimentalEnabled?: boolean;
+}
+
+export function Stake({ experimentalEnabled }: StakeProps = {}) {
   const ops = useOperations();
   const [status, setStatus] = useState<LiveStakeStatus | null>(null);
   const [busy, setBusy] = useState(false);
@@ -68,10 +73,14 @@ export function Stake() {
         setDirectory(dir.clusters);
         setDirectoryError(null);
         // Fan out the per-cluster diversity reads; tolerant of per-cluster
-        // failures (a missing score just renders "—").
-        fetchClusterDiversities(dir.clusters)
-          .then(setDiversities)
-          .catch(() => setDiversities(new Map()));
+        // failures (a missing score just renders "—"). Only when the
+        // experimental surfaces are enabled — the autovote planner and the
+        // directory diversity column are the only consumers.
+        if (experimentalEnabled) {
+          fetchClusterDiversities(dir.clusters)
+            .then(setDiversities)
+            .catch(() => setDiversities(new Map()));
+        }
       }
     } finally {
       setBusy(false);
@@ -359,6 +368,7 @@ export function Stake() {
         </div>
       </div>
 
+      {experimentalEnabled ? (
       <div className="w-card">
         <div className="w-card__head">
           <h3>Autovote</h3>
@@ -472,6 +482,7 @@ export function Stake() {
           )}
         </div>
       </div>
+      ) : null}
 
       <div className="w-card">
         <div className="w-card__head">
@@ -522,21 +533,23 @@ export function Stake() {
                     <div className="row-help mono">
                       {c.threshold}-of-{c.size} · health {c.aggregateHealth}
                     </div>
-                    {(() => {
-                      const div = diversities.get(c.clusterId);
-                      return (
-                        <div className="row-help mono">
-                          Diversity ·{" "}
-                          {div
-                            ? `${(div.score / 100).toFixed(1)}% (ASN ${(
-                                div.asnVariance / 100
-                              ).toFixed(0)} · geo ${(div.geoVariance / 100).toFixed(
-                                0,
-                              )} · host ${(div.hostingSpread / 100).toFixed(0)})`
-                            : "—"}
-                        </div>
-                      );
-                    })()}
+                    {experimentalEnabled
+                      ? (() => {
+                          const div = diversities.get(c.clusterId);
+                          return (
+                            <div className="row-help mono">
+                              Diversity ·{" "}
+                              {div
+                                ? `${(div.score / 100).toFixed(1)}% (ASN ${(
+                                    div.asnVariance / 100
+                                  ).toFixed(0)} · geo ${(div.geoVariance / 100).toFixed(
+                                    0,
+                                  )} · host ${(div.hostingSpread / 100).toFixed(0)})`
+                                : "—"}
+                            </div>
+                          );
+                        })()
+                      : null}
                     {c.regionDiversity && c.regionDiversity.length > 0 && (
                       <div className="row-help">
                         Regions · {c.regionDiversity.join(", ")}

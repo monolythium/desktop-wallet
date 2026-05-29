@@ -21,3 +21,29 @@ export function writeSteleEnabled(enabled: boolean): void {
     // localStorage unavailable — fall through.
   }
 }
+
+// Experimental surfaces preview flag — DEFAULT OFF.
+//
+// Single switch for the not-yet-stable wallet surfaces: the Agents
+// (agent commerce / spending-policy sub-accounts) page, the bridge
+// per-route risk panel, and the Stake autovote planner. When off, every
+// one of those entry points is hidden / not mounted and the wallet's
+// visible behavior matches the pre-preview surface. Absence of the key
+// reads as off, so the default for every install is off.
+export const EXPERIMENTAL_ENABLED_KEY = "wallet.experimentalEnabled";
+
+export function readExperimentalEnabled(): boolean {
+  try {
+    return localStorage.getItem(EXPERIMENTAL_ENABLED_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
+
+export function writeExperimentalEnabled(enabled: boolean): void {
+  try {
+    localStorage.setItem(EXPERIMENTAL_ENABLED_KEY, enabled ? "true" : "false");
+  } catch {
+    // localStorage unavailable — fall through.
+  }
+}

@@ -24,9 +24,11 @@ interface SettingsProps {
   setDeveloperModeEnabled: (enabled: boolean) => void;
   steleEnabled: boolean;
   setSteleEnabled: (enabled: boolean) => void;
+  experimentalEnabled: boolean;
+  setExperimentalEnabled: (enabled: boolean) => void;
 }
 
-export function Settings({ developerModeEnabled, setDeveloperModeEnabled, steleEnabled, setSteleEnabled }: SettingsProps) {
+export function Settings({ developerModeEnabled, setDeveloperModeEnabled, steleEnabled, setSteleEnabled, experimentalEnabled, setExperimentalEnabled }: SettingsProps) {
   const ops = useOperations();
   const [currency, setCurrency] = useState("USD");
   const [compound, setCompound] = useState("always");
@@ -115,6 +117,27 @@ export function Settings({ developerModeEnabled, setDeveloperModeEnabled, steleE
               writeDevkitChannel(value);
             }}
           />
+        </div>
+      </div>
+
+      <div className="w-card">
+        <div className="w-card__head"><h3>Experimental</h3><span className="w-todo__pill">preview</span></div>
+        <div className="w-card__body">
+          <div className="w-setting-row">
+            <div>
+              <div className="row-label">Enable experimental v5 features</div>
+              <div className="row-help">
+                Shows the Agents page (agent sub-accounts and spending policy), the per-route bridge risk panel, and the Stake autovote planner. These surfaces are in preview and off by default; turning this off hides them and leaves the wallet on the stable surface.
+              </div>
+            </div>
+            <button
+              type="button"
+              className={`w-chip ${experimentalEnabled ? "is-on" : ""}`}
+              onClick={() => setExperimentalEnabled(!experimentalEnabled)}
+            >
+              {experimentalEnabled ? "Enabled" : "Disabled"}
+            </button>
+          </div>
         </div>
       </div>
 
