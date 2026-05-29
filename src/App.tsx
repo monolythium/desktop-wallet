@@ -18,6 +18,7 @@ import { Topbar } from "./components/Topbar";
 import { UpdateBanner } from "./components/UpdateBanner";
 import { checkForUpdate, type UpdateAvailable } from "./sdk/updater";
 import { Activity } from "./pages/Activity";
+import { Agents } from "./pages/Agents";
 import { AiTrading } from "./pages/AiTrading";
 import { Bridges } from "./pages/Bridges";
 import { Contacts } from "./pages/Contacts";
@@ -177,7 +178,7 @@ export function App() {
     try { localStorage.setItem(DENOM_KEY, denom); } catch { /* ignore */ }
     // Tokens-only route: bounce out if user flipped to private.
     // Public-only routes bounce out when user flips to private denomination.
-    if (denom === "private" && (route === "tokens" || route === "stake" || route === "riscv" || route === "studio" || route === "trade" || route === "ai-trade")) {
+    if (denom === "private" && (route === "tokens" || route === "stake" || route === "agents" || route === "riscv" || route === "studio" || route === "trade" || route === "ai-trade")) {
       setRoute("home");
     }
   }, [denom, route]);
@@ -235,6 +236,7 @@ export function App() {
           {route === "tokens" ? <Tokens /> : null}
           {route === "stake" ? <Stake /> : null}
           {route === "bridges" ? <Bridges /> : null}
+          {route === "agents" ? <Agents /> : null}
           {route === "contacts" ? <Contacts denom={denom} /> : null}
           {route === "riscv" ? <RiscvContracts /> : null}
           {route === "studio" ? (
