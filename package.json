@@ -16,7 +16,7 @@
     "precargo": "tsc --noEmit && vite build"
   },
   "dependencies": {
-    "@monolythium/core-sdk": "0.3.8",
+    "@monolythium/core-sdk": "0.3.10",
     "@noble/ciphers": "2.2.0",
     "@noble/hashes": "2.2.0",
     "@noble/post-quantum": "0.6.1",
