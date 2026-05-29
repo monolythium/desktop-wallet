@@ -46,7 +46,12 @@ import {
   loadCatalog,
 } from "./sdk/vaultCatalog";
 import { readDeveloperMode, writeDeveloperMode } from "./sdk/studio-host";
-import { readSteleEnabled, writeSteleEnabled } from "./sdk/feature-flags";
+import {
+  readExperimentalEnabled,
+  readSteleEnabled,
+  writeExperimentalEnabled,
+  writeSteleEnabled,
+} from "./sdk/feature-flags";
 import "./styles/tokens.css";
 import "./styles/wallet.css";
 import type { Denom } from "./data/fixtures";
@@ -95,6 +100,7 @@ export function App() {
   const [denom, setDenom] = useState<Denom>(() => readDenom());
   const [developerModeEnabled, setDeveloperModeEnabledState] = useState<boolean>(() => readDeveloperMode());
   const [steleEnabled, setSteleEnabledState] = useState<boolean>(() => readSteleEnabled());
+  const [experimentalEnabled, setExperimentalEnabledState] = useState<boolean>(() => readExperimentalEnabled());
   const [boot, setBoot] = useState<BootState>(() =>
     isTauri() ? { kind: "probing" } : { kind: "ready" },
   );
@@ -197,6 +203,13 @@ export function App() {
     }
   }, [steleEnabled, route]);
 
+  useEffect(() => {
+    writeExperimentalEnabled(experimentalEnabled);
+    if (!experimentalEnabled && route === "agents") {
+      setRoute("home");
+    }
+  }, [experimentalEnabled, route]);
+
   const setDeveloperModeEnabled = (enabled: boolean) => {
     setDeveloperModeEnabledState(enabled);
     writeDeveloperMode(enabled);
@@ -205,6 +218,11 @@ export function App() {
   const setSteleEnabled = (enabled: boolean) => {
     setSteleEnabledState(enabled);
     writeSteleEnabled(enabled);
+  };
+
+  const setExperimentalEnabled = (enabled: boolean) => {
+    setExperimentalEnabledState(enabled);
+    writeExperimentalEnabled(enabled);
   };
 
   if (boot.kind === "probing") {
@@ -227,6 +245,7 @@ export function App() {
           setRoute={setRoute}
           developerModeEnabled={developerModeEnabled}
           steleEnabled={steleEnabled}
+          experimentalEnabled={experimentalEnabled}
         />
         <Topbar route={route} />
         <main className="w-main">
@@ -234,9 +253,9 @@ export function App() {
           {route === "activity" ? <Activity denom={denom} /> : null}
           {route === "wallets" ? <Wallets /> : null}
           {route === "tokens" ? <Tokens /> : null}
-          {route === "stake" ? <Stake /> : null}
-          {route === "bridges" ? <Bridges /> : null}
-          {route === "agents" ? <Agents /> : null}
+          {route === "stake" ? <Stake experimentalEnabled={experimentalEnabled} /> : null}
+          {route === "bridges" ? <Bridges experimentalEnabled={experimentalEnabled} /> : null}
+          {route === "agents" && experimentalEnabled ? <Agents /> : null}
           {route === "contacts" ? <Contacts denom={denom} /> : null}
           {route === "riscv" ? <RiscvContracts /> : null}
           {route === "studio" ? (
@@ -257,6 +276,8 @@ export function App() {
               setDeveloperModeEnabled={setDeveloperModeEnabled}
               steleEnabled={steleEnabled}
               setSteleEnabled={setSteleEnabled}
+              experimentalEnabled={experimentalEnabled}
+              setExperimentalEnabled={setExperimentalEnabled}
             />
           ) : null}
         </main>

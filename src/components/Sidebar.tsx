@@ -14,6 +14,7 @@ interface NavItem {
   publicOnly?: boolean;
   developerOnly?: boolean;
   steleOnly?: boolean;
+  experimentalOnly?: boolean;
   badge?: string;
 }
 
@@ -141,6 +142,7 @@ interface Props {
   setRoute: (r: Route) => void;
   developerModeEnabled: boolean;
   steleEnabled: boolean;
+  experimentalEnabled: boolean;
 }
 
 const NAV: NavItem[] = [
@@ -150,7 +152,7 @@ const NAV: NavItem[] = [
   { id: "tokens", label: "Tokens", icon: ICON_TOKENS, publicOnly: true },
   { id: "stake", label: "Stake", icon: ICON_STAKE, publicOnly: true },
   { id: "bridges", label: "Bridges", icon: ICON_BRIDGES, publicOnly: true },
-  { id: "agents", label: "Agents", icon: ICON_AGENTS, publicOnly: true },
+  { id: "agents", label: "Agents", icon: ICON_AGENTS, publicOnly: true, experimentalOnly: true, badge: "preview" },
   { id: "contacts", label: "Contacts", icon: ICON_CONTACTS },
   { id: "riscv", label: "RISC-V", icon: ICON_RISCV, publicOnly: true },
   { id: "studio", label: "Studio", icon: ICON_STUDIO, publicOnly: true, developerOnly: true, badge: "dev" },
@@ -166,12 +168,13 @@ const NAV_FOOTER: NavItem[] = [
   { id: "settings", label: "Settings", icon: ICON_SETTINGS },
 ];
 
-export function Sidebar({ denom, setDenom, route, setRoute, developerModeEnabled, steleEnabled }: Props) {
+export function Sidebar({ denom, setDenom, route, setRoute, developerModeEnabled, steleEnabled, experimentalEnabled }: Props) {
   const visible = NAV.filter(
     (n) =>
       (!n.publicOnly || denom === "public") &&
       (!n.developerOnly || developerModeEnabled) &&
-      (!n.steleOnly || steleEnabled),
+      (!n.steleOnly || steleEnabled) &&
+      (!n.experimentalOnly || experimentalEnabled),
   );
 
   return (
