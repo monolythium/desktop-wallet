@@ -55,6 +55,15 @@ const ICON_BRIDGES = () => (
     <path d="M9 14l3-2 3 2" />
   </svg>
 );
+const ICON_AGENTS = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="5" y="9" width="14" height="11" rx="2" />
+    <path d="M12 9V5" />
+    <circle cx="12" cy="4" r="1.5" />
+    <path d="M9 14h.01M15 14h.01" />
+    <path d="M2 14v2M22 14v2" />
+  </svg>
+);
 const ICON_CONTACTS = () => (
   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
@@ -141,6 +150,7 @@ const NAV: NavItem[] = [
   { id: "tokens", label: "Tokens", icon: ICON_TOKENS, publicOnly: true },
   { id: "stake", label: "Stake", icon: ICON_STAKE, publicOnly: true },
   { id: "bridges", label: "Bridges", icon: ICON_BRIDGES, publicOnly: true },
+  { id: "agents", label: "Agents", icon: ICON_AGENTS, publicOnly: true },
   { id: "contacts", label: "Contacts", icon: ICON_CONTACTS },
   { id: "riscv", label: "RISC-V", icon: ICON_RISCV, publicOnly: true },
   { id: "studio", label: "Studio", icon: ICON_STUDIO, publicOnly: true, developerOnly: true, badge: "dev" },
