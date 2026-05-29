@@ -29,7 +29,7 @@ Keep all three green before opening the PR.
 - **Storing key material in module-scope variables or `localStorage`.** The vault is AES-GCM-encrypted with an Argon2id-derived KEK; the encrypted blob lives in the OS keychain; the unlocked seed lives in service-worker-equivalent state only for the duration of one operation.
 - **Hardcoding production operator RPC IPs.** The wallet's RPC source is the SDK chain-registry. Tests that need IP-shaped fixtures use `192.0.2.0/24` (TEST-NET-1 reserved).
 - **Loosening the Stele approval-bridge boundary.** The Stele tab (settings-gated, default off) routes external-AI requests through a loopback HTTP server with a per-session bearer token + the user's explicit approve/reject on each destructive op. Don't add a path that bypasses that approval.
-- **AI-assisted code without an honest commit author.** If you used Claude / Codex / Cursor / Copilot to write code, sign the commit with YOUR identity, not the tool's. We rewrote the public history once to scrub stale author identities; please don't reintroduce them.
+- **Commits without an honest author.** Sign every commit with your own identity, and make sure the author and email on each commit are accurate.
 
 ## Commit + PR conventions
 

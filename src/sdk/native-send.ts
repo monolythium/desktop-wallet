@@ -1,4 +1,4 @@
-// Native Sprintnet send path.
+// Native Monolythium send path.
 //
 // This is the desktop-wallet equivalent of the browser wallet's ML-DSA
 // encrypted-submit route, but kept thin: the SDK owns signing, native tx

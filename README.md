@@ -12,7 +12,7 @@ Functional desktop shell with substantive Rust backend, real hardware-wallet int
 
 - **Chain target is testnet.** Monolythium mainnet has not launched. Anything you connect to here runs against the public testnet today; mainnet activation is gated on separate protocol milestones.
 - **No signed releases on the public update channel yet.** The four-platform release workflow exists (macOS signed + notarized, Windows Azure Trusted Signing, Linux .deb + .AppImage) but no tagged release has run it end-to-end. Until then, install from source.
-- **External builds need a sibling SDK checkout for now.** `package.json` consumes `@monolythium/core-sdk` from `file:../mono-core-sdk/packages/ts`. The SDK is public ([`monolythium/mono-core-sdk`](https://github.com/monolythium/mono-core-sdk), `@monolythium/core-sdk@0.1.0` on npm) — but master here uses SDK exports ahead of the published `0.1.0`. Until the next SDK release, `pnpm install` requires cloning `monolythium/mono-core-sdk` as a sibling directory.
+- **SDK comes from npm.** `package.json` pins `@monolythium/core-sdk` to the exact version `0.3.10` from npm. The SDK is public ([`monolythium/mono-core-sdk`](https://github.com/monolythium/mono-core-sdk)) — `pnpm install` pulls it straight from the registry, no sibling checkout required.
 - **Some pages still render fixture-shaped data.** Real chain consumption is wired for the live SDK hooks; pages awaiting unexposed RPC methods stay on fixtures.
 - **The Stele marketplace tab is settings-gated and off by default.** Even when enabled, marketplace flows require the `lyth_mcp` sidecar running locally — see the Stele integration section below.
 
@@ -32,7 +32,7 @@ Architecture splits into:
 
 ## Who this is for
 
-End users and traders who want to hold and move MNLX from their own machine, with hardware-signer support and an Operations drawer that previews every destructive action before it leaves the device.
+End users and traders who want to hold and move LYTH from their own machine, with hardware-signer support and an Operations drawer that previews every destructive action before it leaves the device.
 
 ## Prerequisites
 
@@ -41,13 +41,7 @@ End users and traders who want to hold and move MNLX from their own machine, wit
 - **Rust** 1.77+
 - Tauri 2 platform prerequisites — see <https://v2.tauri.app/start/prerequisites/>
 
-To complete `pnpm install` you currently also need:
-
-- A sibling **[`mono-core-sdk`](https://github.com/monolythium/mono-core-sdk) checkout** at `../mono-core-sdk`. The SDK is public — `@monolythium/core-sdk@0.1.0` is on npm — but master here uses exports ahead of the published `0.1.0`. Until the next SDK release, the `file:` path in `package.json` requires the sibling. Clone with:
-
-  ```bash
-  git clone https://github.com/monolythium/mono-core-sdk.git ../mono-core-sdk
-  ```
+`pnpm install` resolves all dependencies from npm — including `@monolythium/core-sdk`, which is pinned to the exact version `0.3.10` ([`monolythium/mono-core-sdk`](https://github.com/monolythium/mono-core-sdk)). No sibling checkout is required.
 
 ## Quick start
 
@@ -74,7 +68,7 @@ less src-tauri/src/stele/
 less docs/hardware-signer.md
 ```
 
-With the sibling `mono-core-sdk` checkout in place:
+To build and run the full app:
 
 ```bash
 pnpm install
