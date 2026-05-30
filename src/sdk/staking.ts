@@ -16,6 +16,7 @@ import {
   MONOLYTHIUM_TESTNET_CHAIN_ID,
   RpcClient,
   encodeClaimCalldata,
+  encodeCompleteRedemptionCalldata,
   encodeDelegateCalldata,
   encodeRedelegateCalldata,
   encodeUndelegateCalldata,
@@ -79,6 +80,16 @@ export function buildRedelegateCalldata(
 
 export function buildClaimRewardsCalldata(): string {
   return encodeClaimCalldata();
+}
+
+/** `completeRedemption(uint64 index)` calldata (chain-canonical selector
+ *  `0x26169d0a`). Settles the matured redemption ticket at `index`,
+ *  returning the queued principal to the caller and pruning the ticket.
+ *  With liquid bonding the ticket matures at the undelegate height, so
+ *  this is claimable in the same/next anchor as the `undelegate` that
+ *  created it. Submit via `submitStakingTx` with `valueLythoshi: 0n`. */
+export function buildCompleteRedemptionCalldata(ticketIndex: number): string {
+  return encodeCompleteRedemptionCalldata(ticketIndex);
 }
 
 export async function fetchClusterDirectory(
