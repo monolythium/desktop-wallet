@@ -173,6 +173,27 @@ export function notificationTitle(
   return NOTIFICATION_LABELS[kind][status];
 }
 
+/** Present-tense, in-flight labels for a tracked tx still awaiting its terminal
+ *  receipt. Deliberately distinct from the terminal `NOTIFICATION_LABELS`
+ *  (e.g. "Sending…" vs. "Sent") so a Pending row never reads as already
+ *  confirmed. The Activity "Pending" section and its detail modal both call
+ *  {@link pendingOpLabel} so the wording stays centralized here. */
+export const PENDING_OP_LABELS: Record<TxOpKind, string> = {
+  send: "Sending…",
+  delegate: "Staking…",
+  undelegate: "Unstaking…",
+  redelegate: "Restaking…",
+  claim: "Claiming rewards…",
+  "emergency-key": "Registering backup key…",
+  "agent-policy": "Updating agent policy…",
+  contract_call: "Submitting transaction…",
+};
+
+/** Render the present-tense label for an in-flight tracked tx. */
+export function pendingOpLabel(kind: TxOpKind): string {
+  return PENDING_OP_LABELS[kind];
+}
+
 /** True for amount strings that mean "zero LYTH". The list row + detail modal
  *  omit the amount in this case so a 0-LYTH claim / agent-policy reads
  *  cleanly. */

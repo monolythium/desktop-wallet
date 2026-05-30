@@ -1,4 +1,12 @@
 // Activity page — denom-segregated tx list.
+//
+// Pending section (experimental): txs this wallet broadcast but that haven't
+// reached a terminal receipt live in the durable tracked-tx store. They surface
+// as a "Pending" section that clears itself as the app-level reconcile poller
+// (`PendingTxReconciler`) carries each tx to confirmed/failed and removes it
+// from the store — the store subscription (`usePendingTxs`) drives the
+// re-render. This is the wallet's own tracked set, NOT the `lyth_mempoolPending`
+// snapshot below (which is the node's view and can include txs from elsewhere).
 
 import { useEffect, useState } from "react";
 import { TXS_PRIVATE, TXS_PUBLIC } from "../data/fixtures";
@@ -8,8 +16,14 @@ import { TxRow } from "../components/TxRow";
 import { ActivityDetail, type DetailRow } from "../components/ActivityDetail";
 import { getProvider } from "../sdk/client";
 import { capture, loadLiveAddressActivity, type LiveAddressActivityRow, type RpcOutcome } from "../sdk/live";
+import { isZeroAmount, pendingOpLabel } from "../sdk/notifications";
+import type { PendingTx } from "../sdk/pending-tx";
+import { usePendingTxs } from "../sdk/use-pending-tx";
 
-interface PendingTx {
+// The node's `lyth_mempoolPending` row shape. Distinct from the durable
+// tracked-tx `PendingTx` (imported above) that backs the "Pending" section:
+// this is the node's mempool view, that is the wallet's own broadcast set.
+interface MempoolPendingTx {
   txHash: string;
   nonce: bigint;
   class: number;
@@ -24,12 +38,18 @@ interface Props {
 
 export function Activity({ denom, experimentalEnabled }: Props) {
   const list = denom === "public" ? TXS_PUBLIC : TXS_PRIVATE;
-  const [pending, setPending] = useState<RpcOutcome<PendingTx[]> | null>(null);
+  const [pending, setPending] = useState<RpcOutcome<MempoolPendingTx[]> | null>(null);
   const [activity, setActivity] = useState<RpcOutcome<LiveAddressActivityRow[]> | null>(null);
   const [busy, setBusy] = useState(false);
   // Experimental: clicking a row opens the detail modal. `null` when closed
   // or when the flag is off (no row ever becomes selectable).
   const [selected, setSelected] = useState<DetailRow | null>(null);
+  // Durable tracked-tx store — txs this wallet broadcast that are still in
+  // flight. The hook hydrates on mount and returns [] until then and whenever
+  // nothing is outstanding; gated on the same flag, so OFF renders identically
+  // to master. Rows clear as the reconcile poller removes each resolved tx.
+  const tracked = usePendingTxs();
+  const showPending = experimentalEnabled && tracked.length > 0;
 
   const refreshPending = async () => {
     setBusy(true);
@@ -59,6 +79,50 @@ export function Activity({ denom, experimentalEnabled }: Props) {
             : "Private-denomination envelopes — counterparties and amounts are protocol-hidden."}
         </div>
       </div>
+
+      {showPending ? (
+        <div className="w-card">
+          <div className="w-card__head">
+            <h3>Pending</h3>
+            <span className="w-card__head__spacer" />
+            <span className="w-live-pill is-muted">{tracked.length} in flight</span>
+          </div>
+          <div className="w-card__body">
+            <div className="w-live-list">
+              {tracked.map((tx) => {
+                const onOpen = () => setSelected(trackedRowToDetail(tx));
+                const showAmount = !isZeroAmount(tx.amountDecimal);
+                return (
+                  <div
+                    className="w-live-row"
+                    key={`${tx.chainIdHex}:${tx.txHash}`}
+                    onClick={onOpen}
+                    role="button"
+                    style={{ cursor: "pointer" }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+                      <span className="w-spin" style={{ width: 14, height: 14, margin: 0, flexShrink: 0 }} />
+                      <div style={{ minWidth: 0 }}>
+                        <div className="row-label">{pendingOpLabel(tx.opKind)}</div>
+                        <div className="row-help mono" style={{ overflowWrap: "anywhere" }}>
+                          {tx.counterparty.length > 0 ? truncCounterparty(tx.counterparty) : truncCounterparty(tx.txHash)}
+                        </div>
+                      </div>
+                    </div>
+                    {showAmount ? (
+                      <span className="w-live-pill is-muted">{tx.amountDecimal} LYTH</span>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+            <div className="row-help" style={{ marginTop: 10 }}>
+              Awaiting on-chain confirmation. Resolves automatically — clears
+              when each transaction confirms or fails.
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <div className="w-card">
         <div className="w-card__head">
@@ -153,7 +217,7 @@ export function Activity({ denom, experimentalEnabled }: Props) {
 // discriminated union. Only fields that exist on the source row are passed;
 // none are synthesized.
 
-function pendingRowToDetail(tx: PendingTx): DetailRow {
+function pendingRowToDetail(tx: MempoolPendingTx): DetailRow {
   return {
     kind: "pending",
     txHash: tx.txHash,
@@ -161,6 +225,18 @@ function pendingRowToDetail(tx: PendingTx): DetailRow {
     txClass: tx.class,
     wireBytesLen: tx.wireBytesLen,
     ready: tx.ready,
+  };
+}
+
+// Durable tracked-tx → detail-modal row. The store keys on the broadcast hash,
+// so the modal can link out to Monoscan; counterparty is already typed bech32m.
+function trackedRowToDetail(tx: PendingTx): DetailRow {
+  return {
+    kind: "tracked",
+    txHash: tx.txHash,
+    opKind: tx.opKind,
+    amountDecimal: tx.amountDecimal,
+    counterparty: tx.counterparty,
   };
 }
 
@@ -205,4 +281,10 @@ function formatActivityAmount(row: LiveAddressActivityRow): string {
   if (row.amount) return `${row.direction === "out" ? "-" : "+"}${row.amount}`;
   if (row.weightBps !== null) return `${row.weightBps} bps`;
   return "indexed";
+}
+
+// Middle-truncate a bech32m counterparty (or tx hash fallback) for the compact
+// Pending-row subtitle. Pure slicing — never throws on a malformed value.
+function truncCounterparty(s: string): string {
+  return s.length > 17 ? `${s.slice(0, 10)}…${s.slice(-6)}` : s;
 }
