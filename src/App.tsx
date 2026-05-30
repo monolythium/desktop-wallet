@@ -250,7 +250,7 @@ export function App() {
         <Topbar route={route} />
         <main className="w-main">
           {route === "home" ? <Home denom={denom} goto={setRoute} /> : null}
-          {route === "activity" ? <Activity denom={denom} /> : null}
+          {route === "activity" ? <Activity denom={denom} experimentalEnabled={experimentalEnabled} /> : null}
           {route === "wallets" ? <Wallets /> : null}
           {route === "tokens" ? <Tokens /> : null}
           {route === "stake" ? <Stake experimentalEnabled={experimentalEnabled} /> : null}
