@@ -3,20 +3,33 @@
 import { useEffect, useState } from "react";
 import { TXS_PRIVATE, TXS_PUBLIC } from "../data/fixtures";
 import { IDENTITY } from "../data/fixtures";
-import type { Denom } from "../data/fixtures";
+import type { Denom, Tx } from "../data/fixtures";
 import { TxRow } from "../components/TxRow";
+import { ActivityDetail, type DetailRow } from "../components/ActivityDetail";
 import { getProvider } from "../sdk/client";
 import { capture, loadLiveAddressActivity, type LiveAddressActivityRow, type RpcOutcome } from "../sdk/live";
 
-interface Props {
-  denom: Denom;
+interface PendingTx {
+  txHash: string;
+  nonce: bigint;
+  class: number;
+  wireBytesLen: number;
+  ready: boolean;
 }
 
-export function Activity({ denom }: Props) {
+interface Props {
+  denom: Denom;
+  experimentalEnabled: boolean;
+}
+
+export function Activity({ denom, experimentalEnabled }: Props) {
   const list = denom === "public" ? TXS_PUBLIC : TXS_PRIVATE;
-  const [pending, setPending] = useState<RpcOutcome<Array<{ txHash: string; nonce: bigint; class: number; wireBytesLen: number; ready: boolean }>> | null>(null);
+  const [pending, setPending] = useState<RpcOutcome<PendingTx[]> | null>(null);
   const [activity, setActivity] = useState<RpcOutcome<LiveAddressActivityRow[]> | null>(null);
   const [busy, setBusy] = useState(false);
+  // Experimental: clicking a row opens the detail modal. `null` when closed
+  // or when the flag is off (no row ever becomes selectable).
+  const [selected, setSelected] = useState<DetailRow | null>(null);
 
   const refreshPending = async () => {
     setBusy(true);
@@ -62,15 +75,24 @@ export function Activity({ denom }: Props) {
           {pending?.ok && pending.value?.length === 0 ? <div className="row-help">No pending transactions for <span className="mono">{IDENTITY.address}</span>.</div> : null}
           {pending?.ok && pending.value && pending.value.length > 0 ? (
             <div className="w-live-list">
-              {pending.value.map((tx) => (
-                <div className="w-live-row" key={tx.txHash}>
-                  <div>
-                    <div className="row-label mono">{tx.txHash}</div>
-                    <div className="row-help">nonce {tx.nonce.toString()} · class {tx.class} · {tx.wireBytesLen} bytes</div>
+              {pending.value.map((tx) => {
+                const onOpen = experimentalEnabled ? () => setSelected(pendingRowToDetail(tx)) : undefined;
+                return (
+                  <div
+                    className="w-live-row"
+                    key={tx.txHash}
+                    onClick={onOpen}
+                    role={onOpen ? "button" : undefined}
+                    style={onOpen ? { cursor: "pointer" } : undefined}
+                  >
+                    <div>
+                      <div className="row-label mono">{tx.txHash}</div>
+                      <div className="row-help">nonce {tx.nonce.toString()} · class {tx.class} · {tx.wireBytesLen} bytes</div>
+                    </div>
+                    <span className={`w-live-pill ${tx.ready ? "" : "is-muted"}`}>{tx.ready ? "ready" : "pending"}</span>
                   </div>
-                  <span className={`w-live-pill ${tx.ready ? "" : "is-muted"}`}>{tx.ready ? "ready" : "pending"}</span>
-                </div>
-              ))}
+                );
+              })}
             </div>
           ) : null}
         </div>
@@ -84,27 +106,92 @@ export function Activity({ denom }: Props) {
           {activity?.ok === false ? <div className="w-live-error">address activity: {activity.error}</div> : null}
           {activity?.ok && activity.value && activity.value.length > 0 ? (
             <div className="w-live-list">
-              {activity.value.map((row) => (
-                <div className="w-live-row" key={`${row.blockHeight}-${row.txIndex}-${row.logIndex}`}>
-                  <div>
-                    <div className="row-label mono">{formatActivityTitle(row)}</div>
-                    <div className="row-help">
-                      block {row.blockHeight.toString()} · tx {row.txIndex} · log {row.logIndex}
+              {activity.value.map((row) => {
+                const onOpen = experimentalEnabled ? () => setSelected(indexedRowToDetail(row)) : undefined;
+                return (
+                  <div
+                    className="w-live-row"
+                    key={`${row.blockHeight}-${row.txIndex}-${row.logIndex}`}
+                    onClick={onOpen}
+                    role={onOpen ? "button" : undefined}
+                    style={onOpen ? { cursor: "pointer" } : undefined}
+                  >
+                    <div>
+                      <div className="row-label mono">{formatActivityTitle(row)}</div>
+                      <div className="row-help">
+                        block {row.blockHeight.toString()} · tx {row.txIndex} · log {row.logIndex}
+                      </div>
                     </div>
+                    <span className="w-live-pill">{formatActivityAmount(row)}</span>
                   </div>
-                  <span className="w-live-pill">{formatActivityAmount(row)}</span>
-                </div>
-              ))}
+                );
+              })}
             </div>
           ) : list.length === 0 ? (
             <div style={{ padding: "16px 0", color: "var(--w-text-3)", fontSize: 13 }}>No activity yet.</div>
           ) : (
-            list.map((tx) => <TxRow key={tx.id} tx={tx} />)
+            list.map((tx) => (
+              <TxRow
+                key={tx.id}
+                tx={tx}
+                onClick={experimentalEnabled ? () => setSelected(demoRowToDetail(tx)) : undefined}
+              />
+            ))
           )}
         </div>
       </div>
+
+      {selected ? (
+        <ActivityDetail row={selected} walletAddr={IDENTITY.address} onClose={() => setSelected(null)} />
+      ) : null}
     </div>
   );
+}
+
+// ── Row → DetailRow adapters ──
+// Each maps one of the three Activity-list row shapes onto the modal's
+// discriminated union. Only fields that exist on the source row are passed;
+// none are synthesized.
+
+function pendingRowToDetail(tx: PendingTx): DetailRow {
+  return {
+    kind: "pending",
+    txHash: tx.txHash,
+    nonce: tx.nonce,
+    txClass: tx.class,
+    wireBytesLen: tx.wireBytesLen,
+    ready: tx.ready,
+  };
+}
+
+function indexedRowToDetail(row: LiveAddressActivityRow): DetailRow {
+  return {
+    kind: "indexed",
+    activityKind: row.kind,
+    subKind: row.subKind,
+    direction: row.direction,
+    counterparty: row.counterparty,
+    amount: row.amount,
+    tokenId: row.tokenId,
+    cluster: row.cluster,
+    weightBps: row.weightBps,
+    blockHeight: row.blockHeight,
+    txIndex: row.txIndex,
+    logIndex: row.logIndex,
+  };
+}
+
+function demoRowToDetail(tx: Tx): DetailRow {
+  return {
+    kind: "demo",
+    txKind: tx.kind,
+    direction: tx.direction,
+    amount: tx.amount,
+    token: tx.token || "LYTH",
+    counterparty: tx.counterparty,
+    memo: tx.memo,
+    when: tx.when,
+  };
 }
 
 function formatActivityTitle(row: LiveAddressActivityRow): string {
