@@ -21,10 +21,8 @@ import {
 import { VaultCallError } from "../sdk/vault";
 import { captureAddressOnUnlock } from "../sdk/vaultCatalog";
 import { readExperimentalEnabled } from "../sdk/feature-flags";
-import {
-  recordOperationConfirmed,
-  recordOperationFailure,
-} from "../sdk/notifications-record";
+import { recordOperationFailure } from "../sdk/notifications-record";
+import { trackOperationTx } from "../sdk/reconcile";
 import { MlDsa65Backend } from "@monolythium/core-sdk/crypto";
 import {
   LedgerCallError,
@@ -271,12 +269,15 @@ export function OperationsDrawer({ descriptor, onClose }: Props) {
       resultTxHash = r.txHash;
       setResult(r);
       setStage("done");
-      // Terminal transition: broadcast accepted. Only the experimental flag
-      // wires the notifications center; we never auto-record "confirmed" —
-      // the hook polls lyth_txStatus and records confirmed only on a genuine
-      // on-chain observation (fire-and-forget so the Done pane isn't blocked).
+      // Terminal transition: broadcast accepted (NOT yet a confirmed receipt).
+      // Only the experimental flag wires the notifications center. We do NOT
+      // poll here — the broadcast tx is enqueued into the durable tracked-tx
+      // store, and the app-level reconcile poller follows it to a real terminal
+      // state (recording "confirmed" on an on-chain observation, "failed" on a
+      // reverted receipt) even after this drawer closes. The Done pane shows
+      // the broadcast immediately; the notification comes from the reconciler.
       if (descriptor.notify && resultTxHash && readExperimentalEnabled()) {
-        void recordOperationConfirmed(descriptor.notify, resultTxHash);
+        void trackOperationTx(descriptor.notify, resultTxHash);
       }
     } catch (cause) {
       const message = (cause as Error)?.message ?? String(cause);
