@@ -24,6 +24,7 @@ import { MONOLYTHIUM_TESTNET_CHAIN_ID } from "@monolythium/core-sdk";
 import { IDENTITY } from "../data/fixtures";
 import { getProvider } from "./client";
 import { recordNotification } from "./notifications-store";
+import { toastTerminalNotification } from "./os-toast";
 import {
   classifyPending,
   isPendingExpired,
@@ -169,7 +170,7 @@ export async function reconcilePendingOnce(
         continue;
       }
       // Terminal — record the genuine status verbatim, then stop tracking.
-      await recordNotification({
+      const { added, record } = await recordNotification({
         addressLower: tx.addressLower,
         chainIdHex: tx.chainIdHex,
         txHash: tx.txHash,
@@ -179,6 +180,11 @@ export async function reconcilePendingOnce(
         amountDecimal: tx.amountDecimal,
         counterparty: tx.counterparty,
       });
+      // Raise an OS toast ONLY for a genuinely-new record (added === true), so
+      // the store's `${chainIdHex}:${txHash}` dedupe also dedupes the toast — a
+      // re-observed terminal hash neither re-records nor re-toasts. Best-effort
+      // + flag-gated inside the helper; never throws back into this tick.
+      if (added && record) void toastTerminalNotification(record);
       await removePendingTx(tx.chainIdHex, tx.txHash);
       recorded++;
     }

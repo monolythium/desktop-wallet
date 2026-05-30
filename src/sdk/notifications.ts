@@ -173,6 +173,33 @@ export function notificationTitle(
   return NOTIFICATION_LABELS[kind][status];
 }
 
+/** Middle-truncate a typed bech32m address for compact display — identical
+ *  head/tail to `_detailModalParts.truncMiddle` so the OS toast body matches
+ *  the in-app row's `short` form verbatim. Inlined here (rather than imported)
+ *  to keep this module DOM/React-free per its header invariant. */
+function shortAddress(s: string, head = 10, tail = 6): string {
+  return s.length > head + tail + 1 ? `${s.slice(0, head)}…${s.slice(-tail)}` : s;
+}
+
+/** Friendly title + body for a terminal notification — the SAME wording the
+ *  in-app Notifications row renders (title = {@link notificationTitle}; body =
+ *  `"<amount> LYTH · <short bech32m>"`, or just the short address when the
+ *  amount is zero). Pure + secret-free: only the public amount + a
+ *  middle-truncated bech32m address ever appear, never a contact name or any
+ *  encrypted payload. The OS-toast layer (`os-toast.ts`) consumes this so the
+ *  toast and the in-app record always read identically. */
+export function notificationToast(record: NotificationRecord): {
+  title: string;
+  body: string;
+} {
+  const title = notificationTitle(record.kind, record.status);
+  const short = shortAddress(record.counterparty);
+  const body = isZeroAmount(record.amountDecimal)
+    ? short
+    : `${record.amountDecimal} LYTH · ${short}`;
+  return { title, body };
+}
+
 /** Present-tense, in-flight labels for a tracked tx still awaiting its terminal
  *  receipt. Deliberately distinct from the terminal `NOTIFICATION_LABELS`
  *  (e.g. "Sending…" vs. "Sent") so a Pending row never reads as already

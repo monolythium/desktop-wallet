@@ -33,6 +33,12 @@ tauri-plugin-store = "2"
 # can `relaunch()` after `downloadAndInstall()`.
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
+# Native OS toast notifications. Paired with the in-app notifications center:
+# a newly-recorded terminal tx notification (confirmed/failed) also raises an
+# OS toast via `src/sdk/os-toast.ts`. The toast is gated at the frontend by the
+# `wallet.experimentalEnabled` flag (same gate as the in-app center), so flag
+# off ⇒ no toast and no permission prompt.
+tauri-plugin-notification = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "1"
@@ -53,7 +59,6 @@ bip39 = { version = "2", default-features = false, features = ["std", "zeroize"]
 sha3 = { version = "0.10", optional = true }
 bech32 = { version = "0.11", default-features = false, features = ["alloc"], optional = true }
 fips204 = { version = "0.4.6", default-features = false, features = ["ml-dsa-65"], optional = true }
-tauri-plugin-notification = { version = "2", optional = true }
 
 # Vault crypto. Argon2id KDF + AES-256-GCM encryption of the wallet seed.
 # Stable releases of the RustCrypto password-hashes / AEADs lines.
@@ -104,7 +109,6 @@ stele = [
     "dep:fips204",
     "dep:futures-util",
     "dep:sha3",
-    "dep:tauri-plugin-notification",
     "dep:uuid",
     "tokio/io-util",
     "tokio/process",

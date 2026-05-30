@@ -25,6 +25,15 @@ vi.mock("@tauri-apps/plugin-store", () => {
   return { Store: FakeStore };
 });
 
+// Stub the OS-toast helper so we can assert the reconcile path fires it exactly
+// once per NEWLY-recorded terminal notification (and never on a deduped
+// re-observe). The real helper is exercised separately; here we only care that
+// reconcile.ts calls it with the record it just recorded.
+const toastSpy = vi.fn((_record: unknown): Promise<void> => Promise.resolve());
+vi.mock("../os-toast", () => ({
+  toastTerminalNotification: (record: unknown) => toastSpy(record),
+}));
+
 import { setProviderForTest, type MonolythiumClient } from "../client";
 import {
   __resetNotificationsStoreForTests,
@@ -103,6 +112,7 @@ beforeEach(() => {
   __resetPendingTxStoreForTests();
   txStatusScript = new Map();
   receiptScript = new Map();
+  toastSpy.mockClear();
   installFakeClient();
 });
 
@@ -207,6 +217,60 @@ describe("reconcilePendingOnce — dedupe across ticks", () => {
     // ${chainIdHex}:${txHash}, so no second record is added.
     expect(res.remaining).toBe(0);
     expect(await listAllNotifications()).toHaveLength(1);
+  });
+});
+
+describe("reconcilePendingOnce — OS toast fires once per new record", () => {
+  it("fires the OS toast exactly once for a newly-recorded confirmed tx", async () => {
+    await enqueuePendingTx(tx({ txHash: "0xt1" }));
+    txStatusScript.set("0xt1", { status: "found", blockNumber: 7 });
+
+    await reconcilePendingOnce();
+    expect(toastSpy).toHaveBeenCalledTimes(1);
+    // It's handed the record that was just recorded (same hash + status).
+    const arg = toastSpy.mock.calls[0]![0] as { txHash: string; status: string };
+    expect(arg.txHash).toBe("0xt1");
+    expect(arg.status).toBe("confirmed");
+  });
+
+  it("fires for a failed tx too", async () => {
+    await enqueuePendingTx(tx({ txHash: "0xt2", opKind: "delegate" }));
+    receiptScript.set("0xt2", { status: 0, block_number: 4n });
+
+    await reconcilePendingOnce();
+    expect(toastSpy).toHaveBeenCalledTimes(1);
+    expect((toastSpy.mock.calls[0]![0] as { status: string }).status).toBe(
+      "failed",
+    );
+  });
+
+  it("does NOT re-toast a re-observed (deduped) terminal hash", async () => {
+    await enqueuePendingTx(tx({ txHash: "0xt3" }));
+    txStatusScript.set("0xt3", { status: "found", blockNumber: 1 });
+    await reconcilePendingOnce();
+    expect(toastSpy).toHaveBeenCalledTimes(1);
+
+    // Same hash tracked + terminal again — recordNotification dedupes
+    // (added: false), so the toast must NOT fire a second time.
+    await enqueuePendingTx(tx({ txHash: "0xt3" }));
+    await reconcilePendingOnce();
+    expect(toastSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not toast when nothing reaches a terminal state", async () => {
+    await enqueuePendingTx(tx({ txHash: "0xt4" }));
+    // No script entries → stays pending.
+    await reconcilePendingOnce();
+    expect(toastSpy).not.toHaveBeenCalled();
+  });
+
+  it("does not toast a silently-expired tx", async () => {
+    await enqueuePendingTx(
+      tx({ txHash: "0xt5", submittedAt: Date.now() - PENDING_TX_WINDOW_MS - 1 }),
+    );
+    txStatusScript.set("0xt5", { status: "found", blockNumber: 9 });
+    await reconcilePendingOnce();
+    expect(toastSpy).not.toHaveBeenCalled();
   });
 });
 
