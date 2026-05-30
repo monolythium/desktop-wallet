@@ -15,6 +15,7 @@ import type {
 import { IDENTITY } from "../data/fixtures";
 import { useOperations } from "../operations/context";
 import {
+  DELEGATION_PRECOMPILE,
   buildDelegateCalldata,
   fetchClusterDirectory,
   submitStakingTx,
@@ -125,6 +126,11 @@ export function Stake({ experimentalEnabled }: StakeProps = {}) {
           level: "warn",
         },
       ],
+      notify: {
+        kind: "delegate",
+        amountDecimal: principalLyth.toString(),
+        counterparty: DELEGATION_PRECOMPILE,
+      },
       execute: async (ctx) => {
         if (!ctx?.vaultSeed) {
           throw new Error("vault seed unavailable after keychain authorization");
@@ -138,6 +144,7 @@ export function Stake({ experimentalEnabled }: StakeProps = {}) {
         return {
           headline: `Delegated ${principalLyth} LYTH @ ${weightLabel} to cluster ${clusterId}`,
           detail: result.txHash,
+          txHash: result.txHash,
         };
       },
     });

@@ -6,6 +6,8 @@
 // flow with a typed `OperationDescriptor`. Stages 3+ extend it with real
 // Ledger and keystore signing paths.
 
+import type { TxOpKind } from "../sdk/notifications";
+
 export type OperationStage = "preview" | "auth" | "executing" | "done" | "error";
 
 /**
@@ -67,11 +69,33 @@ export interface OperationDescriptor {
   /** Hardware-signer context (only used when `auth === "hardware"`). */
   ledger?: LedgerContext;
   /**
+   * Optional in-app notification metadata. When present (and the wallet's
+   * experimental flag is on), the drawer records a notification on the
+   * operation's terminal transition: `"failed"` immediately when `execute`
+   * throws, `"confirmed"` only after a bounded `lyth_txStatus` poll observes
+   * the broadcast tx on-chain. Submission-only operations that never resolve
+   * a canonical tx hash leave this unset and record nothing.
+   */
+  notify?: OperationNotifyMeta;
+  /**
    * The actual work. Resolves with an arbitrary "result" payload (tx hash,
    * RPC echo, etc.); throws to land the drawer in `error`. Implementations
    * are responsible for the chain side; the drawer owns UI state only.
    */
   execute: (ctx?: OperationExecutionContext) => Promise<OperationResult>;
+}
+
+/**
+ * Structured notification metadata for an operation. No secrets: only the
+ * operation kind, the formatted LYTH amount (or "0"), and the typed bech32m
+ * counterparty — never a contact name.
+ */
+export interface OperationNotifyMeta {
+  kind: TxOpKind;
+  /** Already-formatted LYTH decimal string (e.g. "12.50"), or "0". */
+  amountDecimal: string;
+  /** Typed bech32m counterparty (recipient or precompile target). */
+  counterparty: string;
 }
 
 export interface OperationExecutionContext {
@@ -86,4 +110,11 @@ export interface OperationResult {
   detail?: string;
   /** Optional URL the user can copy from the done pane. */
   link?: string;
+  /**
+   * Canonical inner-tx hash, when this operation produced exactly one. The
+   * notification hook reads this (paired with `descriptor.notify`) to key the
+   * `lyth_txStatus` confirm-poll and the dedupe id. Operations that submit
+   * zero or many txs (or none that resolve a hash) leave it unset.
+   */
+  txHash?: string;
 }

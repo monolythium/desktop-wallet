@@ -26,6 +26,7 @@ import { Home } from "./pages/Home";
 import { Inbox } from "./pages/Inbox";
 import { News } from "./pages/News";
 import { MonoStudio } from "./pages/MonoStudio";
+import { Notifications } from "./pages/Notifications";
 import { Provider } from "./pages/Provider";
 import { RiscvContracts } from "./pages/RiscvContracts";
 import { Settings } from "./pages/Settings";
@@ -205,7 +206,7 @@ export function App() {
 
   useEffect(() => {
     writeExperimentalEnabled(experimentalEnabled);
-    if (!experimentalEnabled && route === "agents") {
+    if (!experimentalEnabled && (route === "agents" || route === "notifications")) {
       setRoute("home");
     }
   }, [experimentalEnabled, route]);
@@ -247,7 +248,7 @@ export function App() {
           steleEnabled={steleEnabled}
           experimentalEnabled={experimentalEnabled}
         />
-        <Topbar route={route} />
+        <Topbar route={route} setRoute={setRoute} experimentalEnabled={experimentalEnabled} />
         <main className="w-main">
           {route === "home" ? <Home denom={denom} goto={setRoute} /> : null}
           {route === "activity" ? <Activity denom={denom} experimentalEnabled={experimentalEnabled} /> : null}
@@ -270,6 +271,7 @@ export function App() {
           {route === "stele" && steleEnabled ? <Stele /> : null}
           {route === "inbox" && steleEnabled ? <Inbox /> : null}
           {route === "provider" && steleEnabled ? <Provider /> : null}
+          {route === "notifications" && experimentalEnabled ? <Notifications /> : null}
           {route === "settings" ? (
             <Settings
               developerModeEnabled={developerModeEnabled}

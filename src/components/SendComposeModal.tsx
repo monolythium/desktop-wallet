@@ -127,6 +127,7 @@ export function SendComposeModal({ fromBech32m, onClose }: Props) {
           text: "Wraps the native transaction in an encrypted envelope and submits lyth_submitEncrypted.",
         },
       ],
+      notify: { kind: "send", amountDecimal: amountLyth, counterparty: toBech32m },
       execute: async (ctx) => {
         if (!ctx?.vaultSeed) {
           throw new Error("vault seed unavailable after keychain authorization");
@@ -139,6 +140,7 @@ export function SendComposeModal({ fromBech32m, onClose }: Props) {
         return {
           headline: `Broadcast ${amountLyth} LYTH`,
           detail: `${result.txHash} · from ${result.from}`,
+          txHash: result.txHash,
         };
       },
     });

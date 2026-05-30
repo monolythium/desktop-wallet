@@ -20,6 +20,11 @@ import {
 } from "../sdk/keychain";
 import { VaultCallError } from "../sdk/vault";
 import { captureAddressOnUnlock } from "../sdk/vaultCatalog";
+import { readExperimentalEnabled } from "../sdk/feature-flags";
+import {
+  recordOperationConfirmed,
+  recordOperationFailure,
+} from "../sdk/notifications-record";
 import { MlDsa65Backend } from "@monolythium/core-sdk/crypto";
 import {
   LedgerCallError,
@@ -260,14 +265,29 @@ export function OperationsDrawer({ descriptor, onClose }: Props) {
   const runExecute = async (ctx: OperationExecutionContext = {}) => {
     setStage("executing");
     setError(null);
+    let resultTxHash: string | undefined;
     try {
       const r = await descriptor.execute(ctx);
+      resultTxHash = r.txHash;
       setResult(r);
       setStage("done");
+      // Terminal transition: broadcast accepted. Only the experimental flag
+      // wires the notifications center; we never auto-record "confirmed" —
+      // the hook polls lyth_txStatus and records confirmed only on a genuine
+      // on-chain observation (fire-and-forget so the Done pane isn't blocked).
+      if (descriptor.notify && resultTxHash && readExperimentalEnabled()) {
+        void recordOperationConfirmed(descriptor.notify, resultTxHash);
+      }
     } catch (cause) {
       const message = (cause as Error)?.message ?? String(cause);
       setError(message);
       setStage("error");
+      // Terminal transition: the node / precompile / SDK rejected the
+      // submission — a genuine failure, recorded immediately (when a canonical
+      // hash exists to key it on).
+      if (descriptor.notify && readExperimentalEnabled()) {
+        void recordOperationFailure(descriptor.notify, resultTxHash);
+      }
     } finally {
       ctx.vaultSeed?.fill(0);
     }

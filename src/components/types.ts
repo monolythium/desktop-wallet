@@ -18,6 +18,7 @@ export type Route =
   | "stele"
   | "inbox"
   | "provider"
+  | "notifications"
   | "settings";
 
 export const ALL_ROUTES: Route[] = [
@@ -37,5 +38,6 @@ export const ALL_ROUTES: Route[] = [
   "stele",
   "inbox",
   "provider",
+  "notifications",
   "settings",
 ];
