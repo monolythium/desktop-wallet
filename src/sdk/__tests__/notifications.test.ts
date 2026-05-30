@@ -7,6 +7,7 @@ import {
   isZeroAmount,
   notificationId,
   notificationTitle,
+  notificationToast,
   pendingOpLabel,
   PENDING_OP_LABELS,
   notificationsHistoryKey,
@@ -46,6 +47,48 @@ describe("notification key builders", () => {
     expect(notificationId("0x10f2c", "0xdead")).toBe("0x10f2c:0xdead");
     // Same hash, different chain ⇒ different id.
     expect(notificationId("0x1", "0xdead")).not.toBe(notificationId("0x2", "0xdead"));
+  });
+});
+
+describe("notificationToast", () => {
+  it("uses the in-app title and an amount + short-bech32m body", () => {
+    const t = notificationToast(rec({ kind: "send", status: "confirmed" }));
+    // Title is verbatim the in-app friendly title.
+    expect(t.title).toBe(notificationTitle("send", "confirmed"));
+    expect(t.title).toBe("Sent");
+    // Body = "<amount> LYTH · <short>" with the SAME 10/6 middle-truncation the
+    // Notifications row's `truncMiddle` applies.
+    expect(t.body).toBe(
+      "12.50 LYTH · mono1qqqqq…qqqqqq",
+    );
+  });
+
+  it("uses the failed title and respects status", () => {
+    const t = notificationToast(rec({ kind: "delegate", status: "failed" }));
+    expect(t.title).toBe("Stake failed");
+  });
+
+  it("omits the amount when it is zero (body = short address only)", () => {
+    const t = notificationToast(
+      rec({ kind: "claim", status: "confirmed", amountDecimal: "0" }),
+    );
+    expect(t.body).toBe("mono1qqqqq…qqqqqq");
+    expect(t.body).not.toContain("LYTH");
+  });
+
+  it("does not truncate a short counterparty", () => {
+    const t = notificationToast(
+      rec({ amountDecimal: "1", counterparty: "mono1short" }),
+    );
+    expect(t.body).toBe("1 LYTH · mono1short");
+  });
+
+  it("carries no secrets — body holds only amount + a bech32m address", () => {
+    const t = notificationToast(
+      rec({ amountDecimal: "3.14", counterparty: "mono1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq" }),
+    );
+    // No contact name, no raw seed/payload — just the public amount + address.
+    expect(t.body).toMatch(/^3\.14 LYTH · mono1[a-z0-9]+…[a-z0-9]+$/);
   });
 });
 

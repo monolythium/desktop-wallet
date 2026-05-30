@@ -33,12 +33,15 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        // Native OS toasts for terminal tx notifications. The frontend
+        // (`src/sdk/os-toast.ts`) is the only caller; it gates every toast +
+        // permission prompt behind the `wallet.experimentalEnabled` flag.
+        .plugin(tauri_plugin_notification::init())
         .manage(ledger_state)
         .manage(studio_host::StudioSidecarState::default());
 
     #[cfg(feature = "stele")]
     let builder = builder
-        .plugin(tauri_plugin_notification::init())
         .manage(stele::SidecarHandle::default())
         .manage(stele::ApprovalBridgeHandle::default())
         .manage(stele::OutboundMcpHandle::default());

@@ -27,6 +27,7 @@
 import { MONOLYTHIUM_TESTNET_CHAIN_ID } from "@monolythium/core-sdk";
 import { IDENTITY } from "../data/fixtures";
 import { recordNotification } from "./notifications-store";
+import { toastTerminalNotification } from "./os-toast";
 import type { TxOpKind } from "./notifications";
 
 /** Lowercased scope address. The wallet's active typed bech32m address is the
@@ -56,7 +57,7 @@ export async function recordOperationFailure(
   txHash: string | undefined,
 ): Promise<void> {
   if (!txHash) return;
-  await recordNotification({
+  const { added, record } = await recordNotification({
     addressLower: scopeAddressLower(),
     chainIdHex: scopeChainIdHex(),
     txHash,
@@ -66,4 +67,8 @@ export async function recordOperationFailure(
     amountDecimal: meta.amountDecimal,
     counterparty: meta.counterparty,
   });
+  // Raise an OS toast ONLY for a genuinely-new record (added === true), reusing
+  // the store's `${chainIdHex}:${txHash}` dedupe. Best-effort + flag-gated
+  // inside the helper; never throws back into the caller's submit flow.
+  if (added && record) void toastTerminalNotification(record);
 }
