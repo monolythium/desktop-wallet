@@ -13,6 +13,7 @@
 import { useEffect, useState } from "react";
 import { ApprovalOverlay } from "./components/ApprovalOverlay";
 import { Onboarding } from "./components/Onboarding";
+import { PendingTxReconciler } from "./components/PendingTxReconciler";
 import { Sidebar } from "./components/Sidebar";
 import { Topbar } from "./components/Topbar";
 import { UpdateBanner } from "./components/UpdateBanner";
@@ -284,6 +285,7 @@ export function App() {
           ) : null}
         </main>
         {steleEnabled ? <ApprovalOverlay /> : null}
+        {experimentalEnabled ? <PendingTxReconciler /> : null}
         {pendingUpdate ? (
           <UpdateBanner
             update={pendingUpdate}
