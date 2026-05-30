@@ -7,6 +7,8 @@ import {
   isZeroAmount,
   notificationId,
   notificationTitle,
+  pendingOpLabel,
+  PENDING_OP_LABELS,
   notificationsHistoryKey,
   notifiedSetKey,
   parseHistoryEnvelope,
@@ -65,6 +67,23 @@ describe("notificationTitle", () => {
     expect(notificationTitle("delegate", "confirmed")).toBe("Staked");
     expect(notificationTitle("claim", "confirmed")).toBe("Rewards claimed");
     expect(notificationTitle("contract_call", "failed")).toBe("Transaction failed");
+  });
+});
+
+describe("pendingOpLabel", () => {
+  it("renders a present-tense, in-flight label per kind", () => {
+    expect(pendingOpLabel("send")).toBe("Sending…");
+    expect(pendingOpLabel("delegate")).toBe("Staking…");
+    expect(pendingOpLabel("undelegate")).toBe("Unstaking…");
+    expect(pendingOpLabel("claim")).toBe("Claiming rewards…");
+    expect(pendingOpLabel("contract_call")).toBe("Submitting transaction…");
+  });
+
+  it("is distinct from the terminal title for every kind (never reads as confirmed)", () => {
+    for (const k of Object.keys(PENDING_OP_LABELS)) {
+      const kind = k as keyof typeof PENDING_OP_LABELS;
+      expect(pendingOpLabel(kind)).not.toBe(notificationTitle(kind, "confirmed"));
+    }
   });
 });
 
