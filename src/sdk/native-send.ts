@@ -1,28 +1,24 @@
 // Native Monolythium send path.
 //
-// This is the desktop-wallet equivalent of the browser wallet's ML-DSA
-// encrypted-submit route, but kept thin: the SDK owns signing, native tx
-// bincode, encrypted-envelope construction, and `lyth_submitEncrypted`.
+// Routes through the shared `submitNativeTx` seam (core-sdk 0.3.11), which
+// submits PLAINTEXT by default via `submitTransactionWithPrivacy({ private:
+// false })` → `mesh_submitTx` (the inclusion path that actually confirms on
+// the live optional-encryption chain). Pass `private: true` to engage the
+// encrypted preview path — but threshold-encrypted inclusion is NOT live yet,
+// so only the Send screen's preview-gated toggle should ever set it.
+//
+// The SDK owns signing, native tx bincode, the plaintext/encrypted submit
+// fork, and sane fee defaults (we no longer hardcode an execution-unit limit
+// — the transfer default ~100k + clamped tip comes from the SDK).
 
 import {
-  MONOLYTHIUM_TESTNET_CHAIN_ID,
-  RpcClient,
   addressToTypedBech32,
   formatLyth,
   parseLythToLythoshi,
 } from "@monolythium/core-sdk";
-import {
-  MlDsa65Backend,
-  buildEncryptedSubmission,
-  fetchEncryptionKey,
-  submitEncryptedEnvelope,
-} from "@monolythium/core-sdk/crypto";
 import type { NativeEvmTxFields } from "@monolythium/core-sdk/crypto";
 import { requireTypedUserAddressHex } from "./address";
-import { getProvider } from "./client";
-import { getExecutionUnitPriceLythoshi, getNativeTransactionCount } from "./native-rpc";
-
-const SPRINTNET_TRANSFER_EXECUTION_UNIT_LIMIT = 30_000n;
+import { submitNativeTx } from "./submit";
 
 export interface SendNativeLythArgs {
   seed: Uint8Array;
@@ -30,6 +26,12 @@ export interface SendNativeLythArgs {
   to: string;
   amountLyth: string;
   executionUnitLimit?: bigint;
+  /**
+   * Privacy posture. DEFAULT FALSE = plaintext (the confirming path). TRUE
+   * routes through the encrypted PREVIEW path (not live for inclusion yet) —
+   * only the preview-gated Send toggle should pass true.
+   */
+  private?: boolean;
 }
 
 export interface SendNativeLythResult {
@@ -37,8 +39,8 @@ export interface SendNativeLythResult {
   from: string;
   amountLythoshi: string;
   amountDisplay: string;
-  innerSighashHex: string;
-  envelopeWireBytes: number;
+  /** True if this went through the encrypted (preview) path. */
+  wasPrivate: boolean;
 }
 
 export interface NativeLythTransferPlanArgs {
@@ -58,9 +60,14 @@ export interface NativeLythTransferPlan {
   tx: NativeEvmTxFields;
 }
 
+/** Default execution-unit limit for a bare transfer plan preview. The live
+ *  send path takes the SDK transfer default; this is only for offline plan
+ *  construction / tests. */
+const TRANSFER_PLAN_EXECUTION_UNIT_LIMIT = 100_000n;
+
 export function buildNativeLythTransferPlan(args: NativeLythTransferPlanArgs): NativeLythTransferPlan {
   const amountLythoshi = parseLythToLythoshi(args.amountLyth).toString();
-  const executionUnitLimit = args.executionUnitLimit ?? SPRINTNET_TRANSFER_EXECUTION_UNIT_LIMIT;
+  const executionUnitLimit = args.executionUnitLimit ?? TRANSFER_PLAN_EXECUTION_UNIT_LIMIT;
   const toHex = requireTypedUserAddressHex(args.to, "to");
   return {
     amountLythoshi,
@@ -79,38 +86,25 @@ export function buildNativeLythTransferPlan(args: NativeLythTransferPlanArgs): N
 }
 
 export async function sendNativeLyth(args: SendNativeLythArgs): Promise<SendNativeLythResult> {
-  const backend = MlDsa65Backend.fromSeed(args.seed);
-  const provider = getProvider();
-  const client = new RpcClient(provider.rpcClient.endpoint);
-  const fromHex = backend.getAddress();
+  const toHex = requireTypedUserAddressHex(args.to, "to");
+  const amountLythoshi = parseLythToLythoshi(args.amountLyth).toString();
 
-  const [nonce, executionUnitPrice, encryptionKey] = await Promise.all([
-    getNativeTransactionCount(client, fromHex),
-    getExecutionUnitPriceLythoshi(client),
-    fetchEncryptionKey(client),
-  ]);
-  const plan = buildNativeLythTransferPlan({
-    chainId: MONOLYTHIUM_TESTNET_CHAIN_ID,
-    nonce,
-    to: args.to,
-    amountLyth: args.amountLyth,
-    executionUnitPriceLythoshi: executionUnitPrice,
-    executionUnitLimit: args.executionUnitLimit,
+  const result = await submitNativeTx({
+    seed: args.seed,
+    to: toHex,
+    valueLythoshi: BigInt(amountLythoshi),
+    feeClass: "transfer",
+    ...(args.executionUnitLimit === undefined
+      ? {}
+      : { executionUnitLimit: args.executionUnitLimit }),
+    private: args.private === true,
   });
 
-  const wrapped = await buildEncryptedSubmission({
-    backend,
-    encryptionKey,
-    tx: plan.tx,
-  });
-
-  const txHash = await submitEncryptedEnvelope(client, wrapped.envelopeWireHex);
   return {
-    txHash,
-    from: addressToTypedBech32("user", fromHex),
-    amountLythoshi: plan.amountLythoshi,
-    amountDisplay: plan.amountDisplay,
-    innerSighashHex: wrapped.innerSighashHex,
-    envelopeWireBytes: (wrapped.envelopeWireHex.length - 2) / 2,
+    txHash: result.txHash,
+    from: addressToTypedBech32("user", result.fromHex),
+    amountLythoshi,
+    amountDisplay: formatLyth(amountLythoshi, { includeUnit: false }),
+    wasPrivate: result.wasPrivate,
   };
 }

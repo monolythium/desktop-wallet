@@ -23,6 +23,14 @@ interface Props {
 
 const USER_HRP = ADDRESS_KIND_HRPS.user;
 
+// Private (encrypted) send is a PREVIEW surface. Threshold-encrypted
+// INCLUSION is not live on the chain yet (fast-follow), so an encrypted
+// submit would NOT confirm. The toggle is rendered default-OFF and disabled
+// so a user can never broadcast a non-confirming encrypted tx — plaintext
+// (OFF) is the working path. Flip this to `true` only once threshold
+// inclusion ships.
+const PRIVATE_SEND_PREVIEW_ENABLED = false;
+
 export function SendComposeModal({ fromBech32m, onClose }: Props) {
   const ops = useOperations();
   const [recipient, setRecipient] = useState("");
@@ -30,6 +38,10 @@ export function SendComposeModal({ fromBech32m, onClose }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [reviewing, setReviewing] = useState(false);
+  // Private (encrypted) toggle — DEFAULT OFF (plaintext). The control stays
+  // disabled while the preview flag is off, so this can only ever be false
+  // on a user-reachable send today.
+  const [usePrivate, setUsePrivate] = useState(false);
   // When the user picks a contact, hold the resolved name so the
   // review pane can render "Send to Alice (mono1…)" rather than the
   // bare address. Cleared on any manual edit of the recipient field
@@ -109,23 +121,34 @@ export function SendComposeModal({ fromBech32m, onClose }: Props) {
       ? `${recipientName} · ${toBech32m}`
       : toBech32m;
 
+    // Only ever private if the preview flag is on AND the user toggled it.
+    const sendPrivate = PRIVATE_SEND_PREVIEW_ENABLED && usePrivate;
+
     ops.open({
       title: `Send ${amountLyth} LYTH`,
-      subtitle: "Native ML-DSA encrypted Monolythium send",
+      subtitle: sendPrivate
+        ? "Native ML-DSA send · encrypted (preview)"
+        : "Native ML-DSA send · plaintext (default)",
       auth: "keychain",
       diff: [
         { k: "From", v: fromBech32m },
         { k: "To", v: toLine },
         { k: "Token", v: "LYTH" },
         { k: "Amount", v: `${amountLyth} LYTH` },
+        { k: "Privacy", v: sendPrivate ? "Private (preview)" : "Plaintext", kind: "value" },
         { k: "Finality", v: finality.label, kind: "value" },
       ],
       effects: [
         { text: "Unlocks the local vault for this operation only." },
         { text: "Derives an ML-DSA-65 signer with @monolythium/core-sdk/crypto." },
-        {
-          text: "Wraps the native transaction in an encrypted envelope and submits lyth_submitEncrypted.",
-        },
+        sendPrivate
+          ? {
+              text: "PREVIEW: wraps the tx in a threshold-encrypted envelope (lyth_submitEncrypted). Encrypted inclusion is not live yet — this may not confirm.",
+              level: "warn" as const,
+            }
+          : {
+              text: "Submits the signed transaction over the plaintext mesh_submitTx path — the inclusion path that confirms on this chain.",
+            },
       ],
       notify: { kind: "send", amountDecimal: amountLyth, counterparty: toBech32m },
       execute: async (ctx) => {
@@ -136,6 +159,7 @@ export function SendComposeModal({ fromBech32m, onClose }: Props) {
           seed: ctx.vaultSeed,
           to: toBech32m,
           amountLyth,
+          private: sendPrivate,
         });
         return {
           headline: `Broadcast ${amountLyth} LYTH`,
@@ -244,6 +268,49 @@ export function SendComposeModal({ fromBech32m, onClose }: Props) {
           aria-label="Amount in LYTH"
           style={inputStyle}
         />
+
+        <div
+          style={{
+            marginTop: 16,
+            padding: "12px 12px 14px",
+            background: "rgba(255,255,255,0.03)",
+            border: "1px solid rgba(255,255,255,0.10)",
+            borderRadius: 10,
+            opacity: PRIVATE_SEND_PREVIEW_ENABLED ? 1 : 0.6,
+          }}
+        >
+          <label
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              cursor: PRIVATE_SEND_PREVIEW_ENABLED ? "pointer" : "not-allowed",
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={PRIVATE_SEND_PREVIEW_ENABLED && usePrivate}
+              disabled={!PRIVATE_SEND_PREVIEW_ENABLED}
+              onChange={(e) => setUsePrivate(e.target.checked)}
+              aria-label="Private send (preview)"
+            />
+            <span style={{ fontSize: 13, color: "var(--fg-100)" }}>
+              Private (preview)
+            </span>
+          </label>
+          <p
+            style={{
+              margin: "8px 0 0 28px",
+              fontSize: 11,
+              color: "var(--fg-400)",
+              lineHeight: 1.5,
+            }}
+          >
+            Off sends in the clear over the working mesh path. Threshold-encrypted
+            inclusion is not live on this network yet, so private sends are
+            disabled — an encrypted transaction would not confirm.
+          </p>
+        </div>
 
         {error && (
           <p style={{ margin: "12px 0 0", fontSize: 12, color: "var(--err)", lineHeight: 1.5 }}>

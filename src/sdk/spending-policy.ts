@@ -21,7 +21,6 @@
 
 import {
   MONOLYTHIUM_TESTNET_CHAIN_ID,
-  RpcClient,
   composeClaimBoundMessage,
   encodeDisableCalldata,
   encodeEnableCalldata,
@@ -33,19 +32,9 @@ import type {
   SpendingPolicyArgs,
   SpendingPolicyView,
 } from "@monolythium/core-sdk";
-import {
-  MlDsa65Backend,
-  buildEncryptedSubmission,
-  fetchEncryptionKey,
-  submitEncryptedEnvelope,
-} from "@monolythium/core-sdk/crypto";
-import type { NativeEvmTxFields } from "@monolythium/core-sdk/crypto";
 import { requireTypedUserAddress } from "./address";
 import { getProvider } from "./client";
-import {
-  getExecutionUnitPriceLythoshi,
-  getNativeTransactionCount,
-} from "./native-rpc";
+import { submitNativeTx } from "./submit";
 
 /** Spending-policy precompile address (`0x…110C`, WP §18.8 / Law §5.4). */
 export const SPENDING_POLICY_PRECOMPILE = spendingPolicyAddressHex();
@@ -169,49 +158,30 @@ export interface SubmitSpendingPolicyTxArgs {
 
 export interface SubmitSpendingPolicyTxResult {
   txHash: string;
-  innerSighashHex: string;
 }
 
 /**
- * Submit a spending-policy precompile call. Identical to `submitStakingTx`
- * but `to` is the spending-policy precompile (`0x…110C`), `value` is 0, and
- * the execution-unit budget is sized for the claim payload. The PRINCIPAL
- * seed signs + submits; the (separately-derived) sub-account signature is
- * already baked into `data` for a `setPolicyClaim`.
+ * Submit a spending-policy precompile call (register via `setPolicyClaim` /
+ * enable / disable). Routes through the shared `submitNativeTx` seam:
+ * PLAINTEXT `mesh_submitTx` by default (the path that confirms on the live
+ * chain), `to` = the spending-policy precompile (`0x…110C`), `value` 0, and
+ * the registry fee class sized for the claim payload. The PRINCIPAL seed
+ * signs + submits; the (separately-derived) sub-account signature is already
+ * baked into `data` for a `setPolicyClaim`.
  */
 export async function submitSpendingPolicyTx(
   args: SubmitSpendingPolicyTxArgs,
 ): Promise<SubmitSpendingPolicyTxResult> {
-  const backend = MlDsa65Backend.fromSeed(args.seed);
-  const provider = getProvider();
-  const client = new RpcClient(provider.rpcClient.endpoint);
-  const fromHex = backend.getAddress();
-
-  const [nonce, executionUnitPrice, encryptionKey] = await Promise.all([
-    getNativeTransactionCount(client, fromHex),
-    getExecutionUnitPriceLythoshi(client),
-    fetchEncryptionKey(client),
-  ]);
-
-  const tx: NativeEvmTxFields = {
-    chainId: MONOLYTHIUM_TESTNET_CHAIN_ID,
-    nonce,
-    gasLimit: args.executionUnitLimit ?? SET_POLICY_CLAIM_EXECUTION_UNIT_LIMIT,
-    maxFeePerGas: executionUnitPrice,
-    maxPriorityFeePerGas: executionUnitPrice,
+  const result = await submitNativeTx({
+    seed: args.seed,
     to: SPENDING_POLICY_PRECOMPILE,
-    value: 0n,
     input: args.data,
-  };
-
-  const wrapped = await buildEncryptedSubmission({
-    backend,
-    encryptionKey,
-    tx,
+    valueLythoshi: 0n,
+    feeClass: "registry",
+    executionUnitLimit:
+      args.executionUnitLimit ?? SET_POLICY_CLAIM_EXECUTION_UNIT_LIMIT,
   });
-
-  const txHash = await submitEncryptedEnvelope(client, wrapped.envelopeWireHex);
-  return { txHash, innerSighashHex: wrapped.innerSighashHex };
+  return { txHash: result.txHash };
 }
 
 /** Execution-unit limit for an enable/disable toggle (no claim payload). */
