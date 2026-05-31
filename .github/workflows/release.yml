@@ -10,6 +10,10 @@ on:
         description: "Release tag to attach artifacts to (e.g. v0.1.0). Leave empty for a dry-run build with no release upload."
         required: false
         type: string
+      windows_trusted_signing_account:
+        description: "Azure Trusted Signing account name for Windows artifacts."
+        required: false
+        type: string
 
 permissions:
   contents: write
@@ -95,8 +99,8 @@ jobs:
           azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
           azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
-          endpoint: https://weu.codesigning.azure.net/
-          trusted-signing-account-name: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          endpoint: ${{ vars.AZURE_TRUSTED_SIGNING_ENDPOINT || 'https://eus.codesigning.azure.net/' }}
+          trusted-signing-account-name: ${{ github.event.inputs.windows_trusted_signing_account || vars.AZURE_TRUSTED_SIGNING_ACCOUNT_NAME || 'mono-labs' }}
           certificate-profile-name: ${{ secrets.AZURE_CERT_PROFILE }}
           files-folder: src-tauri/target/${{ matrix.target }}/release/bundle
           files-folder-filter: exe,msi
