@@ -4,6 +4,10 @@
 
 **License:** Apache-2.0 · **Status:** preview (testnet only) · **Stack:** Tauri 2 · Rust · React 19 · TypeScript · Vite
 
+## Download
+
+**[Preview builds — GitHub Releases →](https://github.com/monolythium/desktop-wallet/releases)** (macOS · Windows · Linux). These are early, preview-grade builds that default to testnet RPC — the fully signed/notarized four-platform channel hasn't shipped a tagged release yet. Or build from source (below).
+
 ---
 
 ## Status: preview
@@ -11,7 +15,7 @@
 Functional desktop shell with substantive Rust backend, real hardware-wallet integration, and a working Operations drawer — but not yet production-grade. Set expectations before adopting:
 
 - **Chain target is testnet.** Monolythium mainnet has not launched. Anything you connect to here runs against the public testnet today; mainnet activation is gated on separate protocol milestones.
-- **No signed releases on the public update channel yet.** The four-platform release workflow exists (macOS signed + notarized, Windows Azure Trusted Signing, Linux .deb + .AppImage) but no tagged release has run it end-to-end. Until then, install from source.
+- **Preview builds are on [GitHub Releases](https://github.com/monolythium/desktop-wallet/releases); the fully signed channel hasn't run end-to-end yet.** The four-platform release workflow exists (macOS signed + notarized, Windows Azure Trusted Signing, Linux .deb + .AppImage) but no tagged release has driven it start to finish. Until then, use the preview builds or install from source.
 - **SDK comes from npm.** `package.json` pins `@monolythium/core-sdk` to the exact version `0.3.10` from npm. The SDK is public ([`monolythium/mono-core-sdk`](https://github.com/monolythium/mono-core-sdk)) — `pnpm install` pulls it straight from the registry, no sibling checkout required.
 - **Some pages still render fixture-shaped data.** Real chain consumption is wired for the live SDK hooks; pages awaiting unexposed RPC methods stay on fixtures.
 - **The Stele marketplace tab is settings-gated and off by default.** Even when enabled, marketplace flows require the `lyth_mcp` sidecar running locally — see the Stele integration section below.
