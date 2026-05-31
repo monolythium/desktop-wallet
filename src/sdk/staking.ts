@@ -13,8 +13,6 @@
 // chain's typed error verbatim through the OperationsDrawer.
 
 import {
-  MONOLYTHIUM_TESTNET_CHAIN_ID,
-  RpcClient,
   encodeClaimCalldata,
   encodeCompleteRedemptionCalldata,
   encodeDelegateCalldata,
@@ -25,24 +23,18 @@ import type {
   ClusterDirectoryPageResponse,
   DelegationsResponse,
 } from "@monolythium/core-sdk";
-import {
-  MlDsa65Backend,
-  buildEncryptedSubmission,
-  fetchEncryptionKey,
-  submitEncryptedEnvelope,
-} from "@monolythium/core-sdk/crypto";
-import type { NativeEvmTxFields } from "@monolythium/core-sdk/crypto";
 import { requireTypedUserAddressHex } from "./address";
 import { getProvider } from "./client";
-import {
-  getExecutionUnitPriceLythoshi,
-  getNativeTransactionCount,
-} from "./native-rpc";
+import { submitNativeTx } from "./submit";
 
 /** Delegation precompile address (Law §5.4 / §7.6). */
 export const DELEGATION_PRECOMPILE =
   "0x000000000000000000000000000000000000100a";
 
+/** A delegate/undelegate/redelegate/claim/completeRedemption call carries a
+ *  small ABI payload; size the execution-unit budget above the observed cost
+ *  with headroom (the SDK transfer default of ~100k would underprovision the
+ *  precompile work). */
 const STAKING_EXECUTION_UNIT_LIMIT = 150_000n;
 
 export interface SubmitStakingTxArgs {
@@ -56,7 +48,6 @@ export interface SubmitStakingTxArgs {
 
 export interface SubmitStakingTxResult {
   txHash: string;
-  innerSighashHex: string;
 }
 
 export function buildDelegateCalldata(
@@ -107,41 +98,22 @@ export async function fetchDelegations(
 }
 
 /**
- * Submit a delegation-precompile call. Drives the same encrypted-envelope
- * path as `sendNativeLyth`, but `to` is the precompile address and value
- * is 0. Caller (OperationsDrawer.execute) supplies the unlocked seed.
+ * Submit a delegation-precompile call (delegate / undelegate / redelegate /
+ * claim rewards / completeRedemption). Routes through the shared
+ * `submitNativeTx` seam: PLAINTEXT `mesh_submitTx` by default (the path that
+ * confirms on the live chain), with `to` = the precompile and the staking
+ * execution-unit budget. Caller (OperationsDrawer.execute) supplies the
+ * unlocked seed.
  */
 export async function submitStakingTx(
   args: SubmitStakingTxArgs,
 ): Promise<SubmitStakingTxResult> {
-  const backend = MlDsa65Backend.fromSeed(args.seed);
-  const provider = getProvider();
-  const client = new RpcClient(provider.rpcClient.endpoint);
-  const fromHex = backend.getAddress();
-
-  const [nonce, executionUnitPrice, encryptionKey] = await Promise.all([
-    getNativeTransactionCount(client, fromHex),
-    getExecutionUnitPriceLythoshi(client),
-    fetchEncryptionKey(client),
-  ]);
-
-  const tx: NativeEvmTxFields = {
-    chainId: MONOLYTHIUM_TESTNET_CHAIN_ID,
-    nonce,
-    gasLimit: args.executionUnitLimit ?? STAKING_EXECUTION_UNIT_LIMIT,
-    maxFeePerGas: executionUnitPrice,
-    maxPriorityFeePerGas: executionUnitPrice,
+  const result = await submitNativeTx({
+    seed: args.seed,
     to: DELEGATION_PRECOMPILE,
-    value: args.valueLythoshi ?? 0n,
     input: args.data,
-  };
-
-  const wrapped = await buildEncryptedSubmission({
-    backend,
-    encryptionKey,
-    tx,
+    valueLythoshi: args.valueLythoshi ?? 0n,
+    executionUnitLimit: args.executionUnitLimit ?? STAKING_EXECUTION_UNIT_LIMIT,
   });
-
-  const txHash = await submitEncryptedEnvelope(client, wrapped.envelopeWireHex);
-  return { txHash, innerSighashHex: wrapped.innerSighashHex };
+  return { txHash: result.txHash };
 }
