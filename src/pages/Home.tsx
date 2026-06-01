@@ -3,18 +3,14 @@
 // Private denom: hero with amount-hidden disclosure + activity preview.
 
 import { useEffect, useState } from "react";
-import { addressToTypedBech32 } from "@monolythium/core-sdk";
 import { useOperations } from "../operations/context";
 import { loadChainSnapshot } from "../sdk/client";
 import { useChainSnapshot } from "../sdk/useChainSnapshot";
 import { ReceiveModal } from "../components/ReceiveModal";
 import { SendComposeModal } from "../components/SendComposeModal";
-import { BALANCES, IDENTITY, TOKENS, TXS_PRIVATE, TXS_PUBLIC } from "../data/fixtures";
-import type { Denom } from "../data/fixtures";
-import { TokenRow } from "../components/TokenRow";
-import { TxRow } from "../components/TxRow";
-import { fmt } from "../components/format";
+import type { Denom } from "../data/types";
 import type { Route } from "../components/types";
+import { useActiveWallet } from "../sdk/active-wallet";
 import {
   loadLiveAddressActivity,
   loadLiveTokenStatus,
@@ -31,26 +27,28 @@ interface Props {
 export function Home({ denom, goto }: Props) {
   const ops = useOperations();
   const isPub = denom === "public";
-  const bal = BALANCES[denom];
-  const totalUsd = TOKENS.reduce((a, t) => a + t.amount * t.priceUsd, 0);
+  const wallet = useActiveWallet();
+  const walletAddress = wallet.status === "ready" ? wallet.address : "";
   const [liveTokens, setLiveTokens] = useState<LiveTokenStatus | null>(null);
   const [liveActivity, setLiveActivity] = useState<RpcOutcome<LiveAddressActivityRow[]> | null>(null);
   const [sendOpen, setSendOpen] = useState(false);
   const [receiveOpen, setReceiveOpen] = useState(false);
 
-  const selfBech32m = addressToTypedBech32("user", IDENTITY.address);
-
   // Live SDK call: chain id + balance for the bound address. The result is
   // surfaced through the topbar (see Topbar.tsx); the hook is mounted here so
   // a Home revisit refreshes the chain snapshot.
-  const chain = useChainSnapshot(IDENTITY.address);
+  const chain = useChainSnapshot(walletAddress);
 
   useEffect(() => {
-    if (!isPub) return;
+    if (!isPub || !walletAddress) {
+      setLiveTokens(null);
+      setLiveActivity(null);
+      return;
+    }
     let cancelled = false;
     void Promise.all([
-      loadLiveTokenStatus(IDENTITY.address),
-      loadLiveAddressActivity(IDENTITY.address),
+      loadLiveTokenStatus(walletAddress),
+      loadLiveAddressActivity(walletAddress),
     ]).then(([tokens, activity]) => {
       if (cancelled) return;
       setLiveTokens(tokens);
@@ -59,7 +57,7 @@ export function Home({ denom, goto }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [isPub]);
+  }, [isPub, walletAddress]);
 
   const openNativeSend = () => setSendOpen(true);
   const openReceive = () => setReceiveOpen(true);
@@ -71,14 +69,15 @@ export function Home({ denom, goto }: Props) {
       auth: "none",
       diff: [
         { k: "Endpoint", v: chain.snapshot?.endpoint ?? "(unknown)" },
-        { k: "Address",  v: IDENTITY.address },
+        { k: "Address",  v: walletAddress || "(no active address)" },
       ],
       effects: [
         { text: "Reads chain, block, and balance data." },
         { text: "No keychain access. No outbound transaction." },
       ],
       execute: async () => {
-        const snap = await loadChainSnapshot(IDENTITY.address);
+        if (!walletAddress) throw new Error("No active wallet address.");
+        const snap = await loadChainSnapshot(walletAddress);
         if (snap.error) {
           throw new Error(`${snap.error.kind}: ${snap.error.message}`);
         }
@@ -98,14 +97,18 @@ export function Home({ denom, goto }: Props) {
           {isPub ? "Total balance" : "Private balance"}
           <span style={{ color: "var(--w-text-3)" }}>·</span>
           <span style={{ fontFamily: "var(--f-mono)", fontSize: 11, color: "var(--w-text-3)" }}>
-            {isPub ? "LYTH + tokens" : "LYTH-p, shielded"}
+            {isPub ? "live LYTH" : "LYTH-p, shielded"}
           </span>
         </div>
 
         {isPub ? (
           <div className="w-hero__amount">
-            ${totalUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-            <span className="tok">USD</span>
+            {liveTokens?.nativeBalance.ok
+              ? liveTokens.nativeBalance.value
+              : chain.status === "ok"
+                ? chain.snapshot.balanceLyth
+                : "—"}
+            <span className="tok">LYTH</span>
           </div>
         ) : (
           <div className="w-hero__amount" style={{ color: "var(--w-text-2)" }}>
@@ -116,9 +119,9 @@ export function Home({ denom, goto }: Props) {
         <div className="w-hero__meta">
           {isPub ? (
             <>
-              <span>Available <b>{fmt(bal.stakable, 0)} LYTH</b></span>
-              <span>Staked <b>{fmt(bal.staked, 0)} LYTH</b></span>
-              <span>Earning <b className="up">{bal.apr.toFixed(2)}%</b> APR</span>
+              <span>Wallet <b>{wallet.status === "ready" ? wallet.name : "not selected"}</b></span>
+              <span>Indexed assets <b>{liveTokens?.tokenBalances.ok ? liveTokens.tokenBalances.value?.length ?? 0 : "—"}</b></span>
+              <span>Endpoint <b>{liveTokens?.endpoint ?? chain.snapshot?.endpoint ?? "—"}</b></span>
             </>
           ) : (
             <span>Only you and your recipients can read the amount.</span>
@@ -126,14 +129,14 @@ export function Home({ denom, goto }: Props) {
         </div>
 
         <div className="w-hero__bar">
-          <button className="w-hbtn w-hbtn--primary" onClick={openNativeSend}>
+          <button className="w-hbtn w-hbtn--primary" onClick={openNativeSend} disabled={!walletAddress}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="m22 2-7 20-4-9-9-4Z" />
               <path d="M22 2 11 13" />
             </svg>
             <span>Send</span>
           </button>
-          <button className="w-hbtn" onClick={openReceive}>
+          <button className="w-hbtn" onClick={openReceive} disabled={!walletAddress}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M12 5v14M5 12l7 7 7-7" />
             </svg>
@@ -149,6 +152,7 @@ export function Home({ denom, goto }: Props) {
         </div>
 
         <ChainStatusLine
+          hasAddress={Boolean(walletAddress)}
           status={chain.status}
           chainId={chain.snapshot?.chainId ?? 0n}
           height={chain.snapshot?.blockHeight ?? null}
@@ -177,8 +181,12 @@ export function Home({ denom, goto }: Props) {
                     </div>
                   ))}
                 </div>
+              ) : liveTokens?.tokenBalances.ok === false ? (
+                <div className="w-live-error">{liveTokens.tokenBalances.error}</div>
+              ) : liveTokens?.tokenBalances.ok ? (
+                <div className="row-help">No indexed token balances returned for this address.</div>
               ) : (
-                TOKENS.slice(0, 4).map((t) => <TokenRow key={t.sym} token={t} />)
+                <div className="row-help">{walletAddress ? "Loading token balances…" : "Select or unlock a wallet to load balances."}</div>
               )}
             </div>
           </div>
@@ -202,8 +210,12 @@ export function Home({ denom, goto }: Props) {
                     </div>
                   ))}
                 </div>
+              ) : liveActivity?.ok === false ? (
+                <div className="w-live-error">{liveActivity.error}</div>
+              ) : liveActivity?.ok ? (
+                <div className="row-help">No indexed activity returned for this address.</div>
               ) : (
-                TXS_PUBLIC.slice(0, 4).map((tx) => <TxRow key={tx.id} tx={tx} />)
+                <div className="row-help">{walletAddress ? "Loading indexed activity…" : "Select or unlock a wallet to load activity."}</div>
               )}
             </div>
           </div>
@@ -216,20 +228,22 @@ export function Home({ denom, goto }: Props) {
             <button className="btn btn--sm btn--ghost" onClick={() => goto("activity")}>View all</button>
           </div>
           <div className="w-card__body">
-            {TXS_PRIVATE.slice(0, 4).map((tx) => <TxRow key={tx.id} tx={tx} />)}
+            <div className="row-help">
+              Private-denomination activity is not exposed as public indexed rows.
+            </div>
           </div>
         </div>
       )}
 
-      {sendOpen && (
+      {sendOpen && walletAddress && (
         <SendComposeModal
-          fromBech32m={selfBech32m}
+          fromBech32m={walletAddress}
           onClose={() => setSendOpen(false)}
         />
       )}
-      {receiveOpen && (
+      {receiveOpen && walletAddress && (
         <ReceiveModal
-          address={selfBech32m}
+          address={walletAddress}
           onClose={() => setReceiveOpen(false)}
         />
       )}
@@ -255,16 +269,25 @@ function formatLiveAmount(row: LiveAddressActivityRow): string {
 }
 
 function ChainStatusLine({
+  hasAddress,
   status,
   chainId,
   height,
   error,
 }: {
+  hasAddress: boolean;
   status: "loading" | "ok" | "error";
   chainId: bigint;
   height: bigint | null;
   error: string | null;
 }) {
+  if (!hasAddress) {
+    return (
+      <div style={{ marginTop: 12, fontFamily: "var(--f-mono)", fontSize: 11, color: "var(--w-text-3)" }}>
+        no active wallet address
+      </div>
+    );
+  }
   if (status === "loading") {
     return (
       <div style={{ marginTop: 12, fontFamily: "var(--f-mono)", fontSize: 11, color: "var(--w-text-3)" }}>

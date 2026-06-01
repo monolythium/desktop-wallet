@@ -7,6 +7,7 @@
 
 import { RpcClient, SdkError, formatLyth, getRpcEndpoints } from "@monolythium/core-sdk";
 import type { RpcClientOptions } from "@monolythium/core-sdk";
+import { rpcClientOptions } from "./http";
 
 function defaultEndpoint(): string {
   const fromEnv = import.meta.env.VITE_MONO_RPC_URL;
@@ -24,7 +25,7 @@ let _client: MonolythiumClient | null = null;
 
 export function getProvider(options: RpcClientOptions = {}): MonolythiumClient {
   if (_client === null) {
-    const rpcClient = new RpcClient(defaultEndpoint(), options);
+    const rpcClient = new RpcClient(defaultEndpoint(), rpcClientOptions(options));
     _client = { rpcClient, endpoint: rpcClient.endpoint };
   }
   return _client;

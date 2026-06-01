@@ -3,7 +3,6 @@
 // Provider surface: agent-wallet management and attestation list.
 
 import { useCallback, useEffect, useState } from "react";
-import { TodoSection } from "../components/TodoSection";
 import {
   agentWalletCreate,
   agentWalletDelete,
@@ -29,16 +28,6 @@ export function Provider() {
       <AgentWalletsCard />
 
       <AttestationsCard />
-
-      <TodoSection
-        title="Listings · Calendar · Earnings · Disputes"
-        items={[
-          "New-listing wizard (8 steps from design brief)",
-          "Weekly + month calendar views with booking-detail click-through",
-          "Earnings chart + per-booking table + CSV tax export",
-          "Disputes list with arbiter decision view",
-        ]}
-      />
     </div>
   );
 }
@@ -243,10 +232,7 @@ function AttestationsCard() {
         ) : null}
         {entries && entries.length === 0 ? (
           <div className="row-help">
-            lyth_mcp's attestation tools haven't shipped yet (tracked in
-            stele-desktop <code>docs/lyth-mcp-gaps.md</code> §attestations). Once
-            they land, KYC / Bar Association / Health Permit / AI Agent badges
-            populate here and surface on provider profiles.
+            No attestations returned by the local Stele sidecar.
           </div>
         ) : entries ? (
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>

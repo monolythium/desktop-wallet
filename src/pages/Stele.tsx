@@ -1,14 +1,9 @@
 // Stele — services marketplace. Settings-gated; sidebar entry hidden
 // unless `Settings → Stele marketplace` is on.
 //
-// Screens port lands in a later wave. Today this page is a placeholder
-// that probes the Stele backend (via the `stele_sidecar_status` Tauri
-// command, only available when the binary is built with --features stele)
-// so the user can see whether the marketplace backend is live before the
-// real screens ship.
+// Probes the Stele backend and exposes only wired marketplace controls.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { TodoSection } from "../components/TodoSection";
 import {
   convertCreate,
   convertEstimate,
@@ -67,15 +62,6 @@ export function Stele() {
 
       <SpendCard />
 
-      <TodoSection
-        title="Booking"
-        items={[
-          "Request form lives on the Inbox page today",
-          "Counter-offer thread (Negotiating state — blocked on lyth_mcp adding booking_counter_offer)",
-          "Signing-ceremony animation around the release tx",
-          "Dispute flow with evidence upload",
-        ]}
-      />
     </div>
   );
 }
@@ -600,16 +586,16 @@ function NameChecker() {
 
   const placeholder = "alice.mono";
 
-  const badge = useMemo<{ label: string; tone: string }>(() => {
-    if (!name.trim()) return { label: "type a name", tone: "stub" };
-    if (!result) return { label: "checking…", tone: "stub" };
+  const badge = useMemo<{ label: string }>(() => {
+    if (!name.trim()) return { label: "type a name" };
+    if (!result) return { label: "checking…" };
     switch (result.kind) {
       case "not_tauri":
-        return { label: "browser preview", tone: "stub" };
+        return { label: "browser preview" };
       case "invalid":
-        return { label: result.error.code.replace(/_/g, " "), tone: "stub" };
+        return { label: result.error.code.replace(/_/g, " ") };
       case "ok":
-        return { label: result.availability.category, tone: "stub" };
+        return { label: result.availability.category };
     }
   }, [name, result]);
 
@@ -624,8 +610,7 @@ function NameChecker() {
           <div style={{ flex: 1 }}>
             <div className="row-label">Name</div>
             <div className="row-help">
-              Validated locally against the v4 naming spec. Live on-chain
-              availability lookup ships when the RPC client wires in.
+              Local syntax check only. Live availability, registration, and pricing are not enabled in this build.
             </div>
           </div>
           <input
@@ -679,7 +664,7 @@ function NameDetail({ name, result }: { name: string; result: NameCheckResult | 
           <Stat label="Primary label" value={`${a.primary_label} · ${a.primary_label_len}ch`} />
           <Stat label="Length ×" value={String(a.length_multiplier)} />
           <Stat label="Category ×" value={String(a.category_multiplier)} />
-          <Stat label="Estimated price" value={`${a.price_lyth.toFixed(4)} LYTH`} />
+          <Stat label="Pricing" value="live quote unavailable" />
         </div>
       );
     }
@@ -727,10 +712,8 @@ function BackendDetail({ backend }: { backend: SteleBackendResult | null }) {
     case "not_compiled":
       return (
         <div className="row-help">
-          The Stele backend isn't compiled into this build. Ship-time
-          binaries pass <code>--features stele</code>; default development
-          builds skip it while the merge from{" "}
-          <code>monolythium/stele-desktop</code> is in flight.
+          The Stele marketplace backend is not available in this wallet build.
+          The rest of the wallet remains usable.
         </div>
       );
     case "ok":

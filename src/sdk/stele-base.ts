@@ -35,7 +35,7 @@ function messageFor(e: SteleProxyError, surfaceLabel: string): string {
     case "not_tauri":
       return `${surfaceLabel} runs in the native Tauri binary; browser preview can't reach it.`;
     case "not_compiled":
-      return `The Stele backend isn't compiled into this build. Pass --features stele to enable ${surfaceLabel.toLowerCase()}.`;
+      return `The Stele backend is not available in this wallet build.`;
     case "sidecar_not_running":
       return `lyth_mcp isn't running. Install it and restart the wallet to use ${surfaceLabel.toLowerCase()}.`;
     case "sidecar_tool":

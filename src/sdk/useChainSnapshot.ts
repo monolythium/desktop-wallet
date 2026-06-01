@@ -16,6 +16,12 @@ export function useChainSnapshot(address: string): State {
 
   useEffect(() => {
     let cancelled = false;
+    if (!address) {
+      setState({ status: "loading", snapshot: null });
+      return () => {
+        cancelled = true;
+      };
+    }
     setState({ status: "loading", snapshot: null });
     void loadChainSnapshot(address).then((snap) => {
       if (cancelled) return;

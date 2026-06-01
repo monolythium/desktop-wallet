@@ -145,9 +145,8 @@ export function buildAutovotePlan(input: AutovotePlanInput): AutovotePlan {
       case "maxDecentralization":
         return decentralizationWeight(view);
       case "maxYield":
-        // TODO(monolythium-vision): lyth_* per-cluster APR/yield read not in
-        // 0.3.10 SDK — ClusterDirectoryEntryResponse has no APR field. Max
-        // Yield ranks by the aggregateHealth (+ reputation, via
+        // Live per-cluster APR/yield is not exposed to the wallet yet.
+        // Max Yield ranks by the aggregateHealth (+ reputation, via
         // lythClusterStatus, when the page supplies it) liveness proxy.
         return healthProxyWeight(c.aggregateHealth);
       default:

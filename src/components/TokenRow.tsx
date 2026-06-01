@@ -1,6 +1,6 @@
 // Token row — port of designs wallet-pages.jsx TokenRow.
 
-import type { Token } from "../data/fixtures";
+import type { Token } from "../data/types";
 import { fmt } from "./format";
 
 interface Props {

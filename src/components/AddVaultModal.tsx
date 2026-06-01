@@ -22,6 +22,7 @@ import {
   mintVaultSlot,
   registerVault,
 } from "../sdk/vaultCatalog";
+import { notifyActiveWalletChanged } from "../sdk/active-wallet";
 
 interface Props {
   onClose: () => void;
@@ -90,7 +91,10 @@ export function AddVaultModal({ onClose, onAdded }: Props) {
         { slot, name: name.trim(), addressHex: result.addressHex },
         { setActive: setAsActive },
       );
-      if (setAsActive) setActiveAccount(slot);
+      if (setAsActive) {
+        setActiveAccount(slot);
+        notifyActiveWalletChanged();
+      }
 
       // Drop password material from state ASAP.
       setPassword("");

@@ -56,7 +56,7 @@ import {
 } from "./sdk/feature-flags";
 import "./styles/tokens.css";
 import "./styles/wallet.css";
-import type { Denom } from "./data/fixtures";
+import type { Denom } from "./data/types";
 import { ALL_ROUTES, type Route } from "./components/types";
 
 const ROUTE_KEY = "wallet.route";
@@ -207,7 +207,7 @@ export function App() {
 
   useEffect(() => {
     writeExperimentalEnabled(experimentalEnabled);
-    if (!experimentalEnabled && (route === "agents" || route === "notifications")) {
+    if (!experimentalEnabled && (route === "agents" || route === "ai-trade" || route === "notifications")) {
       setRoute("home");
     }
   }, [experimentalEnabled, route]);

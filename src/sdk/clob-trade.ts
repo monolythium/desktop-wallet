@@ -26,6 +26,7 @@ import {
 import { submitEncryptedEnvelope } from "@monolythium/core-sdk/crypto";
 import type { NativeEvmTxFields } from "@monolythium/core-sdk/crypto";
 import { getProvider } from "./client";
+import { rpcClientOptions } from "./http";
 import { getExecutionUnitPriceLythoshi, getNativeTransactionCount } from "./native-rpc";
 
 const SPOT_LIMIT_ORDER_EXECUTION_UNIT_LIMIT = 250_000n;
@@ -64,7 +65,7 @@ export async function placeClobLimitOrder(
 ): Promise<PlaceClobLimitOrderResult> {
   const backend = MlDsa65Backend.fromSeed(args.seed);
   const provider = getProvider();
-  const client = new RpcClient(provider.rpcClient.endpoint);
+  const client = new RpcClient(provider.rpcClient.endpoint, rpcClientOptions());
   const fromHex = backend.getAddress();
 
   const [nonce, executionUnitPrice, encryptionKey] = await Promise.all([
@@ -135,7 +136,7 @@ export async function cancelClobOrder(
 ): Promise<CancelClobOrderResult> {
   const backend = MlDsa65Backend.fromSeed(args.seed);
   const provider = getProvider();
-  const client = new RpcClient(provider.rpcClient.endpoint);
+  const client = new RpcClient(provider.rpcClient.endpoint, rpcClientOptions());
   const fromHex = backend.getAddress();
 
   const [nonce, executionUnitPrice, encryptionKey] = await Promise.all([

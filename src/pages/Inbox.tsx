@@ -1,10 +1,9 @@
-// Inbox — Stele bookings + tx outbox + address book. Settings-gated
-// alongside Stele.
+// Inbox — Stele bookings + tx outbox plus the wallet-local address book.
+// Settings-gated alongside Stele because the booking/outbox tools require it.
 //
-// Today only the address-book section is live through the lyth_mcp sidecar.
+// Renders only Stele tools that have a wired sidecar command.
 
 import { useCallback, useEffect, useState } from "react";
-import { TodoSection } from "../components/TodoSection";
 import {
   addressbookAdd,
   addressbookLookup,
@@ -38,15 +37,6 @@ export function Inbox() {
       <BookingRequestCard />
 
       <TxOutboxCard />
-
-      <TodoSection
-        title="My bookings"
-        items={[
-          "All · Buying · Selling segmented tabs (needs a bookings-list tool from lyth_mcp)",
-          "Counterparty avatar, state badge, last activity, unread indicator",
-          "Booking detail with state-machine timeline + Accept / Release / Dispute actions",
-        ]}
-      />
     </div>
   );
 }
@@ -123,8 +113,7 @@ function BookingRequestCard() {
             {result.id ? <div>id: <code>{result.id}</code></div> : null}
             {result.tx_hash ? <div>tx: <code>{result.tx_hash}</code></div> : null}
             <div style={{ fontSize: 11, opacity: 0.7, marginTop: 4 }}>
-              Confirmation came back from <code>booking_request_create</code>. Track it on the
-              chain or wait for Negotiating / Accepted updates (booking list view is pending).
+              Confirmation came back from <code>booking_request_create</code>.
             </div>
           </div>
         ) : null}

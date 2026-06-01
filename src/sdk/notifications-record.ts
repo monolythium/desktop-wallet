@@ -25,7 +25,7 @@
 // ever persists explicit "confirmed" / "failed".
 
 import { MONOLYTHIUM_TESTNET_CHAIN_ID } from "@monolythium/core-sdk";
-import { IDENTITY } from "../data/fixtures";
+import { loadActiveWallet } from "./active-wallet";
 import { recordNotification } from "./notifications-store";
 import { toastTerminalNotification } from "./os-toast";
 import type { TxOpKind } from "./notifications";
@@ -33,8 +33,9 @@ import type { TxOpKind } from "./notifications";
 /** Lowercased scope address. The wallet's active typed bech32m address is the
  *  notification scope's address dimension (the recipient of every record it
  *  fires for is the user's own outbound activity). */
-function scopeAddressLower(): string {
-  return IDENTITY.address.toLowerCase();
+async function scopeAddressLower(): Promise<string | null> {
+  const wallet = await loadActiveWallet();
+  return wallet.status === "ready" ? wallet.address.toLowerCase() : null;
 }
 
 /** Hex chain id for the scope key — `0x10f2c` for testnet-69420. */
@@ -57,8 +58,10 @@ export async function recordOperationFailure(
   txHash: string | undefined,
 ): Promise<void> {
   if (!txHash) return;
+  const addressLower = await scopeAddressLower();
+  if (!addressLower) return;
   const { added, record } = await recordNotification({
-    addressLower: scopeAddressLower(),
+    addressLower,
     chainIdHex: scopeChainIdHex(),
     txHash,
     status: "failed",

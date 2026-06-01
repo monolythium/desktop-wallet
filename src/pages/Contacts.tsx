@@ -1,4 +1,4 @@
-// Contacts page — address book backed by the Stele lyth_mcp sidecar.
+// Contacts page — local wallet address book.
 // Denom-segregated: public denom shows on-chain addresses; private denom
 // shows view-keys.
 //
@@ -7,7 +7,7 @@
 // policy probe).
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { IDENTITY } from "../data/fixtures";
+import { useActiveWallet } from "../sdk/active-wallet";
 import { requireTypedUserAddress } from "../sdk/address";
 import {
   addressbookAdd,
@@ -425,7 +425,8 @@ function ContactRow({
 }
 
 function LiveAccountPolicyCard() {
-  const [address, setAddress] = useState(IDENTITY.address);
+  const wallet = useActiveWallet();
+  const [address, setAddress] = useState("");
   const [policy, setPolicy] = useState<Record<string, unknown> | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -446,6 +447,10 @@ function LiveAccountPolicyCard() {
       setBusy(false);
     }
   };
+
+  useEffect(() => {
+    if (wallet.status === "ready") setAddress(wallet.address);
+  }, [wallet]);
 
   return (
     <div className="w-card">

@@ -8,7 +8,7 @@
 // marked read.
 
 import { useEffect, useState } from "react";
-import { IDENTITY } from "../data/fixtures";
+import { useActiveWallet } from "../sdk/active-wallet";
 import { useChainSnapshot } from "../sdk/useChainSnapshot";
 import { getUnread, subscribeNotifications } from "../sdk/notifications-store";
 import { shortHex } from "./format";
@@ -42,13 +42,16 @@ const TITLES: Record<Route, string> = {
 };
 
 export function Topbar({ route, setRoute, experimentalEnabled }: Props) {
-  const chain = useChainSnapshot(IDENTITY.address);
+  const wallet = useActiveWallet();
+  const chain = useChainSnapshot(wallet.status === "ready" ? wallet.address : "");
   const dotClass =
-    chain.status === "loading" ? "is-stale"
+    wallet.status !== "ready" ? "is-stale"
+    : chain.status === "loading" ? "is-stale"
     : chain.status === "error" ? "is-down"
     : "";
   const syncLabel =
-    chain.status === "loading" ? "Connecting…"
+    wallet.status !== "ready" ? "No active address"
+    : chain.status === "loading" ? "Connecting…"
     : chain.status === "error" ? `Offline · ${chain.snapshot?.error?.kind ?? "unknown"}`
     : `Synced · chain ${chain.snapshot?.chainId} · #${chain.snapshot?.blockHeight ?? "?"}`;
 
@@ -67,10 +70,14 @@ export function Topbar({ route, setRoute, experimentalEnabled }: Props) {
         <span>{syncLabel}</span>
       </div>
       <div className="w-top__user">
-        <div className="w-top__user__avatar" />
+          <div className="w-top__user__avatar" />
         <div>
-          <div className="w-top__user__name">{IDENTITY.handle}</div>
-          <div className="w-top__user__addr">{shortHex(IDENTITY.address)}</div>
+          <div className="w-top__user__name">
+            {wallet.status === "ready" || wallet.status === "locked" ? wallet.name : "Wallet"}
+          </div>
+          <div className="w-top__user__addr">
+            {wallet.status === "ready" ? shortHex(wallet.address) : "no address"}
+          </div>
         </div>
       </div>
     </header>
