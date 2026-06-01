@@ -7,7 +7,7 @@ const testnetRpc = getRpcEndpoints("testnet-69420")[0]?.url;
 
 // Tauri 2 expects the dev server on a stable port and prefers no clear screen
 // so its own logs stay visible alongside Vite's. Use the conventional 1420.
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   plugins: [react()],
   clearScreen: false,
   server: {
@@ -27,7 +27,8 @@ export default defineConfig({
   envPrefix: ["VITE_", "TAURI_"],
   build: {
     target: "es2022",
-    sourcemap: true,
+    // Source maps in dev only — shipping them deminifies the published artifact.
+    sourcemap: mode !== "production",
     outDir: "dist",
   },
   test: {
@@ -37,4 +38,4 @@ export default defineConfig({
     environment: "jsdom",
     include: ["src/**/__tests__/**/*.test.ts", "src/**/*.test.ts"],
   },
-});
+}));
