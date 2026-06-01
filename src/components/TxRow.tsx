@@ -59,7 +59,10 @@ export function TxRow({ tx, onClick }: Props) {
       <div className="w-tx__right">
         <div className={`w-tx__amt ${tx.direction} ${tx.amount === null ? "private" : ""}`}>
           {tx.amount === null ? (
-            "Private"
+            // Private-denom rows hide the amount by protocol; a public row with
+            // no amount (e.g. a weight-only delegation) has none to show — an
+            // em-dash, never a fabricated figure.
+            tx.denom === "private" ? "Private" : "—"
           ) : (
             <>
               {tx.direction === "in" ? "+" : "−"}{fmt(tx.amount, fracDigits)}

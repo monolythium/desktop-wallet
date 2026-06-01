@@ -11,7 +11,9 @@
 import { useEffect, useState } from "react";
 import type { Denom } from "../data/types";
 import { ActivityDetail, type DetailRow } from "../components/ActivityDetail";
+import { TxRow } from "../components/TxRow";
 import { getProvider } from "../sdk/client";
+import { activityRowToTx } from "../sdk/activity-rows";
 import { capture, loadLiveAddressActivity, type LiveAddressActivityRow, type RpcOutcome } from "../sdk/live";
 import { isZeroAmount, pendingOpLabel } from "../sdk/notifications";
 import type { PendingTx } from "../sdk/pending-tx";
@@ -40,8 +42,8 @@ export function Activity({ denom, experimentalEnabled }: Props) {
   const [pending, setPending] = useState<RpcOutcome<MempoolPendingTx[]> | null>(null);
   const [activity, setActivity] = useState<RpcOutcome<LiveAddressActivityRow[]> | null>(null);
   const [busy, setBusy] = useState(false);
-  // Experimental: clicking a row opens the detail modal. `null` when closed
-  // or when the flag is off (no row ever becomes selectable).
+  // Clicking a row opens the tx-detail modal (default-on — every build has
+  // clickable rows). `null` when the modal is closed.
   const [selected, setSelected] = useState<DetailRow | null>(null);
   // Durable tracked-tx store — txs this wallet broadcast that are still in
   // flight. The hook hydrates on mount and returns [] until then and whenever
@@ -144,14 +146,14 @@ export function Activity({ denom, experimentalEnabled }: Props) {
           {pending?.ok && pending.value && pending.value.length > 0 ? (
             <div className="w-live-list">
               {pending.value.map((tx) => {
-                const onOpen = experimentalEnabled ? () => setSelected(pendingRowToDetail(tx)) : undefined;
+                const onOpen = () => setSelected(pendingRowToDetail(tx));
                 return (
                   <div
                     className="w-live-row"
                     key={tx.txHash}
                     onClick={onOpen}
-                    role={onOpen ? "button" : undefined}
-                    style={onOpen ? { cursor: "pointer" } : undefined}
+                    role="button"
+                    style={{ cursor: "pointer" }}
                   >
                     <div>
                       <div className="row-label mono">{tx.txHash}</div>
@@ -173,28 +175,13 @@ export function Activity({ denom, experimentalEnabled }: Props) {
         <div className="w-card__body">
           {activity?.ok === false ? <div className="w-live-error">address activity: {activity.error}</div> : null}
           {activity?.ok && activity.value && activity.value.length > 0 ? (
-            <div className="w-live-list">
-              {activity.value.map((row) => {
-                const onOpen = experimentalEnabled ? () => setSelected(indexedRowToDetail(row)) : undefined;
-                return (
-                  <div
-                    className="w-live-row"
-                    key={`${row.blockHeight}-${row.txIndex}-${row.logIndex}`}
-                    onClick={onOpen}
-                    role={onOpen ? "button" : undefined}
-                    style={onOpen ? { cursor: "pointer" } : undefined}
-                  >
-                    <div>
-                      <div className="row-label mono">{formatActivityTitle(row)}</div>
-                      <div className="row-help">
-                        block {row.blockHeight.toString()} · tx {row.txIndex} · log {row.logIndex}
-                      </div>
-                    </div>
-                    <span className="w-live-pill">{formatActivityAmount(row)}</span>
-                  </div>
-                );
-              })}
-            </div>
+            activity.value.map((row) => (
+              <TxRow
+                key={`${row.blockHeight}-${row.txIndex}-${row.logIndex}`}
+                tx={activityRowToTx(row, denom)}
+                onClick={() => setSelected(indexedRowToDetail(row))}
+              />
+            ))
           ) : activity?.ok ? (
             <div style={{ padding: "16px 0", color: "var(--w-text-3)", fontSize: 13 }}>
               No indexed activity returned for this address.
@@ -261,19 +248,6 @@ function indexedRowToDetail(row: LiveAddressActivityRow): DetailRow {
     txIndex: row.txIndex,
     logIndex: row.logIndex,
   };
-}
-
-function formatActivityTitle(row: LiveAddressActivityRow): string {
-  const kind = row.subKind ? `${row.kind} · ${row.subKind}` : row.kind;
-  if (row.counterparty) return `${kind} · ${row.counterparty}`;
-  if (row.cluster !== null) return `${kind} · C-${String(row.cluster + 1).padStart(3, "0")}`;
-  return kind;
-}
-
-function formatActivityAmount(row: LiveAddressActivityRow): string {
-  if (row.amount) return `${row.direction === "out" ? "-" : "+"}${row.amount}`;
-  if (row.weightBps !== null) return `${row.weightBps} bps`;
-  return "indexed";
 }
 
 // Middle-truncate a bech32m counterparty (or tx hash fallback) for the compact
