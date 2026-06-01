@@ -1,9 +1,13 @@
 // React hook for the chain-snapshot SDK call.
 // Caller passes the address it wants a balance for; the hook reads native
 // height plus the current compatibility balance envelope.
+//
+// The snapshot re-fetches whenever the active RPC endpoint changes (the user
+// switched peers): the hook subscribes to endpoint changes and bumps an
+// internal dependency, so the effect re-runs against the new node.
 
 import { useEffect, useState } from "react";
-import { loadChainSnapshot } from "./client";
+import { loadChainSnapshot, subscribeEndpoint } from "./client";
 import type { ChainSnapshot } from "./client";
 
 type State =
@@ -13,6 +17,12 @@ type State =
 
 export function useChainSnapshot(address: string): State {
   const [state, setState] = useState<State>({ status: "loading", snapshot: null });
+  // Bumped on every endpoint change to force the fetch effect to re-run.
+  const [endpointBump, setEndpointBump] = useState(0);
+
+  useEffect(() => {
+    return subscribeEndpoint(() => setEndpointBump((n) => n + 1));
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -33,7 +43,7 @@ export function useChainSnapshot(address: string): State {
     return () => {
       cancelled = true;
     };
-  }, [address]);
+  }, [address, endpointBump]);
 
   return state;
 }
