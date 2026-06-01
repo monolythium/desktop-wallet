@@ -24,6 +24,7 @@ import {
   composeClaimBoundMessage,
   encodeDisableCalldata,
   encodeEnableCalldata,
+  encodeSetPolicyCalldata,
   encodeSetPolicyClaimCalldata,
   packTimeWindow,
   spendingPolicyAddressHex,
@@ -130,6 +131,17 @@ export function buildSetPolicyClaimCalldata(
   subSig: Uint8Array,
 ): string {
   return encodeSetPolicyClaimCalldata(args, subPubkey, subSig);
+}
+
+/**
+ * Encode a no-claim `setPolicy` (selector 0x8da1a765) — the UPDATE path for a
+ * sub-account that ALREADY has a policy written. The principal alone is
+ * authorised to amend its own previously-bound sub-account, so no fresh
+ * agent claim (pubkey + signature) is required; `setPolicyClaim` is
+ * fresh-sub-account-binding-only and would be the wrong selector here.
+ */
+export function buildSetPolicyCalldata(args: SpendingPolicyArgs): string {
+  return encodeSetPolicyCalldata(args);
 }
 
 /** Re-enable a previously-disabled policy for `subAccount` (typed bech32m). */
