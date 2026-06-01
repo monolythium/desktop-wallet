@@ -57,6 +57,9 @@ import {
 } from "./sdk/feature-flags";
 import "./styles/tokens.css";
 import "./styles/wallet.css";
+// Loaded last so the html[data-theme="…"] palette overrides win over the
+// native :root tokens (the default "monolythium" theme uses no attribute).
+import "./styles/themes.css";
 import type { Denom } from "./data/types";
 import { ALL_ROUTES, type Route } from "./components/types";
 
