@@ -863,7 +863,7 @@ body[data-denom="private"] .w-nav__item.is-active::before {
   border-color: rgba(var(--gold-glow), 0.45);
 }
 
-/* ============ Todo stub sections ============ */
+/* ============ Status pills ============ */
 .w-card__head .w-todo__pill {
   margin-left: auto;
   font-family: var(--f-mono);

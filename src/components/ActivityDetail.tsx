@@ -6,11 +6,10 @@
 // Honest absence: a "View on Monoscan" link only appears when the row carries
 // a canonical tx hash. On desktop that is the pending-mempool row (it streams
 // its `txHash` directly) and the tracked-tx row (the durable store keys on the
-// broadcast hash). Indexed and demo rows expose no canonical hash — the indexer
-// activity stream carries (block, txIndex) coordinates but no hash, and there
-// is no desktop RPC that turns those back into a hash — so those rows simply
-// omit the Monoscan button rather than synthesizing a link. This mirrors the
-// browser, which links a tx only when it knows the hash.
+// broadcast hash). Indexed rows expose no canonical hash — the indexer activity
+// stream carries (block, txIndex) coordinates but no hash, and there is no
+// desktop RPC that turns those back into a hash — so those rows simply omit the
+// Monoscan button rather than synthesizing a link.
 //
 // Address rendering is defensive: counterparties arrive as bech32m (`mono…`)
 // and the wallet's own address is bech32m too, so `CopyableAddress` takes the
@@ -59,23 +58,10 @@ export interface IndexedDetailRow {
   logIndex: number;
 }
 
-/** Demo/fixture row (offline contract). No tx hash, no on-chain coordinate. */
-export interface DemoDetailRow {
-  kind: "demo";
-  txKind: "transfer" | "reward" | "stake";
-  direction: "in" | "out";
-  amount: number | null;
-  token: string;
-  counterparty: string;
-  memo: string;
-  when: string;
-}
-
 export type DetailRow =
   | PendingDetailRow
   | TrackedDetailRow
-  | IndexedDetailRow
-  | DemoDetailRow;
+  | IndexedDetailRow;
 
 export interface ActivityDetailProps {
   row: DetailRow;
@@ -91,11 +77,6 @@ function clusterName(id: number): string {
 function modalTitle(row: DetailRow): string {
   if (row.kind === "pending") return "Pending transaction";
   if (row.kind === "tracked") return pendingOpLabel(row.opKind);
-  if (row.kind === "demo") {
-    if (row.txKind === "reward") return "Reward";
-    if (row.txKind === "stake") return "Stake";
-    return row.direction === "in" ? "Received" : "Sent";
-  }
   // Indexed — title off the indexer kind, capitalised.
   const k = row.activityKind;
   return k.charAt(0).toUpperCase() + k.slice(1);
@@ -145,34 +126,6 @@ function DetailBody({ row, walletAddr }: { row: DetailRow; walletAddr: string })
           }
         />
         <MonoscanTxButton hash={row.txHash} />
-      </div>
-    );
-  }
-
-  if (row.kind === "demo") {
-    const isIn = row.direction === "in";
-    const cp = row.counterparty;
-    return (
-      <div>
-        <DRow label="Status" value="Confirmed" />
-        <DRow
-          label="Amount"
-          value={row.amount !== null ? `${row.amount} ${row.token}` : "Private"}
-        />
-        {isIn ? (
-          <>
-            <DRow label="From" value={cp ? <CopyableAddress addr={cp} /> : "unknown"} />
-            <DRow label="To" value={<CopyableAddress addr={walletAddr} />} />
-          </>
-        ) : (
-          <>
-            <DRow label="From" value={<CopyableAddress addr={walletAddr} />} />
-            <DRow label="To" value={cp ? <CopyableAddress addr={cp} /> : "unknown"} />
-          </>
-        )}
-        {row.memo ? <DRow label="Memo" value={row.memo} /> : null}
-        <DRow label="When" value={row.when} />
-        {/* No canonical tx hash on demo rows → no Monoscan link. */}
       </div>
     );
   }

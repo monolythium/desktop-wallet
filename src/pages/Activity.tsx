@@ -9,16 +9,14 @@
 // snapshot below (which is the node's view and can include txs from elsewhere).
 
 import { useEffect, useState } from "react";
-import { TXS_PRIVATE, TXS_PUBLIC } from "../data/fixtures";
-import { IDENTITY } from "../data/fixtures";
-import type { Denom, Tx } from "../data/fixtures";
-import { TxRow } from "../components/TxRow";
+import type { Denom } from "../data/types";
 import { ActivityDetail, type DetailRow } from "../components/ActivityDetail";
 import { getProvider } from "../sdk/client";
 import { capture, loadLiveAddressActivity, type LiveAddressActivityRow, type RpcOutcome } from "../sdk/live";
 import { isZeroAmount, pendingOpLabel } from "../sdk/notifications";
 import type { PendingTx } from "../sdk/pending-tx";
 import { usePendingTxs } from "../sdk/use-pending-tx";
+import { useActiveWallet } from "../sdk/active-wallet";
 
 // The node's `lyth_mempoolPending` row shape. Distinct from the durable
 // tracked-tx `PendingTx` (imported above) that backs the "Pending" section:
@@ -37,7 +35,8 @@ interface Props {
 }
 
 export function Activity({ denom, experimentalEnabled }: Props) {
-  const list = denom === "public" ? TXS_PUBLIC : TXS_PRIVATE;
+  const wallet = useActiveWallet();
+  const walletAddress = wallet.status === "ready" ? wallet.address : "";
   const [pending, setPending] = useState<RpcOutcome<MempoolPendingTx[]> | null>(null);
   const [activity, setActivity] = useState<RpcOutcome<LiveAddressActivityRow[]> | null>(null);
   const [busy, setBusy] = useState(false);
@@ -52,11 +51,16 @@ export function Activity({ denom, experimentalEnabled }: Props) {
   const showPending = experimentalEnabled && tracked.length > 0;
 
   const refreshPending = async () => {
+    if (!walletAddress) {
+      setPending(null);
+      setActivity(null);
+      return;
+    }
     setBusy(true);
     try {
       const [pendingRows, activityRows] = await Promise.all([
-        capture(() => getProvider().rpcClient.lythMempoolPending(IDENTITY.address)),
-        loadLiveAddressActivity(IDENTITY.address),
+        capture(() => getProvider().rpcClient.lythMempoolPending(walletAddress)),
+        loadLiveAddressActivity(walletAddress),
       ]);
       setPending(pendingRows);
       setActivity(activityRows);
@@ -67,7 +71,7 @@ export function Activity({ denom, experimentalEnabled }: Props) {
 
   useEffect(() => {
     void refreshPending();
-  }, []);
+  }, [walletAddress]);
 
   return (
     <div className="w-page">
@@ -134,9 +138,9 @@ export function Activity({ denom, experimentalEnabled }: Props) {
           </button>
         </div>
         <div className="w-card__body">
-          {pending === null ? <div className="row-help">Loading lyth_mempoolPending…</div> : null}
+          {pending === null ? <div className="row-help">{walletAddress ? "Loading lyth_mempoolPending…" : "No active wallet address."}</div> : null}
           {pending?.ok === false ? <div className="w-live-error">{pending.error}</div> : null}
-          {pending?.ok && pending.value?.length === 0 ? <div className="row-help">No pending transactions for <span className="mono">{IDENTITY.address}</span>.</div> : null}
+          {pending?.ok && pending.value?.length === 0 ? <div className="row-help">No pending transactions for <span className="mono">{walletAddress}</span>.</div> : null}
           {pending?.ok && pending.value && pending.value.length > 0 ? (
             <div className="w-live-list">
               {pending.value.map((tx) => {
@@ -191,22 +195,24 @@ export function Activity({ denom, experimentalEnabled }: Props) {
                 );
               })}
             </div>
-          ) : list.length === 0 ? (
-            <div style={{ padding: "16px 0", color: "var(--w-text-3)", fontSize: 13 }}>No activity yet.</div>
+          ) : activity?.ok ? (
+            <div style={{ padding: "16px 0", color: "var(--w-text-3)", fontSize: 13 }}>
+              No indexed activity returned for this address.
+            </div>
           ) : (
-            list.map((tx) => (
-              <TxRow
-                key={tx.id}
-                tx={tx}
-                onClick={experimentalEnabled ? () => setSelected(demoRowToDetail(tx)) : undefined}
-              />
-            ))
+            <div style={{ padding: "16px 0", color: "var(--w-text-3)", fontSize: 13 }}>
+              {walletAddress
+                ? denom === "private"
+                  ? "Private-denomination activity is not exposed as public indexed rows."
+                  : "Loading indexed activity…"
+                : "No active wallet address."}
+            </div>
           )}
         </div>
       </div>
 
       {selected ? (
-        <ActivityDetail row={selected} walletAddr={IDENTITY.address} onClose={() => setSelected(null)} />
+        <ActivityDetail row={selected} walletAddr={walletAddress} onClose={() => setSelected(null)} />
       ) : null}
     </div>
   );
@@ -254,19 +260,6 @@ function indexedRowToDetail(row: LiveAddressActivityRow): DetailRow {
     blockHeight: row.blockHeight,
     txIndex: row.txIndex,
     logIndex: row.logIndex,
-  };
-}
-
-function demoRowToDetail(tx: Tx): DetailRow {
-  return {
-    kind: "demo",
-    txKind: tx.kind,
-    direction: tx.direction,
-    amount: tx.amount,
-    token: tx.token || "LYTH",
-    counterparty: tx.counterparty,
-    memo: tx.memo,
-    when: tx.when,
   };
 }
 

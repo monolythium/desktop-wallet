@@ -16,6 +16,7 @@ import { getProvider } from "./client";
 import { getNativeTransactionCount } from "./native-rpc";
 import { requireTypedUserAddress, requireTypedUserAddressHex } from "./address";
 import { selectNativeSpotMarket, type SelectedNativeSpotMarket } from "./market";
+import { walletFetch } from "./http";
 
 export interface RpcOutcome<T> {
   ok: boolean;
@@ -211,7 +212,7 @@ export async function loadLiveTokenStatus(wallet: string): Promise<LiveTokenStat
 
 export async function loadLiveTradeStatus(): Promise<LiveTradeStatus> {
   const client = getProvider().rpcClient;
-  const api = new ApiClient(client.endpoint);
+  const api = new ApiClient(client.endpoint, { fetch: walletFetch });
   const [
     activePrecompiles,
     nativeMarketState,

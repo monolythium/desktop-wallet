@@ -7,15 +7,16 @@ const backing = new Map<string, unknown>();
 
 vi.mock("@tauri-apps/plugin-store", () => {
   class FakeStore {
-    static async load(_file: string): Promise<FakeStore> {
-      return new FakeStore();
+    constructor(private readonly file: string) {}
+    static async load(file: string): Promise<FakeStore> {
+      return new FakeStore(file);
     }
     async get<T>(key: string): Promise<T | undefined> {
-      const v = backing.get(key);
+      const v = backing.get(`${this.file}:${key}`);
       return v === undefined ? undefined : (JSON.parse(JSON.stringify(v)) as T);
     }
     async set(key: string, value: unknown): Promise<void> {
-      backing.set(key, JSON.parse(JSON.stringify(value)));
+      backing.set(`${this.file}:${key}`, JSON.parse(JSON.stringify(value)));
     }
     async save(): Promise<void> {
       /* no-op */
@@ -38,10 +39,28 @@ import {
 import { recordOperationFailure } from "../notifications-record";
 
 beforeEach(() => {
+  (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {};
   backing.clear();
+  seedActiveVault();
   __resetNotificationsStoreForTests();
   toastSpy.mockClear();
 });
+
+function seedActiveVault(): void {
+  backing.set("vaults.v1.json:state", {
+    version: 1,
+    activeSlot: "kc:test",
+    vaults: {
+      "kc:test": {
+        slot: "kc:test",
+        name: "Test wallet",
+        addressHex: "0x0000000000000000000000000000000000000001",
+        createdAt: 1,
+        kind: "local",
+      },
+    },
+  });
+}
 
 describe("recordOperationFailure", () => {
   const meta = {

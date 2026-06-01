@@ -13,6 +13,7 @@ import { useCallback, useEffect, useState } from "react";
 import { addressToTypedBech32 } from "@monolythium/core-sdk";
 import { useOperations } from "../operations/context";
 import { AddVaultModal } from "../components/AddVaultModal";
+import { notifyActiveWalletChanged } from "../sdk/active-wallet";
 import { enumerateDevices, type LedgerDeviceInfo } from "../sdk/ledger";
 import {
   deriveLiveWalletIdentity,
@@ -61,6 +62,7 @@ export function Wallets() {
       // important after rename / remove / set-active flows.
       if (state.activeSlot && state.activeSlot !== getActiveAccount()) {
         setActiveAccountInMemory(state.activeSlot);
+        notifyActiveWalletChanged();
       }
     } catch (cause) {
       setCatalogError(errorMessage(cause));
@@ -75,6 +77,7 @@ export function Wallets() {
     try {
       await setActiveVault(slot);
       setActiveAccountInMemory(slot);
+      notifyActiveWalletChanged();
       setIdentity(null);
       setBalance(null);
       await refreshCatalog();
@@ -106,6 +109,7 @@ export function Wallets() {
       await removeVaultFromCatalog(removingSlot);
       setRemovingSlot(null);
       await refreshCatalog();
+      notifyActiveWalletChanged();
     } catch (cause) {
       setCatalogError(errorMessage(cause));
     }

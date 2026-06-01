@@ -1,11 +1,11 @@
-// Shared native-tx submission seam (core-sdk 0.3.11).
+// Shared native-tx submission seam.
 //
 // Every wallet write — send / delegate / undelegate / redelegate / claim /
 // completeRedemption / register (spending-policy) / CLOB / MRV — routes
 // through `submitNativeTx` here so there is exactly ONE place that decides
 // the privacy posture and the fee shape.
 //
-// DEFAULT = PLAINTEXT. The function delegates to the SDK 0.3.11
+// DEFAULT = PLAINTEXT. The function delegates to the SDK
 // `submitTransactionWithPrivacy` with `private: false`, which builds + signs
 // + posts the bincode `SignedTransaction` through `mesh_submitTx` (the node
 // routes it to `MempoolTx::plaintext`). That is the inclusion path that
@@ -20,7 +20,7 @@
 // fast-follow flip; nothing should call it with `private: true` from a
 // user-reachable path until threshold inclusion ships.
 //
-// FEES come from the SDK 0.3.11 sane-fee resolvers (`resolveExecutionFee` /
+// FEES come from the SDK sane-fee resolvers (`resolveExecutionFee` /
 // `resolveRegistryExecutionFee`): they read the live `lyth_executionUnitPrice`
 // quote, apply the safety multiplier, clamp the priority tip to the per-unit
 // max price (the plaintext path rejects `priority_tip > max_execution_unit_price`
@@ -42,6 +42,7 @@ import {
 } from "@monolythium/core-sdk/crypto";
 import type { NativeEvmTxFields } from "@monolythium/core-sdk/crypto";
 import { getProvider } from "./client";
+import { rpcClientOptions } from "./http";
 import { getNativeTransactionCount } from "./native-rpc";
 
 /** Fee-resolution class — picks the SDK default execution-unit limit. */
@@ -97,7 +98,7 @@ export async function submitNativeTx(
   const backend = MlDsa65Backend.fromSeed(args.seed);
   // A fresh transport bound to the shared provider endpoint, matching the
   // prior per-seam behaviour (the SDK client is request-scoped, not pooled).
-  const client = new RpcClient(getProvider().rpcClient.endpoint);
+  const client = new RpcClient(getProvider().rpcClient.endpoint, rpcClientOptions());
   const fromHex = backend.getAddress();
 
   const feeOptions =

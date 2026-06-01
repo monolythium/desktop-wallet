@@ -1,10 +1,8 @@
-// Settings — Stage 2 ships preference stubs. Real persistence + keychain
-// rotation arrive with Stage 3 / Stage 4.
+// Settings for wallet preferences and optional surfaces.
 
 import { useCallback, useEffect, useState } from "react";
 import type { ChainInfo } from "@monolythium/core-sdk";
-import { IDENTITY } from "../data/fixtures";
-import { useOperations } from "../operations/context";
+import { useActiveWallet } from "../sdk/active-wallet";
 import { fetchLiveTestnetRegistry } from "../sdk/live-registry";
 import {
   outboundMcpStart,
@@ -29,33 +27,10 @@ interface SettingsProps {
 }
 
 export function Settings({ developerModeEnabled, setDeveloperModeEnabled, steleEnabled, setSteleEnabled, experimentalEnabled, setExperimentalEnabled }: SettingsProps) {
-  const ops = useOperations();
+  const wallet = useActiveWallet();
   const [currency, setCurrency] = useState("USD");
   const [compound, setCompound] = useState("always");
   const [devkitChannel, setDevkitChannel] = useState<NativeDevkitChannel>(() => readDevkitChannel());
-
-  const openRotate = () => {
-    ops.open({
-      title: "Rotate signing key",
-      subtitle: "Re-derive a fresh signing key under the same identity",
-      auth: "keychain",
-      diff: [
-        { k: "Identity",       v: IDENTITY.handle },
-        { k: "Address",        v: IDENTITY.address },
-        { k: "Old key id",     v: "kc:lyth:primary:v1" },
-        { k: "New key id",     v: "kc:lyth:primary:v2" },
-      ],
-      effects: [
-        { text: "Old key remains in the keychain for 24h before purge." },
-        { text: "Existing signed transactions remain valid." },
-        { text: "Future signatures use the new key automatically.", level: "info" },
-      ],
-      execute: () => Promise.resolve({
-        headline: "Key rotated",
-        detail: "Stage 2 mock — Stage 4 wires this to the Tauri keychain command.",
-      }),
-    });
-  };
 
   return (
     <div className="w-page">
@@ -166,19 +141,26 @@ export function Settings({ developerModeEnabled, setDeveloperModeEnabled, steleE
         <div className="w-card__body">
           <div className="w-setting-row">
             <div>
-              <div className="row-label">Device pairing</div>
-              <div className="row-help">{IDENTITY.pairedDevice} · paired {IDENTITY.since}.</div>
+              <div className="row-label">Active wallet</div>
+              <div className="row-help">
+                {wallet.status === "ready"
+                  ? `${wallet.name} · ${wallet.address}`
+                  : wallet.status === "locked"
+                    ? `${wallet.name} · unlock to derive address`
+                    : wallet.status === "error"
+                      ? wallet.error
+                      : "No active wallet registered."}
+              </div>
             </div>
-            <button className="btn btn--sm">Change</button>
           </div>
           <div className="w-setting-row">
             <div>
               <div className="row-label">Rotate signing key</div>
               <div className="row-help">
-                Generates a fresh key under the same identity. Walk the Operations drawer.
+                Key rotation is not available in this build. Use Wallets to add or import a separate vault.
               </div>
             </div>
-            <button className="btn btn--sm" onClick={openRotate}>Rotate</button>
+            <button className="btn btn--sm" disabled>Unavailable</button>
           </div>
         </div>
       </div>

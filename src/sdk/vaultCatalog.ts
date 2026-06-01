@@ -134,7 +134,7 @@ export async function registerVault(
 
 /**
  * Migration helper: when the catalog is empty but a legacy
- * PRIMARY_ACCOUNT keychain entry exists, drop a placeholder vault in
+ * PRIMARY_ACCOUNT keychain entry exists, drop a legacy vault shell in
  * the catalog with `addressHex: null`. The first unlock fills it in
  * via `captureAddressOnUnlock`.
  */

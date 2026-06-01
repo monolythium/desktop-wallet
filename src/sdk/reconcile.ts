@@ -21,7 +21,7 @@
 // for a tx the wallet successfully broadcast.
 
 import { MONOLYTHIUM_TESTNET_CHAIN_ID } from "@monolythium/core-sdk";
-import { IDENTITY } from "../data/fixtures";
+import { loadActiveWallet } from "./active-wallet";
 import { getProvider } from "./client";
 import { recordNotification } from "./notifications-store";
 import { toastTerminalNotification } from "./os-toast";
@@ -40,8 +40,9 @@ import type { OperationNotifyMeta } from "../operations/types";
 
 /** Lowercased scope address — the wallet's active identity is the sender (and
  *  the notification scope's address dimension). Mirrors `notifications-record.ts`. */
-function scopeAddressLower(): string {
-  return IDENTITY.address.toLowerCase();
+async function scopeAddressLower(): Promise<string | null> {
+  const wallet = await loadActiveWallet();
+  return wallet.status === "ready" ? wallet.address.toLowerCase() : null;
 }
 
 /** Hex chain id for the scope key — `0x10f2c` for testnet-69420. */
@@ -61,10 +62,12 @@ export async function trackOperationTx(
   txHash: string | undefined,
 ): Promise<void> {
   if (!txHash) return;
+  const addressLower = await scopeAddressLower();
+  if (!addressLower) return;
   const tx: PendingTx = {
     txHash,
     chainIdHex: scopeChainIdHex(),
-    addressLower: scopeAddressLower(),
+    addressLower,
     opKind: meta.kind,
     amountDecimal: meta.amountDecimal,
     counterparty: meta.counterparty,

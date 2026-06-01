@@ -1,10 +1,8 @@
-// Sidebar — port of designs wallet-app.jsx WSidebar.
-// Stage 2 ships the full consumer NAV; pages are stubs (TodoSection)
-// until their RPC seams land. Node-ops screens live in Monarch Desktop.
+// Sidebar — wallet navigation. Node-ops screens live in Monarch Desktop.
 
 import type { ReactElement } from "react";
-import { IDENTITY } from "../data/fixtures";
-import type { Denom } from "../data/fixtures";
+import type { Denom } from "../data/types";
+import { useActiveWallet } from "../sdk/active-wallet";
 import type { Route } from "./types";
 
 interface NavItem {
@@ -157,7 +155,7 @@ const NAV: NavItem[] = [
   { id: "riscv", label: "RISC-V", icon: ICON_RISCV, publicOnly: true },
   { id: "studio", label: "Studio", icon: ICON_STUDIO, publicOnly: true, developerOnly: true, badge: "dev" },
   { id: "trade", label: "Trade", icon: ICON_TRADE, publicOnly: true },
-  { id: "ai-trade", label: "AI Trading", icon: ICON_AI, publicOnly: true, badge: "beta" },
+  { id: "ai-trade", label: "AI Trading", icon: ICON_AI, publicOnly: true, experimentalOnly: true, badge: "preview" },
   { id: "stele", label: "Stele", icon: ICON_STELE, steleOnly: true, badge: "early" },
   { id: "inbox", label: "Inbox", icon: ICON_INBOX, steleOnly: true },
   { id: "provider", label: "Provider", icon: ICON_PROVIDER, steleOnly: true },
@@ -169,6 +167,7 @@ const NAV_FOOTER: NavItem[] = [
 ];
 
 export function Sidebar({ denom, setDenom, route, setRoute, developerModeEnabled, steleEnabled, experimentalEnabled }: Props) {
+  const wallet = useActiveWallet();
   const visible = NAV.filter(
     (n) =>
       (!n.publicOnly || denom === "public") &&
@@ -236,8 +235,16 @@ export function Sidebar({ denom, setDenom, route, setRoute, developerModeEnabled
       </div>
 
       <div className="w-side__footer">
-        <b>{IDENTITY.handle}</b>
-        <div className="addr">{IDENTITY.address}</div>
+        <b>{wallet.status === "ready" || wallet.status === "locked" ? wallet.name : "No active wallet"}</b>
+        <div className="addr">
+          {wallet.status === "ready"
+            ? wallet.address
+            : wallet.status === "locked"
+              ? "unlock to derive address"
+              : wallet.status === "error"
+                ? wallet.error
+                : "add a wallet"}
+        </div>
       </div>
     </aside>
   );

@@ -1,19 +1,23 @@
 // Tokens page — full asset list. Public denom only.
 
 import { useEffect, useState } from "react";
-import { TOKENS } from "../data/fixtures";
-import { TokenRow } from "../components/TokenRow";
-import { IDENTITY } from "../data/fixtures";
+import { useActiveWallet } from "../sdk/active-wallet";
 import { errorMessage, loadLiveTokenStatus, type LiveTokenStatus } from "../sdk/live";
 
 export function Tokens() {
+  const wallet = useActiveWallet();
+  const walletAddress = wallet.status === "ready" ? wallet.address : "";
   const [live, setLive] = useState<LiveTokenStatus | null>(null);
   const [busy, setBusy] = useState(false);
 
   const refresh = async () => {
+    if (!walletAddress) {
+      setLive(null);
+      return;
+    }
     setBusy(true);
     try {
-      setLive(await loadLiveTokenStatus(IDENTITY.address));
+      setLive(await loadLiveTokenStatus(walletAddress));
     } catch (cause) {
       setLive({
         endpoint: "unavailable",
@@ -29,13 +33,15 @@ export function Tokens() {
 
   useEffect(() => {
     void refresh();
-  }, []);
+  }, [walletAddress]);
 
   return (
     <div className="w-page">
       <div className="w-page__header">
         <h1>Tokens</h1>
-        <div className="sub">All assets held by this wallet on the Monolythium chain.</div>
+        <div className="sub">
+          {walletAddress ? `Assets for ${walletAddress}` : "Select or unlock a wallet to load assets."}
+        </div>
       </div>
 
       <div className="w-card">
@@ -49,6 +55,7 @@ export function Tokens() {
         </div>
         <div className="w-card__body">
           <LiveLine k="Endpoint" v={live?.endpoint ?? "loading"} mono />
+          <LiveLine k="Wallet" v={walletAddress || "no active address"} mono />
           <LiveLine k="LYTH balance" v={live?.nativeBalance.ok ? `${live.nativeBalance.value ?? "0"} LYTH` : live?.nativeBalance.error ?? "loading"} mono />
           <LiveLine k="Indexed assets" v={live?.tokenBalances.ok ? `${live.tokenBalances.value?.length ?? 0}` : live?.tokenBalances.error ?? "loading"} mono />
           <LiveLine
@@ -84,7 +91,25 @@ export function Tokens() {
           <h3>Holdings</h3>
         </div>
         <div className="w-card__body">
-          {TOKENS.map((t) => <TokenRow key={t.sym} token={t} />)}
+          {live?.tokenBalances.ok && live.tokenBalances.value && live.tokenBalances.value.length > 0 ? (
+            <div className="w-live-list">
+              {live.tokenBalances.value.map((row) => (
+                <div className="w-live-row" key={row.tokenId}>
+                  <div>
+                    <div className="row-label mono">{row.tokenId.slice(0, 18)}…{row.tokenId.slice(-8)}</div>
+                    <div className="row-help">updated at block {row.updatedAtBlock.toString()}</div>
+                  </div>
+                  <div className="w-live-right mono">{row.balance}</div>
+                </div>
+              ))}
+            </div>
+          ) : live?.tokenBalances.ok === false ? (
+            <div className="w-live-error">{live.tokenBalances.error}</div>
+          ) : live?.tokenBalances.ok ? (
+            <div className="row-help">No indexed token balances returned for this address.</div>
+          ) : (
+            <div className="row-help">{walletAddress ? "Loading holdings…" : "No active wallet address."}</div>
+          )}
         </div>
       </div>
     </div>

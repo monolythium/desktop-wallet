@@ -8,8 +8,8 @@
 //
 // IMPORTANT: a live bridge SEND is blocked at the SDK boundary
 // (BRIDGE_QUOTE_API_BLOCKED_REASON / BRIDGE_SUBMIT_API_BLOCKED_REASON) —
-// mono-core exposes no live quote/submit primitive in 0.3.10. This panel
-// is the disclosure surface only; if a send is ever attempted, the
+// mono-core exposes no live quote/submit primitive yet. This panel is the
+// disclosure surface only; if a send is ever attempted, the
 // blocked-reason surfaces here verbatim rather than reading as a broken
 // send.
 

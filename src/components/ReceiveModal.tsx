@@ -1,10 +1,7 @@
 // Receive modal — wallet's typed `mono1…` address as QR + copy.
 //
-// No biometric / keychain access required; the bound address is a
-// public read. Falls back to IDENTITY.address (the demo fixture) until
-// a future Tauri command surfaces the live address from the vault
-// envelope header — until then desktop's "bound address" is the same
-// constant Home + Topbar already display.
+// No biometric / keychain access required; the active wallet address is a
+// public catalog read.
 
 import { useEffect, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";

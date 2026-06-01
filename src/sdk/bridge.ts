@@ -1,8 +1,8 @@
 // Bridge SDK seam — typed wrappers around the §20 trusted-routes registry
 // and the §25.2 pre-send risk disclosure surface.
 //
-// Read-only. mono-core exposes NO live bridge quote/submit primitive in
-// 0.3.10 — the SDK gates both behind BRIDGE_QUOTE_API_BLOCKED_REASON /
+// Read-only. mono-core exposes NO live bridge quote/submit primitive yet —
+// the SDK gates both behind BRIDGE_QUOTE_API_BLOCKED_REASON /
 // BRIDGE_SUBMIT_API_BLOCKED_REASON. This seam surfaces every disclosure
 // field a user needs to verify a route BEFORE they would sign a bridge
 // call (drain cap remaining, circuit-breaker posture, insurance pool,

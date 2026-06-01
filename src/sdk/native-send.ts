@@ -1,6 +1,6 @@
 // Native Monolythium send path.
 //
-// Routes through the shared `submitNativeTx` seam (core-sdk 0.3.11), which
+// Routes through the shared `submitNativeTx` seam, which
 // submits PLAINTEXT by default via `submitTransactionWithPrivacy({ private:
 // false })` → `mesh_submitTx` (the inclusion path that actually confirms on
 // the live optional-encryption chain). Pass `private: true` to engage the

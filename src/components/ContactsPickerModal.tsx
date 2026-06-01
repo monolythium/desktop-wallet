@@ -1,10 +1,10 @@
 // Contacts picker — modal shown from SendComposeModal when the user
 // wants to pick a recipient from their saved address book. Reads the
-// Stele MCP addressbook via addressbookLookup(); search filters
+// wallet-local addressbook via addressbookLookup(); search filters
 // client-side by name or address.
 //
 // Ports the browser-wallet ContactsPickerModal pattern (commit
-// 30a1d8c) onto the desktop's Stele-backed addressbook shape.
+// 30a1d8c) onto the desktop's local addressbook shape.
 
 import { useEffect, useMemo, useState } from "react";
 import {

@@ -14,18 +14,6 @@ import { formatOutcome, loadLiveTradeStatus, type LiveTradeStatus } from "../sdk
 import { cancelClobOrder, placeClobLimitOrder } from "../sdk/clob-trade";
 import { useOperations } from "../operations/context";
 
-// LYTHt / USDCt testnet pair pinned to the v0.0.13 fresh genesis. The
-// chain seeds these via `[token_factory.records]` in
-// `mono-core/testnet/clob-markets-testnet.toml`; the market id is
-// `keccak256(0xC1 || base || quote)` and is stable across testnet
-// regenesis events as long as the foundation address + creator nonce
-// roster stays constant.
-const TESTNET_LYTHT_USDCT_MARKET = {
-  marketId: "0x465ec000385b9c9e72cbe4a5a64030a528d2f55f92de0a6c5f63cff828e0e954",
-  baseToken: "0x1bc640e9f21b226d7bb32eabefdcfa08ebcd177937e3c3d945a2806f46b4daa1",
-  quoteToken: "0xb067b3bccc8cd353753b36b3859bde1a230be94818492bb5a54a48ac9f2d64f0",
-} as const;
-
 export function Trade() {
   const [status, setStatus] = useState<LiveTradeStatus | null>(null);
   const [busy, setBusy] = useState(false);
@@ -168,9 +156,9 @@ export function Trade() {
       </div>
 
       <PlaceLimitOrderCard
-        marketId={selected?.marketId ?? TESTNET_LYTHT_USDCT_MARKET.marketId}
-        baseTokenIdHex={nativeMarket?.baseAssetId ?? TESTNET_LYTHT_USDCT_MARKET.baseToken}
-        quoteTokenIdHex={nativeMarket?.quoteAssetId ?? TESTNET_LYTHT_USDCT_MARKET.quoteToken}
+        marketId={selected?.marketId ?? null}
+        baseTokenIdHex={nativeMarket?.baseAssetId ?? null}
+        quoteTokenIdHex={nativeMarket?.quoteAssetId ?? null}
         bestBidPrice={book?.bids?.[0]?.price ?? null}
         bestAskPrice={book?.asks?.[0]?.price ?? null}
         lastPrice={trades[0]?.price ?? null}
@@ -336,9 +324,10 @@ function PlaceLimitOrderCard({
           Place {side === "buy" ? "BUY" : "SELL"} limit
         </button>
         <div className="row-help">
-          Notional <code className="mono">price × quantity</code> must exceed the market's
-          <code className="mono">min_notional_atoms</code> (1 quote-atom floor by default; on
-          testnet 1e18). Crossing fills happen at the resting maker's price.
+          Order placement is enabled only after the connected node returns live
+          market metadata. Notional <code className="mono">price × quantity</code>{" "}
+          must exceed the market's <code className="mono">min_notional_atoms</code>.
+          Crossing fills happen at the resting maker's price.
         </div>
       </div>
     </div>

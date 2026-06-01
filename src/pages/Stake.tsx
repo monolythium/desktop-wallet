@@ -7,13 +7,12 @@
 // delegation precompile call → encrypted-envelope submit).
 
 import { useEffect, useState } from "react";
-import { addressToTypedBech32 } from "@monolythium/core-sdk";
 import type {
   ClusterDirectoryEntryResponse,
   ClusterDiversityView,
 } from "@monolythium/core-sdk";
-import { IDENTITY } from "../data/fixtures";
 import { useOperations } from "../operations/context";
+import { useActiveWallet } from "../sdk/active-wallet";
 import {
   DELEGATION_PRECOMPILE,
   buildDelegateCalldata,
@@ -39,6 +38,8 @@ interface StakeProps {
 
 export function Stake({ experimentalEnabled }: StakeProps = {}) {
   const ops = useOperations();
+  const wallet = useActiveWallet();
+  const walletAddress = wallet.status === "ready" ? wallet.address : "";
   const [status, setStatus] = useState<LiveStakeStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const [directory, setDirectory] = useState<ClusterDirectoryEntryResponse[]>([]);
@@ -60,10 +61,16 @@ export function Stake({ experimentalEnabled }: StakeProps = {}) {
   const [autovoteError, setAutovoteError] = useState<string | null>(null);
 
   const refresh = async () => {
+    if (!walletAddress) {
+      setStatus(null);
+      setDirectory([]);
+      setDirectoryError(null);
+      return;
+    }
     setBusy(true);
     try {
       const [s, dir] = await Promise.all([
-        loadLiveStakeStatus(IDENTITY.address),
+        loadLiveStakeStatus(walletAddress),
         fetchClusterDirectory(1, 20).catch((cause: unknown) => {
           setDirectoryError((cause as Error)?.message ?? "directory unavailable");
           return null;
@@ -90,7 +97,7 @@ export function Stake({ experimentalEnabled }: StakeProps = {}) {
 
   useEffect(() => {
     void refresh();
-  }, []);
+  }, [walletAddress]);
 
   const clusters = status?.clusters.ok ? status.clusters.value ?? [] : [];
   const active = status?.activeClusters.ok ? status.activeClusters.value ?? [] : [];
@@ -100,7 +107,7 @@ export function Stake({ experimentalEnabled }: StakeProps = {}) {
     ? status.delegationHistory.value ?? []
     : [];
 
-  const selfBech32m = addressToTypedBech32("user", IDENTITY.address);
+  const selfBech32m = walletAddress;
 
   const openDelegate = (clusterId: number, weightBps: number, principalLyth: bigint) => {
     const weightLabel = `${(weightBps / 100).toFixed(2)}%`;

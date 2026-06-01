@@ -131,8 +131,7 @@ export function OperationsDrawer({ descriptor, onClose }: Props) {
   };
 
   const advanceFromAuth = async () => {
-    // Stage 4 wires the keychain-vault path AND the Ledger hardware path.
-    // Passkey stays banner-only until that signer lands.
+    // Stage 4 wires the keychain-vault path and the Ledger hardware path.
     if (descriptor.auth === "keychain") {
       if (!password) {
         setAuthError({
@@ -185,7 +184,11 @@ export function OperationsDrawer({ descriptor, onClose }: Props) {
       void runLedgerFlow();
       return;
     }
-    // Passkey + none → straight through.
+    if (descriptor.auth === "passkey") {
+      setError("Passkey signing is unavailable in this build.");
+      setStage("error");
+      return;
+    }
     void runExecute();
   };
 
@@ -370,7 +373,7 @@ export function OperationsDrawer({ descriptor, onClose }: Props) {
                 className="btn btn--primary"
                 style={{ marginLeft: "auto" }}
                 onClick={() => void advanceFromAuth()}
-                disabled={authBusy || (descriptor.auth === "keychain" && !password)}
+                disabled={authBusy || descriptor.auth === "passkey" || (descriptor.auth === "keychain" && !password)}
               >
                 {hardwareButtonLabel({
                   authMethod: descriptor.auth,
@@ -494,12 +497,11 @@ function AuthPane({
     return <LedgerAuthPane ledgerFlow={ledgerFlow} authError={authError} />;
   }
   if (descriptor.auth === "passkey") {
-    // TODO: wire WebAuthn / platform passkey signer.
     return (
       <div className="w-banner">
-        A platform passkey prompt will open. Approve to continue.
+        Passkey signing is unavailable in this build.
         <div style={{ marginTop: 6, fontSize: 11.5, color: "var(--w-text-3)" }}>
-          (Passkey signer wiring is not yet implemented. This pane is banner-only for now.)
+          Use a keychain vault or Ledger-backed account until the WebAuthn signer ships.
         </div>
       </div>
     );

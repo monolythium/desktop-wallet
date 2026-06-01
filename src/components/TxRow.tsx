@@ -1,7 +1,6 @@
 // Transaction row — port of designs wallet-pages.jsx TxRow.
 
-import type { Tx } from "../data/fixtures";
-import { TOKENS } from "../data/fixtures";
+import type { Tx } from "../data/types";
 import { fmt } from "./format";
 
 interface Props {
@@ -26,8 +25,6 @@ export function TxRow({ tx, onClick }: Props) {
     : `To ${tx.counterparty}`;
   const memo = tx.memo;
   const tok = tx.token || "LYTH";
-  const price = TOKENS.find((t) => t.sym === tok)?.priceUsd ?? null;
-  const usd = tx.amount !== null && price !== null ? tx.amount * price : null;
   const fracDigits = (tx.amount ?? 0) >= 100 ? 2 : 3;
 
   return (
@@ -70,7 +67,6 @@ export function TxRow({ tx, onClick }: Props) {
             </>
           )}
         </div>
-        {usd !== null ? <div className="w-tx__usd">${fmt(usd, 2)}</div> : null}
       </div>
     </div>
   );
