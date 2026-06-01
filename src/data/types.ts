@@ -4,8 +4,10 @@ export interface Token {
   sym: string;
   name: string;
   amount: number;
-  priceUsd: number;
-  chg24h: number;
+  // No price oracle / token-name registry exists on-chain, so these are
+  // nullable. `null` renders as an em-dash ("—") — never a fabricated value.
+  priceUsd: number | null;
+  chg24h: number | null;
   primary?: boolean;
   note?: string;
 }

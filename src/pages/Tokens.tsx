@@ -1,8 +1,15 @@
 // Tokens page — full asset list. Public denom only.
+//
+// The list is live: the native LYTH balance plus any indexed MRC-20 rows
+// from `loadLiveTokenStatus`. There is no price oracle and no token-name
+// registry on-chain, so price / USD value / 24h change render as an em-dash
+// ("—") rather than a fabricated figure (see `liveTokenStatusToRows`).
 
 import { useEffect, useState } from "react";
+import { TokenRow } from "../components/TokenRow";
 import { useActiveWallet } from "../sdk/active-wallet";
 import { errorMessage, loadLiveTokenStatus, type LiveTokenStatus } from "../sdk/live";
+import { liveTokenStatusToRows } from "../sdk/token-rows";
 
 export function Tokens() {
   const wallet = useActiveWallet();
@@ -35,6 +42,12 @@ export function Tokens() {
     void refresh();
   }, [walletAddress]);
 
+  const rows = liveTokenStatusToRows(live);
+  // The native row is always present; MRC-20 rows are appended only when the
+  // balance query succeeded. A failed native query surfaces as an error line.
+  const nativeFailed = live?.nativeBalance.ok === false;
+  const tokenFailed = live?.tokenBalances.ok === false;
+
   return (
     <div className="w-page">
       <div className="w-page__header">
@@ -46,7 +59,7 @@ export function Tokens() {
 
       <div className="w-card">
         <div className="w-card__head">
-          <h3>Live native asset</h3>
+          <h3>Holdings</h3>
           <span className="w-live-pill">live</span>
           <span className="w-card__head__spacer" />
           <button className="btn btn--sm" onClick={refresh} disabled={busy}>
@@ -54,73 +67,30 @@ export function Tokens() {
           </button>
         </div>
         <div className="w-card__body">
-          <LiveLine k="Endpoint" v={live?.endpoint ?? "loading"} mono />
-          <LiveLine k="Wallet" v={walletAddress || "no active address"} mono />
-          <LiveLine k="LYTH balance" v={live?.nativeBalance.ok ? `${live.nativeBalance.value ?? "0"} LYTH` : live?.nativeBalance.error ?? "loading"} mono />
-          <LiveLine k="Indexed assets" v={live?.tokenBalances.ok ? `${live.tokenBalances.value?.length ?? 0}` : live?.tokenBalances.error ?? "loading"} mono />
-          <LiveLine
-            k="Address label"
-            v={live?.addressLabel.ok
-              ? live.addressLabel.value
-                ? `${live.addressLabel.value.category}${live.addressLabel.value.displayName ? ` · ${live.addressLabel.value.displayName}` : ""}`
-                : "unlabeled"
-              : live?.addressLabel.error ?? "loading"}
-          />
-          <LiveLine
-            k="LYTH policy"
-            v={live?.assetPolicy.ok ? `${String(live.assetPolicy.value?.mode ?? "unknown")} · explicit ${String(live.assetPolicy.value?.explicit ?? false)}` : live?.assetPolicy.error ?? "loading"}
-          />
-          {live?.tokenBalances.ok && live.tokenBalances.value && live.tokenBalances.value.length > 0 ? (
-            <div className="w-live-list">
-              {live.tokenBalances.value.map((row) => (
-                <div className="w-live-row" key={row.tokenId}>
-                  <div>
-                    <div className="row-label mono">{row.tokenId.slice(0, 18)}…{row.tokenId.slice(-8)}</div>
-                    <div className="row-help">updated at block {row.updatedAtBlock.toString()}</div>
-                  </div>
-                  <div className="w-live-right mono">{row.balance}</div>
-                </div>
-              ))}
-            </div>
-          ) : null}
-        </div>
-      </div>
-
-      <div className="w-card">
-        <div className="w-card__head">
-          <h3>Holdings</h3>
-        </div>
-        <div className="w-card__body">
-          {live?.tokenBalances.ok && live.tokenBalances.value && live.tokenBalances.value.length > 0 ? (
-            <div className="w-live-list">
-              {live.tokenBalances.value.map((row) => (
-                <div className="w-live-row" key={row.tokenId}>
-                  <div>
-                    <div className="row-label mono">{row.tokenId.slice(0, 18)}…{row.tokenId.slice(-8)}</div>
-                    <div className="row-help">updated at block {row.updatedAtBlock.toString()}</div>
-                  </div>
-                  <div className="w-live-right mono">{row.balance}</div>
-                </div>
-              ))}
-            </div>
-          ) : live?.tokenBalances.ok === false ? (
-            <div className="w-live-error">{live.tokenBalances.error}</div>
-          ) : live?.tokenBalances.ok ? (
-            <div className="row-help">No indexed token balances returned for this address.</div>
+          {!walletAddress ? (
+            <div className="row-help">No active wallet address.</div>
+          ) : live === null ? (
+            <div className="row-help">Loading assets…</div>
           ) : (
-            <div className="row-help">{walletAddress ? "Loading holdings…" : "No active wallet address."}</div>
+            <>
+              {rows.map((token) => (
+                <TokenRow key={token.primary ? "native" : token.sym} token={token} />
+              ))}
+              {nativeFailed ? (
+                <div className="w-live-error">LYTH balance: {live.nativeBalance.error}</div>
+              ) : null}
+              {tokenFailed ? (
+                <div className="w-live-error">token balances: {live.tokenBalances.error}</div>
+              ) : null}
+            </>
           )}
         </div>
+        <div className="w-tokens__net">
+          <span className="dot" />
+          <span>Network</span>
+          <span className="mono">{live?.endpoint ?? "—"}</span>
+        </div>
       </div>
-    </div>
-  );
-}
-
-function LiveLine({ k, v, mono = false }: { k: string; v: string; mono?: boolean }) {
-  return (
-    <div className="w-kv">
-      <span className="k">{k}</span>
-      <span className={`v ${mono ? "mono" : ""}`}>{v}</span>
     </div>
   );
 }
