@@ -8,8 +8,10 @@ import {
   convertCreate,
   convertEstimate,
   ConvertCallError,
+  formatConvertQuote,
   type ConvertCreateInput,
   type ConvertEstimateInput,
+  type ConvertQuoteView,
 } from "../sdk/convert";
 import { flightSearch, FlightCallError, type FlightSearchInput } from "../sdk/flights";
 import { checkName, type NameCheckResult } from "../sdk/name-registry";
@@ -254,7 +256,7 @@ function ConvertCard() {
   const [toCurrency, setToCurrency] = useState("eth");
   const [fromAmount, setFromAmount] = useState("");
   const [payoutAddress, setPayoutAddress] = useState("");
-  const [quote, setQuote] = useState<unknown | null>(null);
+  const [quote, setQuote] = useState<ConvertQuoteView | null>(null);
   const [created, setCreated] = useState<unknown | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -277,7 +279,7 @@ function ConvertCard() {
         flow: "standard",
       };
       const result = await convertEstimate(input);
-      setQuote(result);
+      setQuote(formatConvertQuote(input, result));
     } catch (cause) {
       if (cause instanceof ConvertCallError) setError(cause.message);
       else setError(String(cause));
@@ -349,23 +351,7 @@ function ConvertCard() {
             </button>
           </div>
 
-          {quote ? (
-            <pre
-              style={{
-                background: "var(--w-bg-2, #161616)",
-                border: "1px solid var(--w-border, #2a2a2a)",
-                borderRadius: 6,
-                padding: 10,
-                fontFamily: "var(--w-font-mono, ui-monospace, monospace)",
-                fontSize: 11,
-                maxHeight: 180,
-                overflow: "auto",
-                margin: 0,
-              }}
-            >
-              {JSON.stringify(quote, null, 2)}
-            </pre>
-          ) : null}
+          {quote ? <ConvertQuotePanel quote={quote} /> : null}
 
           <div style={{ display: "flex", gap: 8 }}>
             <input
@@ -385,27 +371,108 @@ function ConvertCard() {
             </button>
           </div>
 
-          {created ? (
-            <pre
-              style={{
-                background: "var(--w-bg-2, #161616)",
-                border: "1px solid var(--w-border, #2a2a2a)",
-                borderRadius: 6,
-                padding: 10,
-                fontFamily: "var(--w-font-mono, ui-monospace, monospace)",
-                fontSize: 11,
-                maxHeight: 220,
-                overflow: "auto",
-                margin: 0,
-              }}
-            >
-              {JSON.stringify(created, null, 2)}
-            </pre>
-          ) : null}
+          {created ? <ConvertCreatedPanel created={created} /> : null}
         </form>
       </div>
     </div>
   );
+}
+
+function ConvertQuotePanel({ quote }: { quote: ConvertQuoteView }) {
+  const rows: Array<{ k: string; v: string }> = [
+    {
+      k: "Rate",
+      v: quote.rate ? `1 ${quote.fromCurrency} ≈ ${quote.rate} ${quote.toCurrency}` : "—",
+    },
+    {
+      k: "You send",
+      v: quote.fromAmount ? `${quote.fromAmount} ${quote.fromCurrency}` : "—",
+    },
+    {
+      k: "You receive",
+      v: quote.toAmount ? `${quote.toAmount} ${quote.toCurrency}` : "—",
+    },
+    { k: "Fee", v: quote.fee ? `${quote.fee} ${quote.fromCurrency}` : "—" },
+    {
+      k: "Minimum",
+      v: quote.minReceived ? `${quote.minReceived} ${quote.fromCurrency}` : "—",
+    },
+    { k: "Speed", v: quote.speed ?? "—" },
+  ];
+  return (
+    <div style={quotePanelStyle()}>
+      {rows.map((r) => (
+        <div key={r.k} style={quoteRowStyle()}>
+          <span style={{ color: "var(--w-text-2, #999)" }}>{r.k}</span>
+          <span style={{ fontFamily: "var(--w-font-mono, ui-monospace, monospace)" }}>{r.v}</span>
+        </div>
+      ))}
+      {quote.warning ? (
+        <div className="row-help" style={{ color: "var(--w-text-2, #999)", marginTop: 4 }}>
+          {quote.warning}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function ConvertCreatedPanel({ created }: { created: unknown }) {
+  const record = created && typeof created === "object" ? (created as Record<string, unknown>) : {};
+  const get = (...keys: string[]): string | null => {
+    for (const key of keys) {
+      const value = record[key];
+      if (typeof value === "string" && value.trim() !== "") return value;
+      if (typeof value === "number" && Number.isFinite(value)) return String(value);
+    }
+    return null;
+  };
+  const rows: Array<{ k: string; v: string }> = [
+    { k: "Swap id", v: get("id", "swapId", "swap_id") ?? "—" },
+    { k: "Pay this amount", v: get("fromAmount", "from_amount", "amountFrom") ?? "—" },
+    { k: "To deposit address", v: get("payinAddress", "payin_address", "depositAddress") ?? "—" },
+    { k: "Deposit memo / tag", v: get("payinExtraId", "payin_extra_id", "depositExtraId") ?? "—" },
+    { k: "Status", v: get("status") ?? "created" },
+  ];
+  return (
+    <div style={quotePanelStyle()}>
+      {rows.map((r) => (
+        <div key={r.k} style={quoteRowStyle()}>
+          <span style={{ color: "var(--w-text-2, #999)" }}>{r.k}</span>
+          <span
+            style={{
+              fontFamily: "var(--w-font-mono, ui-monospace, monospace)",
+              wordBreak: "break-all",
+              textAlign: "right",
+              marginLeft: 12,
+            }}
+          >
+            {r.v}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function quotePanelStyle(): React.CSSProperties {
+  return {
+    background: "var(--w-bg-2, #161616)",
+    border: "1px solid var(--w-border, #2a2a2a)",
+    borderRadius: 6,
+    padding: 12,
+    display: "flex",
+    flexDirection: "column",
+    gap: 8,
+    fontSize: 12.5,
+  };
+}
+
+function quoteRowStyle(): React.CSSProperties {
+  return {
+    display: "flex",
+    alignItems: "baseline",
+    justifyContent: "space-between",
+  };
 }
 
 function inputStyle(): React.CSSProperties {

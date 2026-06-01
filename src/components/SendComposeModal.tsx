@@ -6,12 +6,21 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   ADDRESS_KIND_HRPS,
+  formatLyth,
+  parseLythToLythoshi,
   typedBech32ToAddress,
 } from "@monolythium/core-sdk";
 import { useOperations } from "../operations/context";
 import { sendNativeLyth } from "../sdk/native-send";
 import { addressbookLookup } from "../sdk/addressbook";
 import { fetchFinalityPosture } from "../sdk/finality";
+import { errorMessage, loadLiveWalletBalance } from "../sdk/live";
+import {
+  maxFeeLythoshiFrom,
+  previewTransferFee,
+  totalReservedLyth,
+  type NativeFeePreview,
+} from "../sdk/fee-preview";
 import { ContactsPickerModal } from "./ContactsPickerModal";
 
 interface Props {
@@ -47,6 +56,15 @@ export function SendComposeModal({ fromBech32m, onClose }: Props) {
   // bare address. Cleared on any manual edit of the recipient field
   // so a stale name never travels with a fresh address.
   const [resolvedContactName, setResolvedContactName] = useState<string | null>(null);
+  // Live available balance (native LYTH). `null` while loading; a failed read
+  // disables the Max button rather than fabricating a figure.
+  const [balanceLyth, setBalanceLyth] = useState<string | null>(null);
+  const [balanceLythoshi, setBalanceLythoshi] = useState<bigint | null>(null);
+  const [balanceError, setBalanceError] = useState<string | null>(null);
+  // Live-resolved transfer fee (same path the submit seam uses). Surfaced
+  // in-compose so the fee + total are visible before the user confirms.
+  const [feePreview, setFeePreview] = useState<NativeFeePreview | null>(null);
+  const [feeError, setFeeError] = useState<string | null>(null);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -55,6 +73,46 @@ export function SendComposeModal({ fromBech32m, onClose }: Props) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
+
+  // Load the live available balance once the modal opens. The Max button and
+  // the available line both read off this; a failed read leaves Max disabled.
+  useEffect(() => {
+    let cancelled = false;
+    setBalanceLyth(null);
+    setBalanceLythoshi(null);
+    setBalanceError(null);
+    void loadLiveWalletBalance(fromBech32m)
+      .then((b) => {
+        if (cancelled) return;
+        setBalanceLyth(b.balanceLyth);
+        setBalanceLythoshi(BigInt(b.balanceLythoshi));
+      })
+      .catch((cause) => {
+        if (!cancelled) setBalanceError(errorMessage(cause));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [fromBech32m]);
+
+  // Resolve the live transfer fee once the modal opens. Independent of the
+  // amount (a bare transfer's fee shape doesn't depend on value), so one read
+  // covers the whole compose; a failed read shows an honest "fee unavailable".
+  useEffect(() => {
+    let cancelled = false;
+    setFeePreview(null);
+    setFeeError(null);
+    void previewTransferFee()
+      .then((preview) => {
+        if (!cancelled) setFeePreview(preview);
+      })
+      .catch((cause) => {
+        if (!cancelled) setFeeError(errorMessage(cause));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [fromBech32m]);
 
   const validate = useMemo(
     () => () => {
@@ -136,6 +194,11 @@ export function SendComposeModal({ fromBech32m, onClose }: Props) {
         { k: "To", v: toLine },
         { k: "Token", v: "LYTH" },
         { k: "Amount", v: `${amountLyth} LYTH` },
+        {
+          k: "Network fee (max)",
+          v: feePreview ? `${feePreview.maxFeeLyth} LYTH` : "resolved at submit",
+          kind: "fee" as const,
+        },
         { k: "Privacy", v: sendPrivate ? "Private (preview)" : "Plaintext", kind: "value" },
         { k: "Finality", v: finality.label, kind: "value" },
       ],
@@ -171,6 +234,41 @@ export function SendComposeModal({ fromBech32m, onClose }: Props) {
     });
     onClose();
   };
+
+  // The amount parsed to lythoshi for the fee/total preview. Tolerant of an
+  // in-progress / invalid entry — returns null so the total line stays blank
+  // rather than rendering NaN.
+  const amountLythoshi = useMemo<bigint | null>(() => {
+    const trimmed = amount.trim();
+    if (!/^\d+(\.\d{1,8})?$/.test(trimmed)) return null;
+    try {
+      return parseLythToLythoshi(trimmed);
+    } catch {
+      return null;
+    }
+  }, [amount]);
+
+  const maxFeeLythoshi = feePreview ? maxFeeLythoshiFrom(feePreview.fee) : null;
+
+  // "Max" sends the whole spendable balance minus the worst-case max fee, so
+  // the send + fee never exceeds the balance. Disabled until both the live
+  // balance and the live fee are known (we never guess the fee headroom).
+  const maxSpendableLythoshi =
+    balanceLythoshi !== null && maxFeeLythoshi !== null
+      ? balanceLythoshi - maxFeeLythoshi
+      : null;
+  const canFillMax = maxSpendableLythoshi !== null && maxSpendableLythoshi > 0n;
+
+  const onMax = () => {
+    if (maxSpendableLythoshi === null || maxSpendableLythoshi <= 0n) return;
+    setAmount(formatLyth(maxSpendableLythoshi.toString(), { includeUnit: false }));
+    setError(null);
+  };
+
+  const totalReserved =
+    amountLythoshi !== null && maxFeeLythoshi !== null
+      ? totalReservedLyth(amountLythoshi, maxFeeLythoshi)
+      : null;
 
   return (
     <div
@@ -257,7 +355,43 @@ export function SendComposeModal({ fromBech32m, onClose }: Props) {
           </div>
         )}
 
-        <label style={{ ...fieldLabel, marginTop: 12 }}>Amount (LYTH)</label>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            marginTop: 12,
+            marginBottom: 6,
+          }}
+        >
+          <label style={{ ...fieldLabel, marginBottom: 0 }}>Amount (LYTH)</label>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 11, color: "var(--fg-400)" }}>
+              Available{" "}
+              <span style={{ fontFamily: "var(--f-mono)", color: "var(--fg-200)" }}>
+                {balanceError
+                  ? "—"
+                  : balanceLyth === null
+                    ? "…"
+                    : `${balanceLyth} LYTH`}
+              </span>
+            </span>
+            <button
+              type="button"
+              className="btn btn--sm btn--ghost"
+              onClick={onMax}
+              disabled={!canFillMax}
+              title={
+                canFillMax
+                  ? "Send the full balance minus the max network fee"
+                  : "Live balance and fee required"
+              }
+              style={{ padding: "4px 10px", fontSize: 11 }}
+            >
+              Max
+            </button>
+          </div>
+        </div>
         <input
           type="text"
           inputMode="decimal"
@@ -269,6 +403,42 @@ export function SendComposeModal({ fromBech32m, onClose }: Props) {
           aria-label="Amount in LYTH"
           style={inputStyle}
         />
+
+        {/* In-compose fee + total — the SAME transfer fee the submit seam
+            resolves at broadcast. Shown as a MAX (maxFeePerGas × gasLimit),
+            never an exact post-execution charge. */}
+        <div
+          style={{
+            marginTop: 12,
+            padding: "10px 12px",
+            background: "rgba(255,255,255,0.03)",
+            border: "1px solid rgba(255,255,255,0.08)",
+            borderRadius: 10,
+            display: "grid",
+            gap: 6,
+          }}
+        >
+          <div style={feeRow}>
+            <span style={feeKey}>Network fee (max)</span>
+            <span style={feeVal}>
+              {feeError ? "unavailable" : feePreview === null ? "…" : `${feePreview.maxFeeLyth} LYTH`}
+            </span>
+          </div>
+          <div style={feeRow}>
+            <span style={feeKey}>Total (amount + fee)</span>
+            <span style={feeVal}>
+              {feeError
+                ? "—"
+                : totalReserved === null
+                  ? "—"
+                  : `${totalReserved} LYTH`}
+            </span>
+          </div>
+          <div style={{ fontSize: 10.5, color: "var(--fg-400)", lineHeight: 1.5 }}>
+            Fee is the maximum the chain reserves; the actual charge is
+            {" "}(base + tip) × units used and may be lower.
+          </div>
+        </div>
 
         <div
           style={{
@@ -355,6 +525,22 @@ const fieldLabel: React.CSSProperties = {
   textTransform: "uppercase",
   color: "var(--fg-400)",
   marginBottom: 6,
+};
+
+const feeRow: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  fontSize: 12,
+};
+
+const feeKey: React.CSSProperties = {
+  color: "var(--fg-400)",
+};
+
+const feeVal: React.CSSProperties = {
+  fontFamily: "var(--f-mono)",
+  color: "var(--fg-100)",
 };
 
 const inputStyle: React.CSSProperties = {
