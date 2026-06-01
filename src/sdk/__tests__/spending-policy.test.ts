@@ -19,6 +19,7 @@ import {
   ZERO_WORD,
   buildDisablePolicyCalldata,
   buildEnablePolicyCalldata,
+  buildSetPolicyCalldata,
   buildSetPolicyClaimCalldata,
   buildSpendingPolicyArgs,
   composePolicyClaimMessage,
@@ -109,6 +110,18 @@ describe("spending-policy §18.8 calldata", () => {
     const pubkey = backend.publicKey();
     const shortSig = backend.sign(composePolicyClaimMessage(args)).slice(0, 100);
     expect(() => buildSetPolicyClaimCalldata(args, pubkey, shortSig)).toThrow();
+  });
+
+  it("buildSetPolicyCalldata (existing-policy update) pins the no-claim setPolicy selector 0x8da1a765", () => {
+    expect(SPENDING_POLICY_SELECTORS.setPolicy).toBe("0x8da1a765");
+    const args = buildSpendingPolicyArgs(sampleForm());
+    const calldata = buildSetPolicyCalldata(args);
+    // The UPDATE path is setPolicy (no agent claim), NOT setPolicyClaim.
+    expect(calldata.slice(0, 10)).toBe("0x8da1a765");
+    expect(calldata.slice(0, 10)).not.toBe(SPENDING_POLICY_SELECTORS.setPolicyClaim);
+    // No pubkey/sig payload — much smaller than the claim calldata.
+    const calldataBytes = (calldata.length - 2) / 2;
+    expect(calldataBytes).toBeLessThan(1952 + 3309);
   });
 
   it("buildDisablePolicyCalldata (revoke) pins selector 0xe6c09edf", () => {
