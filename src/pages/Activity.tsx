@@ -8,12 +8,12 @@
 // re-render. This is the wallet's own tracked set, NOT the `lyth_mempoolPending`
 // snapshot below (which is the node's view and can include txs from elsewhere).
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { Denom } from "../data/types";
 import { ActivityDetail, type DetailRow } from "../components/ActivityDetail";
 import { TxRow } from "../components/TxRow";
 import { getProvider } from "../sdk/client";
-import { activityRowToTx } from "../sdk/activity-rows";
+import { activityDirection, activityRowToTx } from "../sdk/activity-rows";
 import { capture, loadLiveAddressActivity, type LiveAddressActivityRow, type RpcOutcome } from "../sdk/live";
 import { isZeroAmount, pendingOpLabel } from "../sdk/notifications";
 import type { PendingTx } from "../sdk/pending-tx";
@@ -51,6 +51,37 @@ export function Activity({ denom, experimentalEnabled }: Props) {
   // to master. Rows clear as the reconcile poller removes each resolved tx.
   const tracked = usePendingTxs();
   const showPending = experimentalEnabled && tracked.length > 0;
+
+  // Client-side filters over the already-loaded indexed-activity rows. The
+  // direction filter maps onto the row's normalised in/out direction; the
+  // token filter is the raw indexer token id (native rows are "LYTH").
+  const [dirFilter, setDirFilter] = useState<"all" | "in" | "out">("all");
+  const [tokenFilter, setTokenFilter] = useState<string>("all");
+
+  const activityRows = activity?.ok ? activity.value ?? [] : [];
+
+  // Distinct token options drawn from the loaded rows (native = "LYTH").
+  const tokenOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const row of activityRows) set.add(row.tokenId ?? "LYTH");
+    return Array.from(set).sort();
+  }, [activityRows]);
+
+  const filteredRows = useMemo(
+    () =>
+      activityRows.filter((row) => {
+        if (dirFilter !== "all" && activityDirection(row.direction) !== dirFilter) {
+          return false;
+        }
+        if (tokenFilter !== "all" && (row.tokenId ?? "LYTH") !== tokenFilter) {
+          return false;
+        }
+        return true;
+      }),
+    [activityRows, dirFilter, tokenFilter],
+  );
+
+  const filtersActive = dirFilter !== "all" || tokenFilter !== "all";
 
   const refreshPending = async () => {
     if (!walletAddress) {
@@ -170,21 +201,92 @@ export function Activity({ denom, experimentalEnabled }: Props) {
 
       <div className="w-card">
         <div className="w-card__head">
-          <h3>{activity?.ok && activity.value && activity.value.length > 0 ? "Live indexed activity" : denom === "public" ? "Recent" : "Private envelopes"}</h3>
+          <h3>{activityRows.length > 0 ? "Live indexed activity" : denom === "public" ? "Recent" : "Private envelopes"}</h3>
+          {activityRows.length > 0 ? (
+            <>
+              <span className="w-card__head__spacer" />
+              <div className="w-chip-group">
+                {(
+                  [
+                    { id: "all", label: "All" },
+                    { id: "in", label: "Received" },
+                    { id: "out", label: "Sent" },
+                  ] as const
+                ).map((o) => (
+                  <button
+                    key={o.id}
+                    type="button"
+                    className={`w-chip ${dirFilter === o.id ? "is-on" : ""}`}
+                    onClick={() => setDirFilter(o.id)}
+                  >
+                    {o.label}
+                  </button>
+                ))}
+              </div>
+              {tokenOptions.length > 1 ? (
+                <div className="w-chip-group">
+                  <button
+                    type="button"
+                    className={`w-chip ${tokenFilter === "all" ? "is-on" : ""}`}
+                    onClick={() => setTokenFilter("all")}
+                  >
+                    All tokens
+                  </button>
+                  {tokenOptions.map((tok) => (
+                    <button
+                      key={tok}
+                      type="button"
+                      className={`w-chip ${tokenFilter === tok ? "is-on" : ""}`}
+                      onClick={() => setTokenFilter(tok)}
+                    >
+                      {tok}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </>
+          ) : null}
         </div>
         <div className="w-card__body">
           {activity?.ok === false ? <div className="w-live-error">address activity: {activity.error}</div> : null}
-          {activity?.ok && activity.value && activity.value.length > 0 ? (
-            activity.value.map((row) => (
-              <TxRow
-                key={`${row.blockHeight}-${row.txIndex}-${row.logIndex}`}
-                tx={activityRowToTx(row, denom)}
-                onClick={() => setSelected(indexedRowToDetail(row))}
-              />
-            ))
+          {activityRows.length > 0 ? (
+            filteredRows.length > 0 ? (
+              filteredRows.map((row) => (
+                <TxRow
+                  key={`${row.blockHeight}-${row.txIndex}-${row.logIndex}`}
+                  tx={activityRowToTx(row, denom)}
+                  onClick={() => setSelected(indexedRowToDetail(row))}
+                />
+              ))
+            ) : (
+              <div className="w-empty">
+                <h4>No matching activity</h4>
+                <p>
+                  No rows match the current filter. Clear it to see every
+                  indexed transaction for this address.
+                </p>
+                {filtersActive ? (
+                  <button
+                    className="btn btn--sm"
+                    style={{ marginTop: 12 }}
+                    onClick={() => {
+                      setDirFilter("all");
+                      setTokenFilter("all");
+                    }}
+                  >
+                    Clear filters
+                  </button>
+                ) : null}
+              </div>
+            )
           ) : activity?.ok ? (
-            <div style={{ padding: "16px 0", color: "var(--w-text-3)", fontSize: 13 }}>
-              No indexed activity returned for this address.
+            <div className="w-empty">
+              <h4>No activity yet</h4>
+              <p>
+                {denom === "private"
+                  ? "Private-denomination activity is not exposed as public indexed rows."
+                  : "The indexer has no transactions for this address. Sent and received transfers appear here once they confirm."}
+              </p>
             </div>
           ) : (
             <div style={{ padding: "16px 0", color: "var(--w-text-3)", fontSize: 13 }}>
