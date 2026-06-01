@@ -17,13 +17,17 @@ import {
   encodeCompleteRedemptionCalldata,
   encodeDelegateCalldata,
   encodeRedelegateCalldata,
+  encodeSetAutoCompoundCalldata,
   encodeUndelegateCalldata,
+  formatLyth,
 } from "@monolythium/core-sdk";
 import type {
   ClusterDirectoryPageResponse,
   DelegationsResponse,
+  PendingRewardsResponse,
+  RedemptionQueueResponse,
 } from "@monolythium/core-sdk";
-import { requireTypedUserAddressHex } from "./address";
+import { requireTypedUserAddress, requireTypedUserAddressHex } from "./address";
 import { getProvider } from "./client";
 import { submitNativeTx } from "./submit";
 
@@ -73,6 +77,14 @@ export function buildClaimRewardsCalldata(): string {
   return encodeClaimCalldata();
 }
 
+/** `setAutoCompound(bool enabled)` calldata (chain-canonical selector
+ *  `0x86593454`). Persists whether the caller's pending rewards are
+ *  auto-restaked on settlement instead of becoming claimable. Submit via
+ *  `submitStakingTx` with `valueLythoshi: 0n`. */
+export function buildSetAutoCompoundCalldata(enabled: boolean): string {
+  return encodeSetAutoCompoundCalldata(enabled);
+}
+
 /** `completeRedemption(uint64 index)` calldata (chain-canonical selector
  *  `0x26169d0a`). Settles the matured redemption ticket at `index`,
  *  returning the queued principal to the caller and pruning the ticket.
@@ -95,6 +107,55 @@ export async function fetchDelegations(
 ): Promise<DelegationsResponse> {
   const hex = requireTypedUserAddressHex(walletBech32m, "wallet");
   return getProvider().rpcClient.lythGetDelegations(hex);
+}
+
+/** `lyth_pendingRewards` — settled + unsettled claimable delegation rewards
+ *  for a wallet, plus the wallet's auto-compound flag. Amounts are hex
+ *  lythoshi quantities. */
+export async function fetchPendingRewards(
+  walletBech32m: string,
+): Promise<PendingRewardsResponse> {
+  const typed = requireTypedUserAddress(walletBech32m, "wallet");
+  return getProvider().rpcClient.lythPendingRewards(typed);
+}
+
+/** `lyth_redemptionQueue` — the wallet's open unbonding/redemption tickets.
+ *  Each ticket carries the redeeming cluster + weight and a maturity height;
+ *  a matured ticket is settled with `completeRedemption(index)`. Note: the
+ *  ticket exposes weight (basis points), NOT a principal LYTH amount — the
+ *  delegation precompile tracks weight, so the wallet renders weight here
+ *  rather than a fabricated LYTH figure. */
+export async function fetchRedemptionQueue(
+  walletBech32m: string,
+): Promise<RedemptionQueueResponse> {
+  const typed = requireTypedUserAddress(walletBech32m, "wallet");
+  return getProvider().rpcClient.lythRedemptionQueue(typed);
+}
+
+/**
+ * Format a hex (or decimal) lythoshi quantity as a whole-LYTH decimal string
+ * for display. Tolerant of an empty / malformed value — collapses to "0" so a
+ * row still renders rather than throwing.
+ */
+export function formatRewardLyth(lythoshiHex: string | null | undefined): string {
+  if (!lythoshiHex) return "0";
+  try {
+    const wei = BigInt(lythoshiHex);
+    return formatLyth(wei.toString(), { includeUnit: false });
+  } catch {
+    return "0";
+  }
+}
+
+/** True when the wallet has any non-zero claimable reward (settled or
+ *  unsettled). Drives the Claim button's enabled state. */
+export function hasClaimableRewards(rewards: PendingRewardsResponse | null): boolean {
+  if (!rewards) return false;
+  try {
+    return BigInt(rewards.totalAmountLythoshi || "0x0") > 0n;
+  } catch {
+    return false;
+  }
 }
 
 /**
