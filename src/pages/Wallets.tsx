@@ -9,12 +9,22 @@
 // unusable, but adding a true keychain_delete Tauri command would be
 // the right follow-up.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { addressToTypedBech32 } from "@monolythium/core-sdk";
+
+/** Per-wallet live native-balance state. Each wallet tracks its own state so
+ *  one RPC failure renders an honest per-row error rather than blanking the
+ *  whole list or showing a fabricated zero. */
+type WalletBalanceState =
+  | { status: "loading" }
+  | { status: "ready"; balance: LiveWalletBalance }
+  | { status: "error"; error: string }
+  | { status: "no-address" };
 import { useOperations } from "../operations/context";
 import { AddVaultModal } from "../components/AddVaultModal";
 import { notifyActiveWalletChanged } from "../sdk/active-wallet";
 import { enumerateDevices, type LedgerDeviceInfo } from "../sdk/ledger";
+import { formatLyth } from "@monolythium/core-sdk";
 import {
   deriveLiveWalletIdentity,
   errorMessage,
@@ -45,6 +55,12 @@ export function Wallets() {
   const [devicesBusy, setDevicesBusy] = useState(false);
 
   const [vaults, setVaults] = useState<VaultEntry[]>([]);
+  // Per-wallet live native balance, keyed by slot. Each entry is its own
+  // loading / value / error state so one wallet's RPC failure never blocks
+  // the rest, and so the row renders an honest state (not a fabricated 0).
+  const [balances, setBalances] = useState<Map<string, WalletBalanceState>>(
+    new Map(),
+  );
   const [activeSlot, setActiveSlot] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
   const [renamingSlot, setRenamingSlot] = useState<string | null>(null);
@@ -72,6 +88,86 @@ export function Wallets() {
   useEffect(() => {
     void refreshCatalog();
   }, [refreshCatalog]);
+
+  // Fetch each wallet's live native balance. Runs whenever the vault list
+  // changes; a vault with no captured address (legacy / unlock-pending) is
+  // marked as such rather than queried. Keyed on the joined slot+address set
+  // so re-renders that don't change the wallets don't re-fetch.
+  const balanceKey = vaults.map((v) => `${v.slot}:${v.addressHex ?? ""}`).join("|");
+  useEffect(() => {
+    let cancelled = false;
+    const withAddress = vaults.filter((v) => v.addressHex);
+    // Seed the map: addressless vaults get a terminal "no address" state,
+    // address-bearing vaults start in "loading".
+    setBalances(() => {
+      const seed = new Map<string, WalletBalanceState>();
+      for (const v of vaults) {
+        seed.set(
+          v.slot,
+          v.addressHex
+            ? { status: "loading" }
+            : { status: "no-address" },
+        );
+      }
+      return seed;
+    });
+    for (const v of withAddress) {
+      const bech32m = addressToTypedBech32("user", v.addressHex as string);
+      void loadLiveWalletBalance(bech32m)
+        .then((b) => {
+          if (cancelled) return;
+          setBalances((prev) => {
+            const next = new Map(prev);
+            next.set(v.slot, { status: "ready", balance: b });
+            return next;
+          });
+        })
+        .catch((cause) => {
+          if (cancelled) return;
+          setBalances((prev) => {
+            const next = new Map(prev);
+            next.set(v.slot, { status: "error", error: errorMessage(cause) });
+            return next;
+          });
+        });
+    }
+    return () => {
+      cancelled = true;
+    };
+    // balanceKey captures the slot+address set; vaults is stable within a key.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [balanceKey]);
+
+  // Totals strip across every wallet whose balance has loaded. `loadedCount`
+  // vs `vaults.length` tells the user whether the total is partial.
+  const totals = useMemo(() => {
+    let lythoshi = 0n;
+    let loaded = 0;
+    let pending = 0;
+    let errored = 0;
+    for (const v of vaults) {
+      const state = balances.get(v.slot);
+      if (state?.status === "ready") {
+        try {
+          lythoshi += BigInt(state.balance.balanceLythoshi);
+          loaded += 1;
+        } catch {
+          errored += 1;
+        }
+      } else if (state?.status === "error") {
+        errored += 1;
+      } else if (state?.status === "loading") {
+        pending += 1;
+      }
+    }
+    return {
+      lyth: formatLyth(lythoshi.toString(), { includeUnit: false }),
+      loaded,
+      pending,
+      errored,
+      total: vaults.length,
+    };
+  }, [vaults, balances]);
 
   const onSetActive = async (slot: string) => {
     try {
@@ -188,6 +284,26 @@ export function Wallets() {
           </button>
         </div>
         <div className="w-card__body">
+          {vaults.length > 0 ? (
+            <div className="w-wallet-totals">
+              <div className="w-wallet-totals__cell">
+                <span className="k">Total balance</span>
+                <span className="v mono">{totals.lyth} LYTH</span>
+              </div>
+              <div className="w-wallet-totals__cell">
+                <span className="k">Est. value</span>
+                <span className="v" title="No price oracle is available on-chain.">—</span>
+              </div>
+              <div className="w-wallet-totals__cell">
+                <span className="k">Wallets</span>
+                <span className="v mono">
+                  {totals.loaded}/{totals.total} loaded
+                  {totals.pending > 0 ? ` · ${totals.pending} loading` : ""}
+                  {totals.errored > 0 ? ` · ${totals.errored} unavailable` : ""}
+                </span>
+              </div>
+            </div>
+          ) : null}
           {catalogError && (
             <div className="w-live-error">{catalogError}</div>
           )}
@@ -273,6 +389,16 @@ export function Wallets() {
                     </div>
                     <div className="row-help" style={{ marginTop: 2, fontSize: 10.5 }}>
                       slot {v.slot}
+                    </div>
+                  </div>
+                  <div style={{ textAlign: "right", flexShrink: 0 }}>
+                    <WalletBalanceLine state={balances.get(v.slot)} />
+                    <div
+                      className="row-help"
+                      style={{ marginTop: 2, fontSize: 10.5 }}
+                      title="No price oracle is available on-chain."
+                    >
+                      —
                     </div>
                   </div>
                 </div>
@@ -445,6 +571,33 @@ export function Wallets() {
           onAdded={() => void refreshCatalog()}
         />
       )}
+    </div>
+  );
+}
+
+/** One wallet's native balance, rendered from its per-wallet fetch state.
+ *  Honest about each state — never a fabricated zero. */
+function WalletBalanceLine({ state }: { state: WalletBalanceState | undefined }) {
+  if (!state || state.status === "loading") {
+    return <div className="row-label mono" style={{ color: "var(--fg-400)" }}>loading…</div>;
+  }
+  if (state.status === "no-address") {
+    return <div className="row-label mono" style={{ color: "var(--fg-400)" }}>unlock to derive</div>;
+  }
+  if (state.status === "error") {
+    return (
+      <div
+        className="row-label mono"
+        style={{ color: "var(--warn)" }}
+        title={state.error}
+      >
+        unavailable
+      </div>
+    );
+  }
+  return (
+    <div className="row-label mono">
+      {state.balance.balanceLyth} <span style={{ color: "var(--fg-400)" }}>LYTH</span>
     </div>
   );
 }
