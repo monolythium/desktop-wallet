@@ -16,6 +16,15 @@ import {
   writeDevkitChannel,
   type NativeDevkitChannel,
 } from "../sdk/studio-host";
+import {
+  LAYOUTS,
+  THEMES,
+  applyLayout,
+  applyTheme,
+  readLayout,
+  readTheme,
+  type LayoutId,
+} from "../sdk/theme";
 
 interface SettingsProps {
   developerModeEnabled: boolean;
@@ -28,8 +37,6 @@ interface SettingsProps {
 
 export function Settings({ developerModeEnabled, setDeveloperModeEnabled, steleEnabled, setSteleEnabled, experimentalEnabled, setExperimentalEnabled }: SettingsProps) {
   const wallet = useActiveWallet();
-  const [currency, setCurrency] = useState("USD");
-  const [compound, setCompound] = useState("always");
   const [devkitChannel, setDevkitChannel] = useState<NativeDevkitChannel>(() => readDevkitChannel());
 
   return (
@@ -38,6 +45,8 @@ export function Settings({ developerModeEnabled, setDeveloperModeEnabled, steleE
         <h1>Settings</h1>
         <div className="sub">Customize how your wallet looks and behaves.</div>
       </div>
+
+      <AppearanceCard />
 
       <ChainRegistryCard />
 
@@ -116,25 +125,7 @@ export function Settings({ developerModeEnabled, setDeveloperModeEnabled, steleE
         </div>
       </div>
 
-      <div className="w-card">
-        <div className="w-card__head"><h3>Preferences</h3></div>
-        <div className="w-card__body">
-          <ChipRow
-            label="Display currency"
-            help="Used to show estimated values next to balances."
-            value={currency}
-            options={["USD", "EUR", "GBP", "JPY", "None"]}
-            onChange={setCurrency}
-          />
-          <ChipRow
-            label="Auto-compound rewards"
-            help="Automatically restake earnings from your clusters."
-            value={compound}
-            options={["always", "weekly", "never"]}
-            onChange={setCompound}
-          />
-        </div>
-      </div>
+      <RecoveryPhraseCard />
 
       <div className="w-card">
         <div className="w-card__head"><h3>Security</h3></div>
@@ -332,6 +323,123 @@ function ChipRow<T extends string>({ label, help, value, options, onChange }: {
 function shortHex(s: string, head = 10, tail = 6): string {
   if (s.length <= head + tail + 1) return s;
   return `${s.slice(0, head)}…${s.slice(-tail)}`;
+}
+
+/**
+ * Appearance — the 12-palette theme picker + the sidebar/topbar layout
+ * toggle. Both write a `data-*` attribute on <html> and persist to
+ * localStorage via `sdk/theme`; `main.tsx` re-applies them before first
+ * paint on the next launch. The default theme ("monolythium") renders the
+ * native :root palette (no attribute).
+ */
+function AppearanceCard() {
+  const [theme, setTheme] = useState<string>(() => readTheme());
+  const [layout, setLayout] = useState<LayoutId>(() => readLayout());
+
+  const pickTheme = (id: string) => {
+    applyTheme(id);
+    setTheme(id);
+  };
+  const pickLayout = (id: LayoutId) => {
+    applyLayout(id);
+    setLayout(id);
+  };
+
+  return (
+    <div className="w-card">
+      <div className="w-card__head"><h3>Appearance</h3></div>
+      <div className="w-card__body">
+        <div style={{ marginBottom: 14 }}>
+          <div className="row-label">Theme</div>
+          <div className="row-help" style={{ marginBottom: 12 }}>
+            Pick a palette. Applies across the wallet and persists on this
+            device.
+          </div>
+          <div className="w-theme-grid">
+            {THEMES.map((t) => {
+              const active = t.id === theme;
+              return (
+                <button
+                  key={t.id}
+                  type="button"
+                  className={`w-theme-swatch ${active ? "is-on" : ""}`}
+                  onClick={() => pickTheme(t.id)}
+                  aria-pressed={active}
+                  title={t.desc}
+                >
+                  <span className="w-theme-swatch__top">
+                    <span
+                      className="w-theme-swatch__dot"
+                      style={{
+                        background: t.swatch,
+                        boxShadow: `0 0 12px ${t.swatch}55`,
+                      }}
+                    />
+                    <span className="w-theme-swatch__label">{t.label}</span>
+                    {active ? (
+                      <span className="w-theme-swatch__check" aria-hidden="true">
+                        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="m2 6 3 3 5-6" />
+                        </svg>
+                      </span>
+                    ) : null}
+                  </span>
+                  <span className="w-theme-swatch__desc">{t.desc}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+        <ChipRow
+          label="Layout"
+          help="Sidebar keeps a vertical rail on the left. Topbar moves navigation above the content."
+          value={layout}
+          options={LAYOUTS}
+          onChange={pickLayout}
+        />
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Recovery phrase. The local vault (src-tauri/src/vault.rs) seals only the
+ * 32-byte ML-DSA-65 SEED — the 24-word PQM-1 phrase is derived from the
+ * mnemonic one-way (SHAKE256 KDF, see `pqm1MnemonicToMlDsa65Seed`), so it
+ * cannot be reconstructed from what is stored. Onboarding shows the phrase
+ * once at setup; this surface is honest about that and never fakes a reveal.
+ *
+ * A real in-app reveal would require the Rust vault wire-format to ALSO seal
+ * the encrypted mnemonic (a separate, security-sensitive vault change). Until
+ * that lands, the only recovery path is the phrase the user wrote down at
+ * setup — which is what this card states.
+ */
+function RecoveryPhraseCard() {
+  return (
+    <div className="w-card">
+      <div className="w-card__head"><h3>Recovery phrase</h3></div>
+      <div className="w-card__body">
+        <div className="row-help" style={{ lineHeight: 1.6 }}>
+          Your 24-word PQM-1 recovery phrase was shown once when this wallet was
+          created. It is the only way to restore the wallet on another device.
+        </div>
+        <div className="w-setting-row">
+          <div>
+            <div className="row-label">Reveal recovery phrase</div>
+            <div className="row-help">
+              Not available in this build. The local vault stores only the
+              encrypted signing seed — the recovery phrase is derived from it
+              one way and is never written to disk, so it cannot be shown again
+              from here. Keep the copy you wrote down at setup; if you have
+              lost it, move your funds to a freshly created wallet whose phrase
+              you do record.
+            </div>
+          </div>
+          <button className="btn btn--sm" disabled>Unavailable</button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 /**
