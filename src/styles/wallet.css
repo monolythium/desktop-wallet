@@ -206,13 +206,19 @@ body[data-denom="private"] .w-nav__item.is-active::before {
   letter-spacing: -0.005em;
 }
 .w-top__spacer { flex: 1; }
+.w-top__sync-wrap { position: relative; display: inline-flex; }
 .w-top__sync {
   display: inline-flex; align-items: center; gap: 8px;
   padding: 6px 12px; border-radius: 10px;
   border: 1px solid var(--w-line);
   font-size: 12px; color: var(--fg-300);
   background: var(--w-bg);
+  cursor: pointer;
+  font-family: inherit;
+  transition: border-color 160ms var(--e-out), background 160ms var(--e-out);
 }
+.w-top__sync:hover { border-color: var(--fg-600); }
+.w-top__sync:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 .w-top__sync .dot {
   width: 8px; height: 8px; border-radius: 50%;
   background: var(--ok);
@@ -220,6 +226,87 @@ body[data-denom="private"] .w-nav__item.is-active::before {
 }
 .w-top__sync .dot.is-stale { background: var(--warn); box-shadow: 0 0 8px var(--warn); }
 .w-top__sync .dot.is-down  { background: var(--err);  box-shadow: 0 0 8px var(--err); }
+.w-top__sync__caret { display: inline-flex; opacity: 0.65; margin-left: 1px; }
+
+/* ============ Peer popover (sync-peer switcher) ============ */
+.w-peer-pop {
+  position: absolute; top: calc(100% + 10px); right: 0;
+  width: 360px;
+  background: #0e0e18;
+  border: 1px solid var(--fg-700);
+  border-radius: 12px;
+  box-shadow: 0 24px 60px -12px rgba(0,0,0,0.65), 0 0 0 1px rgba(0,0,0,0.4);
+  z-index: 200;
+  overflow: hidden;
+  color: var(--fg-100);
+  cursor: default;
+  animation: wPeerPopIn 160ms var(--e-out);
+}
+@keyframes wPeerPopIn { from { opacity: 0; transform: translateY(-4px); } }
+.w-peer-pop__head {
+  padding: 14px 16px 12px;
+  border-bottom: 1px solid var(--fg-700);
+}
+.w-peer-pop__head__title {
+  font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--fg-300);
+}
+.w-peer-pop__head__sub { font-size: 12.5px; color: var(--fg-200); margin-top: 4px; }
+.w-peer-pop__head__sub b { color: var(--fg-100); font-weight: 500; }
+.w-peer-pop__list { padding: 6px; max-height: 340px; overflow-y: auto; }
+.w-peer-row {
+  display: flex; align-items: center; gap: 12px;
+  width: 100%;
+  padding: 10px 12px; border-radius: 8px;
+  background: transparent; border: 1px solid transparent;
+  color: var(--fg-100); text-align: left; cursor: pointer;
+  transition: background 140ms var(--e-out), border-color 140ms var(--e-out);
+}
+.w-peer-row:hover { background: rgba(255,255,255,0.04); }
+.w-peer-row.is-on {
+  background: rgba(255,255,255,0.05);
+  border-color: var(--fg-700);
+}
+.w-peer-row.is-disabled { cursor: default; opacity: 0.6; }
+.w-peer-row.is-disabled:hover { background: transparent; }
+.w-peer-row__main { flex: 1; min-width: 0; }
+.w-peer-row__label {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 13px; font-weight: 500;
+  font-family: var(--f-mono); letter-spacing: -0.005em;
+}
+.w-peer-row__tag {
+  font-size: 9.5px; letter-spacing: 0.05em; text-transform: uppercase;
+  padding: 2px 6px; border-radius: 4px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid var(--fg-700);
+  color: var(--fg-300); font-weight: 400;
+}
+.w-peer-row__meta {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 11.5px; color: var(--fg-300); margin-top: 3px;
+}
+.w-peer-row__meta .sep { opacity: 0.4; }
+.w-peer-row__meta .mono { font-family: var(--f-mono); letter-spacing: -0.01em; overflow-wrap: anywhere; }
+.w-peer-row__stats {
+  text-align: right; font-family: var(--f-mono); font-size: 11px;
+  display: flex; flex-direction: column; gap: 2px;
+  min-width: 78px;
+}
+.w-peer-row__lat { font-weight: 500; color: var(--fg-300); }
+.w-peer-row__lat--ok   { color: var(--ok); }
+.w-peer-row__lat--warn { color: var(--warn); }
+.w-peer-row__lat--slow { color: var(--err); }
+.w-peer-row__height { color: var(--fg-300); }
+.w-peer-row__check {
+  display: flex; align-items: center; justify-content: center;
+  width: 16px; color: var(--gold);
+}
+.w-peer-pop__foot {
+  padding: 10px 12px;
+  border-top: 1px solid var(--fg-700);
+  display: flex; justify-content: flex-end;
+}
 .w-top__user {
   display: inline-flex; align-items: center; gap: 8px;
   padding: 6px 10px;
@@ -366,6 +453,18 @@ body[data-denom="private"] .w-nav__item.is-active::before {
   font-size: 12.5px;
   overflow-wrap: anywhere;
 }
+/* De-emphasized network/endpoint footer on the Tokens card. */
+.w-tokens__net {
+  display: flex; align-items: center; gap: 7px;
+  padding: 10px 18px;
+  border-top: 1px solid var(--fg-700);
+  font-size: 11px; color: var(--fg-400);
+}
+.w-tokens__net .dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--ok); box-shadow: 0 0 6px var(--ok);
+}
+.w-tokens__net .mono { color: var(--fg-300); overflow-wrap: anywhere; }
 .w-market-book {
   display: flex;
   flex-direction: column;
