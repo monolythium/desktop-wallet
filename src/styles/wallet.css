@@ -431,6 +431,7 @@ body[data-denom="private"] .w-nav__item.is-active::before {
 }
 .w-card__head {
   display: flex; align-items: center; gap: 12px;
+  flex-wrap: wrap; row-gap: 8px;
   padding: 14px 18px;
   border-bottom: 1px solid var(--fg-700);
 }
