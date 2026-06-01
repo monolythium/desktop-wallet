@@ -107,9 +107,12 @@ export function News() {
             <LiveCell label="Peers" value={status ? formatOutcome(status.peerCount, String) : "loading"} />
             <LiveCell label="Listening" value={status ? formatOutcome(status.listening, String) : "loading"} />
             <LiveCell label="Round" value={status ? formatOutcome(status.currentRound, (round) => round.height.toString()) : "loading"} />
+            <LiveCell label="Latest" value={status ? formatOutcome(status.chainStats, (stats) => stats.latestHeight.toString()) : "loading"} />
             <LiveCell label="Precompiles" value={status ? formatOutcome(status.activePrecompiles, (rows) => rows.length.toString()) : "loading"} />
           </div>
           {status ? <div className="row-help">Endpoint: <span className="mono">{status.endpoint}</span></div> : null}
+          {status?.chainStats.ok ? <div className="row-help">Genesis: <span className="mono">{status.chainStats.value?.genesisHash ?? "unknown"}</span></div> : null}
+          {status?.chainStats.ok === false ? <div className="w-live-error">chainStats: {status.chainStats.error}</div> : null}
           {status?.clientVersion.ok ? <div className="row-help">Client: <span className="mono">{status.clientVersion.value}</span></div> : null}
           {status?.clientVersion.ok === false ? <div className="w-live-error">clientVersion: {status.clientVersion.error}</div> : null}
           {status?.mempoolStatus.ok ? <div className="row-help">Mempool: <span className="mono">{compact(status.mempoolStatus.value)}</span></div> : null}

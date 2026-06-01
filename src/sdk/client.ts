@@ -9,11 +9,28 @@ import { RpcClient, SdkError, formatLyth, getRpcEndpoints } from "@monolythium/c
 import type { RpcClientOptions } from "@monolythium/core-sdk";
 import { rpcClientOptions } from "./http";
 
+export const MONOLYTHIUM_TESTNET_RPC_GATEWAY = "https://rpc.monolythium.com";
+
+const TESTNET_RPC_ENDPOINTS = getRpcEndpoints("testnet-69420").map((endpoint) => endpoint.url);
+
+export interface EndpointEnv {
+  readonly VITE_MONO_RPC_URL?: string;
+  readonly DEV?: boolean;
+}
+
+export function sdkTestnetRpcEndpoints(): readonly string[] {
+  return TESTNET_RPC_ENDPOINTS;
+}
+
+export function resolveDefaultEndpoint(env: EndpointEnv = import.meta.env): string {
+  const fromEnv = env.VITE_MONO_RPC_URL?.trim();
+  if (fromEnv) return fromEnv;
+  if (env.DEV) return "/rpc";
+  return MONOLYTHIUM_TESTNET_RPC_GATEWAY;
+}
+
 function defaultEndpoint(): string {
-  const fromEnv = import.meta.env.VITE_MONO_RPC_URL;
-  if (typeof fromEnv === "string" && fromEnv.length > 0) return fromEnv;
-  if (import.meta.env.DEV) return "/rpc";
-  return getRpcEndpoints("testnet-69420")[0]?.url ?? "http://localhost:8548";
+  return resolveDefaultEndpoint(import.meta.env);
 }
 
 export interface MonolythiumClient {

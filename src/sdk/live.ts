@@ -5,6 +5,7 @@ import type {
   ApiHealthResponse,
   ApiQueryValue,
   ApiStreamsIndexResponse,
+  ChainStatsResponse,
   ClobMarketsResponse,
   ClobOrderBookResponse,
   ClobTradesResponse,
@@ -32,6 +33,7 @@ export interface LiveNetworkStatus {
   listening: RpcOutcome<boolean>;
   clientVersion: RpcOutcome<string>;
   syncing: RpcOutcome<unknown>;
+  chainStats: RpcOutcome<ChainStatsResponse>;
   currentRound: RpcOutcome<{ height: bigint }>;
   syncStatus: RpcOutcome<unknown | null>;
   indexerStatus: RpcOutcome<unknown | null>;
@@ -131,6 +133,7 @@ export async function loadLiveNetworkStatus(): Promise<LiveNetworkStatus> {
     listening,
     clientVersion,
     syncing,
+    chainStats,
     currentRound,
     syncStatus,
     indexerStatus,
@@ -143,6 +146,7 @@ export async function loadLiveNetworkStatus(): Promise<LiveNetworkStatus> {
     capture(() => client.netListening()),
     capture(() => client.web3ClientVersion()),
     capture(() => client.ethSyncing()),
+    capture(() => client.lythChainStats()),
     capture(() => client.lythCurrentRound()),
     capture(() => client.lythSyncStatus()),
     capture(() => client.lythIndexerStatus()),
@@ -157,6 +161,7 @@ export async function loadLiveNetworkStatus(): Promise<LiveNetworkStatus> {
     listening,
     clientVersion,
     syncing,
+    chainStats,
     currentRound,
     syncStatus,
     indexerStatus,
