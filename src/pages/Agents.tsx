@@ -20,9 +20,10 @@ import {
   formatLyth,
   parseLythToLythoshi,
 } from "@monolythium/core-sdk";
-import type { SpendingPolicyView } from "@monolythium/core-sdk";
+import type { SpendingPolicyArgs, SpendingPolicyView } from "@monolythium/core-sdk";
 import { useOperations } from "../operations/context";
 import { fetchAndUnlockVault } from "../sdk/keychain";
+import { errorMessage, loadLiveWalletBalance } from "../sdk/live";
 import { getActiveVault } from "../sdk/vaultCatalog";
 import {
   createAgentSubAccount,
@@ -31,6 +32,8 @@ import {
 } from "../sdk/agent-subaccount";
 import {
   buildDisablePolicyCalldata,
+  buildEnablePolicyCalldata,
+  buildSetPolicyCalldata,
   buildSetPolicyClaimCalldata,
   buildSpendingPolicyArgs,
   fetchSpendingPolicy,
@@ -78,6 +81,12 @@ export function Agents() {
     bech32m: string;
     mnemonic: string;
   } | null>(null);
+
+  // Pending WYSIWYS policy review. Set when the user has filled the policy
+  // form; the review surface renders EVERY signed term and only on confirm
+  // does the operation route through the drawer. `isUpdate` picks the
+  // no-claim setPolicy path (existing policy) over setPolicyClaim (fresh).
+  const [review, setReview] = useState<PolicyReviewState | null>(null);
 
   const refresh = async () => {
     setBusy(true);
@@ -149,7 +158,7 @@ export function Agents() {
     }
   };
 
-  const openFund = (agent: AgentEntry) => {
+  const openFund = async (agent: AgentEntry) => {
     let amountLyth = "10";
     // The amount prompt is intentionally minimal: a window.prompt keeps the
     // funding flow one tap; the OperationsDrawer is the real confirmation.
@@ -159,12 +168,41 @@ export function Agents() {
     );
     if (entered === null) return;
     amountLyth = entered.trim();
-    let amountLythoshi: string;
+    let amountLythoshi: bigint;
     try {
-      amountLythoshi = parseLythToLythoshi(amountLyth).toString();
+      amountLythoshi = parseLythToLythoshi(amountLyth);
     } catch {
       window.alert("Enter a valid LYTH amount.");
       return;
+    }
+    if (amountLythoshi <= 0n) {
+      window.alert("Enter a positive LYTH amount.");
+      return;
+    }
+
+    // Sufficiency check BEFORE opening the drawer: read the principal's live
+    // native balance and refuse to open an execute that the chain would reject
+    // for insufficient funds. A balance-read failure (RPC offline) only warns
+    // — we don't block the user from trying, since the drawer surfaces the
+    // real on-chain error verbatim either way.
+    if (principalBech32m) {
+      try {
+        const bal = await loadLiveWalletBalance(principalBech32m);
+        const have = BigInt(bal.balanceLythoshi);
+        if (have < amountLythoshi) {
+          window.alert(
+            `Insufficient balance. The principal holds ${bal.balanceLyth} LYTH ` +
+              `but ${amountLyth} LYTH is needed (plus fees). Fund the principal first.`,
+          );
+          return;
+        }
+      } catch (cause) {
+        const proceed = window.confirm(
+          `Could not check the principal's balance (${errorMessage(cause)}). ` +
+            `Continue anyway? The transaction will fail on-chain if funds are short.`,
+        );
+        if (!proceed) return;
+      }
     }
 
     ops.open({
@@ -198,14 +236,47 @@ export function Agents() {
     });
   };
 
+  // Step 1 of the policy flow: collect the form, build the canonical args, and
+  // open the WYSIWYS review surface. NOTHING is signed or submitted here — the
+  // review must show every signed term first (§25 WYSIWYS parity with the
+  // browser wallet's T3-01). `existing` decides the eventual selector.
   const openRegister = (agent: AgentEntry) => {
     if (!principalBech32m) {
       window.alert("No active principal wallet address resolved.");
       return;
     }
-    const form = collectPolicyForm();
+    const existing = policies.get(agent.slot)?.exists === true;
+    const form = collectPolicyForm(existing);
     if (!form) return;
-    const { fields, agentPassword } = form;
+    let args: SpendingPolicyArgs;
+    try {
+      args = buildSpendingPolicyArgs({
+        ...form.fields,
+        subAccount: agent.bech32m,
+        principal: principalBech32m,
+      });
+    } catch (cause) {
+      window.alert(errorMessage(cause));
+      return;
+    }
+    setReview({
+      agent,
+      principalBech32m,
+      fields: form.fields,
+      agentPassword: form.agentPassword,
+      args,
+      isUpdate: existing,
+    });
+  };
+
+  // Step 2: the user has seen every signed term in the review surface and
+  // confirmed. Route through the OperationsDrawer with the CORRECT selector —
+  // setPolicy (no-claim) when amending an existing policy, setPolicyClaim
+  // (fresh agent claim) when binding a brand-new sub-account.
+  const confirmRegister = (state: PolicyReviewState) => {
+    const { agent, principalBech32m: principal, fields, agentPassword, args, isUpdate } =
+      state;
+    setReview(null);
 
     const capLine = (lythoshi: bigint) =>
       lythoshi === 0n
@@ -213,11 +284,15 @@ export function Agents() {
         : `${formatLyth(lythoshi.toString(), { includeUnit: false })} LYTH`;
 
     ops.open({
-      title: `Register policy · ${agent.label}`,
-      subtitle: "Bind a §18.8 spending policy to the agent (setPolicyClaim)",
+      title: isUpdate
+        ? `Update policy · ${agent.label}`
+        : `Register policy · ${agent.label}`,
+      subtitle: isUpdate
+        ? "Amend the agent's §18.8 spending policy (setPolicy, no-claim)"
+        : "Bind a §18.8 spending policy to the agent (setPolicyClaim)",
       auth: "keychain",
       diff: [
-        { k: "Principal", v: principalBech32m },
+        { k: "Principal", v: principal },
         { k: "Agent", v: agent.bech32m },
         { k: "Per-tx cap", v: capLine(fields.perTxCapLythoshi) },
         { k: "Daily cap", v: capLine(fields.dailyCapLythoshi) },
@@ -244,12 +319,21 @@ export function Agents() {
       ],
       effects: [
         { text: "Unlocks the principal vault for this operation only." },
-        {
-          text: "Unlocks the agent vault transiently to sign the claim-bound message (its own ML-DSA-65 key). The agent seed is zeroized after signing.",
-        },
-        {
-          text: "Encodes setPolicyClaim(args, agentPubkey[1952B], agentSig[3309B]) via @monolythium/core-sdk — the fresh-sub-account claim path, NOT setPolicy.",
-        },
+        isUpdate
+          ? {
+              text: "Encodes setPolicy(args) via @monolythium/core-sdk — the no-claim UPDATE path for an existing sub-account. The principal alone is authorised to amend its own bound agent, so no fresh agent signature is taken.",
+            }
+          : {
+              text: "Unlocks the agent vault transiently to sign the claim-bound message (its own ML-DSA-65 key). The agent seed is zeroized after signing.",
+            },
+        isUpdate
+          ? {
+              text: "No agent vault unlock is required for an update — only the principal signs + submits.",
+              level: "info",
+            }
+          : {
+              text: "Encodes setPolicyClaim(args, agentPubkey[1952B], agentSig[3309B]) via @monolythium/core-sdk — the fresh-sub-account claim path, NOT setPolicy.",
+            },
         {
           text: "Counterparty allow/deny + category constraints ship as no-constraint (zero) Merkle roots in this build — see the note below the form.",
           level: "info",
@@ -263,23 +347,64 @@ export function Agents() {
         if (!ctx?.vaultSeed) {
           throw new Error("vault seed unavailable after keychain authorization");
         }
-        const args = buildSpendingPolicyArgs({
-          ...fields,
-          subAccount: agent.bech32m,
-          principal: principalBech32m,
-        });
-        // Two-key dance: unlock the AGENT vault transiently to produce its
-        // pubkey + signature over the claim-bound message. The principal
-        // seed (ctx.vaultSeed) signs + submits the outer tx.
-        const agentSeed = await fetchAndUnlockVault(agent.slot, agentPassword);
-        const { pubkey, sig } = signClaimAsSubAccount(agentSeed, args); // zeroizes agentSeed
-        const calldata = buildSetPolicyClaimCalldata(args, pubkey, sig);
+        let calldata: string;
+        if (isUpdate) {
+          // No-claim update: the principal amends its own existing policy.
+          calldata = buildSetPolicyCalldata(args);
+        } else {
+          // Two-key dance: unlock the AGENT vault transiently to produce its
+          // pubkey + signature over the claim-bound message. The principal
+          // seed (ctx.vaultSeed) signs + submits the outer tx.
+          const agentSeed = await fetchAndUnlockVault(agent.slot, agentPassword);
+          const { pubkey, sig } = signClaimAsSubAccount(agentSeed, args); // zeroizes agentSeed
+          calldata = buildSetPolicyClaimCalldata(args, pubkey, sig);
+        }
         const r = await submitSpendingPolicyTx({
           seed: ctx.vaultSeed,
           data: calldata,
         });
         return {
-          headline: `Policy registered for ${agent.label}`,
+          headline: isUpdate
+            ? `Policy updated for ${agent.label}`
+            : `Policy registered for ${agent.label}`,
+          detail: r.txHash,
+        };
+      },
+    });
+  };
+
+  // Re-enable a previously-disabled policy (selector 0x5bfa1b68). Cheap toggle
+  // — no claim payload, principal signs + submits. Mirrors the revoke path.
+  const openEnable = (agent: AgentEntry) => {
+    ops.open({
+      title: `Enable policy · ${agent.label}`,
+      subtitle: "Re-enable the agent's disabled spending policy",
+      auth: "keychain",
+      diff: [
+        { k: "Agent", v: agent.bech32m },
+        { k: "Action", v: "enable" },
+        { k: "Precompile", v: PRECOMPILE_LABEL },
+      ],
+      effects: [
+        { text: "Unlocks the principal vault for this operation only." },
+        { text: "Encodes enable(subAccount) via @monolythium/core-sdk; the retained policy slot becomes spendable again under its existing caps." },
+        {
+          text: "Chain rejects at the precompile gate if spending-policy is gated off on this network — verbatim error surfaces here.",
+          level: "warn",
+        },
+      ],
+      execute: async (ctx) => {
+        if (!ctx?.vaultSeed) {
+          throw new Error("vault seed unavailable after keychain authorization");
+        }
+        const calldata = buildEnablePolicyCalldata(agent.bech32m);
+        const r = await submitSpendingPolicyTx({
+          seed: ctx.vaultSeed,
+          data: calldata,
+          executionUnitLimit: POLICY_TOGGLE_LIMIT,
+        });
+        return {
+          headline: `Policy enabled for ${agent.label}`,
           detail: r.txHash,
         };
       },
@@ -511,7 +636,7 @@ export function Agents() {
                     )}
                   </div>
                   <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
-                    <button className="btn btn--sm" onClick={() => openFund(agent)}>
+                    <button className="btn btn--sm" onClick={() => void openFund(agent)}>
                       Fund
                     </button>
                     <button
@@ -526,6 +651,14 @@ export function Agents() {
                         onClick={() => openRevoke(agent)}
                       >
                         Revoke
+                      </button>
+                    ) : null}
+                    {view?.exists && !view.enabled ? (
+                      <button
+                        className="btn btn--sm"
+                        onClick={() => openEnable(agent)}
+                      >
+                        Enable
                       </button>
                     ) : null}
                     <button
@@ -548,8 +681,28 @@ export function Agents() {
           </div>
         </div>
       </div>
+
+      {review ? (
+        <PolicyReviewModal
+          state={review}
+          onCancel={() => setReview(null)}
+          onConfirm={() => confirmRegister(review)}
+        />
+      ) : null}
     </div>
   );
+}
+
+/** Pending WYSIWYS policy review — everything needed to render the signed
+ *  terms and (on confirm) submit with the correct selector. */
+interface PolicyReviewState {
+  agent: AgentEntry;
+  principalBech32m: string;
+  fields: PolicyFields;
+  agentPassword: string;
+  args: SpendingPolicyArgs;
+  /** true → existing policy (setPolicy, no-claim); false → fresh (setPolicyClaim). */
+  isUpdate: boolean;
 }
 
 interface PolicyFields {
@@ -563,12 +716,17 @@ interface PolicyFields {
 
 /**
  * Collect the policy form via sequential prompts. Kept minimal on purpose:
- * the OperationsDrawer is the real confirmation surface; this is the input
- * capture. Returns null if the user cancels at any step.
+ * the WYSIWYS review surface confirms the signed terms and the
+ * OperationsDrawer is the auth gate; this is just input capture. Returns null
+ * if the user cancels at any step.
+ *
+ * `existing` (an already-bound policy) skips the agent-vault password prompt:
+ * the no-claim `setPolicy` UPDATE path is signed by the principal alone, so no
+ * fresh agent signature — and therefore no agent unlock — is needed.
  */
-function collectPolicyForm():
-  | { fields: PolicyFields; agentPassword: string }
-  | null {
+function collectPolicyForm(
+  existing: boolean,
+): { fields: PolicyFields; agentPassword: string } | null {
   const perTx = window.prompt("Per-transaction cap in LYTH (blank = no cap)", "1");
   if (perTx === null) return null;
   const daily = window.prompt("Daily cap in LYTH (blank = no cap)", "10");
@@ -587,11 +745,15 @@ function collectPolicyForm():
     "",
   );
   if (expiryRaw === null) return null;
-  const agentPassword = window.prompt(
-    "Agent vault password (to sign the policy claim with the agent key)",
-    "",
-  );
-  if (agentPassword === null || agentPassword.length === 0) return null;
+  let agentPassword = "";
+  if (!existing) {
+    const entered = window.prompt(
+      "Agent vault password (to sign the policy claim with the agent key)",
+      "",
+    );
+    if (entered === null || entered.length === 0) return null;
+    agentPassword = entered;
+  }
 
   const toLythoshi = (s: string): bigint => {
     const t = s.trim();
@@ -639,6 +801,136 @@ function collectPolicyForm():
   }
 
   return { fields, agentPassword };
+}
+
+/**
+ * WYSIWYS policy-review surface (§25 / browser-wallet T3-01 parity). Before
+ * any key signs the policy, render EVERY term the principal (and, for a fresh
+ * sub-account, the agent) is about to sign — caps, allow/deny + category
+ * roots, the time window, expiry — sourced from the canonical
+ * {@link SpendingPolicyArgs}, not just a hash. The drawer (auth + execute)
+ * only opens after the user confirms here.
+ */
+function PolicyReviewModal({
+  state,
+  onCancel,
+  onConfirm,
+}: {
+  state: PolicyReviewState;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const { agent, principalBech32m, args, isUpdate } = state;
+
+  const capLine = (lythoshi: bigint | number | string) => {
+    const v = BigInt(lythoshi);
+    return v === 0n
+      ? "No cap"
+      : `${formatLyth(v.toString(), { includeUnit: false })} LYTH`;
+  };
+  // Render a Merkle root only when it constrains anything (non-zero word);
+  // a zero root means "no constraint" and is shown as such, never hidden —
+  // the user must see that allow/deny/category lists are open.
+  const rootLine = (
+    root: string | Uint8Array | readonly number[] | undefined,
+  ) => {
+    if (root == null) return "No constraint (open)";
+    const hex =
+      typeof root === "string"
+        ? root
+        : `0x${Array.from(root, (b) => b.toString(16).padStart(2, "0")).join("")}`;
+    if (/^0x0*$/i.test(hex)) return "No constraint (open)";
+    return `${hex.slice(0, 10)}…${hex.slice(-6)}`;
+  };
+
+  // Decode the packed 32-byte time window (low 3 bytes: enabled, start, end).
+  const tw = args.timeWindow;
+  const twBytes =
+    typeof tw === "string"
+      ? hexWordToBytes(tw)
+      : tw instanceof Uint8Array
+        ? tw
+        : Uint8Array.from(tw as readonly number[]);
+  const twEnabled = twBytes.length >= 32 && twBytes[29] === 0x01;
+  const windowLine = twEnabled
+    ? `${String(twBytes[30]).padStart(2, "0")}:00–${String(twBytes[31]).padStart(2, "0")}:00`
+    : "Any time";
+
+  const expiry = BigInt(args.policyExpiry ?? 0n);
+  const expiryLine =
+    expiry > 0n ? new Date(Number(expiry) * 1000).toISOString() : "Never";
+
+  return (
+    <div
+      onClick={onCancel}
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(0,0,0,0.55)",
+        backdropFilter: "blur(6px)",
+        WebkitBackdropFilter: "blur(6px)",
+        zIndex: 30,
+        display: "grid",
+        placeItems: "center",
+        padding: 24,
+      }}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Review spending policy"
+        onClick={(e) => e.stopPropagation()}
+        className="w-card"
+        style={{ maxWidth: 460, width: "100%", maxHeight: "90vh", overflowY: "auto" }}
+      >
+        <div className="w-card__head">
+          <h3>{isUpdate ? "Review policy update" : "Review spending policy"}</h3>
+        </div>
+        <div className="w-card__body">
+          <div className="row-help" style={{ marginBottom: 12, lineHeight: 1.6 }}>
+            {isUpdate
+              ? "The principal signs these exact terms into the updated policy. Confirm every line before authorising."
+              : "The agent signs these exact terms into the claim, and the principal signs + submits them. Confirm every line — this is what is cryptographically bound, not just a hash."}
+          </div>
+
+          <div className="w-kv"><span className="k">Principal</span><span className="v mono" style={{ fontSize: 11 }}>{principalBech32m}</span></div>
+          <div className="w-kv"><span className="k">Agent</span><span className="v mono" style={{ fontSize: 11 }}>{agent.bech32m}</span></div>
+          <div className="w-kv"><span className="k">Per-tx cap</span><span className="v">{capLine(args.perTxCapLythoshi)}</span></div>
+          <div className="w-kv"><span className="k">Daily cap</span><span className="v">{capLine(args.dailyCapLythoshi)}</span></div>
+          <div className="w-kv"><span className="k">Weekly cap</span><span className="v">{capLine(args.weeklyCapLythoshi ?? 0n)}</span></div>
+          <div className="w-kv"><span className="k">Monthly cap</span><span className="v">{capLine(args.monthlyCapLythoshi ?? 0n)}</span></div>
+          <div className="w-kv"><span className="k">Allow-list root</span><span className="v mono" style={{ fontSize: 11 }}>{rootLine(args.allowRoot)}</span></div>
+          <div className="w-kv"><span className="k">Deny-list root</span><span className="v mono" style={{ fontSize: 11 }}>{rootLine(args.denyRoot)}</span></div>
+          <div className="w-kv"><span className="k">Category root</span><span className="v mono" style={{ fontSize: 11 }}>{rootLine(args.categoryAllowRoot)}</span></div>
+          <div className="w-kv"><span className="k">Time window</span><span className="v">{windowLine}</span></div>
+          <div className="w-kv"><span className="k">Expiry</span><span className="v">{expiryLine}</span></div>
+          <div className="w-kv"><span className="k">Selector</span><span className="v mono">{isUpdate ? "setPolicy · 0x8da1a765" : "setPolicyClaim · 0x35531f6c"}</span></div>
+
+          <div className="row-help" style={{ marginTop: 12, lineHeight: 1.6, color: "var(--warn)" }}>
+            The precompile may be milestone-gated on the active network. If it
+            is, the chain returns a typed error and nothing is committed.
+          </div>
+
+          <div style={{ display: "flex", gap: 8, marginTop: 18, justifyContent: "flex-end" }}>
+            <button className="btn btn--sm" onClick={onCancel}>Cancel</button>
+            <button className="btn btn--sm btn--primary" onClick={onConfirm}>
+              {isUpdate ? "Confirm update" : "Confirm & sign"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Parse a `0x…` 32-byte word into its byte array (left-padded to 32). */
+function hexWordToBytes(hex: string): Uint8Array {
+  const clean = hex.replace(/^0x/i, "").padStart(64, "0").slice(-64);
+  const out = new Uint8Array(32);
+  for (let i = 0; i < 32; i++) {
+    out[i] = parseInt(clean.slice(i * 2, i * 2 + 2), 16) || 0;
+  }
+  return out;
 }
 
 const inputStyle: React.CSSProperties = {
