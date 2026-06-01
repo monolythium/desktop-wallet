@@ -55,7 +55,7 @@ export function Onboarding({ onDone }: Props) {
   const [importError, setImportError] = useState<string | null>(null);
 
   const canSubmit =
-    !busy && password.length >= 8 && password === confirm && acknowledged;
+    !busy && password.length >= 12 && password === confirm && acknowledged;
 
   const beginCreate = () => {
     setIsImport(false);
@@ -296,7 +296,7 @@ export function Onboarding({ onDone }: Props) {
             <p style={{ margin: "0 0 24px", color: "var(--w-text-2)", fontSize: 13 }}>
               The password unwraps a signing key encrypted with Argon2id and
               AES-256-GCM. We never store the password itself, only the
-              encrypted vault. Pick at least 8 characters.
+              encrypted vault. Pick at least 12 characters.
             </p>
 
             <label className="w-onboarding__field">
@@ -326,9 +326,9 @@ export function Onboarding({ onDone }: Props) {
               />
             </label>
 
-            {password && password.length < 8 ? (
+            {password && password.length < 12 ? (
               <div className="w-banner" style={{ marginTop: 12 }}>
-                Password must be at least 8 characters.
+                Password must be at least 12 characters.
               </div>
             ) : null}
             {confirm && password !== confirm ? (
