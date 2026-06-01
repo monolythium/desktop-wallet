@@ -12,6 +12,13 @@ import type {
 import { findOrderBookStreamTopic } from "../sdk/market";
 import { formatOutcome, loadLiveTradeStatus, type LiveTradeStatus } from "../sdk/live";
 import { cancelClobOrder, placeClobLimitOrder } from "../sdk/clob-trade";
+import {
+  SPOT_DEFAULT_DECIMALS,
+  atomPriceToHuman,
+  humanPriceToAtoms,
+  humanQuantityToAtoms,
+  notionalQuoteAtoms,
+} from "../sdk/clob-units";
 import { useOperations } from "../operations/context";
 
 export function Trade() {
@@ -159,6 +166,8 @@ export function Trade() {
         marketId={selected?.marketId ?? null}
         baseTokenIdHex={nativeMarket?.baseAssetId ?? null}
         quoteTokenIdHex={nativeMarket?.quoteAssetId ?? null}
+        market={nativeMarket}
+        blockHeight={status?.blockHeight ?? null}
         bestBidPrice={book?.bids?.[0]?.price ?? null}
         bestAskPrice={book?.asks?.[0]?.price ?? null}
         lastPrice={trades[0]?.price ?? null}
@@ -184,10 +193,21 @@ export function Trade() {
   );
 }
 
+// Order-expiry presets, in blocks from the current head. "GTC" = never expires
+// (`expiresAtBlock = 0`, the CLOB sentinel for good-till-cancelled).
+const EXPIRY_PRESETS: Array<{ label: string; blocks: number | null }> = [
+  { label: "GTC", blocks: null },
+  { label: "1k blocks", blocks: 1_000 },
+  { label: "10k blocks", blocks: 10_000 },
+  { label: "100k blocks", blocks: 100_000 },
+];
+
 function PlaceLimitOrderCard({
   marketId,
   baseTokenIdHex,
   quoteTokenIdHex,
+  market,
+  blockHeight,
   bestBidPrice,
   bestAskPrice,
   lastPrice,
@@ -195,48 +215,95 @@ function PlaceLimitOrderCard({
   marketId: string | null;
   baseTokenIdHex: string | null;
   quoteTokenIdHex: string | null;
+  market: NativeSpotMarketStateRecord | null;
+  blockHeight: bigint | null;
   bestBidPrice: string | null;
   bestAskPrice: string | null;
   lastPrice: string | null;
 }) {
   const ops = useOperations();
   const [side, setSide] = useState<SpotLimitOrderSide>("buy");
+  // Human-unit entry (whole tokens), converted to atoms on submit.
   const [price, setPrice] = useState<string>("");
   const [quantity, setQuantity] = useState<string>("");
+  const [expiryBlocks, setExpiryBlocks] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Seed the price field with the touching side once we have book data.
+  // Both legs of the native LYTH spot market are LYTH-decimals. There is no
+  // per-asset decimals registry, so we use the native scale and state it in
+  // the UI rather than silently guessing a foreign token's scale.
+  const baseDecimals = SPOT_DEFAULT_DECIMALS;
+  const quoteDecimals = SPOT_DEFAULT_DECIMALS;
+
+  // Seed the price field with the touching side once we have book data. The
+  // book carries atom prices; show them as the human price so the seed matches
+  // the human-unit field.
   useEffect(() => {
     if (price) return;
-    const seed = side === "buy" ? bestAskPrice ?? lastPrice : bestBidPrice ?? lastPrice;
-    if (seed) setPrice(seed);
-  }, [side, bestBidPrice, bestAskPrice, lastPrice, price]);
+    const seedAtoms = side === "buy" ? bestAskPrice ?? lastPrice : bestBidPrice ?? lastPrice;
+    if (seedAtoms) {
+      const human = atomPriceToHuman(seedAtoms, baseDecimals, quoteDecimals);
+      if (human) setPrice(human);
+    }
+  }, [side, bestBidPrice, bestAskPrice, lastPrice, price, baseDecimals, quoteDecimals]);
+
+  const priceAtoms =
+    price.trim() === "" ? null : humanPriceToAtoms(price.trim(), baseDecimals, quoteDecimals);
+  const quantityAtoms =
+    quantity.trim() === "" ? null : humanQuantityToAtoms(quantity.trim(), baseDecimals);
+  const notionalAtoms =
+    priceAtoms !== null && quantityAtoms !== null
+      ? notionalQuoteAtoms(priceAtoms, quantityAtoms)
+      : null;
+
+  const priceTooPrecise = price.trim() !== "" && priceAtoms === null;
+  const quantityTooPrecise = quantity.trim() !== "" && quantityAtoms === null;
 
   const canSubmit =
     Boolean(baseTokenIdHex && quoteTokenIdHex) &&
-    /^\d+$/.test(price.trim()) &&
-    /^\d+$/.test(quantity.trim()) &&
-    BigInt(price || "0") > 0n &&
-    BigInt(quantity || "0") > 0n;
+    priceAtoms !== null &&
+    priceAtoms > 0n &&
+    quantityAtoms !== null &&
+    quantityAtoms > 0n;
+
+  // Resolve the expiry block from "in N blocks" relative to the live head.
+  // Null preset = GTC (0). When the head is unknown we can't compute an
+  // absolute height, so a non-GTC preset is held back rather than guessed.
+  const resolvedExpiry: bigint | null =
+    expiryBlocks === null ? 0n : blockHeight !== null ? blockHeight + BigInt(expiryBlocks) : null;
+  const expiryUnavailable = expiryBlocks !== null && blockHeight === null;
 
   const submit = () => {
     if (!baseTokenIdHex || !quoteTokenIdHex) {
       setError("Market metadata is still loading.");
       return;
     }
+    if (priceAtoms === null || quantityAtoms === null) {
+      setError("Enter a valid price and quantity.");
+      return;
+    }
+    if (resolvedExpiry === null) {
+      setError("Block height unavailable — cannot set a relative expiry.");
+      return;
+    }
     setError(null);
     const priceStr = price.trim();
     const qtyStr = quantity.trim();
+    const expiryLabel = expiryBlocks === null ? "GTC" : `block ${resolvedExpiry.toString()}`;
     ops.open({
-      title: `${side === "buy" ? "Buy" : "Sell"} ${qtyStr} base atoms @ ${priceStr}`,
+      title: `${side === "buy" ? "Buy" : "Sell"} ${qtyStr} @ ${priceStr}`,
       subtitle: "Native CLOB placeLimitOrder, encrypted-mempool submit",
       auth: "keychain",
       diff: [
         { k: "Side", v: side === "buy" ? "BUY" : "SELL" },
+        { k: "Limit price", v: `${priceStr} quote / base` },
+        { k: "Quantity", v: `${qtyStr} base` },
+        { k: "Price (atoms)", v: `${priceAtoms.toString()} quote atoms / base atom` },
+        { k: "Quantity (atoms)", v: `${quantityAtoms.toString()} base atoms` },
+        { k: "Notional (atoms)", v: notionalAtoms?.toString() ?? "—" },
+        { k: "Expiry", v: expiryLabel },
         { k: "Base token", v: baseTokenIdHex },
         { k: "Quote token", v: quoteTokenIdHex },
-        { k: "Limit price", v: `${priceStr} quote atoms / base atom` },
-        { k: "Quantity", v: `${qtyStr} base atoms` },
       ],
       effects: [
         { text: "Unlocks the local vault for this operation only." },
@@ -253,8 +320,9 @@ function PlaceLimitOrderCard({
           baseTokenIdHex,
           quoteTokenIdHex,
           side,
-          price: priceStr,
-          quantity: qtyStr,
+          price: priceAtoms.toString(),
+          quantity: quantityAtoms.toString(),
+          expiresAtBlock: resolvedExpiry,
         });
         return {
           headline: `Submitted ${side} @ ${priceStr}`,
@@ -290,44 +358,99 @@ function PlaceLimitOrderCard({
           </button>
         </div>
         <label style={{ display: "grid", gap: 4 }}>
-          <span className="row-label">Limit price (quote atoms per base atom)</span>
+          <span className="row-label">Limit price (quote tokens per base token)</span>
           <input
             type="text"
-            inputMode="numeric"
+            inputMode="decimal"
             value={price}
             onChange={(e) => setPrice(e.target.value)}
-            placeholder="e.g. 1000000001"
+            placeholder="e.g. 10"
             className="mono"
           />
+          {priceAtoms !== null ? (
+            <span className="row-help mono">= {priceAtoms.toString()} quote atoms / base atom</span>
+          ) : null}
+          {priceTooPrecise ? (
+            <span className="w-live-error">
+              Price is finer than this market's per-atom granularity. Use fewer
+              decimals.
+            </span>
+          ) : null}
         </label>
         <label style={{ display: "grid", gap: 4 }}>
-          <span className="row-label">Quantity (base atoms)</span>
+          <span className="row-label">Quantity (base tokens)</span>
           <input
             type="text"
-            inputMode="numeric"
+            inputMode="decimal"
             value={quantity}
             onChange={(e) => setQuantity(e.target.value)}
-            placeholder="e.g. 2000000000"
+            placeholder="e.g. 2"
             className="mono"
           />
+          {quantityAtoms !== null ? (
+            <span className="row-help mono">= {quantityAtoms.toString()} base atoms</span>
+          ) : null}
+          {quantityTooPrecise ? (
+            <span className="w-live-error">
+              Quantity has more than {baseDecimals} decimal places.
+            </span>
+          ) : null}
         </label>
+        <div style={{ display: "grid", gap: 4 }}>
+          <span className="row-label">Order expiry</span>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {EXPIRY_PRESETS.map((preset) => (
+              <button
+                key={preset.label}
+                type="button"
+                onClick={() => setExpiryBlocks(preset.blocks)}
+                className={`btn btn--sm ${expiryBlocks === preset.blocks ? "btn--primary" : ""}`}
+              >
+                {preset.label}
+              </button>
+            ))}
+          </div>
+          {expiryBlocks !== null ? (
+            expiryUnavailable ? (
+              <span className="w-live-error">
+                Block height unavailable — relative expiry can't be resolved.
+              </span>
+            ) : (
+              <span className="row-help mono">expires at block {resolvedExpiry?.toString()}</span>
+            )
+          ) : (
+            <span className="row-help">Good-till-cancelled — never expires.</span>
+          )}
+        </div>
+        {notionalAtoms !== null ? (
+          <div className="row-help mono">Notional: {notionalAtoms.toString()} quote atoms</div>
+        ) : null}
+        {market ? (
+          <div className="row-help">
+            Market min notional: <span className="mono">{market.minNotional}</span> atoms · min
+            quantity <span className="mono">{market.minQuantity}</span> · tick{" "}
+            <span className="mono">{market.tickSize}</span> · lot{" "}
+            <span className="mono">{market.lotSize}</span>
+          </div>
+        ) : null}
         {baseTokenIdHex ? <div className="row-help">Base token: <span className="mono">{baseTokenIdHex}</span></div> : null}
         {quoteTokenIdHex ? <div className="row-help">Quote token: <span className="mono">{quoteTokenIdHex}</span></div> : null}
         {error ? <div className="w-live-error">{error}</div> : null}
         <button
           type="button"
           onClick={submit}
-          disabled={!canSubmit}
+          disabled={!canSubmit || expiryUnavailable}
           className="btn btn--primary"
           style={{ justifySelf: "flex-start" }}
         >
           Place {side === "buy" ? "BUY" : "SELL"} limit
         </button>
         <div className="row-help">
-          Order placement is enabled only after the connected node returns live
-          market metadata. Notional <code className="mono">price × quantity</code>{" "}
-          must exceed the market's <code className="mono">min_notional_atoms</code>.
-          Crossing fills happen at the resting maker's price.
+          Amounts are in whole tokens (both legs use {baseDecimals} decimals,
+          the native LYTH scale) and converted to atoms before signing. Notional{" "}
+          <code className="mono">price × quantity</code> must exceed the market's{" "}
+          <code className="mono">min_notional_atoms</code>. Crossing fills happen
+          at the resting maker's price.
         </div>
       </div>
     </div>
@@ -424,6 +547,10 @@ function OrderBook({ book }: { book: ClobOrderBookResponse }) {
   const rows = Math.max(book.asks.length, book.bids.length);
   if (rows === 0) return <div className="row-help">The selected market returned an empty book.</div>;
 
+  // Depth bars: proportional to each level's size against the largest size on
+  // the book. Real data only — no synthetic levels are added.
+  const maxSize = depthMaxSize(book);
+
   return (
     <div className="w-market-book">
       <div className="w-market-book__head">
@@ -437,15 +564,47 @@ function OrderBook({ book }: { book: ClobOrderBookResponse }) {
         const ask = book.asks[index];
         return (
           <div className="w-market-book__row" key={index}>
-            <span className="mono">{bid?.size ?? ""}</span>
+            <span className="mono w-depth w-depth--bid" style={depthStyle(bid?.size, maxSize)}>
+              <span className="w-depth__val">{bid?.size ?? ""}</span>
+            </span>
             <span className="mono">{bid?.price ?? ""}</span>
             <span className="mono">{ask?.price ?? ""}</span>
-            <span className="mono">{ask?.size ?? ""}</span>
+            <span className="mono w-depth w-depth--ask" style={depthStyle(ask?.size, maxSize)}>
+              <span className="w-depth__val">{ask?.size ?? ""}</span>
+            </span>
           </div>
         );
       })}
     </div>
   );
+}
+
+/** Largest level size across both sides (atoms), for depth-bar scaling. */
+function depthMaxSize(book: ClobOrderBookResponse): bigint {
+  let max = 0n;
+  for (const level of [...book.bids, ...book.asks]) {
+    const size = safeBigInt(level.size);
+    if (size > max) max = size;
+  }
+  return max;
+}
+
+/** A CSS variable carrying the proportional bar width (0–100%). */
+function depthStyle(size: string | undefined, maxSize: bigint): React.CSSProperties {
+  if (size === undefined || maxSize === 0n) return { ["--depth" as string]: "0%" };
+  const value = safeBigInt(size);
+  // Integer percentage via BigInt to avoid precision loss on large atom counts.
+  const pctValue = Number((value * 100n) / maxSize);
+  return { ["--depth" as string]: `${pctValue}%` };
+}
+
+function safeBigInt(value: string | undefined): bigint {
+  if (value === undefined) return 0n;
+  try {
+    return BigInt(value);
+  } catch {
+    return 0n;
+  }
 }
 
 function LiveCell({ label, value }: { label: string; value: string }) {

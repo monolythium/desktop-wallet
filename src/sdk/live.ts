@@ -81,6 +81,9 @@ export interface LiveTradeStatus {
   apiStreams: RpcOutcome<ApiStreamsIndexResponse>;
   orderBookReplay: RpcOutcome<NativeMarketOrderBookReplayResponse>;
   selectedMarket: SelectedNativeSpotMarket | null;
+  /** Current block height — the reference point for an order-expiry "in N
+   *  blocks" entry. `null` when the head read failed. */
+  blockHeight: bigint | null;
 }
 
 export interface NativeMarketOrderBookReplayResponse {
@@ -271,6 +274,7 @@ export async function loadLiveTradeStatus(): Promise<LiveTradeStatus> {
     apiStreams,
     orderBookReplay,
     selectedMarket,
+    blockHeight: blockHeight.ok ? blockHeight.value ?? null : null,
   };
 }
 

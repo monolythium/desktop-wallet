@@ -491,6 +491,26 @@ body[data-denom="private"] .w-nav__item.is-active::before {
   border-top: 1px solid rgba(255,255,255,0.04);
   font-size: 12px;
 }
+/* Depth bars — proportional fill behind the size column (real sizes only). */
+.w-depth {
+  position: relative;
+  display: block;
+  padding: 2px 6px;
+  border-radius: 4px;
+  overflow: hidden;
+}
+.w-depth::before {
+  content: "";
+  position: absolute;
+  top: 0; bottom: 0;
+  width: var(--depth, 0%);
+  opacity: 0.16;
+  pointer-events: none;
+}
+.w-depth--bid::before { right: 0; background: var(--ok); }
+.w-depth--ask::before { left: 0; background: var(--alert); }
+.w-depth--bid { text-align: right; }
+.w-depth__val { position: relative; }
 .w-live-form {
   display: grid;
   grid-template-columns: 1fr auto;
