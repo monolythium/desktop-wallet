@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   MONOSCAN_ADDRESS_BASE,
+  MONOSCAN_GET_LYTH_URL,
   MONOSCAN_TX_BASE,
   monoscanAddressUrl,
   monoscanTxUrl,
@@ -23,6 +24,11 @@ describe("monoscan explorer URL builders", () => {
   it("builds an address URL from a bech32m address", () => {
     const addr = "mono1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq";
     expect(monoscanAddressUrl(addr)).toBe(`https://monoscan.xyz/#/wallet/${addr}`);
+  });
+
+  it("pins the canonical LYTH sale (get-monolythium) external URL", () => {
+    // The wallet has no on-ramp primitive — the Buy affordance links here.
+    expect(MONOSCAN_GET_LYTH_URL).toBe("https://monoscan.xyz/#/get-monolythium");
   });
 });
 

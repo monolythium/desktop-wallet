@@ -25,3 +25,10 @@ export const MONOSCAN_ADDRESS_BASE = "https://monoscan.xyz/#/wallet/";
 export function monoscanAddressUrl(bech32mAddr: string): string {
   return `${MONOSCAN_ADDRESS_BASE}${bech32mAddr}`;
 }
+
+/** The canonical LYTH sale ("get monolythium") route on monoscan. The wallet
+ *  has no on-ramp primitive of its own — the Buy affordance opens this page
+ *  externally. The route resolves to the genesis-liquidity-backed sale flow
+ *  (monoscan forwards `get-monolythium`/`get-lyth` to the sale page); we link
+ *  the hash-routed explorer entry so every surface points at the same place. */
+export const MONOSCAN_GET_LYTH_URL = "https://monoscan.xyz/#/get-monolythium";

@@ -1,23 +1,50 @@
 // Home wallet overview.
-// Public denom: hero balance + token preview + activity preview.
-// Private denom: hero with amount-hidden disclosure + activity preview.
+//
+// Public denom: consumer portfolio facts (Available / Staked / APR), a staking
+// summary card, token + recent-activity previews, and Send / Receive / Stake /
+// Buy hero CTAs.
+// Private denom: hero with amount-hidden disclosure + activity note.
+//
+// HONESTY:
+//  - "Available" is the live native balance (loadLiveTokenStatus → eth_getBalance).
+//  - "Staked" is total delegated *weight* (basis points) — the SDK exposes no
+//    per-delegation principal LYTH, so we never print a fabricated LYTH stake.
+//  - "APR" is an em-dash: there is no per-cluster APR/yield oracle on-chain.
+//  - "Earned" comes from lyth_pendingRewards (real lythoshi), rendered as LYTH.
+//  - Endpoint / chain-height / probe telemetry is dropped from the hero (the
+//    topbar already shows live sync + the peer switcher).
 
 import { useEffect, useState } from "react";
-import { useOperations } from "../operations/context";
-import { loadChainSnapshot } from "../sdk/client";
 import { useChainSnapshot } from "../sdk/useChainSnapshot";
 import { ReceiveModal } from "../components/ReceiveModal";
 import { SendComposeModal } from "../components/SendComposeModal";
+import { TokenRow } from "../components/TokenRow";
+import { TxRow } from "../components/TxRow";
 import type { Denom } from "../data/types";
 import type { Route } from "../components/types";
 import { useActiveWallet } from "../sdk/active-wallet";
+import { activityRowToTx } from "../sdk/activity-rows";
+import { liveTokenStatusToRows } from "../sdk/token-rows";
 import {
+  deriveStakeSummary,
+  type StakeSummaryFacts,
+} from "../sdk/staking-summary";
+import { MONOSCAN_GET_LYTH_URL } from "../sdk/monoscan";
+import {
+  fetchPendingRewards,
+  formatRewardLyth,
+} from "../sdk/staking";
+import {
+  capture,
   loadLiveAddressActivity,
+  loadLiveStakeStatus,
   loadLiveTokenStatus,
   type LiveAddressActivityRow,
+  type LiveStakeStatus,
   type LiveTokenStatus,
   type RpcOutcome,
 } from "../sdk/live";
+import type { PendingRewardsResponse } from "@monolythium/core-sdk";
 
 interface Props {
   denom: Denom;
@@ -25,34 +52,41 @@ interface Props {
 }
 
 export function Home({ denom, goto }: Props) {
-  const ops = useOperations();
   const isPub = denom === "public";
   const wallet = useActiveWallet();
   const walletAddress = wallet.status === "ready" ? wallet.address : "";
   const [liveTokens, setLiveTokens] = useState<LiveTokenStatus | null>(null);
   const [liveActivity, setLiveActivity] = useState<RpcOutcome<LiveAddressActivityRow[]> | null>(null);
+  const [stakeStatus, setStakeStatus] = useState<LiveStakeStatus | null>(null);
+  const [rewards, setRewards] = useState<RpcOutcome<PendingRewardsResponse> | null>(null);
   const [sendOpen, setSendOpen] = useState(false);
   const [receiveOpen, setReceiveOpen] = useState(false);
 
-  // Live SDK call: chain id + balance for the bound address. The result is
-  // surfaced through the topbar (see Topbar.tsx); the hook is mounted here so
-  // a Home revisit refreshes the chain snapshot.
+  // Chain snapshot is mounted as a balance fallback for the hero. The
+  // topbar owns the surfaced live-sync indicator; here it only backs the
+  // Available figure when the token-status native balance read is in flight.
   const chain = useChainSnapshot(walletAddress);
 
   useEffect(() => {
     if (!isPub || !walletAddress) {
       setLiveTokens(null);
       setLiveActivity(null);
+      setStakeStatus(null);
+      setRewards(null);
       return;
     }
     let cancelled = false;
     void Promise.all([
       loadLiveTokenStatus(walletAddress),
       loadLiveAddressActivity(walletAddress),
-    ]).then(([tokens, activity]) => {
+      loadLiveStakeStatus(walletAddress),
+      capture(() => fetchPendingRewards(walletAddress)),
+    ]).then(([tokens, activity, stake, rew]) => {
       if (cancelled) return;
       setLiveTokens(tokens);
       setLiveActivity(activity);
+      setStakeStatus(stake);
+      setRewards(rew);
     });
     return () => {
       cancelled = true;
@@ -62,32 +96,25 @@ export function Home({ denom, goto }: Props) {
   const openNativeSend = () => setSendOpen(true);
   const openReceive = () => setReceiveOpen(true);
 
-  const openChainProbe = () => {
-    ops.open({
-      title: "Refresh chain snapshot",
-      subtitle: "Read-only RPC round trip via @monolythium/core-sdk",
-      auth: "none",
-      diff: [
-        { k: "Endpoint", v: chain.snapshot?.endpoint ?? "(unknown)" },
-        { k: "Address",  v: walletAddress || "(no active address)" },
-      ],
-      effects: [
-        { text: "Reads chain, block, and balance data." },
-        { text: "No keychain access. No outbound transaction." },
-      ],
-      execute: async () => {
-        if (!walletAddress) throw new Error("No active wallet address.");
-        const snap = await loadChainSnapshot(walletAddress);
-        if (snap.error) {
-          throw new Error(`${snap.error.kind}: ${snap.error.message}`);
-        }
-        return {
-          headline: `chain id ${snap.chainId} · height ${snap.blockHeight ?? "?"}`,
-          detail: `balance ${snap.balanceLyth} LYTH (${snap.balanceLythoshi} lythoshi)`,
-        };
-      },
-    });
-  };
+  // Available = live native balance. Prefer the token-status read; fall back
+  // to the chain snapshot while it loads; "—" when neither is available.
+  const availableLyth =
+    liveTokens?.nativeBalance.ok
+      ? liveTokens.nativeBalance.value ?? "—"
+      : chain.status === "ok"
+        ? chain.snapshot.balanceLyth
+        : "—";
+
+  const summary: StakeSummaryFacts = deriveStakeSummary(stakeStatus);
+  const earnedLyth =
+    rewards?.ok && rewards.value
+      ? formatRewardLyth(rewards.value.totalAmountLythoshi)
+      : null;
+
+  // Token + activity previews via the shared mappers + row components.
+  const tokenRows = liveTokens ? liveTokenStatusToRows(liveTokens) : [];
+  const activityRows =
+    liveActivity?.ok && liveActivity.value ? liveActivity.value : [];
 
   return (
     <div className="w-page">
@@ -103,11 +130,7 @@ export function Home({ denom, goto }: Props) {
 
         {isPub ? (
           <div className="w-hero__amount">
-            {liveTokens?.nativeBalance.ok
-              ? liveTokens.nativeBalance.value
-              : chain.status === "ok"
-                ? chain.snapshot.balanceLyth
-                : "—"}
+            {availableLyth}
             <span className="tok">LYTH</span>
           </div>
         ) : (
@@ -119,9 +142,12 @@ export function Home({ denom, goto }: Props) {
         <div className="w-hero__meta">
           {isPub ? (
             <>
-              <span>Wallet <b>{wallet.status === "ready" ? wallet.name : "not selected"}</b></span>
-              <span>Indexed assets <b>{liveTokens?.tokenBalances.ok ? liveTokens.tokenBalances.value?.length ?? 0 : "—"}</b></span>
-              <span>Endpoint <b>{liveTokens?.endpoint ?? chain.snapshot?.endpoint ?? "—"}</b></span>
+              <span>Available <b>{availableLyth} LYTH</b></span>
+              {/* Staked is delegated *weight* (bps) — no principal LYTH read
+                  exists, so we never render a fabricated LYTH stake here. */}
+              <span>Staked <b>{summary.totalWeightLabel}</b> weight</span>
+              {/* No per-cluster APR/yield oracle exists on-chain. */}
+              <span>APR <b>—</b></span>
             </>
           ) : (
             <span>Only you and your recipients can read the amount.</span>
@@ -142,22 +168,36 @@ export function Home({ denom, goto }: Props) {
             </svg>
             <span>Receive</span>
           </button>
-          <button className="w-hbtn" onClick={openChainProbe} title="Run an SDK round-trip via the Operations drawer">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21 12a9 9 0 1 1-9-9" />
-              <polyline points="21 3 21 12 12 12" />
-            </svg>
-            <span>Probe chain</span>
-          </button>
+          {isPub && (
+            <>
+              <button className="w-hbtn" onClick={() => goto("stake")}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="3" />
+                  <circle cx="5" cy="7" r="2" />
+                  <circle cx="19" cy="7" r="2" />
+                  <circle cx="5" cy="17" r="2" />
+                  <circle cx="19" cy="17" r="2" />
+                </svg>
+                <span>Stake</span>
+              </button>
+              {/* No on-ramp primitive exists in the wallet — Buy opens the
+                  canonical monoscan sale page externally (honest external link,
+                  not a fake in-app card/bank/exchange on-ramp). */}
+              <a
+                className="w-hbtn"
+                href={MONOSCAN_GET_LYTH_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ textDecoration: "none" }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 5v14M5 12h14" />
+                </svg>
+                <span>Buy</span>
+              </a>
+            </>
+          )}
         </div>
-
-        <ChainStatusLine
-          hasAddress={Boolean(walletAddress)}
-          status={chain.status}
-          chainId={chain.snapshot?.chainId ?? 0n}
-          height={chain.snapshot?.blockHeight ?? null}
-          error={chain.snapshot?.error?.message ?? null}
-        />
       </div>
 
       {isPub ? (
@@ -169,71 +209,69 @@ export function Home({ denom, goto }: Props) {
               <button className="btn btn--sm btn--ghost" onClick={() => goto("tokens")}>View all</button>
             </div>
             <div className="w-card__body">
-              {liveTokens?.tokenBalances.ok && liveTokens.tokenBalances.value && liveTokens.tokenBalances.value.length > 0 ? (
-                <div className="w-live-list">
-                  {liveTokens.tokenBalances.value.slice(0, 4).map((row) => (
-                    <div className="w-live-row" key={row.tokenId}>
-                      <div>
-                        <div className="row-label mono">{shortHex(row.tokenId)}</div>
-                        <div className="row-help">updated at block {row.updatedAtBlock.toString()}</div>
-                      </div>
-                      <div className="w-live-right mono">{row.balance}</div>
-                    </div>
-                  ))}
-                </div>
-              ) : liveTokens?.tokenBalances.ok === false ? (
-                <div className="w-live-error">{liveTokens.tokenBalances.error}</div>
-              ) : liveTokens?.tokenBalances.ok ? (
-                <div className="row-help">No indexed token balances returned for this address.</div>
-              ) : (
+              {liveTokens === null ? (
                 <div className="row-help">{walletAddress ? "Loading token balances…" : "Select or unlock a wallet to load balances."}</div>
+              ) : (
+                <>
+                  {tokenRows.slice(0, 4).map((token) => (
+                    <TokenRow key={token.primary ? "native" : token.sym} token={token} />
+                  ))}
+                  {liveTokens.tokenBalances.ok === false ? (
+                    <div className="w-live-error">{liveTokens.tokenBalances.error}</div>
+                  ) : null}
+                </>
               )}
             </div>
           </div>
 
           <div className="w-card">
             <div className="w-card__head">
-              <h3>Recent activity</h3>
+              <h3>Staking</h3>
               <div className="w-card__head__spacer" />
-              <button className="btn btn--sm btn--ghost" onClick={() => goto("activity")}>View all</button>
+              <button className="btn btn--sm btn--ghost" onClick={() => goto("stake")}>Manage</button>
             </div>
             <div className="w-card__body">
-              {liveActivity?.ok && liveActivity.value && liveActivity.value.length > 0 ? (
-                <div className="w-live-list">
-                  {liveActivity.value.slice(0, 4).map((row) => (
-                    <div className="w-live-row" key={`${row.blockHeight}-${row.txIndex}-${row.logIndex}`}>
-                      <div>
-                        <div className="row-label mono">{formatLiveActivity(row)}</div>
-                        <div className="row-help">block {row.blockHeight.toString()} · tx {row.txIndex}</div>
-                      </div>
-                      <span className="w-live-pill">{formatLiveAmount(row)}</span>
-                    </div>
-                  ))}
-                </div>
-              ) : liveActivity?.ok === false ? (
-                <div className="w-live-error">{liveActivity.error}</div>
-              ) : liveActivity?.ok ? (
-                <div className="row-help">No indexed activity returned for this address.</div>
-              ) : (
-                <div className="row-help">{walletAddress ? "Loading indexed activity…" : "Select or unlock a wallet to load activity."}</div>
-              )}
+              <StakeSummaryCard
+                summary={summary}
+                earnedLyth={earnedLyth}
+                hasAddress={Boolean(walletAddress)}
+                loading={stakeStatus === null}
+                goto={goto}
+              />
             </div>
           </div>
         </div>
-      ) : (
-        <div className="w-card">
-          <div className="w-card__head">
-            <h3>Recent activity</h3>
-            <div className="w-card__head__spacer" />
-            <button className="btn btn--sm btn--ghost" onClick={() => goto("activity")}>View all</button>
-          </div>
-          <div className="w-card__body">
+      ) : null}
+
+      <div className="w-card">
+        <div className="w-card__head">
+          <h3>Recent activity</h3>
+          <div className="w-card__head__spacer" />
+          <button className="btn btn--sm btn--ghost" onClick={() => goto("activity")}>View all</button>
+        </div>
+        <div className="w-card__body">
+          {isPub ? (
+            liveActivity?.ok && activityRows.length > 0 ? (
+              activityRows.slice(0, 5).map((row) => (
+                <TxRow
+                  key={`${row.blockHeight}-${row.txIndex}-${row.logIndex}`}
+                  tx={activityRowToTx(row, denom)}
+                />
+              ))
+            ) : liveActivity?.ok === false ? (
+              <div className="w-live-error">{liveActivity.error}</div>
+            ) : liveActivity?.ok ? (
+              <div className="row-help">No indexed activity returned for this address.</div>
+            ) : (
+              <div className="row-help">{walletAddress ? "Loading indexed activity…" : "Select or unlock a wallet to load activity."}</div>
+            )
+          ) : (
             <div className="row-help">
               Private-denomination activity is not exposed as public indexed rows.
             </div>
-          </div>
+          )}
         </div>
-      )}
+      </div>
 
       {sendOpen && walletAddress && (
         <SendComposeModal
@@ -251,62 +289,62 @@ export function Home({ denom, goto }: Props) {
   );
 }
 
-function shortHex(value: string): string {
-  return value.length > 28 ? `${value.slice(0, 18)}…${value.slice(-8)}` : value;
-}
-
-function formatLiveActivity(row: LiveAddressActivityRow): string {
-  const kind = row.subKind ? `${row.kind} · ${row.subKind}` : row.kind;
-  if (row.counterparty) return `${kind} · ${shortHex(row.counterparty)}`;
-  if (row.cluster !== null) return `${kind} · C-${String(row.cluster + 1).padStart(3, "0")}`;
-  return kind;
-}
-
-function formatLiveAmount(row: LiveAddressActivityRow): string {
-  if (row.amount) return `${row.direction === "out" ? "-" : "+"}${row.amount}`;
-  if (row.weightBps !== null) return `${row.weightBps} bps`;
-  return "indexed";
-}
-
-function ChainStatusLine({
+function StakeSummaryCard({
+  summary,
+  earnedLyth,
   hasAddress,
-  status,
-  chainId,
-  height,
-  error,
+  loading,
+  goto,
 }: {
+  summary: StakeSummaryFacts;
+  earnedLyth: string | null;
   hasAddress: boolean;
-  status: "loading" | "ok" | "error";
-  chainId: bigint;
-  height: bigint | null;
-  error: string | null;
+  loading: boolean;
+  goto: (r: Route) => void;
 }) {
   if (!hasAddress) {
-    return (
-      <div style={{ marginTop: 12, fontFamily: "var(--f-mono)", fontSize: 11, color: "var(--w-text-3)" }}>
-        no active wallet address
-      </div>
-    );
+    return <div className="row-help">Select or unlock a wallet to load staking.</div>;
   }
-  if (status === "loading") {
-    return (
-      <div style={{ marginTop: 12, fontFamily: "var(--f-mono)", fontSize: 11, color: "var(--w-text-3)" }}>
-        querying chain via @monolythium/core-sdk…
-      </div>
-    );
+  if (loading) {
+    return <div className="row-help">Loading staking…</div>;
   }
-  if (status === "error") {
+  if (summary.delegationsFailed) {
+    return <div className="w-live-error">delegations: {summary.delegationsError}</div>;
+  }
+  if (summary.delegationCount === 0) {
     return (
-      <div style={{ marginTop: 12, fontFamily: "var(--f-mono)", fontSize: 11, color: "var(--warn)" }}>
-        offline · {error ?? "no node reachable"}
+      <div>
+        <div className="row-help" style={{ marginBottom: 10 }}>
+          You are not delegating to any cluster yet.
+        </div>
+        <button className="btn btn--sm btn--primary" onClick={() => goto("stake")}>
+          Start staking
+        </button>
       </div>
     );
   }
   return (
-    <div style={{ marginTop: 12, fontFamily: "var(--f-mono)", fontSize: 11, color: "var(--w-text-3)" }}>
-      chain id <b style={{ color: "var(--w-text)" }}>{chainId.toString()}</b>
-      {" · "}
-      height <b style={{ color: "var(--w-text)" }}>{height === null ? "?" : height.toString()}</b>
+    <div>
+      <div className="w-live-grid">
+        {/* Total delegated *weight* — not a LYTH principal (no such read). */}
+        <div className="w-live-cell">
+          <div className="cap">Staked weight</div>
+          <div>{summary.totalWeightLabel}</div>
+        </div>
+        <div className="w-live-cell">
+          <div className="cap">Earned</div>
+          <div>{earnedLyth === null ? "—" : `${earnedLyth} LYTH`}</div>
+        </div>
+        <div className="w-live-cell">
+          <div className="cap">APR</div>
+          <div>—</div>
+        </div>
+      </div>
+      <div className="row-help" style={{ marginTop: 10 }}>
+        {/* No per-wallet slot-cap read exists; the honest denominator is the
+            number of active clusters available to delegate to. */}
+        Delegating to {summary.delegationCount} of {summary.activeClusterCount} active clusters.
+      </div>
     </div>
   );
 }
