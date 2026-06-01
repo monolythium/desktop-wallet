@@ -33,6 +33,7 @@ import { RiscvContracts } from "./pages/RiscvContracts";
 import { Settings } from "./pages/Settings";
 import { Stake } from "./pages/Stake";
 import { Stele } from "./pages/Stele";
+import { TokenDetail } from "./pages/TokenDetail";
 import { Tokens } from "./pages/Tokens";
 import { Trade } from "./pages/Trade";
 import { Wallets } from "./pages/Wallets";
@@ -186,7 +187,7 @@ export function App() {
     try { localStorage.setItem(DENOM_KEY, denom); } catch { /* ignore */ }
     // Tokens-only route: bounce out if user flipped to private.
     // Public-only routes bounce out when user flips to private denomination.
-    if (denom === "private" && (route === "tokens" || route === "stake" || route === "agents" || route === "riscv" || route === "studio" || route === "trade" || route === "ai-trade")) {
+    if (denom === "private" && (route === "tokens" || route === "token-detail" || route === "stake" || route === "agents" || route === "riscv" || route === "studio" || route === "trade" || route === "ai-trade")) {
       setRoute("home");
     }
   }, [denom, route]);
@@ -254,7 +255,8 @@ export function App() {
           {route === "home" ? <Home denom={denom} goto={setRoute} /> : null}
           {route === "activity" ? <Activity denom={denom} experimentalEnabled={experimentalEnabled} /> : null}
           {route === "wallets" ? <Wallets /> : null}
-          {route === "tokens" ? <Tokens /> : null}
+          {route === "tokens" ? <Tokens goto={setRoute} /> : null}
+          {route === "token-detail" ? <TokenDetail denom={denom} goto={setRoute} /> : null}
           {route === "stake" ? <Stake experimentalEnabled={experimentalEnabled} /> : null}
           {route === "bridges" ? <Bridges experimentalEnabled={experimentalEnabled} /> : null}
           {route === "agents" && experimentalEnabled ? <Agents /> : null}

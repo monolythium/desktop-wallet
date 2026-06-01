@@ -7,11 +7,17 @@
 
 import { useEffect, useState } from "react";
 import { TokenRow } from "../components/TokenRow";
+import type { Route } from "../components/types";
 import { useActiveWallet } from "../sdk/active-wallet";
 import { errorMessage, loadLiveTokenStatus, type LiveTokenStatus } from "../sdk/live";
+import { NATIVE_TOKEN_REF, writeSelectedToken } from "../sdk/selected-token";
 import { liveTokenStatusToRows } from "../sdk/token-rows";
 
-export function Tokens() {
+interface Props {
+  goto: (r: Route) => void;
+}
+
+export function Tokens({ goto }: Props) {
   const wallet = useActiveWallet();
   const walletAddress = wallet.status === "ready" ? wallet.address : "";
   const [live, setLive] = useState<LiveTokenStatus | null>(null);
@@ -43,6 +49,16 @@ export function Tokens() {
   }, [walletAddress]);
 
   const rows = liveTokenStatusToRows(live);
+  // Token references aligned to `rows`: row 0 is native; the rest are the raw
+  // MRC-20 token ids in the same indexer order `liveTokenStatusToRows` used.
+  // Clicking a row stores its ref and opens the token-detail page.
+  const tokenIds = live?.tokenBalances.ok ? live.tokenBalances.value ?? [] : [];
+  const refForRow = (index: number): string =>
+    index === 0 ? NATIVE_TOKEN_REF : tokenIds[index - 1]?.tokenId ?? NATIVE_TOKEN_REF;
+  const openDetail = (index: number) => {
+    writeSelectedToken(refForRow(index));
+    goto("token-detail");
+  };
   // The native row is always present; MRC-20 rows are appended only when the
   // balance query succeeded. A failed native query surfaces as an error line.
   const nativeFailed = live?.nativeBalance.ok === false;
@@ -73,8 +89,12 @@ export function Tokens() {
             <div className="row-help">Loading assets…</div>
           ) : (
             <>
-              {rows.map((token) => (
-                <TokenRow key={token.primary ? "native" : token.sym} token={token} />
+              {rows.map((token, index) => (
+                <TokenRow
+                  key={token.primary ? "native" : `${token.sym}-${index}`}
+                  token={token}
+                  onClick={() => openDetail(index)}
+                />
               ))}
               {nativeFailed ? (
                 <div className="w-live-error">LYTH balance: {live.nativeBalance.error}</div>
