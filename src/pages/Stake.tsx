@@ -10,15 +10,27 @@ import { useEffect, useState } from "react";
 import type {
   ClusterDirectoryEntryResponse,
   ClusterDiversityView,
+  PendingRewardsResponse,
+  RedemptionQueueResponse,
 } from "@monolythium/core-sdk";
 import { useOperations } from "../operations/context";
 import { useActiveWallet } from "../sdk/active-wallet";
 import {
   DELEGATION_PRECOMPILE,
+  buildClaimRewardsCalldata,
+  buildCompleteRedemptionCalldata,
   buildDelegateCalldata,
+  buildRedelegateCalldata,
+  buildSetAutoCompoundCalldata,
+  buildUndelegateCalldata,
   fetchClusterDirectory,
+  fetchPendingRewards,
+  fetchRedemptionQueue,
+  formatRewardLyth,
+  hasClaimableRewards,
   submitStakingTx,
 } from "../sdk/staking";
+import { capture, type RpcOutcome } from "../sdk/live";
 import {
   buildAutovotePlan,
   fetchClusterDiversities,
@@ -44,7 +56,18 @@ export function Stake({ experimentalEnabled }: StakeProps = {}) {
   const [busy, setBusy] = useState(false);
   const [directory, setDirectory] = useState<ClusterDirectoryEntryResponse[]>([]);
   const [directoryError, setDirectoryError] = useState<string | null>(null);
+  // Pending delegation rewards (lyth_pendingRewards) + open redemption tickets
+  // (lyth_redemptionQueue). Both are RpcOutcomes so a node failure surfaces the
+  // verbatim error rather than a blank/fabricated zero.
+  const [rewards, setRewards] = useState<RpcOutcome<PendingRewardsResponse> | null>(null);
+  const [redemptions, setRedemptions] = useState<RpcOutcome<RedemptionQueueResponse> | null>(null);
   const [openForm, setOpenForm] = useState<number | null>(null);
+  // Redelegate draft: which source delegation row is open, plus the
+  // destination cluster + weight to move. Distinct from the delegate form.
+  const [redelegateFrom, setRedelegateFrom] = useState<number | null>(null);
+  const [redelegateTo, setRedelegateTo] = useState("");
+  const [redelegateWeightBps, setRedelegateWeightBps] = useState("1000");
+  const [redelegateError, setRedelegateError] = useState<string | null>(null);
   const [draftWeightBps, setDraftWeightBps] = useState("1000");
   const [draftPrincipalLyth, setDraftPrincipalLyth] = useState("100");
   const [draftError, setDraftError] = useState<string | null>(null);
@@ -65,18 +88,24 @@ export function Stake({ experimentalEnabled }: StakeProps = {}) {
       setStatus(null);
       setDirectory([]);
       setDirectoryError(null);
+      setRewards(null);
+      setRedemptions(null);
       return;
     }
     setBusy(true);
     try {
-      const [s, dir] = await Promise.all([
+      const [s, dir, rew, red] = await Promise.all([
         loadLiveStakeStatus(walletAddress),
         fetchClusterDirectory(1, 20).catch((cause: unknown) => {
           setDirectoryError((cause as Error)?.message ?? "directory unavailable");
           return null;
         }),
+        capture(() => fetchPendingRewards(walletAddress)),
+        capture(() => fetchRedemptionQueue(walletAddress)),
       ]);
       setStatus(s);
+      setRewards(rew);
+      setRedemptions(red);
       if (dir) {
         setDirectory(dir.clusters);
         setDirectoryError(null);
@@ -157,6 +186,219 @@ export function Stake({ experimentalEnabled }: StakeProps = {}) {
     });
     setOpenForm(null);
     setDraftError(null);
+  };
+
+  const openUndelegate = (clusterId: number, weightBps: number) => {
+    const weightLabel = `${(weightBps / 100).toFixed(2)}%`;
+    ops.open({
+      title: `Unstake from cluster ${clusterId}`,
+      subtitle: `Undelegate ${weightLabel} of wallet weight, queue the principal for redemption`,
+      auth: "keychain",
+      diff: [
+        { k: "From", v: selfBech32m },
+        { k: "Cluster", v: String(clusterId) },
+        { k: "Weight removed", v: weightLabel },
+        { k: "Precompile", v: "0x…100a" },
+      ],
+      effects: [
+        { text: "Unlocks the local vault for this operation only." },
+        { text: "Encodes undelegate(uint32 clusterId) calldata via @monolythium/core-sdk — removes the entire delegation row for this cluster." },
+        { text: "Appends a redemption ticket; the principal becomes claimable via Complete redemption once the ticket matures (see the Redemptions card)." },
+        {
+          text: "Chain rejects at the precompile gate if delegation is gated off or no delegation row exists for this cluster — verbatim error surfaces here.",
+          level: "warn",
+        },
+      ],
+      notify: {
+        kind: "undelegate",
+        amountDecimal: "0",
+        counterparty: DELEGATION_PRECOMPILE,
+      },
+      execute: async (ctx) => {
+        if (!ctx?.vaultSeed) {
+          throw new Error("vault seed unavailable after keychain authorization");
+        }
+        const calldata = buildUndelegateCalldata(clusterId);
+        const result = await submitStakingTx({ seed: ctx.vaultSeed, data: calldata });
+        return {
+          headline: `Unstaked ${weightLabel} from cluster ${clusterId}`,
+          detail: result.txHash,
+          txHash: result.txHash,
+        };
+      },
+    });
+  };
+
+  const openRedelegate = (
+    fromCluster: number,
+    toCluster: number,
+    weightBps: number,
+  ) => {
+    const weightLabel = `${(weightBps / 100).toFixed(2)}%`;
+    ops.open({
+      title: `Redelegate cluster ${fromCluster} → ${toCluster}`,
+      subtitle: `Move ${weightLabel} of wallet weight without an unbonding round`,
+      auth: "keychain",
+      diff: [
+        { k: "From", v: selfBech32m },
+        { k: "Source cluster", v: String(fromCluster) },
+        { k: "Destination cluster", v: String(toCluster) },
+        { k: "Weight moved", v: weightLabel },
+        { k: "Precompile", v: "0x…100a" },
+      ],
+      effects: [
+        { text: "Unlocks the local vault for this operation only." },
+        { text: "Encodes redelegate(uint32 fromCluster, uint32 toCluster, uint16 weightBps) calldata via @monolythium/core-sdk." },
+        { text: "Moves voting weight directly between clusters — no redemption ticket, no unbonding wait." },
+        {
+          text: "Chain rejects at the precompile gate if delegation is gated off, the destination is inactive, the source has insufficient weight, or a per-cluster cap would be exceeded — verbatim error surfaces here.",
+          level: "warn",
+        },
+      ],
+      notify: {
+        kind: "redelegate",
+        amountDecimal: "0",
+        counterparty: DELEGATION_PRECOMPILE,
+      },
+      execute: async (ctx) => {
+        if (!ctx?.vaultSeed) {
+          throw new Error("vault seed unavailable after keychain authorization");
+        }
+        const calldata = buildRedelegateCalldata(fromCluster, toCluster, weightBps);
+        const result = await submitStakingTx({ seed: ctx.vaultSeed, data: calldata });
+        return {
+          headline: `Redelegated ${weightLabel} from cluster ${fromCluster} to ${toCluster}`,
+          detail: result.txHash,
+          txHash: result.txHash,
+        };
+      },
+    });
+    setRedelegateFrom(null);
+    setRedelegateError(null);
+  };
+
+  const openClaim = (totalLyth: string) => {
+    ops.open({
+      title: "Claim staking rewards",
+      subtitle: `Settle and withdraw ${totalLyth} LYTH of pending delegation rewards`,
+      auth: "keychain",
+      diff: [
+        { k: "From", v: selfBech32m },
+        { k: "Claimable", v: `${totalLyth} LYTH` },
+        { k: "Precompile", v: "0x…100a" },
+      ],
+      effects: [
+        { text: "Unlocks the local vault for this operation only." },
+        { text: "Encodes claim() calldata via @monolythium/core-sdk — settles per-cluster reward indices and withdraws the accrued rewards to this wallet." },
+        {
+          text: "Chain rejects at the precompile gate if delegation is gated off or there is nothing to claim — verbatim error surfaces here.",
+          level: "warn",
+        },
+      ],
+      notify: {
+        kind: "claim",
+        amountDecimal: totalLyth,
+        counterparty: DELEGATION_PRECOMPILE,
+      },
+      execute: async (ctx) => {
+        if (!ctx?.vaultSeed) {
+          throw new Error("vault seed unavailable after keychain authorization");
+        }
+        const calldata = buildClaimRewardsCalldata();
+        const result = await submitStakingTx({ seed: ctx.vaultSeed, data: calldata });
+        return {
+          headline: `Claimed ${totalLyth} LYTH of staking rewards`,
+          detail: result.txHash,
+          txHash: result.txHash,
+        };
+      },
+    });
+  };
+
+  const openCompleteRedemption = (ticketIndex: number, weightBps: number, cluster: number) => {
+    const weightLabel = `${(weightBps / 100).toFixed(2)}%`;
+    ops.open({
+      title: `Complete redemption #${ticketIndex}`,
+      subtitle: `Settle the matured redemption ticket and return the queued principal`,
+      auth: "keychain",
+      diff: [
+        { k: "From", v: selfBech32m },
+        { k: "Ticket index", v: String(ticketIndex) },
+        { k: "Source cluster", v: String(cluster) },
+        { k: "Redeeming weight", v: weightLabel },
+        { k: "Precompile", v: "0x…100a" },
+      ],
+      effects: [
+        { text: "Unlocks the local vault for this operation only." },
+        { text: "Encodes completeRedemption(uint64 index) calldata via @monolythium/core-sdk — settles the matured ticket and returns the queued principal to this wallet." },
+        {
+          text: "Chain rejects at the precompile gate if the ticket is not yet mature, was already settled, or the principal is unavailable — verbatim error surfaces here.",
+          level: "warn",
+        },
+      ],
+      notify: {
+        // No dedicated redemption op kind in TxOpKind — it is a delegation
+        // precompile call, so it records as a generic contract call rather
+        // than a fabricated kind.
+        kind: "contract_call",
+        amountDecimal: "0",
+        counterparty: DELEGATION_PRECOMPILE,
+      },
+      execute: async (ctx) => {
+        if (!ctx?.vaultSeed) {
+          throw new Error("vault seed unavailable after keychain authorization");
+        }
+        const calldata = buildCompleteRedemptionCalldata(ticketIndex);
+        const result = await submitStakingTx({ seed: ctx.vaultSeed, data: calldata });
+        return {
+          headline: `Completed redemption #${ticketIndex}`,
+          detail: result.txHash,
+          txHash: result.txHash,
+        };
+      },
+    });
+  };
+
+  const openAutoCompoundToggle = (next: boolean) => {
+    ops.open({
+      title: next ? "Enable auto-compound" : "Disable auto-compound",
+      subtitle: next
+        ? "Restake settled rewards automatically instead of leaving them claimable"
+        : "Leave settled rewards claimable instead of restaking them",
+      auth: "keychain",
+      diff: [
+        { k: "From", v: selfBech32m },
+        { k: "Auto-compound", v: next ? "on" : "off" },
+        { k: "Precompile", v: "0x…100a" },
+      ],
+      effects: [
+        { text: "Unlocks the local vault for this operation only." },
+        { text: "Encodes setAutoCompound(bool enabled) calldata via @monolythium/core-sdk — persists the preference on-chain for this wallet." },
+        {
+          text: "Chain rejects at the precompile gate if delegation is gated off — verbatim error surfaces here.",
+          level: "warn",
+        },
+      ],
+      notify: {
+        // No dedicated auto-compound op kind in TxOpKind — it is a delegation
+        // precompile call, so it records as a generic contract call.
+        kind: "contract_call",
+        amountDecimal: "0",
+        counterparty: DELEGATION_PRECOMPILE,
+      },
+      execute: async (ctx) => {
+        if (!ctx?.vaultSeed) {
+          throw new Error("vault seed unavailable after keychain authorization");
+        }
+        const calldata = buildSetAutoCompoundCalldata(next);
+        const result = await submitStakingTx({ seed: ctx.vaultSeed, data: calldata });
+        return {
+          headline: `Auto-compound ${next ? "enabled" : "disabled"}`,
+          detail: result.txHash,
+          txHash: result.txHash,
+        };
+      },
+    });
   };
 
   const runAutovote = (mode: Exclude<AutovoteMode, "custom">) => {
@@ -312,17 +554,135 @@ export function Stake({ experimentalEnabled }: StakeProps = {}) {
 
           {delegations && delegations.rows.length > 0 && (
             <div className="w-live-list">
-              {delegations.rows.map((row) => (
-                <div className="w-live-row" key={row.cluster}>
-                  <div>
-                    <div className="row-label">Cluster #{row.cluster}</div>
-                    <div className="row-help">your delegation</div>
+              {delegations.rows.map((row) => {
+                const isRedelegating = redelegateFrom === row.cluster;
+                return (
+                  <div
+                    key={row.cluster}
+                    style={{ display: "flex", flexDirection: "column", gap: 8 }}
+                  >
+                    <div className="w-live-row">
+                      <div>
+                        <div className="row-label">Cluster #{row.cluster}</div>
+                        {/* Weight (basis points), NOT a LYTH principal — the
+                            delegation precompile tracks voting weight; there is
+                            no per-delegation principal LYTH read in the SDK. */}
+                        <div className="row-help">your delegation · weight only</div>
+                      </div>
+                      <div
+                        className="w-live-right"
+                        style={{ display: "flex", alignItems: "center", gap: 8 }}
+                      >
+                        <span className="mono">{(row.weightBps / 100).toFixed(2)}%</span>
+                        <button
+                          className="btn btn--sm btn--ghost"
+                          onClick={() => {
+                            setRedelegateFrom(row.cluster);
+                            setRedelegateTo("");
+                            setRedelegateWeightBps(String(row.weightBps));
+                            setRedelegateError(null);
+                          }}
+                        >
+                          Redelegate
+                        </button>
+                        <button
+                          className="btn btn--sm"
+                          onClick={() => openUndelegate(row.cluster, row.weightBps)}
+                        >
+                          Unstake
+                        </button>
+                      </div>
+                    </div>
+
+                    {isRedelegating && (
+                      <div
+                        style={{
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: 8,
+                          padding: 12,
+                          background: "rgba(255,255,255,0.03)",
+                          border: "1px solid var(--fg-700)",
+                          borderRadius: 8,
+                        }}
+                      >
+                        <label style={redelegateLabelStyle}>
+                          Destination cluster id
+                        </label>
+                        <input
+                          type="number"
+                          inputMode="numeric"
+                          min={0}
+                          value={redelegateTo}
+                          placeholder="e.g. 2"
+                          onChange={(e) => {
+                            setRedelegateTo(e.target.value);
+                            setRedelegateError(null);
+                          }}
+                          style={autovoteInputStyle}
+                        />
+                        <label style={redelegateLabelStyle}>
+                          Weight to move (basis points · 100 = 1%)
+                        </label>
+                        <input
+                          type="number"
+                          inputMode="numeric"
+                          min={1}
+                          max={row.weightBps}
+                          value={redelegateWeightBps}
+                          onChange={(e) => {
+                            setRedelegateWeightBps(e.target.value);
+                            setRedelegateError(null);
+                          }}
+                          style={autovoteInputStyle}
+                        />
+                        {redelegateError && (
+                          <div className="row-help" style={{ color: "var(--err)" }}>
+                            {redelegateError}
+                          </div>
+                        )}
+                        <div style={{ display: "flex", gap: 6 }}>
+                          <button
+                            className="btn btn--sm"
+                            onClick={() => {
+                              setRedelegateFrom(null);
+                              setRedelegateError(null);
+                            }}
+                            style={{ flex: 1 }}
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            className="btn btn--sm btn--primary"
+                            onClick={() => {
+                              const to = parseInt(redelegateTo, 10);
+                              if (!Number.isFinite(to) || to < 0) {
+                                setRedelegateError("Enter a valid destination cluster id.");
+                                return;
+                              }
+                              if (to === row.cluster) {
+                                setRedelegateError("Destination must differ from the source cluster.");
+                                return;
+                              }
+                              const bps = parseInt(redelegateWeightBps, 10);
+                              if (!Number.isFinite(bps) || bps <= 0 || bps > row.weightBps) {
+                                setRedelegateError(
+                                  `Weight must be 1–${row.weightBps} basis points (no more than the source delegation).`,
+                                );
+                                return;
+                              }
+                              openRedelegate(row.cluster, to, bps);
+                            }}
+                            style={{ flex: 1 }}
+                          >
+                            Review
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
-                  <div className="w-live-right mono">
-                    {(row.weightBps / 100).toFixed(2)}%
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
 
@@ -381,6 +741,142 @@ export function Stake({ experimentalEnabled }: StakeProps = {}) {
           {active.length || healthy.length ? null : null}
         </div>
       </div>
+
+      {/* Rewards — pending delegation rewards (lyth_pendingRewards) with a
+          Claim action + auto-compound toggle. Only mounts once a wallet is
+          selected (rewards is non-null after the first refresh). */}
+      {walletAddress ? (
+        <div className="w-card">
+          <div className="w-card__head">
+            <h3>Rewards</h3>
+            <span className="w-live-pill">live</span>
+            <span className="w-card__head__spacer" />
+          </div>
+          <div className="w-card__body">
+            {rewards === null ? (
+              <div className="row-help">Loading pending rewards…</div>
+            ) : rewards.ok === false ? (
+              <div className="w-live-error">pending rewards: {rewards.error}</div>
+            ) : rewards.value ? (
+              (() => {
+                const r = rewards.value;
+                const totalLyth = formatRewardLyth(r.totalAmountLythoshi);
+                const settledLyth = formatRewardLyth(r.settledPendingLythoshi);
+                const unsettledLyth = formatRewardLyth(r.unsettledAmountLythoshi);
+                const claimable = hasClaimableRewards(r);
+                return (
+                  <>
+                    <div className="w-live-grid">
+                      <LiveCell label="Claimable" value={`${totalLyth} LYTH`} />
+                      <LiveCell label="Settled" value={`${settledLyth} LYTH`} />
+                      <LiveCell label="Unsettled" value={`${unsettledLyth} LYTH`} />
+                      <LiveCell label="Auto-compound" value={r.autoCompound ? "on" : "off"} />
+                    </div>
+                    <div
+                      style={{
+                        display: "flex",
+                        gap: 8,
+                        flexWrap: "wrap",
+                        marginTop: 12,
+                      }}
+                    >
+                      <button
+                        className="btn btn--sm btn--primary"
+                        disabled={!claimable}
+                        title={
+                          claimable
+                            ? "Settle and withdraw your pending rewards"
+                            : "Nothing to claim"
+                        }
+                        onClick={() => openClaim(totalLyth)}
+                      >
+                        Claim {totalLyth} LYTH
+                      </button>
+                      <button
+                        className="btn btn--sm"
+                        onClick={() => openAutoCompoundToggle(!r.autoCompound)}
+                      >
+                        {r.autoCompound ? "Disable auto-compound" : "Enable auto-compound"}
+                      </button>
+                    </div>
+                  </>
+                );
+              })()
+            ) : (
+              <div className="row-help">No pending rewards for this wallet.</div>
+            )}
+          </div>
+        </div>
+      ) : null}
+
+      {/* Redemptions — open unbonding tickets from undelegate (lyth_redemptionQueue).
+          A matured ticket is settled with Complete redemption. Tickets carry
+          weight (basis points), not a principal LYTH amount — the precompile
+          tracks weight, so weight is what we surface (no fabricated figure). */}
+      {walletAddress && redemptions && redemptions.ok && redemptions.value && redemptions.value.tickets.length > 0 ? (
+        <div className="w-card">
+          <div className="w-card__head">
+            <h3>Redemptions</h3>
+            <span className="w-card__head__spacer" />
+            <span className="row-help mono">
+              {redemptions.value.count.toString()} ticket
+              {redemptions.value.count === 1n ? "" : "s"}
+            </span>
+          </div>
+          <div className="w-card__body">
+            <div className="w-live-list">
+              {redemptions.value.tickets.map((t) => {
+                const matured = t.mature === true;
+                return (
+                  <div className="w-live-row" key={t.index.toString()}>
+                    <div>
+                      <div className="row-label">
+                        Ticket #{t.index.toString()} · cluster {t.cluster}
+                      </div>
+                      <div className="row-help mono">
+                        {(t.weightBps / 100).toFixed(2)}% weight · queued at block{" "}
+                        {t.createdHeight.toString()} · matures{" "}
+                        {t.maturityHeight.toString()}
+                      </div>
+                    </div>
+                    <div
+                      className="w-live-right"
+                      style={{ display: "flex", alignItems: "center", gap: 8 }}
+                    >
+                      <span className={`w-live-pill ${matured ? "" : "is-muted"}`}>
+                        {t.mature === null ? "—" : matured ? "mature" : "pending"}
+                      </span>
+                      <button
+                        className="btn btn--sm btn--primary"
+                        disabled={!matured}
+                        title={
+                          matured
+                            ? "Settle this matured ticket"
+                            : "Ticket is not yet mature"
+                        }
+                        onClick={() =>
+                          openCompleteRedemption(Number(t.index), t.weightBps, t.cluster)
+                        }
+                      >
+                        Complete
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      ) : walletAddress && redemptions && redemptions.ok === false ? (
+        <div className="w-card">
+          <div className="w-card__head">
+            <h3>Redemptions</h3>
+          </div>
+          <div className="w-card__body">
+            <div className="w-live-error">redemption queue: {redemptions.error}</div>
+          </div>
+        </div>
+      ) : null}
 
       {experimentalEnabled ? (
       <div className="w-card">
@@ -732,4 +1228,11 @@ const autovoteInputStyle: React.CSSProperties = {
   borderRadius: 8,
   color: "var(--fg-100)",
   outline: "none",
+};
+
+const redelegateLabelStyle: React.CSSProperties = {
+  fontSize: 11,
+  letterSpacing: "0.06em",
+  textTransform: "uppercase",
+  color: "var(--fg-400)",
 };
