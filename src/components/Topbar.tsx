@@ -43,6 +43,7 @@ const TITLES: Record<Route, string> = {
   activity: "Activity",
   wallets: "Wallets",
   tokens: "Tokens",
+  "token-detail": "Token",
   stake: "Stake",
   bridges: "Bridges",
   agents: "Agents",
