@@ -199,7 +199,7 @@ export function Sidebar({ denom, setDenom, route, setRoute, developerModeEnabled
         ))}
       </div>
 
-      <div style={{ marginTop: 4, display: "flex", flexDirection: "column", gap: 2, flex: 1 }}>
+      <div className="w-nav w-nav--main">
         {visible.map((n) => {
           const Icon = n.icon;
           return (
@@ -217,7 +217,7 @@ export function Sidebar({ denom, setDenom, route, setRoute, developerModeEnabled
         })}
       </div>
 
-      <div style={{ display: "flex", flexDirection: "column", gap: 2, marginTop: 12 }}>
+      <div className="w-nav w-nav--footer">
         {NAV_FOOTER.map((n) => {
           const Icon = n.icon;
           return (
