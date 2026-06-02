@@ -30,13 +30,16 @@ import {
 import {
   errorMessage,
   loadLiveAddressActivity,
+  loadLiveSupplyStatus,
   loadLiveTokenStatus,
   type LiveAddressActivityRow,
+  type LiveSupplyStatus,
   type LiveTokenStatus,
   type RpcOutcome,
 } from "../sdk/live";
+import { formatLyth } from "@monolythium/core-sdk";
 import { MONOSCAN_GET_LYTH_URL } from "../sdk/monoscan";
-import { readSelectedToken } from "../sdk/selected-token";
+import { isNativeRef, readSelectedToken } from "../sdk/selected-token";
 import { selectTokenDetailFacts } from "../sdk/token-detail";
 
 interface Props {
@@ -57,6 +60,9 @@ export function TokenDetail({ denom, goto }: Props) {
 
   const [live, setLive] = useState<LiveTokenStatus | null>(null);
   const [activity, setActivity] = useState<RpcOutcome<LiveAddressActivityRow[]> | null>(null);
+  // Native LYTH supply stats (circulating + burned). Only loaded/shown for the
+  // native row — MRC-20 has no such read. Null until the first load resolves.
+  const [supply, setSupply] = useState<LiveSupplyStatus | null>(null);
   const [busy, setBusy] = useState(false);
 
   const [sendOpen, setSendOpen] = useState(false);
@@ -66,19 +72,26 @@ export function TokenDetail({ denom, goto }: Props) {
     if (!walletAddress) {
       setLive(null);
       setActivity(null);
+      setSupply(null);
       return;
     }
     setBusy(true);
     try {
-      const [tokens, act] = await Promise.all([
+      // Supply stats are a chain-global read; only fetch them for the native
+      // LYTH row (the only token they apply to).
+      const wantSupply = isNativeRef(ref);
+      const [tokens, act, sup] = await Promise.all([
         loadLiveTokenStatus(walletAddress),
         loadLiveAddressActivity(walletAddress),
+        wantSupply ? loadLiveSupplyStatus() : Promise.resolve(null),
       ]);
       setLive(tokens);
       setActivity(act);
+      setSupply(sup);
     } catch (cause) {
       setLive(null);
       setActivity({ ok: false, error: errorMessage(cause) });
+      setSupply(null);
     } finally {
       setBusy(false);
     }
@@ -233,7 +246,7 @@ export function TokenDetail({ denom, goto }: Props) {
           hasAddress={Boolean(walletAddress)}
         />
       ) : null}
-      {tab === "info" ? <InfoTab facts={facts} endpoint={live?.endpoint ?? "—"} /> : null}
+      {tab === "info" ? <InfoTab facts={facts} endpoint={live?.endpoint ?? "—"} supply={supply} /> : null}
       {tab === "bridges" ? <BridgesTab facts={facts} /> : null}
 
       {sendOpen && walletAddress ? (
@@ -308,18 +321,38 @@ function ActivityTab({
 function InfoTab({
   facts,
   endpoint,
+  supply,
 }: {
   facts: ReturnType<typeof selectTokenDetailFacts>;
   endpoint: string;
+  supply: LiveSupplyStatus | null;
 }) {
   // Asset policy fields are only available for native LYTH (the live read
   // queries the LYTH policy). MRC rows show "—" rather than a fabricated
   // policy. There is no decimals read for an MRC row either, so native shows
   // the protocol's 8 decimals and MRC rows show "—".
   const policy = facts.assetPolicy;
+  // Circulating supply + total burned are real chain reads, native LYTH only.
+  // Each falls back to the honest "—" when the read failed or for an MRC row.
+  const circulating =
+    facts.isNative && supply?.circulatingSupply.ok && supply.circulatingSupply.value
+      ? `${formatLyth(supply.circulatingSupply.value.circulatingSupplyLythoshi, { includeUnit: false })} LYTH`
+      : "—";
+  const burned =
+    facts.isNative && supply?.totalBurned.ok && supply.totalBurned.value
+      ? `${formatLyth(supply.totalBurned.value.totalBurnedLythoshi, { includeUnit: false })} LYTH`
+      : facts.isNative && supply?.circulatingSupply.ok && supply.circulatingSupply.value
+        ? `${formatLyth(supply.circulatingSupply.value.totalBurnedLythoshi, { includeUnit: false })} LYTH`
+        : "—";
   const rows: Array<{ k: string; v: string; mono?: boolean }> = [
     { k: "Token id", v: facts.isNative ? "native (LYTH)" : facts.tokenId ?? "—", mono: !facts.isNative },
     { k: "Decimals", v: facts.isNative ? "8" : "—" },
+    ...(facts.isNative
+      ? [
+          { k: "Circulating supply", v: circulating },
+          { k: "Total burned", v: burned },
+        ]
+      : []),
     {
       k: "Last seen at block",
       v: facts.updatedAtBlock !== null ? facts.updatedAtBlock.toString() : "—",
