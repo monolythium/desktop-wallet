@@ -128,6 +128,41 @@ export function notificationId(chainIdHex: string, txHash: string): string {
   return `${chainIdHex}:${txHash}`;
 }
 
+/** Anchor for incoming-transfer detection — the position of the newest inbound
+ *  row already notified for an (address, chain). Compared lexicographically. */
+export interface IncomingWatermark {
+  blockHeight: number;
+  txIndex: number;
+  logIndex: number;
+}
+
+/** Per-(address, chain) incoming-watermark key inside the store. */
+export function incomingWatermarkKey(
+  addressLower: string,
+  chainIdHex: string,
+): string {
+  return `mono.notifications.incoming-watermark.${addressLower}.${chainIdHex}.v1`;
+}
+
+/** True when anchor `a` is strictly newer than `b` — lexicographic by
+ *  blockHeight, then txIndex, then logIndex. */
+export function anchorAfter(a: IncomingWatermark, b: IncomingWatermark): boolean {
+  if (a.blockHeight !== b.blockHeight) return a.blockHeight > b.blockHeight;
+  if (a.txIndex !== b.txIndex) return a.txIndex > b.txIndex;
+  return a.logIndex > b.logIndex;
+}
+
+/** Tolerant parse of a stored incoming watermark. Malformed → null (caller
+ *  treats it as "no baseline yet" and baselines on the next pass). */
+export function parseIncomingWatermark(raw: unknown): IncomingWatermark | null {
+  if (raw === null || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+  if (typeof r.blockHeight !== "number" || !Number.isFinite(r.blockHeight)) return null;
+  if (typeof r.txIndex !== "number" || !Number.isFinite(r.txIndex)) return null;
+  if (typeof r.logIndex !== "number" || !Number.isFinite(r.logIndex)) return null;
+  return { blockHeight: r.blockHeight, txIndex: r.txIndex, logIndex: r.logIndex };
+}
+
 /** Insert a record newest-first and slice to the cap. Pure. */
 export function appendCapped(
   entries: NotificationRecord[],

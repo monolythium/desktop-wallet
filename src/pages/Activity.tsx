@@ -13,6 +13,7 @@
 // off they are empty and the feed is exactly the indexed confirmed rows.
 
 import { useEffect, useMemo, useState } from "react";
+import { MONOLYTHIUM_TESTNET_CHAIN_ID } from "@monolythium/core-sdk";
 import type { Denom } from "../data/types";
 import { ActivityDetail, type DetailRow } from "../components/ActivityDetail";
 import { NotificationDetail } from "../components/NotificationDetail";
@@ -34,6 +35,7 @@ import {
   type NotificationRecord,
 } from "../sdk/notifications";
 import { listAllNotifications } from "../sdk/notifications-store";
+import { detectAndNotifyIncoming } from "../sdk/incoming-detect";
 import { txTypeLabelForOpKind } from "../sdk/tx-type-label";
 import type { PendingTx } from "../sdk/pending-tx";
 import { usePendingTxs } from "../sdk/use-pending-tx";
@@ -112,6 +114,16 @@ export function Activity({ denom, experimentalEnabled }: Props) {
       ]);
       setActivity(activityOutcome);
       setFailed(allNotifications.filter((r) => r.status === "failed"));
+      // Announce newly-arrived incoming native LYTH (records + toasts once).
+      // Runs here on the open, focused surface and is gated by the experimental
+      // flag like the rest of the notifications layer; best-effort.
+      if (showExtra && activityOutcome.ok) {
+        void detectAndNotifyIncoming(
+          walletAddress.toLowerCase(),
+          `0x${MONOLYTHIUM_TESTNET_CHAIN_ID.toString(16)}`,
+          activityOutcome.value ?? [],
+        );
+      }
     } finally {
       setBusy(false);
     }

@@ -31,11 +31,14 @@ import { Store } from "@tauri-apps/plugin-store";
 import {
   NOTIFICATION_HISTORY_CAP,
   appendCapped,
+  incomingWatermarkKey,
   notificationId,
   notificationsHistoryKey,
   notifiedSetKey,
   parseHistoryEnvelope,
+  parseIncomingWatermark,
   parseNotifiedSetEnvelope,
+  type IncomingWatermark,
   type NotificationRecord,
   type NotificationsHistoryEnvelope,
   type NotifiedSetEnvelope,
@@ -49,7 +52,10 @@ const STATE_KEY = "state";
  *  envelope, exactly as the browser keyed chrome.storage. */
 interface NotificationsState {
   version: 1;
-  scopes: Record<string, NotificationsHistoryEnvelope | NotifiedSetEnvelope>;
+  // Per-scope envelopes keyed by the same strings the browser keyed
+  // chrome.storage. Values are tolerant-parsed at read time (history /
+  // notified-set / incoming-watermark), so the map value stays `unknown`.
+  scopes: Record<string, unknown>;
 }
 
 const EMPTY_STATE: NotificationsState = { version: 1, scopes: {} };
@@ -217,6 +223,43 @@ export async function recordNotification(
     return { added: true, record };
   } catch {
     return { added: false, record: null };
+  }
+}
+
+/** Read the incoming-transfer watermark for an (address, chain) scope, or null
+ *  when none has been baselined yet. Best-effort. */
+export async function getIncomingWatermark(
+  addressLower: string,
+  chainIdHex: string,
+): Promise<IncomingWatermark | null> {
+  try {
+    const state = await loadState();
+    return parseIncomingWatermark(
+      state.scopes[incomingWatermarkKey(addressLower, chainIdHex)],
+    );
+  } catch {
+    return null;
+  }
+}
+
+/** Persist the incoming-transfer watermark for an (address, chain) scope.
+ *  Best-effort — a store failure is swallowed (the next pass re-baselines). */
+export async function setIncomingWatermark(
+  addressLower: string,
+  chainIdHex: string,
+  watermark: IncomingWatermark,
+): Promise<void> {
+  try {
+    const state = await loadState();
+    await saveState({
+      version: 1,
+      scopes: {
+        ...state.scopes,
+        [incomingWatermarkKey(addressLower, chainIdHex)]: watermark,
+      },
+    });
+  } catch {
+    // Best-effort — never throw back into the detect path.
   }
 }
 

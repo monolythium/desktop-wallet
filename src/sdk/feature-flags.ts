@@ -47,3 +47,27 @@ export function writeExperimentalEnabled(enabled: boolean): void {
     // localStorage unavailable — fall through.
   }
 }
+
+// Incoming-transfer OS-toast flag — DEFAULT ON, fail-open.
+//
+// Gates ONLY the OS toast raised when LYTH arrives. The in-app notification
+// record is always written and always counts toward the bell badge regardless
+// of this flag. Absence of the key reads as ON, and any storage error fails
+// open, so the toast is on unless the user explicitly turned it off.
+export const INCOMING_ENABLED_KEY = "wallet.incomingTransfersEnabled";
+
+export function readIncomingEnabled(): boolean {
+  try {
+    return localStorage.getItem(INCOMING_ENABLED_KEY) !== "false";
+  } catch {
+    return true; // fail-open
+  }
+}
+
+export function writeIncomingEnabled(enabled: boolean): void {
+  try {
+    localStorage.setItem(INCOMING_ENABLED_KEY, enabled ? "true" : "false");
+  } catch {
+    // localStorage unavailable — fall through.
+  }
+}

@@ -92,7 +92,10 @@ export function NotificationDetail({ record, onClose }: NotificationDetailProps)
           {clusterLabel !== null ? (
             <DRow label="Cluster" value={clusterLabel} />
           ) : (
-            <DRow label="To" value={<CopyableAddress addr={record.counterparty} />} />
+            <DRow
+              label={record.kind === "receive" ? "From" : "To"}
+              value={<CopyableAddress addr={record.counterparty} />}
+            />
           )}
           {showBlock ? (
             <DRow
@@ -100,16 +103,24 @@ export function NotificationDetail({ record, onClose }: NotificationDetailProps)
               value={`#${record.blockNumber!.toLocaleString("en-US")}`}
             />
           ) : null}
-          <DRow
-            label="Tx hash"
-            value={
-              <span style={{ fontFamily: "var(--f-mono)" }} title={record.txHash}>
-                {truncMiddle(record.txHash)}
-              </span>
-            }
-          />
-          <DRow label="When" value={relativeMs(record.createdAtMs)} />
-          {record.txHash ? <MonoscanTxButton hash={record.txHash} /> : null}
+          {/* Real on-chain hashes link out; the synthetic incoming id
+              (`in:<block>.<txIndex>.<logIndex>`) is never shown or linked. */}
+          {record.txHash.startsWith("0x") ? (
+            <>
+              <DRow
+                label="Tx hash"
+                value={
+                  <span style={{ fontFamily: "var(--f-mono)" }} title={record.txHash}>
+                    {truncMiddle(record.txHash)}
+                  </span>
+                }
+              />
+              <DRow label="When" value={relativeMs(record.createdAtMs)} />
+              <MonoscanTxButton hash={record.txHash} />
+            </>
+          ) : (
+            <DRow label="When" value={relativeMs(record.createdAtMs)} />
+          )}
         </div>
       </div>
     </div>
