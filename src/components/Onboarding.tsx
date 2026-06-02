@@ -4,8 +4,6 @@
 //
 // Stage 4 keeps this UI minimal on purpose. Future passes will:
 // - Add hardware-bound storage (Secure Enclave / TPM).
-// - Add password-strength meter once we settle on a heuristic that's
-//   honest (zxcvbn-ts) rather than performative.
 //
 // The contract for now: this screen only renders if `keychain_unlock`
 // returns `not_found` for the primary account. Once the vault is stored,
@@ -28,6 +26,8 @@ import { registerVault } from "../sdk/vaultCatalog";
 import { explainImportError } from "../lib/import-error";
 import { MnemonicGrid } from "./MnemonicGrid";
 import { VerifyPhrase } from "./VerifyPhrase";
+import { PasswordStrengthMeter } from "./PasswordStrengthMeter";
+import { isPasswordValid, getPasswordStrength } from "../lib/password-validation";
 
 interface Props {
   onDone: () => void;
@@ -55,7 +55,11 @@ export function Onboarding({ onDone }: Props) {
   const [importError, setImportError] = useState<string | null>(null);
 
   const canSubmit =
-    !busy && password.length >= 12 && password === confirm && acknowledged;
+    !busy &&
+    isPasswordValid(password) &&
+    getPasswordStrength(password) !== "weak" &&
+    password === confirm &&
+    acknowledged;
 
   const beginCreate = () => {
     setIsImport(false);
@@ -296,7 +300,8 @@ export function Onboarding({ onDone }: Props) {
             <p style={{ margin: "0 0 24px", color: "var(--w-text-2)", fontSize: 13 }}>
               The password unwraps a signing key encrypted with Argon2id and
               AES-256-GCM. We never store the password itself, only the
-              encrypted vault. Pick at least 12 characters.
+              encrypted vault. Use at least 12 characters with a mix of upper
+              and lower case, a number, and a symbol.
             </p>
 
             <label className="w-onboarding__field">
@@ -326,16 +331,7 @@ export function Onboarding({ onDone }: Props) {
               />
             </label>
 
-            {password && password.length < 12 ? (
-              <div className="w-banner" style={{ marginTop: 12 }}>
-                Password must be at least 12 characters.
-              </div>
-            ) : null}
-            {confirm && password !== confirm ? (
-              <div className="w-banner" style={{ marginTop: 12 }}>
-                Passwords do not match.
-              </div>
-            ) : null}
+            <PasswordStrengthMeter password={password} confirmPassword={confirm} />
 
             <label
               style={{
