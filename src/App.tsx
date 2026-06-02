@@ -38,6 +38,7 @@ import { Tokens } from "./pages/Tokens";
 import { Trade } from "./pages/Trade";
 import { Wallets } from "./pages/Wallets";
 import { OperationsProvider } from "./operations/context";
+import { LockProvider } from "./sdk/auto-lock";
 import {
   KeychainCallError,
   PRIMARY_ACCOUNT,
@@ -242,7 +243,8 @@ export function App() {
   }
 
   return (
-    <OperationsProvider>
+    <LockProvider>
+      <OperationsProvider>
       <div className="w-app">
         <Sidebar
           denom={denom}
@@ -298,7 +300,8 @@ export function App() {
           />
         ) : null}
       </div>
-    </OperationsProvider>
+      </OperationsProvider>
+    </LockProvider>
   );
 }
 

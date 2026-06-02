@@ -8,6 +8,7 @@ import {
   readAutoLockMinutes,
   writeAutoLockMinutes,
 } from "../sdk/auto-lock-setting";
+import { useAutoLock } from "../sdk/auto-lock";
 import { fetchLiveTestnetRegistry } from "../sdk/live-registry";
 import {
   outboundMcpStart,
@@ -44,6 +45,7 @@ export function Settings({ developerModeEnabled, setDeveloperModeEnabled, steleE
   const wallet = useActiveWallet();
   const [devkitChannel, setDevkitChannel] = useState<NativeDevkitChannel>(() => readDevkitChannel());
   const [autoLockMinutes, setAutoLockMinutes] = useState<number>(() => readAutoLockMinutes());
+  const { lock } = useAutoLock();
 
   return (
     <div className="w-page">
@@ -172,6 +174,15 @@ export function Settings({ developerModeEnabled, setDeveloperModeEnabled, steleE
                 </button>
               ))}
             </div>
+          </div>
+          <div className="w-setting-row">
+            <div>
+              <div className="row-label">Lock now</div>
+              <div className="row-help">
+                Immediately lock the wallet and return to the password screen.
+              </div>
+            </div>
+            <button className="btn btn--sm" onClick={() => lock()}>Lock now</button>
           </div>
           <div className="w-setting-row">
             <div>
