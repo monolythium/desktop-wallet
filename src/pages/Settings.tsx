@@ -9,6 +9,7 @@ import {
   writeAutoLockMinutes,
 } from "../sdk/auto-lock-setting";
 import { useAutoLock } from "../sdk/auto-lock";
+import { readIncomingEnabled, writeIncomingEnabled } from "../sdk/feature-flags";
 import { fetchLiveTestnetRegistry } from "../sdk/live-registry";
 import {
   outboundMcpStart,
@@ -45,6 +46,7 @@ export function Settings({ developerModeEnabled, setDeveloperModeEnabled, steleE
   const wallet = useActiveWallet();
   const [devkitChannel, setDevkitChannel] = useState<NativeDevkitChannel>(() => readDevkitChannel());
   const [autoLockMinutes, setAutoLockMinutes] = useState<number>(() => readAutoLockMinutes());
+  const [incomingEnabled, setIncomingEnabled] = useState<boolean>(() => readIncomingEnabled());
   const { lock } = useAutoLock();
 
   return (
@@ -128,6 +130,25 @@ export function Settings({ developerModeEnabled, setDeveloperModeEnabled, steleE
               onClick={() => setExperimentalEnabled(!experimentalEnabled)}
             >
               {experimentalEnabled ? "Enabled" : "Disabled"}
+            </button>
+          </div>
+          <div className="w-setting-row">
+            <div>
+              <div className="row-label">Incoming transfers</div>
+              <div className="row-help">
+                Show a system notification when LYTH arrives. Detected while the wallet is open; the in-app notification is always kept regardless of this setting.
+              </div>
+            </div>
+            <button
+              type="button"
+              className={`w-chip ${incomingEnabled ? "is-on" : ""}`}
+              onClick={() => {
+                const next = !incomingEnabled;
+                setIncomingEnabled(next);
+                writeIncomingEnabled(next);
+              }}
+            >
+              {incomingEnabled ? "Enabled" : "Disabled"}
             </button>
           </div>
         </div>
