@@ -148,6 +148,9 @@ export interface RecordNotificationInput {
   kind: TxOpKind;
   amountDecimal: string;
   counterparty: string;
+  /** For delegation kinds: the target cluster (optional). */
+  clusterId?: number;
+  clusterName?: string;
   /** `true` ⇒ store already-read (no badge bump). Defaults to unread. */
   read?: boolean;
 }
@@ -188,6 +191,8 @@ export async function recordNotification(
       kind: input.kind,
       amountDecimal: input.amountDecimal,
       counterparty: input.counterparty,
+      clusterId: input.clusterId,
+      clusterName: input.clusterName,
       createdAtMs: Date.now(),
       read: input.read ?? false,
       schemaVersion: 0,

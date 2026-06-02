@@ -49,6 +49,11 @@ export interface PendingTx {
   amountDecimal: string;
   /** Typed bech32m counterparty (recipient or precompile target). */
   counterparty: string;
+  /** For delegation kinds: the target cluster, so a recorded notification can
+   *  name the cluster instead of the bare delegation-module address. Optional —
+   *  absent on non-delegation txs and on rows written before this field. */
+  clusterId?: number;
+  clusterName?: string;
   /** Epoch ms the tx was enqueued. The tracking window is measured from here. */
   submittedAt: number;
 }
@@ -160,6 +165,11 @@ export function asPendingTx(raw: unknown): PendingTx | null {
   if (typeof r.submittedAt !== "number" || !Number.isFinite(r.submittedAt)) {
     return null;
   }
+  const clusterId =
+    typeof r.clusterId === "number" && Number.isFinite(r.clusterId)
+      ? r.clusterId
+      : undefined;
+  const clusterName = typeof r.clusterName === "string" ? r.clusterName : undefined;
   return {
     txHash: r.txHash,
     chainIdHex: r.chainIdHex,
@@ -167,6 +177,8 @@ export function asPendingTx(raw: unknown): PendingTx | null {
     opKind: r.opKind as TxOpKind,
     amountDecimal: r.amountDecimal,
     counterparty: r.counterparty,
+    clusterId,
+    clusterName,
     submittedAt: r.submittedAt,
   };
 }

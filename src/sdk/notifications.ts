@@ -79,6 +79,11 @@ export interface NotificationRecord {
   /** Typed bech32m counterparty — the recipient the user intended to send to,
    *  or the precompile target for contract calls. */
   counterparty: string;
+  /** For delegation kinds: the target cluster, so the row/detail can name the
+   *  cluster rather than the bare delegation-module address. Optional and
+   *  backward-compatible — records written before this field simply omit it. */
+  clusterId?: number;
+  clusterName?: string;
   /** Epoch ms when the terminal transition was observed (the fire-time). */
   createdAtMs: number;
   /** Read state. `false` on insert; `markAllRead` flips per-scope. */
@@ -165,6 +170,12 @@ export const NOTIFICATION_LABELS: Record<
   },
 };
 
+/** True for the delegation precompile kinds whose notification names a cluster
+ *  rather than the bare delegation-module address. */
+export function isDelegationKind(kind: TxOpKind): boolean {
+  return kind === "delegate" || kind === "undelegate" || kind === "redelegate";
+}
+
 /** Render the friendly title for a notification. */
 export function notificationTitle(
   kind: TxOpKind,
@@ -250,6 +261,11 @@ function asNotificationRecord(raw: unknown): NotificationRecord | null {
         ? r.blockNumber
         : undefined;
   if (blockNumber === undefined) return null;
+  const clusterId =
+    typeof r.clusterId === "number" && Number.isFinite(r.clusterId)
+      ? r.clusterId
+      : undefined;
+  const clusterName = typeof r.clusterName === "string" ? r.clusterName : undefined;
   return {
     id: r.id,
     txHash: r.txHash,
@@ -258,6 +274,8 @@ function asNotificationRecord(raw: unknown): NotificationRecord | null {
     kind,
     amountDecimal: r.amountDecimal,
     counterparty: r.counterparty,
+    clusterId,
+    clusterName,
     createdAtMs: r.createdAtMs,
     read: r.read,
     schemaVersion: 0,

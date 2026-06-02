@@ -19,6 +19,7 @@ import type { CSSProperties, ReactElement } from "react";
 import { NotificationDetail } from "../components/NotificationDetail";
 import { truncMiddle } from "../components/_detailModalParts";
 import {
+  isDelegationKind,
   isZeroAmount,
   notificationTitle,
   type NotificationRecord,
@@ -206,7 +207,14 @@ function NotificationRow({
 }) {
   const title = notificationTitle(record.kind, record.status);
   const typeNoun = txTypeLabelForOpKind(record.kind);
-  const short = truncMiddle(record.counterparty);
+  // Delegation rows name the cluster (real name, else "Cluster #<id>") in place
+  // of the bare delegation-module address; fall back to the address when no
+  // cluster info was captured (older records) — never blank, never fabricated.
+  const clusterDisplay = isDelegationKind(record.kind)
+    ? record.clusterName ??
+      (record.clusterId !== undefined ? `Cluster #${record.clusterId}` : null)
+    : null;
+  const short = clusterDisplay ?? truncMiddle(record.counterparty);
   const showAmount = !isZeroAmount(record.amountDecimal);
   const ring = badgeRingColor(record.status);
 
