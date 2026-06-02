@@ -30,7 +30,7 @@ import {
   hasClaimableRewards,
   submitStakingTx,
 } from "../sdk/staking";
-import { capture, type RpcOutcome } from "../sdk/live";
+import { capture, loadLiveClusterApys, type RpcOutcome } from "../sdk/live";
 import {
   buildAutovotePlan,
   fetchClusterDiversities,
@@ -77,6 +77,10 @@ export function Stake({ experimentalEnabled }: StakeProps = {}) {
   const [diversities, setDiversities] = useState<
     Map<number, ClusterDiversityView>
   >(new Map());
+  // Live per-cluster APY (lyth_clusterApr → clusterApyPercent), keyed by
+  // clusterId. A missing key means no yield has accrued yet / the read failed,
+  // so the directory row shows "—" rather than a misleading 0.00%.
+  const [apys, setApys] = useState<Map<number, number>>(new Map());
   // Autovote (§25.1): total principal to spread + weight cap + last-built plan.
   const [autoPrincipalLyth, setAutoPrincipalLyth] = useState("100");
   const [autoCapBps, setAutoCapBps] = useState("5000");
@@ -90,6 +94,7 @@ export function Stake({ experimentalEnabled }: StakeProps = {}) {
       setDirectoryError(null);
       setRewards(null);
       setRedemptions(null);
+      setApys(new Map());
       return;
     }
     setBusy(true);
@@ -109,6 +114,13 @@ export function Stake({ experimentalEnabled }: StakeProps = {}) {
       if (dir) {
         setDirectory(dir.clusters);
         setDirectoryError(null);
+        // Fan out the live per-cluster APY reads; tolerant of per-cluster
+        // failures (a missing entry renders "—"). Currently every cluster
+        // resolves to no-yield-yet, so this becomes a real number automatically
+        // once rewards flow.
+        loadLiveClusterApys(dir.clusters.map((c) => c.clusterId))
+          .then(setApys)
+          .catch(() => setApys(new Map()));
         // Fan out the per-cluster diversity reads; tolerant of per-cluster
         // failures (a missing score just renders "—"). Only when the
         // experimental surfaces are enabled — the autovote planner and the
@@ -1042,6 +1054,14 @@ export function Stake({ experimentalEnabled }: StakeProps = {}) {
                     </div>
                     <div className="row-help mono">
                       {c.threshold}-of-{c.size} · health {c.aggregateHealth}
+                    </div>
+                    {/* Live APY (lyth_clusterApr). "—" when no yield has
+                        accrued yet — never a misleading 0.00%. */}
+                    <div className="row-help mono">
+                      APY ·{" "}
+                      {apys.has(c.clusterId)
+                        ? `${apys.get(c.clusterId)!.toFixed(2)}%`
+                        : "—"}
                     </div>
                     {experimentalEnabled
                       ? (() => {
