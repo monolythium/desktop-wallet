@@ -38,8 +38,8 @@ describe("MRV form normalization", () => {
     expect(() =>
       normalizeMrvCallForm({
         contractAddress: "monoc1contract",
-        valueLyth: "1.000000001",
+        valueLyth: "1.0000000000000000001",
       }),
-    ).toThrow(/8 places/);
+    ).toThrow(/18 places/);
   });
 });

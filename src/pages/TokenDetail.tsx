@@ -37,7 +37,7 @@ import {
   type LiveTokenStatus,
   type RpcOutcome,
 } from "../sdk/live";
-import { formatLyth } from "@monolythium/core-sdk";
+import { NATIVE_LYTH_DECIMALS, formatLyth } from "@monolythium/core-sdk";
 import { MONOSCAN_GET_LYTH_URL } from "../sdk/monoscan";
 import { isNativeRef, readSelectedToken } from "../sdk/selected-token";
 import { selectTokenDetailFacts } from "../sdk/token-detail";
@@ -330,7 +330,7 @@ function InfoTab({
   // Asset policy fields are only available for native LYTH (the live read
   // queries the LYTH policy). MRC rows show "—" rather than a fabricated
   // policy. There is no decimals read for an MRC row either, so native shows
-  // the protocol's 8 decimals and MRC rows show "—".
+  // the protocol's 18 decimals and MRC rows show "—".
   const policy = facts.assetPolicy;
   // Circulating supply + total burned are real chain reads, native LYTH only.
   // Each falls back to the honest "—" when the read failed or for an MRC row.
@@ -346,7 +346,7 @@ function InfoTab({
         : "—";
   const rows: Array<{ k: string; v: string; mono?: boolean }> = [
     { k: "Token id", v: facts.isNative ? "native (LYTH)" : facts.tokenId ?? "—", mono: !facts.isNative },
-    { k: "Decimals", v: facts.isNative ? "8" : "—" },
+    { k: "Decimals", v: facts.isNative ? String(NATIVE_LYTH_DECIMALS) : "—" },
     ...(facts.isNative
       ? [
           { k: "Circulating supply", v: circulating },

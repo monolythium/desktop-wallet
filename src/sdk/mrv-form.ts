@@ -1,4 +1,4 @@
-import { MrvValidationError } from "@monolythium/core-sdk";
+import { MrvValidationError, NATIVE_LYTH_DECIMALS } from "@monolythium/core-sdk";
 
 export interface MrvDeployFormInput {
   artifactBytes: string;
@@ -82,8 +82,10 @@ function normalizeHexBytes(
 function normalizeOptionalDecimal(field: string, value?: string): string | undefined {
   const trimmed = value?.trim() ?? "";
   if (trimmed.length === 0) return undefined;
-  if (!/^(0|[1-9][0-9]*)(\.[0-9]{1,8})?$/.test(trimmed)) {
-    throw new MrvValidationError(`${field} must be a decimal LYTH value with up to 8 places`);
+  if (!new RegExp(`^(0|[1-9][0-9]*)(\\.[0-9]{1,${NATIVE_LYTH_DECIMALS}})?$`).test(trimmed)) {
+    throw new MrvValidationError(
+      `${field} must be a decimal LYTH value with up to ${NATIVE_LYTH_DECIMALS} places`,
+    );
   }
   return trimmed;
 }
