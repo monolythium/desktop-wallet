@@ -25,6 +25,11 @@ interface AutoLockApi {
   isLocked: boolean;
   lock: () => void;
   unlock: () => void;
+  /** Suspend the idle timer while a sensitive flow (e.g. a signing operation)
+   *  is open, so it can't be interrupted mid-action. Calls nest: each
+   *  pauseTimer() must be matched by a resumeTimer(). */
+  pauseTimer: () => void;
+  resumeTimer: () => void;
 }
 
 const AutoLockContext = createContext<AutoLockApi | null>(null);
@@ -41,6 +46,7 @@ export function LockProvider({ children }: { children: ReactNode }) {
   const [isLocked, setIsLocked] = useState(false);
   const deadlineRef = useRef(0);
   const timerRef = useRef<number | null>(null);
+  const pauseDepthRef = useRef(0);
 
   const clearTimer = useCallback(() => {
     if (timerRef.current !== null) {
@@ -51,12 +57,17 @@ export function LockProvider({ children }: { children: ReactNode }) {
 
   const arm = useCallback(() => {
     clearTimer();
+    if (pauseDepthRef.current > 0) return; // suspended during a sensitive flow
     const ms = readAutoLockMinutes() * 60_000;
     deadlineRef.current = Date.now() + ms;
     timerRef.current = window.setTimeout(() => setIsLocked(true), ms);
   }, [clearTimer]);
 
   const lock = useCallback(() => {
+    // No session key to wipe: the seed is decrypted per operation and zeroed
+    // immediately, and any in-flight operation pauses the timer rather than
+    // being interrupted. Locking just clears the timer and flips the flag
+    // that re-gates the shell behind the password screen.
     clearTimer();
     setIsLocked(true);
   }, [clearTimer]);
@@ -64,6 +75,16 @@ export function LockProvider({ children }: { children: ReactNode }) {
   const unlock = useCallback(() => {
     setIsLocked(false);
     arm();
+  }, [arm]);
+
+  const pauseTimer = useCallback(() => {
+    pauseDepthRef.current += 1;
+    clearTimer();
+  }, [clearTimer]);
+
+  const resumeTimer = useCallback(() => {
+    pauseDepthRef.current = Math.max(0, pauseDepthRef.current - 1);
+    if (pauseDepthRef.current === 0) arm();
   }, [arm]);
 
   // Arm on mount; tear the timer down on unmount.
@@ -92,6 +113,7 @@ export function LockProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (isLocked) return;
     const check = () => {
+      if (pauseDepthRef.current > 0) return;
       if (Date.now() >= deadlineRef.current) setIsLocked(true);
     };
     const onVisible = () => {
@@ -106,7 +128,7 @@ export function LockProvider({ children }: { children: ReactNode }) {
   }, [isLocked]);
 
   return (
-    <AutoLockContext.Provider value={{ isLocked, lock, unlock }}>
+    <AutoLockContext.Provider value={{ isLocked, lock, unlock, pauseTimer, resumeTimer }}>
       {children}
     </AutoLockContext.Provider>
   );

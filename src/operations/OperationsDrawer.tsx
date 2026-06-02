@@ -23,6 +23,7 @@ import { captureAddressOnUnlock } from "../sdk/vaultCatalog";
 import { readExperimentalEnabled } from "../sdk/feature-flags";
 import { recordOperationFailure } from "../sdk/notifications-record";
 import { trackOperationTx } from "../sdk/reconcile";
+import { useAutoLock } from "../sdk/auto-lock";
 import { MlDsa65Backend } from "@monolythium/core-sdk/crypto";
 import {
   LedgerCallError,
@@ -98,6 +99,14 @@ export function OperationsDrawer({ descriptor, onClose }: Props) {
   // every time the user retries / steps back so a stale enumeration
   // resolving late doesn't clobber a fresh attempt.
   const ledgerAttempt = useRef(0);
+  const { pauseTimer, resumeTimer } = useAutoLock();
+
+  // Suspend the idle auto-lock timer while this drawer is open so a long
+  // signing operation is never interrupted mid-action; resume on unmount.
+  useEffect(() => {
+    pauseTimer();
+    return resumeTimer;
+  }, [pauseTimer, resumeTimer]);
 
   // Esc closes the drawer except mid-execute (don't let users abandon a tx
   // we may have already broadcast).
