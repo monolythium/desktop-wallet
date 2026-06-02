@@ -52,7 +52,7 @@ interface SettingsProps {
   setExperimentalEnabled: (enabled: boolean) => void;
 }
 
-type SettingsSubPage = "main" | "notifications";
+type SettingsSubPage = "main" | "notifications" | "appearance";
 
 export function Settings({ developerModeEnabled, setDeveloperModeEnabled, steleEnabled, setSteleEnabled, experimentalEnabled, setExperimentalEnabled }: SettingsProps) {
   const wallet = useActiveWallet();
@@ -63,6 +63,9 @@ export function Settings({ developerModeEnabled, setDeveloperModeEnabled, steleE
 
   if (subPage === "notifications") {
     return <ManageNotificationsPage onBack={() => setSubPage("main")} />;
+  }
+  if (subPage === "appearance") {
+    return <AppearancePage onBack={() => setSubPage("main")} />;
   }
 
   return (
@@ -173,13 +176,20 @@ export function Settings({ developerModeEnabled, setDeveloperModeEnabled, steleE
       <div className="w-card">
         <div className="w-card__head"><h3>Theme</h3></div>
         <div className="w-card__body">
-          <div className="row-help" style={{ lineHeight: 1.6 }}>
+          <div className="row-help" style={{ lineHeight: 1.6, marginBottom: 4 }}>
             Choose the wallet&apos;s colour theme — light, dark, and accent palettes.
+          </div>
+          <div className="w-setting-row">
+            <div>
+              <div className="row-label">Appearance</div>
+              <div className="row-help">Colour theme and layout.</div>
+            </div>
+            <button className="btn btn--sm" onClick={() => setSubPage("appearance")}>
+              Customize
+            </button>
           </div>
         </div>
       </div>
-
-      <AppearanceCard />
 
       <ChainRegistryCard />
 
@@ -536,7 +546,7 @@ function shortHex(s: string, head = 10, tail = 6): string {
  * paint on the next launch. The default theme ("monolythium") renders the
  * native :root palette (no attribute).
  */
-function AppearanceCard() {
+function AppearancePage({ onBack }: { onBack: () => void }) {
   const [theme, setTheme] = useState<string>(() => readTheme());
   const [layout, setLayout] = useState<LayoutId>(() => readLayout());
 
@@ -550,9 +560,23 @@ function AppearanceCard() {
   };
 
   return (
-    <div className="w-card">
-      <div className="w-card__head"><h3>Appearance</h3></div>
-      <div className="w-card__body">
+    <div className="w-page">
+      <div className="w-page__header">
+        <button
+          className="btn btn--sm btn--ghost"
+          onClick={onBack}
+          style={{ marginBottom: 12 }}
+        >
+          ← Settings
+        </button>
+        <h1>Appearance</h1>
+        <div className="sub">
+          Choose the wallet&apos;s colour theme and layout. Applies across the
+          wallet and persists on this device.
+        </div>
+      </div>
+      <div className="w-card">
+        <div className="w-card__body">
         <div style={{ marginBottom: 14 }}>
           <div className="row-label">Theme</div>
           <div className="row-help" style={{ marginBottom: 12 }}>
@@ -601,6 +625,7 @@ function AppearanceCard() {
           options={LAYOUTS}
           onChange={pickLayout}
         />
+        </div>
       </div>
     </div>
   );
