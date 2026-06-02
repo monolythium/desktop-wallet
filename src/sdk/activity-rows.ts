@@ -17,6 +17,7 @@
 
 import type { Denom, Tx } from "../data/types";
 import type { LiveAddressActivityRow } from "./live";
+import { txTypeLabelForActivity } from "./tx-type-label";
 
 /** Indexer kind → the `TxRow` icon/category bucket. Conservative: only the
  *  clearly-recognisable families map to reward/stake; everything else is a
@@ -104,6 +105,7 @@ export function activityRowToTx(row: LiveAddressActivityRow, denom: Denom): Tx {
     // The indexer stream carries no memo — left empty so TxRow omits it.
     memo: "",
     kind: activityKindToTxKind(row.subKind ? `${row.kind} ${row.subKind}` : row.kind),
+    typeLabel: txTypeLabelForActivity(row),
     denom,
   };
 }

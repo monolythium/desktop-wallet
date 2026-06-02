@@ -20,6 +20,7 @@ import { useEffect, useState } from "react";
 import { activityRelativeTime } from "../sdk/activity-rows";
 import { loadLiveTxConfirmations } from "../sdk/live";
 import { isZeroAmount, pendingOpLabel, type TxOpKind } from "../sdk/notifications";
+import { txTypeLabelForActivity } from "../sdk/tx-type-label";
 import { CopyableAddress, DRow, MonoscanTxButton, truncMiddle } from "./_detailModalParts";
 
 /** Pending-mempool row — carries the canonical tx hash, so it links out. */
@@ -84,9 +85,12 @@ function clusterName(id: number): string {
 function modalTitle(row: DetailRow): string {
   if (row.kind === "pending") return "Pending transaction";
   if (row.kind === "tracked") return pendingOpLabel(row.opKind);
-  // Indexed — title off the indexer kind, capitalised.
-  const k = row.activityKind;
-  return k.charAt(0).toUpperCase() + k.slice(1);
+  // Indexed — the neutral type-noun for the row's kind/subKind/direction.
+  return txTypeLabelForActivity({
+    kind: row.activityKind,
+    subKind: row.subKind,
+    direction: row.direction,
+  });
 }
 
 /** Best-effort confirmation depth for an indexed row that resolved a tx hash.

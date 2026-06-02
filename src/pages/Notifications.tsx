@@ -24,6 +24,7 @@ import {
   type NotificationRecord,
   type TxOpKind,
 } from "../sdk/notifications";
+import { txTypeLabelForOpKind } from "../sdk/tx-type-label";
 import {
   listAllNotifications,
   markAllNotificationsRead,
@@ -204,6 +205,7 @@ function NotificationRow({
   onOpen: () => void;
 }) {
   const title = notificationTitle(record.kind, record.status);
+  const typeNoun = txTypeLabelForOpKind(record.kind);
   const short = truncMiddle(record.counterparty);
   const showAmount = !isZeroAmount(record.amountDecimal);
   const ring = badgeRingColor(record.status);
@@ -246,7 +248,9 @@ function NotificationRow({
             {!record.read ? <span style={unreadDot} aria-label="Unread" /> : null}
           </div>
           <div className="row-help mono" style={ellipsis}>
-            {showAmount ? `${record.amountDecimal} LYTH · ${short}` : short}
+            {showAmount
+              ? `${typeNoun} · ${record.amountDecimal} LYTH · ${short}`
+              : `${typeNoun} · ${short}`}
           </div>
         </div>
       </div>

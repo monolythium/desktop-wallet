@@ -9,13 +9,7 @@ interface Props {
 }
 
 export function TxRow({ tx, onClick }: Props) {
-  const typeLabel = tx.kind === "reward"
-    ? "Reward"
-    : tx.kind === "stake"
-    ? "Stake"
-    : tx.direction === "in"
-    ? "Received"
-    : "Sent";
+  const typeLabel = tx.typeLabel;
   const label = tx.kind === "reward"
     ? tx.counterparty
     : tx.kind === "stake"
