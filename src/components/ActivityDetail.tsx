@@ -78,7 +78,7 @@ export interface ActivityDetailProps {
 }
 
 function clusterName(id: number): string {
-  return `C-${String(id + 1).padStart(3, "0")}.cluster.mono`;
+  return `Cluster #${id}`;
 }
 
 function modalTitle(row: DetailRow): string {
