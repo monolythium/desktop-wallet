@@ -276,11 +276,38 @@ export function Onboarding({ onDone }: Props) {
           <>
             <div className="cap" style={{ marginBottom: 8 }}>Recovery phrase</div>
             <h1 style={{ margin: "0 0 8px" }}>Write this down</h1>
-            <p style={{ margin: "0 0 18px", color: "var(--w-text-2)", fontSize: 13 }}>
+            <p style={{ margin: "0 0 14px", color: "var(--w-text-2)", fontSize: 13 }}>
               This PQM-1 phrase is the only recovery path for the encrypted
               local vault. It will not be shown again.
             </p>
+            <div
+              style={{
+                fontFamily: "var(--f-mono)",
+                fontSize: 10,
+                color: "var(--fg-400)",
+                letterSpacing: "0.14em",
+                textTransform: "uppercase",
+                marginBottom: 10,
+              }}
+            >
+              PQM-1 · {PQM1_WORDS} words
+            </div>
             <MnemonicGrid mnemonic={mnemonic} />
+            <div
+              style={{
+                marginTop: 14,
+                padding: "10px 12px",
+                borderRadius: 10,
+                background: "rgba(242,180,65,0.08)",
+                border: "1px solid rgba(242,180,65,0.4)",
+                color: "var(--fg-100)",
+                fontSize: 12,
+                lineHeight: 1.5,
+              }}
+            >
+              Anyone with these words controls your funds — store them offline
+              and never share them. Monolythium cannot recover them for you.
+            </div>
             <div style={{ display: "flex", marginTop: 24 }}>
               <button
                 className="btn btn--primary"
