@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState } from "react";
 import type { ChainInfo } from "@monolythium/core-sdk";
 import { useActiveWallet } from "../sdk/active-wallet";
 import { CopyableAddress } from "../components/_detailModalParts";
+import { deleteAccount } from "../sdk/keychain";
+import { loadCatalog, removeVaultFromCatalog } from "../sdk/vaultCatalog";
 import {
   AUTO_LOCK_OPTIONS,
   readAutoLockMinutes,
@@ -52,7 +54,7 @@ interface SettingsProps {
   setExperimentalEnabled: (enabled: boolean) => void;
 }
 
-type SettingsSubPage = "main" | "notifications" | "appearance";
+type SettingsSubPage = "main" | "notifications" | "appearance" | "reset";
 
 export function Settings({ developerModeEnabled, setDeveloperModeEnabled, steleEnabled, setSteleEnabled, experimentalEnabled, setExperimentalEnabled }: SettingsProps) {
   const wallet = useActiveWallet();
@@ -66,6 +68,9 @@ export function Settings({ developerModeEnabled, setDeveloperModeEnabled, steleE
   }
   if (subPage === "appearance") {
     return <AppearancePage onBack={() => setSubPage("main")} />;
+  }
+  if (subPage === "reset") {
+    return <ResetWalletPage onBack={() => setSubPage("main")} />;
   }
 
   return (
@@ -148,6 +153,15 @@ export function Settings({ developerModeEnabled, setDeveloperModeEnabled, steleE
               </div>
             </div>
             <button className="btn btn--sm" onClick={() => lock()}>Lock now</button>
+          </div>
+          <div className="w-setting-row">
+            <div>
+              <div className="row-label">Reset wallet</div>
+              <div className="row-help">
+                Erase this wallet from this device. Only your recovery phrase can restore it.
+              </div>
+            </div>
+            <button className="btn btn--sm" onClick={() => setSubPage("reset")}>Reset…</button>
           </div>
         </div>
       </div>
@@ -379,6 +393,94 @@ function ManageNotificationsPage({ onBack }: { onBack: () => void }) {
               writeIncomingEnabled(next);
             }}
           />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Reset wallet — a destructive, type-to-confirm wipe. Removes every vault from
+ * this device by deleting each OS-keychain blob and its catalog entry (the same
+ * commands the Wallets page uses to remove a single vault). On success the
+ * webview reloads so the boot probe re-runs and, finding no vault, routes to
+ * onboarding. On-chain funds are untouched; only the recovery phrase restores.
+ */
+function ResetWalletPage({ onBack }: { onBack: () => void }) {
+  const [confirmText, setConfirmText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const canReset = confirmText.trim().toUpperCase() === "RESET" && !busy;
+
+  const doReset = async () => {
+    if (!canReset) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const catalog = await loadCatalog().catch(() => null);
+      const slots = catalog ? Object.keys(catalog.vaults) : [];
+      for (const slot of slots) {
+        // Wipe the encrypted blob first, then drop the catalog entry — a
+        // keychain failure aborts before we orphan a row.
+        await deleteAccount(slot);
+        await removeVaultFromCatalog(slot);
+      }
+      // Reload so the boot probe re-runs: with no vault left it routes to
+      // onboarding (the fresh-install state).
+      window.location.reload();
+    } catch (cause) {
+      setError((cause as Error)?.message ?? String(cause));
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="w-page">
+      <div className="w-page__header">
+        <button
+          className="btn btn--sm btn--ghost"
+          onClick={onBack}
+          style={{ marginBottom: 12 }}
+        >
+          ← Settings
+        </button>
+        <h1>Reset wallet</h1>
+        <div className="sub">Erase this wallet from this device.</div>
+      </div>
+      <div className="w-card">
+        <div className="w-card__body">
+          <div className="w-banner error" style={{ lineHeight: 1.6 }}>
+            This erases your wallet from this device — every account and its
+            encrypted vault. <strong>Only your recovery phrase can restore it.</strong>{" "}
+            Your funds on-chain are unaffected.
+          </div>
+          <label className="w-onboarding__field" style={{ marginTop: 16 }}>
+            <span className="cap">Type RESET to confirm</span>
+            <input
+              type="text"
+              autoFocus
+              autoCapitalize="characters"
+              autoComplete="off"
+              spellCheck={false}
+              value={confirmText}
+              onChange={(e) => setConfirmText(e.target.value)}
+              placeholder="RESET"
+            />
+          </label>
+          {error ? (
+            <div className="w-banner error" style={{ marginTop: 12 }}>{error}</div>
+          ) : null}
+          <div style={{ display: "flex", gap: 8, marginTop: 20 }}>
+            <button className="btn" onClick={onBack} disabled={busy}>Cancel</button>
+            <button
+              className="btn btn--primary"
+              style={{ marginLeft: "auto" }}
+              disabled={!canReset}
+              onClick={() => void doReset()}
+            >
+              {busy ? "Erasing…" : "Erase wallet"}
+            </button>
+          </div>
         </div>
       </div>
     </div>
