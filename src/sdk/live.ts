@@ -1,16 +1,19 @@
-import { ApiClient, formatLyth } from "@monolythium/core-sdk";
+import { ApiClient, clusterApyPercent, formatLyth } from "@monolythium/core-sdk";
 import type {
+  AddressActivityEntryEnriched,
   ApiCapabilitiesResponse,
   ApiEnvelope,
   ApiHealthResponse,
   ApiQueryValue,
   ApiStreamsIndexResponse,
   ChainStatsResponse,
+  CirculatingSupplyResponse,
   ClobMarketsResponse,
   ClobOrderBookResponse,
   ClobTradesResponse,
   NativeMarketStateResponse,
   PrecompileCatalogueResponse,
+  TotalBurnedResponse,
 } from "@monolythium/core-sdk";
 import { MlDsa65Backend } from "@monolythium/core-sdk/crypto";
 import { getProvider } from "./client";
@@ -104,6 +107,13 @@ export interface LiveAddressActivityRow {
   cluster: number | null;
   weightBps: number | null;
   subKind: string | null;
+  // Enrichment fields (lyth enrichAddressActivity). Each is honestly null when
+  // the chain can't resolve it: the timestamp for old/pruned blocks, the tx
+  // hash for rows that aren't the wallet's own tx, the cluster name when the
+  // cluster carries no registered name.
+  blockTimestampSeconds: bigint | null;
+  txHash: string | null;
+  clusterName: string | null;
 }
 
 export interface LiveWalletIdentity {
@@ -280,7 +290,111 @@ export async function loadLiveTradeStatus(): Promise<LiveTradeStatus> {
 
 export async function loadLiveAddressActivity(wallet: string): Promise<RpcOutcome<LiveAddressActivityRow[]>> {
   const typedWallet = requireTypedUserAddress(wallet, "wallet");
-  return capture(() => getProvider().rpcClient.lythGetAddressActivity(typedWallet, 30));
+  return capture(async () => {
+    const entries = await getProvider().rpcClient.enrichAddressActivity(typedWallet, 30);
+    return entries.map(toLiveAddressActivityRow);
+  });
+}
+
+/** Map one enriched address-activity entry onto the wallet's row shape. The
+ *  three enrichment fields pass through unchanged (each is already null when
+ *  the chain couldn't resolve it). */
+function toLiveAddressActivityRow(entry: AddressActivityEntryEnriched): LiveAddressActivityRow {
+  return {
+    blockHeight: entry.blockHeight,
+    txIndex: entry.txIndex,
+    logIndex: entry.logIndex,
+    kind: entry.kind,
+    direction: entry.direction,
+    counterparty: entry.counterparty,
+    tokenId: entry.tokenId,
+    amount: entry.amount,
+    cluster: entry.cluster,
+    weightBps: entry.weightBps,
+    subKind: entry.subKind,
+    blockTimestampSeconds: entry.blockTimestampSeconds,
+    txHash: entry.txHash,
+    clusterName: entry.clusterName,
+  };
+}
+
+export interface LiveSupplyStatus {
+  endpoint: string;
+  circulatingSupply: RpcOutcome<CirculatingSupplyResponse>;
+  totalBurned: RpcOutcome<TotalBurnedResponse>;
+}
+
+/** Native LYTH supply stats — circulating supply (with initial supply +
+ *  cumulative burned) and total burned. Both are real chain reads; amounts are
+ *  decimal lythoshi strings the caller formats via `formatLyth`. A failed read
+ *  surfaces the verbatim node error so the page can fall back to "—". */
+export async function loadLiveSupplyStatus(): Promise<LiveSupplyStatus> {
+  const client = getProvider().rpcClient;
+  const [circulatingSupply, totalBurned] = await Promise.all([
+    capture(() => client.lythCirculatingSupply()),
+    capture(() => client.lythTotalBurned()),
+  ]);
+  return {
+    endpoint: client.endpoint,
+    circulatingSupply,
+    totalBurned,
+  };
+}
+
+/** Live per-cluster APY (percent). Wraps `lyth_clusterApr` + the SDK's
+ *  `clusterApyPercent` helper. Returns `null` — not a misleading "0.00%" —
+ *  when no reward has accrued in the window (the reward-index delta is 0, which
+ *  is the current testnet reality) or when the read fails. Becomes a real
+ *  number automatically once rewards flow. */
+export async function loadLiveClusterApy(
+  clusterId: number,
+  windowBlocks?: number,
+): Promise<number | null> {
+  try {
+    const apr = await getProvider().rpcClient.lythClusterApr(clusterId, windowBlocks);
+    const apy = clusterApyPercent(apr);
+    // No yield accrued in the window → aprBps/delta is zero → APY collapses to
+    // 0; surface null so the UI shows an honest "—" rather than "0.00%".
+    if (!Number.isFinite(apy) || apy <= 0) return null;
+    return apy;
+  } catch {
+    return null;
+  }
+}
+
+/** Fan out `loadLiveClusterApy` over a set of cluster ids. Returns a map of
+ *  clusterId → APY percent (only entries that resolved to a real, non-zero
+ *  number are included — a missing key means "no yield yet / unavailable", so
+ *  callers render "—"). Tolerant of per-cluster failures. */
+export async function loadLiveClusterApys(
+  clusterIds: number[],
+  windowBlocks?: number,
+): Promise<Map<number, number>> {
+  const out = new Map<number, number>();
+  const unique = Array.from(new Set(clusterIds));
+  await Promise.all(
+    unique.map(async (id) => {
+      const apy = await loadLiveClusterApy(id, windowBlocks);
+      if (apy !== null) out.set(id, apy);
+    }),
+  );
+  return out;
+}
+
+/** Best-effort confirmation depth for a tx hash (`lyth_txConfirmations`).
+ *  Returns the confirmation count when the chain reports the tx as found, else
+ *  null (not found, no depth, or a read error) — the caller falls back to its
+ *  existing honest status. */
+export async function loadLiveTxConfirmations(txHash: string): Promise<number | null> {
+  try {
+    const result = await getProvider().rpcClient.lythTxConfirmations(txHash);
+    if (result.status === "found" && typeof result.confirmations === "number") {
+      return result.confirmations;
+    }
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 export async function loadAccountPolicy(address: string) {
