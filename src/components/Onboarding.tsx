@@ -199,12 +199,43 @@ export function Onboarding({ onDone }: Props) {
       <div className="w-onboarding__card">
         {step === "choose-path" ? (
           <>
-            <div className="cap" style={{ marginBottom: 8 }}>First-run setup</div>
-            <h1 style={{ margin: "0 0 8px" }}>Set up your wallet</h1>
-            <p style={{ margin: "0 0 24px", color: "var(--w-text-2)", fontSize: 13, lineHeight: 1.55 }}>
-              Create a new wallet or restore one you already have using its
-              24-word PQM-1 recovery phrase.
-            </p>
+            <div style={{ textAlign: "center", marginBottom: 22 }}>
+              <div
+                aria-hidden="true"
+                style={{
+                  width: 52,
+                  height: 52,
+                  margin: "0 auto 14px",
+                  borderRadius: 13,
+                  background: "var(--gold)",
+                  boxShadow: "0 0 16px rgba(var(--gold-glow), 0.4)",
+                }}
+              />
+              <h1 style={{ margin: "0 0 6px" }}>Welcome to Monolythium</h1>
+              <div
+                style={{
+                  fontFamily: "var(--f-mono)",
+                  fontSize: 10,
+                  color: "var(--fg-400)",
+                  letterSpacing: "0.16em",
+                  textTransform: "uppercase",
+                }}
+              >
+                Sovereign post-quantum wallet
+              </div>
+              <p
+                style={{
+                  margin: "12px 0 0",
+                  color: "var(--w-text-2)",
+                  fontSize: 13,
+                  lineHeight: 1.55,
+                }}
+              >
+                ML-DSA-65 keys and ML-KEM-768 envelopes, encrypted on this
+                device. Create a new wallet or restore one from its 24-word
+                PQM-1 recovery phrase.
+              </p>
+            </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               <button
                 className="btn btn--primary"
