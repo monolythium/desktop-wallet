@@ -3,6 +3,11 @@
 import { useCallback, useEffect, useState } from "react";
 import type { ChainInfo } from "@monolythium/core-sdk";
 import { useActiveWallet } from "../sdk/active-wallet";
+import {
+  AUTO_LOCK_OPTIONS,
+  readAutoLockMinutes,
+  writeAutoLockMinutes,
+} from "../sdk/auto-lock-setting";
 import { fetchLiveTestnetRegistry } from "../sdk/live-registry";
 import {
   outboundMcpStart,
@@ -38,6 +43,7 @@ interface SettingsProps {
 export function Settings({ developerModeEnabled, setDeveloperModeEnabled, steleEnabled, setSteleEnabled, experimentalEnabled, setExperimentalEnabled }: SettingsProps) {
   const wallet = useActiveWallet();
   const [devkitChannel, setDevkitChannel] = useState<NativeDevkitChannel>(() => readDevkitChannel());
+  const [autoLockMinutes, setAutoLockMinutes] = useState<number>(() => readAutoLockMinutes());
 
   return (
     <div className="w-page">
@@ -142,6 +148,29 @@ export function Settings({ developerModeEnabled, setDeveloperModeEnabled, steleE
                       ? wallet.error
                       : "No active wallet registered."}
               </div>
+            </div>
+          </div>
+          <div className="w-setting-row">
+            <div>
+              <div className="row-label">Auto-lock after</div>
+              <div className="row-help">
+                Lock the wallet and ask for your password again after this much inactivity.
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 6 }}>
+              {AUTO_LOCK_OPTIONS.map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  className={`btn btn--sm${m === autoLockMinutes ? " btn--primary" : ""}`}
+                  onClick={() => {
+                    setAutoLockMinutes(m);
+                    writeAutoLockMinutes(m);
+                  }}
+                >
+                  {m}m
+                </button>
+              ))}
             </div>
           </div>
           <div className="w-setting-row">
