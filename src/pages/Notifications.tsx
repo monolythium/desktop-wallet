@@ -217,6 +217,10 @@ function NotificationRow({
   const short = clusterDisplay ?? truncMiddle(record.counterparty);
   const showAmount = !isZeroAmount(record.amountDecimal);
   const ring = badgeRingColor(record.status);
+  // Outgoing + confirmed records accent the glyph with the brand colour; the
+  // status ring stays green/red. Failed (red) and pending are untouched.
+  const isOutgoingConfirmed = record.status === "confirmed";
+  const glyphColor = isOutgoingConfirmed ? "var(--gold)" : ring;
 
   return (
     <div
@@ -243,7 +247,7 @@ function NotificationRow({
             height: 28,
             borderRadius: "50%",
             border: `1px solid ${ring}`,
-            color: ring,
+            color: glyphColor,
             background: "rgba(255,255,255,0.03)",
             flexShrink: 0,
           }}
