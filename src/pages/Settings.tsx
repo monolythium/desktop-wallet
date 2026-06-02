@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { ChainInfo } from "@monolythium/core-sdk";
 import { useActiveWallet } from "../sdk/active-wallet";
+import { CopyableAddress } from "../components/_detailModalParts";
 import {
   AUTO_LOCK_OPTIONS,
   readAutoLockMinutes,
@@ -54,6 +55,102 @@ export function Settings({ developerModeEnabled, setDeveloperModeEnabled, steleE
       <div className="w-page__header">
         <h1>Settings</h1>
         <div className="sub">Customize how your wallet looks and behaves.</div>
+      </div>
+
+      <div className="w-card">
+        <div className="w-card__head"><h3>Account</h3></div>
+        <div className="w-card__body">
+          <div className="w-setting-row">
+            <div>
+              <div className="row-label">
+                {wallet.status === "ready" || wallet.status === "locked"
+                  ? wallet.name
+                  : "Active account"}
+              </div>
+              <div className="row-help">The address others use to send you LYTH.</div>
+            </div>
+            {wallet.status === "ready" ? (
+              <CopyableAddress addr={wallet.address} />
+            ) : (
+              <span className="row-help">
+                {wallet.status === "locked"
+                  ? "Unlock to derive address"
+                  : wallet.status === "error"
+                    ? wallet.error
+                    : "No active wallet"}
+              </span>
+            )}
+          </div>
+          <div className="w-setting-row">
+            <div>
+              <div className="row-label">Recovery phrase</div>
+              <div className="row-help">
+                Your 24-word PQM-1 recovery phrase was shown once when this wallet
+                was created — the only way to restore it on another device. The
+                local vault stores only the encrypted signing seed (the phrase is
+                derived from it one way and never written to disk), so it cannot be
+                shown again here. Keep the copy you wrote down at setup.
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="w-card">
+        <div className="w-card__head"><h3>Security</h3></div>
+        <div className="w-card__body">
+          <div className="w-setting-row">
+            <div>
+              <div className="row-label">Auto-lock after</div>
+              <div className="row-help">
+                Lock the wallet and ask for your password again after this much inactivity.
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 6 }}>
+              {AUTO_LOCK_OPTIONS.map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  className={`btn btn--sm${m === autoLockMinutes ? " btn--primary" : ""}`}
+                  onClick={() => {
+                    setAutoLockMinutes(m);
+                    writeAutoLockMinutes(m);
+                  }}
+                >
+                  {m}m
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="w-setting-row">
+            <div>
+              <div className="row-label">Lock wallet now</div>
+              <div className="row-help">
+                Immediately lock the wallet and return to the password screen.
+              </div>
+            </div>
+            <button className="btn btn--sm" onClick={() => lock()}>Lock now</button>
+          </div>
+        </div>
+      </div>
+
+      <div className="w-card">
+        <div className="w-card__head"><h3>Notifications</h3></div>
+        <div className="w-card__body">
+          <div className="row-help" style={{ lineHeight: 1.6 }}>
+            Control system notifications, what details they show, and how they
+            behave while the wallet is locked.
+          </div>
+        </div>
+      </div>
+
+      <div className="w-card">
+        <div className="w-card__head"><h3>Theme</h3></div>
+        <div className="w-card__body">
+          <div className="row-help" style={{ lineHeight: 1.6 }}>
+            Choose the wallet&apos;s colour theme — light, dark, and accent palettes.
+          </div>
+        </div>
       </div>
 
       <AppearanceCard />
@@ -150,69 +247,6 @@ export function Settings({ developerModeEnabled, setDeveloperModeEnabled, steleE
             >
               {incomingEnabled ? "Enabled" : "Disabled"}
             </button>
-          </div>
-        </div>
-      </div>
-
-      <RecoveryPhraseCard />
-
-      <div className="w-card">
-        <div className="w-card__head"><h3>Security</h3></div>
-        <div className="w-card__body">
-          <div className="w-setting-row">
-            <div>
-              <div className="row-label">Active wallet</div>
-              <div className="row-help">
-                {wallet.status === "ready"
-                  ? `${wallet.name} · ${wallet.address}`
-                  : wallet.status === "locked"
-                    ? `${wallet.name} · unlock to derive address`
-                    : wallet.status === "error"
-                      ? wallet.error
-                      : "No active wallet registered."}
-              </div>
-            </div>
-          </div>
-          <div className="w-setting-row">
-            <div>
-              <div className="row-label">Auto-lock after</div>
-              <div className="row-help">
-                Lock the wallet and ask for your password again after this much inactivity.
-              </div>
-            </div>
-            <div style={{ display: "flex", gap: 6 }}>
-              {AUTO_LOCK_OPTIONS.map((m) => (
-                <button
-                  key={m}
-                  type="button"
-                  className={`btn btn--sm${m === autoLockMinutes ? " btn--primary" : ""}`}
-                  onClick={() => {
-                    setAutoLockMinutes(m);
-                    writeAutoLockMinutes(m);
-                  }}
-                >
-                  {m}m
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className="w-setting-row">
-            <div>
-              <div className="row-label">Lock now</div>
-              <div className="row-help">
-                Immediately lock the wallet and return to the password screen.
-              </div>
-            </div>
-            <button className="btn btn--sm" onClick={() => lock()}>Lock now</button>
-          </div>
-          <div className="w-setting-row">
-            <div>
-              <div className="row-label">Rotate signing key</div>
-              <div className="row-help">
-                Key rotation is not available in this build. Use Wallets to add or import a separate vault.
-              </div>
-            </div>
-            <button className="btn btn--sm" disabled>Unavailable</button>
           </div>
         </div>
       </div>
@@ -458,46 +492,6 @@ function AppearanceCard() {
           options={LAYOUTS}
           onChange={pickLayout}
         />
-      </div>
-    </div>
-  );
-}
-
-/**
- * Recovery phrase. The local vault (src-tauri/src/vault.rs) seals only the
- * 32-byte ML-DSA-65 SEED — the 24-word PQM-1 phrase is derived from the
- * mnemonic one-way (SHAKE256 KDF, see `pqm1MnemonicToMlDsa65Seed`), so it
- * cannot be reconstructed from what is stored. Onboarding shows the phrase
- * once at setup; this surface is honest about that and never fakes a reveal.
- *
- * A real in-app reveal would require the Rust vault wire-format to ALSO seal
- * the encrypted mnemonic (a separate, security-sensitive vault change). Until
- * that lands, the only recovery path is the phrase the user wrote down at
- * setup — which is what this card states.
- */
-function RecoveryPhraseCard() {
-  return (
-    <div className="w-card">
-      <div className="w-card__head"><h3>Recovery phrase</h3></div>
-      <div className="w-card__body">
-        <div className="row-help" style={{ lineHeight: 1.6 }}>
-          Your 24-word PQM-1 recovery phrase was shown once when this wallet was
-          created. It is the only way to restore the wallet on another device.
-        </div>
-        <div className="w-setting-row">
-          <div>
-            <div className="row-label">Reveal recovery phrase</div>
-            <div className="row-help">
-              Not available in this build. The local vault stores only the
-              encrypted signing seed — the recovery phrase is derived from it
-              one way and is never written to disk, so it cannot be shown again
-              from here. Keep the copy you wrote down at setup; if you have
-              lost it, move your funds to a freshly created wallet whose phrase
-              you do record.
-            </div>
-          </div>
-          <button className="btn btn--sm" disabled>Unavailable</button>
-        </div>
       </div>
     </div>
   );
