@@ -112,9 +112,9 @@ describe("activityCounterparty", () => {
     expect(activityCounterparty(row({ counterparty: "mono1abc" }))).toBe("mono1abc");
   });
 
-  it("falls back to the synthetic cluster label when a cluster is set without a name", () => {
+  it("falls back to a plain cluster identifier when a cluster is set without a name", () => {
     expect(activityCounterparty(row({ counterparty: null, cluster: 4, clusterName: null }))).toBe(
-      "C-005.cluster.mono",
+      "Cluster #4",
     );
   });
 
@@ -149,7 +149,7 @@ describe("activityRowToTx", () => {
     );
     expect(tx.amount).toBeNull();
     expect(tx.kind).toBe("stake");
-    expect(tx.counterparty).toBe("C-002.cluster.mono");
+    expect(tx.counterparty).toBe("Cluster #1");
   });
 
   it("uses the indexer token id as the token label when present", () => {

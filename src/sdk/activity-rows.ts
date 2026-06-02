@@ -79,12 +79,12 @@ export function activityWhen(row: LiveAddressActivityRow, nowMs?: number): strin
 }
 
 /** Counterparty label. Prefers a resolved cluster name from enrichment, then
- *  the counterparty address, then the synthetic cluster label for
+ *  the counterparty address, then a plain cluster identifier for
  *  delegation-style rows, else "—" (no fabrication). */
 export function activityCounterparty(row: LiveAddressActivityRow): string {
   if (row.clusterName) return row.clusterName;
   if (row.counterparty) return row.counterparty;
-  if (row.cluster !== null) return `C-${String(row.cluster + 1).padStart(3, "0")}.cluster.mono`;
+  if (row.cluster !== null) return `Cluster #${row.cluster}`;
   return "—";
 }
 
