@@ -33,6 +33,7 @@ export const NOTIFICATION_HISTORY_CAP = 50;
  *  fallback for untagged / unrecognized paths. */
 export type TxOpKind =
   | "send"
+  | "receive"
   | "delegate"
   | "undelegate"
   | "redelegate"
@@ -46,6 +47,7 @@ export type TxOpKind =
 export function isTxOpKind(v: unknown): v is TxOpKind {
   return (
     v === "send" ||
+    v === "receive" ||
     v === "delegate" ||
     v === "undelegate" ||
     v === "redelegate" ||
@@ -152,6 +154,7 @@ export const NOTIFICATION_LABELS: Record<
   { confirmed: string; failed: string }
 > = {
   send: { confirmed: "Sent", failed: "Send failed" },
+  receive: { confirmed: "Received", failed: "Received" },
   delegate: { confirmed: "Staked", failed: "Stake failed" },
   undelegate: { confirmed: "Unstaked", failed: "Unstake failed" },
   redelegate: { confirmed: "Restaked", failed: "Restake failed" },
@@ -218,6 +221,7 @@ export function notificationToast(record: NotificationRecord): {
  *  {@link pendingOpLabel} so the wording stays centralized here. */
 export const PENDING_OP_LABELS: Record<TxOpKind, string> = {
   send: "Sending…",
+  receive: "Receiving…",
   delegate: "Staking…",
   undelegate: "Unstaking…",
   redelegate: "Restaking…",

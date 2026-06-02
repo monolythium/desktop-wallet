@@ -11,6 +11,8 @@ export function txTypeLabelForOpKind(kind: TxOpKind): string {
   switch (kind) {
     case "send":
       return "Outgoing transfer";
+    case "receive":
+      return "Incoming transfer";
     case "delegate":
       return "Stake";
     case "undelegate":

@@ -4,6 +4,7 @@ import { txTypeLabelForActivity, txTypeLabelForOpKind } from "../tx-type-label";
 describe("txTypeLabelForOpKind", () => {
   it("maps every operation kind to a neutral type-noun", () => {
     expect(txTypeLabelForOpKind("send")).toBe("Outgoing transfer");
+    expect(txTypeLabelForOpKind("receive")).toBe("Incoming transfer");
     expect(txTypeLabelForOpKind("delegate")).toBe("Stake");
     expect(txTypeLabelForOpKind("undelegate")).toBe("Unstake");
     expect(txTypeLabelForOpKind("redelegate")).toBe("Restake");

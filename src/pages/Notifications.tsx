@@ -87,6 +87,8 @@ function iconForKind(kind: TxOpKind): ReactElement {
   switch (kind) {
     case "send":
       return ICON_SEND;
+    case "receive":
+      return ICON_RECEIVE;
     case "delegate":
     case "undelegate":
     case "redelegate":
@@ -219,7 +221,8 @@ function NotificationRow({
   const ring = badgeRingColor(record.status);
   // Outgoing + confirmed records accent the glyph with the brand colour; the
   // status ring stays green/red. Failed (red) and pending are untouched.
-  const isOutgoingConfirmed = record.status === "confirmed";
+  const isOutgoingConfirmed =
+    record.status === "confirmed" && record.kind !== "receive";
   const glyphColor = isOutgoingConfirmed ? "var(--gold)" : ring;
 
   return (
