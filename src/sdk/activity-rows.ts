@@ -17,6 +17,8 @@
 
 import type { Denom, Tx } from "../data/types";
 import type { LiveAddressActivityRow } from "./live";
+import type { NotificationRecord } from "./notifications";
+import type { PendingTx } from "./pending-tx";
 import { txTypeLabelForActivity } from "./tx-type-label";
 
 /** Indexer kind → the `TxRow` icon/category bucket. Conservative: only the
@@ -108,4 +110,58 @@ export function activityRowToTx(row: LiveAddressActivityRow, denom: Denom): Tx {
     typeLabel: txTypeLabelForActivity(row),
     denom,
   };
+}
+
+/** A merged activity-feed item, tagged by source. Pending (in-flight) rows
+ *  carry no block and float to the top; confirmed and failed rows interleave by
+ *  block height then time. */
+export type MergedActivityItem =
+  | { tag: "pending"; tx: PendingTx }
+  | { tag: "confirmed"; row: LiveAddressActivityRow }
+  | { tag: "failed"; record: NotificationRecord };
+
+interface RankedActivityItem {
+  item: MergedActivityItem;
+  /** Block height; `Infinity` for an item with no block yet (floats to top). */
+  block: number;
+  /** Epoch-ms tie-breaker within a block (or among unanchored items). */
+  ms: number;
+}
+
+/** Merge tracked-pending + indexed-confirmed + failed records into ONE
+ *  newest-first list. Recency = block height desc (absent/unanchored block →
+ *  top), then epoch-ms desc. Pure and stable; never NaNs — `Infinity` blocks
+ *  are compared by identity, not subtraction. Failed rows interleave by
+ *  recency rather than being pinned. */
+export function mergeActivityNewestFirst(
+  pending: ReadonlyArray<PendingTx>,
+  confirmed: ReadonlyArray<LiveAddressActivityRow>,
+  failed: ReadonlyArray<NotificationRecord>,
+): MergedActivityItem[] {
+  const ranked: RankedActivityItem[] = [];
+  for (const tx of pending) {
+    ranked.push({ item: { tag: "pending", tx }, block: Infinity, ms: tx.submittedAt });
+  }
+  for (const row of confirmed) {
+    ranked.push({
+      item: { tag: "confirmed", row },
+      block: Number(row.blockHeight),
+      ms:
+        row.blockTimestampSeconds !== null
+          ? Number(row.blockTimestampSeconds) * 1000
+          : 0,
+    });
+  }
+  for (const record of failed) {
+    ranked.push({
+      item: { tag: "failed", record },
+      block: record.blockNumber ?? Infinity,
+      ms: record.createdAtMs,
+    });
+  }
+  ranked.sort((a, b) => {
+    if (a.block !== b.block) return a.block > b.block ? -1 : 1;
+    return b.ms - a.ms;
+  });
+  return ranked.map((r) => r.item);
 }

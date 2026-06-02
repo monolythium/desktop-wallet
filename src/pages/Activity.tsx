@@ -1,35 +1,43 @@
-// Activity page — denom-segregated tx list.
+// Activity page — denom-segregated, single chronological feed.
 //
-// Pending section (experimental): txs this wallet broadcast but that haven't
-// reached a terminal receipt live in the durable tracked-tx store. They surface
-// as a "Pending" section that clears itself as the app-level reconcile poller
-// (`PendingTxReconciler`) carries each tx to confirmed/failed and removes it
-// from the store — the store subscription (`usePendingTxs`) drives the
-// re-render. This is the wallet's own tracked set, NOT the `lyth_mempoolPending`
-// snapshot below (which is the node's view and can include txs from elsewhere).
+// One newest-first feed merges the wallet's three activity sources:
+//   1. durable tracked-pending txs (in-flight, no block yet — float to the top),
+//   2. indexed confirmed activity rows, and
+//   3. recorded failed transactions,
+// interleaved by block height then time (failed rows are NOT pinned). The node
+// `lyth_mempoolPending` view is not shown — the durable tracked set is the
+// wallet's own single source of pending.
+//
+// Tracked-pending + failed rows are notification-layer features: the stores
+// that back them are only written while the experimental flag is on, so with it
+// off they are empty and the feed is exactly the indexed confirmed rows.
 
 import { useEffect, useMemo, useState } from "react";
 import type { Denom } from "../data/types";
 import { ActivityDetail, type DetailRow } from "../components/ActivityDetail";
+import { NotificationDetail } from "../components/NotificationDetail";
 import { TxRow } from "../components/TxRow";
-import { getProvider } from "../sdk/client";
-import { activityDirection, activityRowToTx } from "../sdk/activity-rows";
-import { capture, loadLiveAddressActivity, type LiveAddressActivityRow, type RpcOutcome } from "../sdk/live";
-import { isZeroAmount, pendingOpLabel } from "../sdk/notifications";
+import {
+  activityDirection,
+  activityRowToTx,
+  mergeActivityNewestFirst,
+} from "../sdk/activity-rows";
+import {
+  loadLiveAddressActivity,
+  type LiveAddressActivityRow,
+  type RpcOutcome,
+} from "../sdk/live";
+import {
+  isDelegationKind,
+  isZeroAmount,
+  pendingOpLabel,
+  type NotificationRecord,
+} from "../sdk/notifications";
+import { listAllNotifications } from "../sdk/notifications-store";
+import { txTypeLabelForOpKind } from "../sdk/tx-type-label";
 import type { PendingTx } from "../sdk/pending-tx";
 import { usePendingTxs } from "../sdk/use-pending-tx";
 import { useActiveWallet } from "../sdk/active-wallet";
-
-// The node's `lyth_mempoolPending` row shape. Distinct from the durable
-// tracked-tx `PendingTx` (imported above) that backs the "Pending" section:
-// this is the node's mempool view, that is the wallet's own broadcast set.
-interface MempoolPendingTx {
-  txHash: string;
-  nonce: bigint;
-  class: number;
-  wireBytesLen: number;
-  ready: boolean;
-}
 
 interface Props {
   denom: Denom;
@@ -39,28 +47,27 @@ interface Props {
 export function Activity({ denom, experimentalEnabled }: Props) {
   const wallet = useActiveWallet();
   const walletAddress = wallet.status === "ready" ? wallet.address : "";
-  const [pending, setPending] = useState<RpcOutcome<MempoolPendingTx[]> | null>(null);
   const [activity, setActivity] = useState<RpcOutcome<LiveAddressActivityRow[]> | null>(null);
+  const [failed, setFailed] = useState<NotificationRecord[]>([]);
   const [busy, setBusy] = useState(false);
-  // Clicking a row opens the tx-detail modal (default-on — every build has
-  // clickable rows). `null` when the modal is closed.
+  // Two detail modals: ActivityDetail for pending/confirmed rows, and the
+  // shared NotificationDetail for a failed record (it has the right shape).
   const [selected, setSelected] = useState<DetailRow | null>(null);
-  // Durable tracked-tx store — txs this wallet broadcast that are still in
-  // flight. The hook hydrates on mount and returns [] until then and whenever
-  // nothing is outstanding; gated on the same flag, so OFF renders identically
-  // to master. Rows clear as the reconcile poller removes each resolved tx.
-  const tracked = usePendingTxs();
-  const showPending = experimentalEnabled && tracked.length > 0;
+  const [selectedFailed, setSelectedFailed] = useState<NotificationRecord | null>(null);
 
-  // Client-side filters over the already-loaded indexed-activity rows. The
-  // direction filter maps onto the row's normalised in/out direction; the
-  // token filter is the raw indexer token id (native rows are "LYTH").
+  // Durable tracked-tx store — the wallet's own in-flight broadcasts.
+  const tracked = usePendingTxs();
+  // Tracked-pending + failed are notification-layer features; their backing
+  // stores are only written when the experimental flag is on, so with it off
+  // they're empty and the feed renders exactly the indexed confirmed rows.
+  const showExtra = experimentalEnabled;
+
+  // Client-side filters over the indexed (confirmed) rows.
   const [dirFilter, setDirFilter] = useState<"all" | "in" | "out">("all");
   const [tokenFilter, setTokenFilter] = useState<string>("all");
 
   const activityRows = activity?.ok ? activity.value ?? [] : [];
 
-  // Distinct token options drawn from the loaded rows (native = "LYTH").
   const tokenOptions = useMemo(() => {
     const set = new Set<string>();
     for (const row of activityRows) set.add(row.tokenId ?? "LYTH");
@@ -83,27 +90,35 @@ export function Activity({ denom, experimentalEnabled }: Props) {
 
   const filtersActive = dirFilter !== "all" || tokenFilter !== "all";
 
-  const refreshPending = async () => {
+  // The single feed. A filter narrows to the confirmed rows only; unfiltered,
+  // the wallet's own pending + failed rows interleave by recency.
+  const merged = useMemo(() => {
+    const p = !filtersActive && showExtra ? tracked : [];
+    const f = !filtersActive && showExtra ? failed : [];
+    return mergeActivityNewestFirst(p, filteredRows, f);
+  }, [tracked, failed, filteredRows, filtersActive, showExtra]);
+
+  const refresh = async () => {
     if (!walletAddress) {
-      setPending(null);
       setActivity(null);
+      setFailed([]);
       return;
     }
     setBusy(true);
     try {
-      const [pendingRows, activityRows] = await Promise.all([
-        capture(() => getProvider().rpcClient.lythMempoolPending(walletAddress)),
+      const [activityOutcome, allNotifications] = await Promise.all([
         loadLiveAddressActivity(walletAddress),
+        listAllNotifications(),
       ]);
-      setPending(pendingRows);
-      setActivity(activityRows);
+      setActivity(activityOutcome);
+      setFailed(allNotifications.filter((r) => r.status === "failed"));
     } finally {
       setBusy(false);
     }
   };
 
   useEffect(() => {
-    void refreshPending();
+    void refresh();
   }, [walletAddress]);
 
   return (
@@ -117,176 +132,173 @@ export function Activity({ denom, experimentalEnabled }: Props) {
         </div>
       </div>
 
-      {showPending ? (
-        <div className="w-card">
-          <div className="w-card__head">
-            <h3>Pending</h3>
-            <span className="w-card__head__spacer" />
-            <span className="w-live-pill is-muted">{tracked.length} in flight</span>
-          </div>
-          <div className="w-card__body">
-            <div className="w-live-list">
-              {tracked.map((tx) => {
-                const onOpen = () => setSelected(trackedRowToDetail(tx));
-                const showAmount = !isZeroAmount(tx.amountDecimal);
-                return (
-                  <div
-                    className="w-live-row"
-                    key={`${tx.chainIdHex}:${tx.txHash}`}
-                    onClick={onOpen}
-                    role="button"
-                    style={{ cursor: "pointer" }}
-                  >
-                    <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
-                      <span className="w-spin" style={{ width: 14, height: 14, margin: 0, flexShrink: 0 }} />
-                      <div style={{ minWidth: 0 }}>
-                        <div className="row-label">{pendingOpLabel(tx.opKind)}</div>
-                        <div className="row-help mono" style={{ overflowWrap: "anywhere" }}>
-                          {tx.counterparty.length > 0 ? truncCounterparty(tx.counterparty) : truncCounterparty(tx.txHash)}
-                        </div>
-                      </div>
-                    </div>
-                    {showAmount ? (
-                      <span className="w-live-pill is-muted">{tx.amountDecimal} LYTH</span>
-                    ) : null}
-                  </div>
-                );
-              })}
-            </div>
-            <div className="row-help" style={{ marginTop: 10 }}>
-              Awaiting on-chain confirmation. Resolves automatically — clears
-              when each transaction confirms or fails.
-            </div>
-          </div>
-        </div>
-      ) : null}
-
       <div className="w-card">
         <div className="w-card__head">
-          <h3>Live pending activity</h3>
-          <span className="w-live-pill">live</span>
+          <h3>{denom === "public" ? "Recent activity" : "Private envelopes"}</h3>
           <span className="w-card__head__spacer" />
-          <button className="btn btn--sm" onClick={refreshPending} disabled={busy}>
+          {activityRows.length > 0 ? (
+            <div className="w-chip-group">
+              {(
+                [
+                  { id: "all", label: "All" },
+                  { id: "in", label: "Received" },
+                  { id: "out", label: "Sent" },
+                ] as const
+              ).map((o) => (
+                <button
+                  key={o.id}
+                  type="button"
+                  className={`w-chip ${dirFilter === o.id ? "is-on" : ""}`}
+                  onClick={() => setDirFilter(o.id)}
+                >
+                  {o.label}
+                </button>
+              ))}
+            </div>
+          ) : null}
+          {tokenOptions.length > 1 ? (
+            <div className="w-chip-group">
+              <button
+                type="button"
+                className={`w-chip ${tokenFilter === "all" ? "is-on" : ""}`}
+                onClick={() => setTokenFilter("all")}
+              >
+                All tokens
+              </button>
+              {tokenOptions.map((tok) => (
+                <button
+                  key={tok}
+                  type="button"
+                  className={`w-chip ${tokenFilter === tok ? "is-on" : ""}`}
+                  onClick={() => setTokenFilter(tok)}
+                >
+                  {tok}
+                </button>
+              ))}
+            </div>
+          ) : null}
+          <button className="btn btn--sm" onClick={() => void refresh()} disabled={busy}>
             {busy ? "Refreshing…" : "Refresh"}
           </button>
         </div>
         <div className="w-card__body">
-          {pending === null ? <div className="row-help">{walletAddress ? "Loading lyth_mempoolPending…" : "No active wallet address."}</div> : null}
-          {pending?.ok === false ? <div className="w-live-error">{pending.error}</div> : null}
-          {pending?.ok && pending.value?.length === 0 ? <div className="row-help">No pending transactions for <span className="mono">{walletAddress}</span>.</div> : null}
-          {pending?.ok && pending.value && pending.value.length > 0 ? (
-            <div className="w-live-list">
-              {pending.value.map((tx) => {
-                const onOpen = () => setSelected(pendingRowToDetail(tx));
+          {activity?.ok === false ? (
+            <div className="w-live-error">address activity: {activity.error}</div>
+          ) : null}
+          {merged.length > 0 ? (
+            merged.map((item) => {
+              if (item.tag === "pending") {
+                const tx = item.tx;
+                const showAmount = !isZeroAmount(tx.amountDecimal);
                 return (
                   <div
-                    className="w-live-row"
-                    key={tx.txHash}
-                    onClick={onOpen}
+                    className="w-tx"
                     role="button"
+                    key={`p:${tx.chainIdHex}:${tx.txHash}`}
+                    onClick={() => setSelected(trackedRowToDetail(tx))}
                     style={{ cursor: "pointer" }}
                   >
-                    <div>
-                      <div className="row-label mono">{tx.txHash}</div>
-                      <div className="row-help">nonce {tx.nonce.toString()} · class {tx.class} · {tx.wireBytesLen} bytes</div>
+                    <div className="w-tx__dir" aria-hidden>
+                      <span className="w-spin" style={{ width: 14, height: 14, margin: 0 }} />
                     </div>
-                    <span className={`w-live-pill ${tx.ready ? "" : "is-muted"}`}>{tx.ready ? "ready" : "pending"}</span>
+                    <div className="w-tx__info">
+                      <div className="eyebrow">
+                        <span>{pendingOpLabel(tx.opKind)}</span>
+                        <span className="sep" />
+                        <span>in flight</span>
+                      </div>
+                      <div className="label mono">
+                        {tx.counterparty.length > 0
+                          ? truncCounterparty(tx.counterparty)
+                          : truncCounterparty(tx.txHash)}
+                      </div>
+                    </div>
+                    <div className="w-tx__right">
+                      {showAmount ? (
+                        <div className="w-tx__amt">
+                          {tx.amountDecimal}
+                          <span className="tok">LYTH</span>
+                        </div>
+                      ) : null}
+                    </div>
                   </div>
                 );
-              })}
-            </div>
-          ) : null}
-        </div>
-      </div>
-
-      <div className="w-card">
-        <div className="w-card__head">
-          <h3>{activityRows.length > 0 ? "Live indexed activity" : denom === "public" ? "Recent" : "Private envelopes"}</h3>
-          {activityRows.length > 0 ? (
-            <>
-              <span className="w-card__head__spacer" />
-              <div className="w-chip-group">
-                {(
-                  [
-                    { id: "all", label: "All" },
-                    { id: "in", label: "Received" },
-                    { id: "out", label: "Sent" },
-                  ] as const
-                ).map((o) => (
-                  <button
-                    key={o.id}
-                    type="button"
-                    className={`w-chip ${dirFilter === o.id ? "is-on" : ""}`}
-                    onClick={() => setDirFilter(o.id)}
+              }
+              if (item.tag === "failed") {
+                const rec = item.record;
+                const showAmount = !isZeroAmount(rec.amountDecimal);
+                return (
+                  <div
+                    className="w-tx"
+                    role="button"
+                    key={`f:${rec.id}`}
+                    onClick={() => setSelectedFailed(rec)}
+                    style={{ cursor: "pointer" }}
                   >
-                    {o.label}
-                  </button>
-                ))}
-              </div>
-              {tokenOptions.length > 1 ? (
-                <div className="w-chip-group">
-                  <button
-                    type="button"
-                    className={`w-chip ${tokenFilter === "all" ? "is-on" : ""}`}
-                    onClick={() => setTokenFilter("all")}
-                  >
-                    All tokens
-                  </button>
-                  {tokenOptions.map((tok) => (
-                    <button
-                      key={tok}
-                      type="button"
-                      className={`w-chip ${tokenFilter === tok ? "is-on" : ""}`}
-                      onClick={() => setTokenFilter(tok)}
-                    >
-                      {tok}
-                    </button>
-                  ))}
-                </div>
-              ) : null}
-            </>
-          ) : null}
-        </div>
-        <div className="w-card__body">
-          {activity?.ok === false ? <div className="w-live-error">address activity: {activity.error}</div> : null}
-          {activityRows.length > 0 ? (
-            filteredRows.length > 0 ? (
-              filteredRows.map((row) => (
+                    <div className="w-tx__dir" style={{ color: "var(--err)" }} aria-hidden>
+                      <svg
+                        width="14"
+                        height="14"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      >
+                        <path d="M18 6 6 18M6 6l12 12" />
+                      </svg>
+                    </div>
+                    <div className="w-tx__info">
+                      <div className="eyebrow">
+                        <span>{txTypeLabelForOpKind(rec.kind)}</span>
+                        <span className="sep" />
+                        <span style={{ color: "var(--err)" }}>Failed</span>
+                      </div>
+                      <div className="label">{failedCounterparty(rec)}</div>
+                    </div>
+                    <div className="w-tx__right">
+                      {showAmount ? (
+                        <div className="w-tx__amt" style={{ color: "var(--err)" }}>
+                          {rec.amountDecimal}
+                          <span className="tok">LYTH</span>
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+                );
+              }
+              const row = item.row;
+              return (
                 <TxRow
-                  key={`${row.blockHeight}-${row.txIndex}-${row.logIndex}`}
+                  key={`c:${row.blockHeight}-${row.txIndex}-${row.logIndex}`}
                   tx={activityRowToTx(row, denom)}
                   onClick={() => setSelected(indexedRowToDetail(row))}
                 />
-              ))
-            ) : (
-              <div className="w-empty">
-                <h4>No matching activity</h4>
-                <p>
-                  No rows match the current filter. Clear it to see every
-                  indexed transaction for this address.
-                </p>
-                {filtersActive ? (
-                  <button
-                    className="btn btn--sm"
-                    style={{ marginTop: 12 }}
-                    onClick={() => {
-                      setDirFilter("all");
-                      setTokenFilter("all");
-                    }}
-                  >
-                    Clear filters
-                  </button>
-                ) : null}
-              </div>
-            )
+              );
+            })
           ) : activity?.ok ? (
             <div className="w-empty">
-              <h4>No activity yet</h4>
+              <h4>{filtersActive ? "No matching activity" : "No activity yet"}</h4>
               <p>
-                {denom === "private"
-                  ? "Private-denomination activity is not exposed as public indexed rows."
-                  : "The indexer has no transactions for this address. Sent and received transfers appear here once they confirm."}
+                {filtersActive
+                  ? "No rows match the current filter. Clear it to see every transaction for this address."
+                  : denom === "private"
+                    ? "Private-denomination activity is not exposed as public indexed rows."
+                    : "The indexer has no transactions for this address. Sent and received transfers appear here once they confirm."}
               </p>
+              {filtersActive ? (
+                <button
+                  className="btn btn--sm"
+                  style={{ marginTop: 12 }}
+                  onClick={() => {
+                    setDirFilter("all");
+                    setTokenFilter("all");
+                  }}
+                >
+                  Clear filters
+                </button>
+              ) : null}
             </div>
           ) : (
             <div style={{ padding: "16px 0", color: "var(--w-text-3)", fontSize: 13 }}>
@@ -303,25 +315,16 @@ export function Activity({ denom, experimentalEnabled }: Props) {
       {selected ? (
         <ActivityDetail row={selected} walletAddr={walletAddress} onClose={() => setSelected(null)} />
       ) : null}
+      {selectedFailed ? (
+        <NotificationDetail record={selectedFailed} onClose={() => setSelectedFailed(null)} />
+      ) : null}
     </div>
   );
 }
 
 // ── Row → DetailRow adapters ──
-// Each maps one of the three Activity-list row shapes onto the modal's
-// discriminated union. Only fields that exist on the source row are passed;
-// none are synthesized.
-
-function pendingRowToDetail(tx: MempoolPendingTx): DetailRow {
-  return {
-    kind: "pending",
-    txHash: tx.txHash,
-    nonce: tx.nonce,
-    txClass: tx.class,
-    wireBytesLen: tx.wireBytesLen,
-    ready: tx.ready,
-  };
-}
+// Each maps a feed row onto the modal's discriminated union. Only fields that
+// exist on the source row are passed; none are synthesized.
 
 // Durable tracked-tx → detail-modal row. The store keys on the broadcast hash,
 // so the modal can link out to Monoscan; counterparty is already typed bech32m.
@@ -356,7 +359,21 @@ function indexedRowToDetail(row: LiveAddressActivityRow): DetailRow {
 }
 
 // Middle-truncate a bech32m counterparty (or tx hash fallback) for the compact
-// Pending-row subtitle. Pure slicing — never throws on a malformed value.
+// row subtitle. Pure slicing — never throws on a malformed value.
 function truncCounterparty(s: string): string {
   return s.length > 17 ? `${s.slice(0, 10)}…${s.slice(-6)}` : s;
+}
+
+// Failed-row label: name the cluster for delegation kinds (real name, else
+// "Cluster #<id>"), otherwise the truncated counterparty — never fabricated.
+function failedCounterparty(rec: NotificationRecord): string {
+  if (isDelegationKind(rec.kind)) {
+    return (
+      rec.clusterName ??
+      (rec.clusterId !== undefined
+        ? `Cluster #${rec.clusterId}`
+        : truncCounterparty(rec.counterparty))
+    );
+  }
+  return truncCounterparty(rec.counterparty);
 }
