@@ -38,7 +38,8 @@ import { Tokens } from "./pages/Tokens";
 import { Trade } from "./pages/Trade";
 import { Wallets } from "./pages/Wallets";
 import { OperationsProvider } from "./operations/context";
-import { LockProvider } from "./sdk/auto-lock";
+import { LockProvider, LockBoundary } from "./sdk/auto-lock";
+import { UnlockGate } from "./components/UnlockGate";
 import {
   KeychainCallError,
   PRIMARY_ACCOUNT,
@@ -244,6 +245,7 @@ export function App() {
 
   return (
     <LockProvider>
+      <LockBoundary locked={<UnlockGate />}>
       <OperationsProvider>
       <div className="w-app">
         <Sidebar
@@ -301,6 +303,7 @@ export function App() {
         ) : null}
       </div>
       </OperationsProvider>
+      </LockBoundary>
     </LockProvider>
   );
 }

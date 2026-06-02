@@ -111,3 +111,16 @@ export function LockProvider({ children }: { children: ReactNode }) {
     </AutoLockContext.Provider>
   );
 }
+
+/** Renders `locked` instead of `children` whenever the wallet is locked.
+ *  Must be used inside a <LockProvider>. */
+export function LockBoundary({
+  locked,
+  children,
+}: {
+  locked: ReactNode;
+  children: ReactNode;
+}) {
+  const { isLocked } = useAutoLock();
+  return <>{isLocked ? locked : children}</>;
+}
