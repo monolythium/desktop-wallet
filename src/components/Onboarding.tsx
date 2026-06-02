@@ -9,7 +9,7 @@
 // returns `not_found` for the primary account. Once the vault is stored,
 // the caller flips `done` and the main shell takes over.
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   generatePqm1Mnemonic,
   pqm1MnemonicToMlDsa65Seed,
@@ -60,6 +60,11 @@ export function Onboarding({ onDone }: Props) {
     getPasswordStrength(password) !== "weak" &&
     password === confirm &&
     acknowledged;
+
+  const importWordCount = useMemo(
+    () => importDraft.trim().split(/\s+/).filter(Boolean).length,
+    [importDraft],
+  );
 
   const beginCreate = () => {
     setIsImport(false);
@@ -284,6 +289,31 @@ export function Onboarding({ onDone }: Props) {
                 resize: "vertical",
               }}
             />
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginTop: 10,
+                fontFamily: "var(--f-mono)",
+                fontSize: 11,
+                color:
+                  importWordCount === PQM1_WORDS
+                    ? "var(--ok)"
+                    : importWordCount === 0
+                      ? "var(--fg-400)"
+                      : "var(--warn)",
+              }}
+            >
+              <span>
+                {importWordCount} / {PQM1_WORDS} words
+              </span>
+              {importWordCount > 0 && importWordCount !== PQM1_WORDS ? (
+                <span style={{ color: "var(--fg-400)" }}>
+                  {importWordCount < PQM1_WORDS ? "keep going…" : "too many"}
+                </span>
+              ) : null}
+            </div>
             {importError && (
               <div className="w-banner error" style={{ marginTop: 12 }}>
                 {importError}
@@ -297,7 +327,7 @@ export function Onboarding({ onDone }: Props) {
                 className="btn btn--primary"
                 style={{ marginLeft: "auto" }}
                 onClick={submitImport}
-                disabled={importDraft.trim().length === 0}
+                disabled={importWordCount !== PQM1_WORDS}
               >
                 Continue
               </button>
