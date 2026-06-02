@@ -243,7 +243,7 @@ function mockNativeReceiptFetch(proof: DesktopNoEvmReceiptProof): { fetch: typeo
           counters: { cycles: 44, syscallUnits: 3, stateIoUnits: 2 },
           fee: {
             total_lythoshi: "440000000000",
-            total_lyth: "4,400",
+            total_lyth: "0.00000044",
             cycles_used: 44,
             base_price_per_cycle_lythoshi: "10000000000",
             state_io_units: 2,

@@ -7,7 +7,7 @@
 // calls reusing the staking seam (buildDelegateCalldata + submitStakingTx)
 // — there is no new write path; autovote is a planner on top of delegate.
 
-import { DIVERSITY_SCORE_MAX } from "@monolythium/core-sdk";
+import { DIVERSITY_SCORE_MAX, LYTHOSHI_PER_LYTH } from "@monolythium/core-sdk";
 import type {
   ClusterDirectoryEntryResponse,
   ClusterDiversityView,
@@ -221,7 +221,7 @@ export async function submitAutovotePlan(
   const txHashes: string[] = [];
   for (const a of plan.allocations) {
     const calldata = buildDelegateCalldata(a.clusterId, a.weightBps);
-    const principalLythoshi = a.principalLyth * 100_000_000n; // 1 LYTH = 1e8 lythoshi
+    const principalLythoshi = a.principalLyth * LYTHOSHI_PER_LYTH; // whole-LYTH principal -> lythoshi
     const result = await submitStakingTx({
       seed,
       data: calldata,

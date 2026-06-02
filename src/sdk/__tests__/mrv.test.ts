@@ -168,19 +168,19 @@ describe("MRV desktop-wallet SDK layer", () => {
     expect(plan.artifactHash).toBe(mrvCodeHashHex(CODE));
     expect(plan.validatedMetadata?.codeHash).toBe(mrvCodeHashHex(CODE));
     expect(plan.expectedContractAddress?.startsWith("monoc1")).toBe(true);
-    expect(plan.valueLythoshi).toBe("125000000");
+    expect(plan.valueLythoshi).toBe("1250000000000000000");
     expect(plan.valueDisplay).toBe("1.25");
     expect(plan.nativeTx).toEqual({
       chainId: 69_420n,
       nonce: 7n,
-      valueLythoshi: "125000000",
+      valueLythoshi: "1250000000000000000",
       executionUnitLimit: 100_000n,
       maxExecutionFeeLythoshi: "25",
       priorityTipLythoshi: "0",
     });
     expect(plan.feePreview).toEqual({
       totalLythoshi: "25",
-      totalLyth: "0.00000025",
+      totalLyth: "0.000000000000000025",
       cyclesUsed: 100_000n,
       executionUnitLimit: 100_000n,
       maxExecutionFeeLythoshi: "25",
@@ -215,7 +215,7 @@ describe("MRV desktop-wallet SDK layer", () => {
     expect(plan.request.input).toBe("0x0102");
     expect(plan.valueLythoshi).toBe("3");
     expect(plan.feePreview.totalLythoshi).toBe("10");
-    expect(plan.feePreview.totalLyth).toBe("0.0000001");
+    expect(plan.feePreview.totalLyth).toBe("0.00000000000000001");
     expect(plan.nativeTx).toEqual({
       chainId: 69_420n,
       nonce: 11n,
@@ -248,43 +248,34 @@ describe("MRV desktop-wallet SDK layer", () => {
     expect(calls).toHaveLength(0);
   });
 
-  it("submits deploy and call plans through stubbed encrypted native RPC", async () => {
-    const { client, calls, submittedEnvelopes } = mockRpc({ nonce: 21n });
+  it("refuses encrypted deploy and call submission while MB-3 threshold decryption is gated off", async () => {
+    // SDK 0.3.15 retires the single-key `scheme: 0` encrypted envelope: the
+    // encrypted-mempool submit path now hard-rejects until MB-3 threshold
+    // decryption is live. The wallet must surface that gate, not emit an
+    // envelope a single operator could decrypt.
+    const { client } = mockRpc({ nonce: 21n });
 
-    const deploy = await submitMrvDeployPayloadTransaction({
-      client,
-      seed: seed(),
-      artifactBytes: CODE,
-      constructorInput: "0x0102",
-      executionUnitLimit: 100_000n,
-      maxExecutionFeeLythoshi: "25",
-    });
-    const call = await submitMrvCallTransaction({
-      client,
-      seed: seed(),
-      contractAddress: CONTRACT_HEX,
-      input: "0x0102",
-      valueLythoshi: "3",
-      executionUnitLimit: 50_000n,
-      maxExecutionFeeLythoshi: "10",
-    });
+    await expect(
+      submitMrvDeployPayloadTransaction({
+        client,
+        seed: seed(),
+        artifactBytes: CODE,
+        constructorInput: "0x0102",
+        executionUnitLimit: 100_000n,
+        maxExecutionFeeLythoshi: "25",
+      }),
+    ).rejects.toThrow(/encrypted mempool submission unavailable until MB-3/);
 
-    expect(deploy.txHash).toBe(`0x${"aa".repeat(32)}`);
-    expect(call.txHash).toBe(`0x${"bb".repeat(32)}`);
-    expect(deploy.innerSighashHex).toMatch(/^0x[0-9a-f]{64}$/);
-    expect(call.innerTxHashHex).toMatch(/^0x[0-9a-f]{64}$/);
-    expect(deploy.envelopeWireBytes).toBeGreaterThan(0);
-    expect(call.envelopeWireBytes).toBeGreaterThan(0);
-    expect(submittedEnvelopes).toHaveLength(2);
-    expect(submittedEnvelopes.every((envelope) => envelope.startsWith("0x"))).toBe(true);
-    expect("tx" in deploy).toBe(false);
-    expect("envelopeWireHex" in deploy).toBe(false);
-    expect(appJson([deploy, call])).not.toMatch(/\b(gas|gwei|wei)\b/i);
-
-    const methods = calls.map((callRecord) => callRecord.method);
-    expect(methods.filter((method) => method === "eth_chainId")).toHaveLength(2);
-    expect(methods.filter((method) => method === "lyth_getTransactionCount")).toHaveLength(2);
-    expect(methods.filter((method) => method === "lyth_getEncryptionKey")).toHaveLength(2);
-    expect(methods.filter((method) => method === "lyth_submitEncrypted")).toHaveLength(2);
+    await expect(
+      submitMrvCallTransaction({
+        client,
+        seed: seed(),
+        contractAddress: CONTRACT_HEX,
+        input: "0x0102",
+        valueLythoshi: "3",
+        executionUnitLimit: 50_000n,
+        maxExecutionFeeLythoshi: "10",
+      }),
+    ).rejects.toThrow(/encrypted mempool submission unavailable until MB-3/);
   });
 });

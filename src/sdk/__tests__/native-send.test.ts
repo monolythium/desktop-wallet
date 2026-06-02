@@ -37,7 +37,7 @@ describe("sendNativeLyth privacy posture", () => {
     const call = submitNativeTxSpy.mock.calls[0]![0];
     expect(call.private).toBe(false);
     expect(res.wasPrivate).toBe(false);
-    expect(res.amountLythoshi).toBe("150000000");
+    expect(res.amountLythoshi).toBe("1500000000000000000");
   });
 
   it("passes private:true only when explicitly requested", async () => {
