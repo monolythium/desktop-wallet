@@ -4,6 +4,7 @@ import {
   activityCounterparty,
   activityDirection,
   activityKindToTxKind,
+  activityRelativeTime,
   activityRowToTx,
   activityWhen,
   parseActivityAmount,
@@ -22,6 +23,9 @@ function row(partial: Partial<LiveAddressActivityRow>): LiveAddressActivityRow {
     cluster: null,
     weightBps: null,
     subKind: null,
+    blockTimestampSeconds: null,
+    txHash: null,
+    clusterName: null,
     ...partial,
   };
 }
@@ -61,24 +65,60 @@ describe("parseActivityAmount", () => {
   });
 });
 
+describe("activityRelativeTime", () => {
+  const now = 1_700_000_000_000; // fixed reference (ms)
+  const nowSec = BigInt(Math.floor(now / 1000));
+
+  it("returns null for a missing timestamp (old/pruned block — no fabrication)", () => {
+    expect(activityRelativeTime(null, now)).toBeNull();
+  });
+
+  it("renders a real relative label across buckets", () => {
+    expect(activityRelativeTime(nowSec, now)).toBe("just now");
+    expect(activityRelativeTime(nowSec - 720n, now)).toBe("12m ago"); // 12 min
+    expect(activityRelativeTime(nowSec - 7_200n, now)).toBe("2h ago"); // 2 h
+    expect(activityRelativeTime(nowSec - 86_400n, now)).toBe("yesterday"); // 1 d
+    expect(activityRelativeTime(nowSec - 259_200n, now)).toBe("3d ago"); // 3 d
+  });
+
+  it("never renders a negative/future time as a stale label", () => {
+    expect(activityRelativeTime(nowSec + 600n, now)).toBe("just now");
+  });
+});
+
 describe("activityWhen", () => {
-  it("shows the indexer block coordinate (no fabricated wall-clock time)", () => {
+  it("shows the indexer block coordinate when no timestamp is available", () => {
     expect(activityWhen(row({ blockHeight: 42n, txIndex: 7 }))).toBe("block 42 · tx 7");
+  });
+
+  it("shows a real relative time when enrichment resolved a timestamp", () => {
+    const now = 1_700_000_000_000;
+    const when = activityWhen(
+      row({ blockTimestampSeconds: BigInt(Math.floor(now / 1000)) - 7_200n }),
+      now,
+    );
+    expect(when).toBe("2h ago");
   });
 });
 
 describe("activityCounterparty", () => {
-  it("uses the address when present", () => {
+  it("prefers the resolved cluster name from enrichment when present", () => {
+    expect(
+      activityCounterparty(row({ counterparty: null, cluster: 4, clusterName: "atlas.cluster.mono" })),
+    ).toBe("atlas.cluster.mono");
+  });
+
+  it("uses the address when present and no cluster name", () => {
     expect(activityCounterparty(row({ counterparty: "mono1abc" }))).toBe("mono1abc");
   });
 
-  it("falls back to the cluster name when a cluster is set", () => {
-    expect(activityCounterparty(row({ counterparty: null, cluster: 4 }))).toBe(
+  it("falls back to the synthetic cluster label when a cluster is set without a name", () => {
+    expect(activityCounterparty(row({ counterparty: null, cluster: 4, clusterName: null }))).toBe(
       "C-005.cluster.mono",
     );
   });
 
-  it("renders an em-dash when neither is present (no fabrication)", () => {
+  it("renders an em-dash when nothing is present (no fabrication)", () => {
     expect(activityCounterparty(row({ counterparty: null, cluster: null }))).toBe("—");
   });
 });

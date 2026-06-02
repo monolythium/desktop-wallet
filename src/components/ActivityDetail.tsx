@@ -5,18 +5,20 @@
 //
 // Honest absence: a "View on Monoscan" link only appears when the row carries
 // a canonical tx hash. On desktop that is the pending-mempool row (it streams
-// its `txHash` directly) and the tracked-tx row (the durable store keys on the
-// broadcast hash). Indexed rows expose no canonical hash — the indexer activity
-// stream carries (block, txIndex) coordinates but no hash, and there is no
-// desktop RPC that turns those back into a hash — so those rows simply omit the
+// its `txHash` directly), the tracked-tx row (the durable store keys on the
+// broadcast hash), and any indexed row the enrichment read resolved a hash for
+// (the wallet's own txs). Indexed rows whose hash couldn't be resolved — older
+// rows, or rows that aren't the wallet's own tx at that index — still omit the
 // Monoscan button rather than synthesizing a link.
 //
 // Address rendering is defensive: counterparties arrive as bech32m (`mono…`)
 // and the wallet's own address is bech32m too, so `CopyableAddress` takes the
 // string as-is and never throws on a malformed value.
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 
+import { activityRelativeTime } from "../sdk/activity-rows";
+import { loadLiveTxConfirmations } from "../sdk/live";
 import { isZeroAmount, pendingOpLabel, type TxOpKind } from "../sdk/notifications";
 import { CopyableAddress, DRow, MonoscanTxButton, truncMiddle } from "./_detailModalParts";
 
@@ -42,7 +44,9 @@ export interface TrackedDetailRow {
   counterparty: string;
 }
 
-/** Indexed activity row (from `lyth_getAddressActivity`). No tx hash. */
+/** Indexed activity row (from the enriched address-activity read). Enrichment
+ *  may resolve a real block timestamp, the canonical tx hash, and a cluster
+ *  name; each is null when the chain couldn't resolve it. */
 export interface IndexedDetailRow {
   kind: "indexed";
   activityKind: string;
@@ -56,6 +60,9 @@ export interface IndexedDetailRow {
   blockHeight: bigint;
   txIndex: number;
   logIndex: number;
+  blockTimestampSeconds: bigint | null;
+  txHash: string | null;
+  clusterName: string | null;
 }
 
 export type DetailRow =
@@ -80,6 +87,30 @@ function modalTitle(row: DetailRow): string {
   // Indexed — title off the indexer kind, capitalised.
   const k = row.activityKind;
   return k.charAt(0).toUpperCase() + k.slice(1);
+}
+
+/** Best-effort confirmation depth for an indexed row that resolved a tx hash.
+ *  Attempts `lyth_txConfirmations` on mount and renders the depth only when the
+ *  chain reports it; renders nothing on not-found / error so the row's existing
+ *  "Confirmed" status stands (no fabricated depth). */
+function IndexedTxConfirmations({ txHash }: { txHash: string }) {
+  const [confirmations, setConfirmations] = useState<number | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void loadLiveTxConfirmations(txHash).then((depth) => {
+      if (!cancelled) setConfirmations(depth);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [txHash]);
+  if (confirmations === null) return null;
+  return (
+    <DRow
+      label="Confirmations"
+      value={confirmations.toLocaleString("en-US")}
+    />
+  );
 }
 
 function DetailBody({ row, walletAddr }: { row: DetailRow; walletAddr: string }) {
@@ -133,10 +164,21 @@ function DetailBody({ row, walletAddr }: { row: DetailRow; walletAddr: string })
   // Indexed activity row.
   const isIn = row.direction === "in";
   const cp = row.counterparty;
+  // Enrichment may resolve a real block timestamp; show a relative time only
+  // when it did, never a fabricated one (the Block row is always present).
+  const relativeTime = activityRelativeTime(row.blockTimestampSeconds);
+  // Prefer the resolved cluster name; fall back to the synthetic label.
+  const clusterLabel =
+    row.cluster !== null
+      ? row.clusterName
+        ? `${row.clusterName} · #${row.cluster}`
+        : `${clusterName(row.cluster)} · #${row.cluster}`
+      : null;
   return (
     <div>
       <DRow label="Status" value="Confirmed" />
       <DRow label="Type" value={row.subKind ? `${row.activityKind} · ${row.subKind}` : row.activityKind} />
+      {relativeTime !== null ? <DRow label="Time" value={relativeTime} /> : null}
       {row.amount !== null ? (
         <DRow
           label="Amount"
@@ -146,8 +188,8 @@ function DetailBody({ row, walletAddr }: { row: DetailRow; walletAddr: string })
         />
       ) : null}
       {row.weightBps !== null ? <DRow label="Weight" value={`${row.weightBps} bps`} /> : null}
-      {row.cluster !== null ? (
-        <DRow label="Cluster" value={`${clusterName(row.cluster)} · #${row.cluster}`} />
+      {clusterLabel !== null ? (
+        <DRow label="Cluster" value={clusterLabel} />
       ) : null}
       {cp ? (
         isIn ? (
@@ -165,7 +207,24 @@ function DetailBody({ row, walletAddr }: { row: DetailRow; walletAddr: string })
       <DRow label="Block" value={row.blockHeight.toLocaleString("en-US")} />
       <DRow label="Tx index" value={String(row.txIndex)} />
       <DRow label="Log index" value={String(row.logIndex)} />
-      {/* The indexer stream carries no canonical tx hash → no Monoscan link. */}
+      {/* Enrichment resolves the canonical tx hash only for the wallet's own
+          txs — link out when present, omit otherwise (never synthesize one). */}
+      {row.txHash ? (
+        <>
+          <DRow
+            label="Tx hash"
+            value={
+              <span style={{ fontFamily: "var(--f-mono)" }} title={row.txHash}>
+                {truncMiddle(row.txHash)}
+              </span>
+            }
+          />
+          {/* Best-effort: shows the live confirmation depth when the chain
+              reports it, otherwise stays silent (status already "Confirmed"). */}
+          <IndexedTxConfirmations txHash={row.txHash} />
+          <MonoscanTxButton hash={row.txHash} />
+        </>
+      ) : null}
     </div>
   );
 }

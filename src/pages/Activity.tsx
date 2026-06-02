@@ -349,6 +349,9 @@ function indexedRowToDetail(row: LiveAddressActivityRow): DetailRow {
     blockHeight: row.blockHeight,
     txIndex: row.txIndex,
     logIndex: row.logIndex,
+    blockTimestampSeconds: row.blockTimestampSeconds,
+    txHash: row.txHash,
+    clusterName: row.clusterName,
   };
 }
 

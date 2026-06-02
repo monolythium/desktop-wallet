@@ -1,15 +1,19 @@
 // Live indexed-activity → tx-row adapter.
 //
-// Maps a `LiveAddressActivityRow` (from `lyth_getAddressActivity`) onto the
-// `Tx` shape that the `TxRow` component renders. Pure and side-effect-free so
-// it can be unit tested directly.
+// Maps a `LiveAddressActivityRow` (from the enriched address-activity read)
+// onto the `Tx` shape that the `TxRow` component renders. Pure and
+// side-effect-free so it can be unit tested directly.
 //
-// HONEST ABSENCE: the indexer activity stream carries no canonical tx hash,
-// no wall-clock timestamp, and no memo. The `when` field therefore shows the
-// indexer's block coordinate (real data — "block N · tx I"), the memo is left
-// empty (TxRow omits it), and the amount is `null` when the row carries none
-// (TxRow renders an em-dash for a public row with no amount). Token labels are
-// the raw indexer token id (no name registry exists); native rows show "LYTH".
+// HONEST ABSENCE: enrichment populates a real block timestamp, the canonical
+// tx hash, and the cluster name only when the chain can resolve them — each is
+// null otherwise (timestamp null for old/pruned blocks, tx hash null for rows
+// that aren't the wallet's own tx, cluster name null for an unnamed cluster).
+// When the timestamp is present the `when` field shows a real relative time;
+// when null it falls back to the indexer block coordinate ("block N · tx I").
+// The memo is always empty (the stream carries none — TxRow omits it), and the
+// amount is `null` when the row carries none (TxRow renders an em-dash for a
+// public row with no amount). Token labels are the raw indexer token id (no
+// name registry exists); native rows show "LYTH".
 
 import type { Denom, Tx } from "../data/types";
 import type { LiveAddressActivityRow } from "./live";
@@ -41,15 +45,44 @@ export function parseActivityAmount(amount: string | null): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-/** The eyebrow timestamp slot. The indexer exposes block coordinates, not a
- *  wall-clock time, so that is what we show — honest, not fabricated. */
-export function activityWhen(row: LiveAddressActivityRow): string {
+/** Relative time from a block-header UNIX-second timestamp. Returns a human
+ *  label ("just now", "12m ago", "2h ago", "yesterday", "3d ago") or null when
+ *  no timestamp is available (old/pruned block) — callers fall back to the
+ *  block coordinate rather than inventing a time. `nowMs` is injectable for
+ *  deterministic tests. */
+export function activityRelativeTime(
+  blockTimestampSeconds: bigint | null,
+  nowMs: number = Date.now(),
+): string | null {
+  if (blockTimestampSeconds === null) return null;
+  const tsMs = Number(blockTimestampSeconds) * 1000;
+  if (!Number.isFinite(tsMs)) return null;
+  const delta = Math.max(0, nowMs - tsMs);
+  const sec = Math.floor(delta / 1000);
+  if (sec < 45) return "just now";
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${Math.max(1, min)}m ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const day = Math.floor(hr / 24);
+  if (day === 1) return "yesterday";
+  return `${day}d ago`;
+}
+
+/** The eyebrow timestamp slot. When enrichment resolved a real block timestamp
+ *  we show a relative wall-clock time; otherwise we fall back to the indexer's
+ *  block coordinate — honest, never a fabricated time. */
+export function activityWhen(row: LiveAddressActivityRow, nowMs?: number): string {
+  const rel = activityRelativeTime(row.blockTimestampSeconds, nowMs);
+  if (rel !== null) return rel;
   return `block ${row.blockHeight.toString()} · tx ${row.txIndex}`;
 }
 
-/** Counterparty label. Falls back to the cluster name for delegation-style
- *  rows that carry a cluster instead of an address, else "—" (no fabrication). */
+/** Counterparty label. Prefers a resolved cluster name from enrichment, then
+ *  the counterparty address, then the synthetic cluster label for
+ *  delegation-style rows, else "—" (no fabrication). */
 export function activityCounterparty(row: LiveAddressActivityRow): string {
+  if (row.clusterName) return row.clusterName;
   if (row.counterparty) return row.counterparty;
   if (row.cluster !== null) return `C-${String(row.cluster + 1).padStart(3, "0")}.cluster.mono`;
   return "—";
