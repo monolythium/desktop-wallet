@@ -21,6 +21,11 @@ import {
 } from "react";
 import { readAutoLockMinutes } from "./auto-lock-setting";
 
+// How long the window may stay unfocused before the wallet locks. A short
+// grace avoids re-prompting for a quick alt-tab (e.g. to a password manager);
+// refocusing within the window cancels the pending lock.
+const BLUR_GRACE_MS = 30_000;
+
 interface AutoLockApi {
   isLocked: boolean;
   lock: () => void;
@@ -124,6 +129,43 @@ export function LockProvider({ children }: { children: ReactNode }) {
     return () => {
       window.removeEventListener("focus", check);
       document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [isLocked]);
+
+  // Lock shortly after the native window loses focus. Suspended during
+  // operations and while already locked. Best-effort: in the non-Tauri design
+  // preview the window API is unavailable, so this quietly does nothing.
+  useEffect(() => {
+    if (isLocked) return;
+    let unlisten: (() => void) | null = null;
+    let graceTimer: number | null = null;
+    let disposed = false;
+    const clearGrace = () => {
+      if (graceTimer !== null) {
+        window.clearTimeout(graceTimer);
+        graceTimer = null;
+      }
+    };
+    void (async () => {
+      try {
+        const { getCurrentWindow } = await import("@tauri-apps/api/window");
+        const handle = await getCurrentWindow().onFocusChanged(
+          ({ payload: focused }) => {
+            clearGrace();
+            if (focused || pauseDepthRef.current > 0) return;
+            graceTimer = window.setTimeout(() => setIsLocked(true), BLUR_GRACE_MS);
+          },
+        );
+        if (disposed) handle();
+        else unlisten = handle;
+      } catch {
+        // Window focus API unavailable — no blur lock; the idle timer stands.
+      }
+    })();
+    return () => {
+      disposed = true;
+      clearGrace();
+      if (unlisten) unlisten();
     };
   }, [isLocked]);
 
