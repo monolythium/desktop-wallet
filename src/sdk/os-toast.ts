@@ -31,7 +31,13 @@
 //   `requestPermission()` once. A denied/dismissed permission simply means no
 //   toast — the in-app record is unaffected.
 
-import { readExperimentalEnabled } from "./feature-flags";
+import {
+  readExperimentalEnabled,
+  readNotificationDetails,
+  readNotificationsEnabled,
+  readNotifyWhileLocked,
+} from "./feature-flags";
+import { isWalletLocked } from "./auto-lock";
 import { notificationToast, type NotificationRecord } from "./notifications";
 
 /** True iff we're running inside Tauri. Browser preview (`pnpm dev` with no
@@ -65,12 +71,20 @@ export async function toastTerminalNotification(
   record: NotificationRecord,
 ): Promise<void> {
   try {
+    // Notifications-system gate (unchanged relationship — the experimental flag
+    // still gates the notifications surface as a whole).
     if (!readExperimentalEnabled()) return;
+    // User-facing master switch for OS toasts.
+    if (!readNotificationsEnabled()) return;
+    // Hold toasts that resolve while the wallet is locked when the user opted
+    // out; the in-app record is still written and surfaces on unlock.
+    if (isWalletLocked() && !readNotifyWhileLocked()) return;
     if (!isTauri()) return;
     if (!(await ensurePermission())) return;
     const { sendNotification } = await import("@tauri-apps/plugin-notification");
-    const { title, body } = notificationToast(record);
-    sendNotification({ title, body });
+    // Redact the toast text to the title only when the user turned details off.
+    const { title, body } = notificationToast(record, readNotificationDetails());
+    sendNotification(body ? { title, body } : { title });
   } catch {
     // Best-effort — never surface a toast failure to the caller.
   }

@@ -10,7 +10,16 @@ import {
   writeAutoLockMinutes,
 } from "../sdk/auto-lock-setting";
 import { useAutoLock } from "../sdk/auto-lock";
-import { readIncomingEnabled, writeIncomingEnabled } from "../sdk/feature-flags";
+import {
+  readIncomingEnabled,
+  writeIncomingEnabled,
+  readNotificationsEnabled,
+  writeNotificationsEnabled,
+  readNotificationDetails,
+  writeNotificationDetails,
+  readNotifyWhileLocked,
+  writeNotifyWhileLocked,
+} from "../sdk/feature-flags";
 import { fetchLiveTestnetRegistry } from "../sdk/live-registry";
 import {
   outboundMcpStart,
@@ -43,12 +52,18 @@ interface SettingsProps {
   setExperimentalEnabled: (enabled: boolean) => void;
 }
 
+type SettingsSubPage = "main" | "notifications";
+
 export function Settings({ developerModeEnabled, setDeveloperModeEnabled, steleEnabled, setSteleEnabled, experimentalEnabled, setExperimentalEnabled }: SettingsProps) {
   const wallet = useActiveWallet();
   const [devkitChannel, setDevkitChannel] = useState<NativeDevkitChannel>(() => readDevkitChannel());
   const [autoLockMinutes, setAutoLockMinutes] = useState<number>(() => readAutoLockMinutes());
-  const [incomingEnabled, setIncomingEnabled] = useState<boolean>(() => readIncomingEnabled());
+  const [subPage, setSubPage] = useState<SettingsSubPage>("main");
   const { lock } = useAutoLock();
+
+  if (subPage === "notifications") {
+    return <ManageNotificationsPage onBack={() => setSubPage("main")} />;
+  }
 
   return (
     <div className="w-page">
@@ -137,9 +152,20 @@ export function Settings({ developerModeEnabled, setDeveloperModeEnabled, steleE
       <div className="w-card">
         <div className="w-card__head"><h3>Notifications</h3></div>
         <div className="w-card__body">
-          <div className="row-help" style={{ lineHeight: 1.6 }}>
+          <div className="row-help" style={{ lineHeight: 1.6, marginBottom: 4 }}>
             Control system notifications, what details they show, and how they
             behave while the wallet is locked.
+          </div>
+          <div className="w-setting-row">
+            <div>
+              <div className="row-label">Manage notifications</div>
+              <div className="row-help">
+                System notifications, transaction details, and locked-state behaviour.
+              </div>
+            </div>
+            <button className="btn btn--sm" onClick={() => setSubPage("notifications")}>
+              Manage
+            </button>
           </div>
         </div>
       </div>
@@ -229,25 +255,6 @@ export function Settings({ developerModeEnabled, setDeveloperModeEnabled, steleE
               {experimentalEnabled ? "Enabled" : "Disabled"}
             </button>
           </div>
-          <div className="w-setting-row">
-            <div>
-              <div className="row-label">Incoming transfers</div>
-              <div className="row-help">
-                Show a system notification when LYTH arrives. Detected while the wallet is open; the in-app notification is always kept regardless of this setting.
-              </div>
-            </div>
-            <button
-              type="button"
-              className={`w-chip ${incomingEnabled ? "is-on" : ""}`}
-              onClick={() => {
-                const next = !incomingEnabled;
-                setIncomingEnabled(next);
-                writeIncomingEnabled(next);
-              }}
-            >
-              {incomingEnabled ? "Enabled" : "Disabled"}
-            </button>
-          </div>
         </div>
       </div>
 
@@ -260,6 +267,108 @@ export function Settings({ developerModeEnabled, setDeveloperModeEnabled, steleE
               <div className="row-help">Monolythium Wallet · Stage 2 (consumer surface).</div>
             </div>
           </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ToggleRow({
+  label,
+  help,
+  on,
+  onToggle,
+}: {
+  label: string;
+  help: string;
+  on: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <div className="w-setting-row">
+      <div>
+        <div className="row-label">{label}</div>
+        <div className="row-help">{help}</div>
+      </div>
+      <button type="button" className={`w-chip ${on ? "is-on" : ""}`} onClick={onToggle}>
+        {on ? "Enabled" : "Disabled"}
+      </button>
+    </div>
+  );
+}
+
+/**
+ * Manage notifications — the system-notification controls. Each toggle persists
+ * a lightweight flag that the OS-toast layer (`os-toast.ts`) reads when it
+ * decides whether/how to raise a toast. The in-app notification record is
+ * always written regardless of any toggle here (the Notifications centre + bell
+ * badge are unaffected). The relationship of the notifications surface to the
+ * experimental flag is unchanged — these are the user-facing controls within it.
+ */
+function ManageNotificationsPage({ onBack }: { onBack: () => void }) {
+  const [sysEnabled, setSysEnabled] = useState(() => readNotificationsEnabled());
+  const [details, setDetails] = useState(() => readNotificationDetails());
+  const [whileLocked, setWhileLocked] = useState(() => readNotifyWhileLocked());
+  const [incoming, setIncoming] = useState(() => readIncomingEnabled());
+
+  return (
+    <div className="w-page">
+      <div className="w-page__header">
+        <button
+          className="btn btn--sm btn--ghost"
+          onClick={onBack}
+          style={{ marginBottom: 12 }}
+        >
+          ← Settings
+        </button>
+        <h1>Manage notifications</h1>
+        <div className="sub">
+          System notifications and how they behave. In-app notifications are
+          always kept.
+        </div>
+      </div>
+      <div className="w-card">
+        <div className="w-card__body">
+          <ToggleRow
+            label="System notifications"
+            help="Show a system notification when a transaction confirms or fails. In-app notifications are always kept."
+            on={sysEnabled}
+            onToggle={() => {
+              const next = !sysEnabled;
+              setSysEnabled(next);
+              writeNotificationsEnabled(next);
+            }}
+          />
+          <ToggleRow
+            label="Show transaction details"
+            help="Include the amount and address in notifications. Off shows only 'Transaction confirmed' — safer on shared screens. In-app details are unaffected."
+            on={details}
+            onToggle={() => {
+              const next = !details;
+              setDetails(next);
+              writeNotificationDetails(next);
+            }}
+          />
+          <ToggleRow
+            label="Notify while locked"
+            help="Notify for transactions that confirm while the wallet is locked. Off holds them until you next unlock. In-app records are always kept."
+            on={whileLocked}
+            onToggle={() => {
+              const next = !whileLocked;
+              setWhileLocked(next);
+              writeNotifyWhileLocked(next);
+            }}
+          />
+          <ToggleRow
+            label="Incoming transfers"
+            help="Show a system notification when LYTH arrives. Detected while the wallet is open; the in-app record is always kept."
+            on={incoming}
+            onToggle={() => {
+              const next = !incoming;
+              setIncoming(next);
+              writeIncomingEnabled(next);
+            }}
+          />
         </div>
       </div>
     </div>

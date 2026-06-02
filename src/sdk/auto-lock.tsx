@@ -39,6 +39,16 @@ interface AutoLockApi {
 
 const AutoLockContext = createContext<AutoLockApi | null>(null);
 
+// Module-level mirror of the lock flag so non-React modules (e.g. the OS-toast
+// layer, which decides whether to suppress a toast while locked) can read it
+// synchronously. The LockProvider keeps it in sync with its React state.
+let _walletLocked = false;
+
+/** True when the wallet is currently locked. Readable outside React. */
+export function isWalletLocked(): boolean {
+  return _walletLocked;
+}
+
 export function useAutoLock(): AutoLockApi {
   const ctx = useContext(AutoLockContext);
   if (ctx === null) {
@@ -91,6 +101,11 @@ export function LockProvider({ children }: { children: ReactNode }) {
     pauseDepthRef.current = Math.max(0, pauseDepthRef.current - 1);
     if (pauseDepthRef.current === 0) arm();
   }, [arm]);
+
+  // Keep the module-level mirror in sync so non-React readers see the lock flag.
+  useEffect(() => {
+    _walletLocked = isLocked;
+  }, [isLocked]);
 
   // Arm on mount; tear the timer down on unmount.
   useEffect(() => {

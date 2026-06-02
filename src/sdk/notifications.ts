@@ -237,11 +237,17 @@ function shortAddress(s: string, head = 10, tail = 6): string {
  *  middle-truncated bech32m address ever appear, never a contact name or any
  *  encrypted payload. The OS-toast layer (`os-toast.ts`) consumes this so the
  *  toast and the in-app record always read identically. */
-export function notificationToast(record: NotificationRecord): {
+export function notificationToast(
+  record: NotificationRecord,
+  includeDetails: boolean = true,
+): {
   title: string;
   body: string;
 } {
   const title = notificationTitle(record.kind, record.status);
+  // Redacted mode: title only — no amount, no address (safer on a shared
+  // screen). The in-app record keeps full detail; only the OS toast is redacted.
+  if (!includeDetails) return { title, body: "" };
   const short = shortAddress(record.counterparty);
   const body = isZeroAmount(record.amountDecimal)
     ? short

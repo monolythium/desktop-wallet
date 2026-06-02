@@ -71,3 +71,67 @@ export function writeIncomingEnabled(enabled: boolean): void {
     // localStorage unavailable — fall through.
   }
 }
+
+// System-notifications master switch — DEFAULT ON, fail-open. Gates ALL OS
+// toasts (terminal + incoming); the in-app notification records are always
+// written regardless. This is the user-facing master; whether the wider
+// notifications system stays behind the experimental flag is unchanged.
+export const NOTIFICATIONS_ENABLED_KEY = "wallet.notificationsEnabled";
+
+export function readNotificationsEnabled(): boolean {
+  try {
+    return localStorage.getItem(NOTIFICATIONS_ENABLED_KEY) !== "false";
+  } catch {
+    return true; // fail-open
+  }
+}
+
+export function writeNotificationsEnabled(enabled: boolean): void {
+  try {
+    localStorage.setItem(NOTIFICATIONS_ENABLED_KEY, enabled ? "true" : "false");
+  } catch {
+    // localStorage unavailable — fall through.
+  }
+}
+
+// Show-transaction-details — DEFAULT ON, fail-open. When off, the OS toast text
+// is redacted to the title only ("Transaction confirmed"); the in-app record
+// always keeps full detail.
+export const NOTIFICATION_DETAILS_KEY = "wallet.notificationDetails";
+
+export function readNotificationDetails(): boolean {
+  try {
+    return localStorage.getItem(NOTIFICATION_DETAILS_KEY) !== "false";
+  } catch {
+    return true; // fail-open
+  }
+}
+
+export function writeNotificationDetails(enabled: boolean): void {
+  try {
+    localStorage.setItem(NOTIFICATION_DETAILS_KEY, enabled ? "true" : "false");
+  } catch {
+    // localStorage unavailable — fall through.
+  }
+}
+
+// Notify-while-locked — DEFAULT ON, fail-open. When off, OS toasts for txs that
+// resolve while the wallet is locked are suppressed; the in-app record is still
+// written and surfaces on the next unlock.
+export const NOTIFY_WHILE_LOCKED_KEY = "wallet.notifyWhileLocked";
+
+export function readNotifyWhileLocked(): boolean {
+  try {
+    return localStorage.getItem(NOTIFY_WHILE_LOCKED_KEY) !== "false";
+  } catch {
+    return true; // fail-open
+  }
+}
+
+export function writeNotifyWhileLocked(enabled: boolean): void {
+  try {
+    localStorage.setItem(NOTIFY_WHILE_LOCKED_KEY, enabled ? "true" : "false");
+  } catch {
+    // localStorage unavailable — fall through.
+  }
+}
