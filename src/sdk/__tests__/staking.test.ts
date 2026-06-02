@@ -67,9 +67,9 @@ describe("staking calldata selectors", () => {
 });
 
 describe("formatRewardLyth", () => {
-  it("formats a hex lythoshi quantity as whole LYTH (1 LYTH = 1e8 lythoshi)", () => {
-    // 1 LYTH = 100_000_000 lythoshi = 0x5f5e100
-    expect(formatRewardLyth("0x5f5e100")).toBe("1");
+  it("formats a hex lythoshi quantity as whole LYTH (1 LYTH = 1e18 lythoshi)", () => {
+    // 1 LYTH = 1_000_000_000_000_000_000 lythoshi = 0xde0b6b3a7640000
+    expect(formatRewardLyth("0xde0b6b3a7640000")).toBe("1");
   });
 
   it("collapses empty / nullish / malformed input to 0 (never throws)", () => {

@@ -7,6 +7,7 @@
 // delegation precompile call → encrypted-envelope submit).
 
 import { useEffect, useState } from "react";
+import { LYTHOSHI_PER_LYTH } from "@monolythium/core-sdk";
 import type {
   ClusterDirectoryEntryResponse,
   ClusterDiversityView,
@@ -152,7 +153,7 @@ export function Stake({ experimentalEnabled }: StakeProps = {}) {
 
   const openDelegate = (clusterId: number, weightBps: number, principalLyth: bigint) => {
     const weightLabel = `${(weightBps / 100).toFixed(2)}%`;
-    const principalLythoshi = principalLyth * 100_000_000n; // 1 LYTH = 1e8 lythoshi
+    const principalLythoshi = principalLyth * LYTHOSHI_PER_LYTH; // whole-LYTH principal -> lythoshi
     ops.open({
       title: `Delegate ${principalLyth} LYTH to cluster ${clusterId}`,
       subtitle: `Stake ${weightLabel} of wallet weight, ${principalLyth} LYTH principal`,

@@ -5,9 +5,10 @@ import { buildNativeLythTransferPlan } from "../native-send";
 
 describe("native LYTH denomination helpers", () => {
   it("renders RPC balance quantities as lythoshi-backed LYTH", () => {
-    expect(balanceQuantityToLythoshi("0x5f5e100")).toBe("100000000");
-    expect(balanceQuantityToLyth("0x5f5e100")).toBe("1");
-    expect(balanceQuantityToLyth("0x77359400")).toBe("20");
+    // 1 LYTH = 1e18 lythoshi = 0xde0b6b3a7640000; 20 LYTH = 0x1158e460913d00000
+    expect(balanceQuantityToLythoshi("0xde0b6b3a7640000")).toBe("1000000000000000000");
+    expect(balanceQuantityToLyth("0xde0b6b3a7640000")).toBe("1");
+    expect(balanceQuantityToLyth("0x1158e460913d00000")).toBe("20");
     expect(balanceQuantityToLyth("not-a-quantity")).toBe("0");
   });
 
@@ -22,9 +23,9 @@ describe("native LYTH denomination helpers", () => {
       executionUnitLimit: 30_000n,
     });
 
-    expect(plan.amountLythoshi).toBe("125000000");
+    expect(plan.amountLythoshi).toBe("1250000000000000000");
     expect(plan.amountDisplay).toBe("1.25");
-    expect(plan.tx.value).toBe("125000000");
+    expect(plan.tx.value).toBe("1250000000000000000");
     expect(plan.tx.chainId).toBe(MONOLYTHIUM_TESTNET_CHAIN_ID);
     expect(plan.tx.to).toBe("0x000000000000000000000000000000000000dead");
     expect(plan.tx.maxFeePerGas).toBe(11n);
@@ -38,9 +39,9 @@ describe("native LYTH denomination helpers", () => {
         chainId: MONOLYTHIUM_TESTNET_CHAIN_ID,
         nonce: 7n,
         to: addressToTypedBech32("user", "0x000000000000000000000000000000000000dead"),
-        amountLyth: "1.000000001",
+        amountLyth: "1.0000000000000000001", // 19 fractional digits > 18-decimal denom
         executionUnitPriceLythoshi: 11n,
       }),
-    ).toThrow(/8 decimal/);
+    ).toThrow(/18 decimal/);
   });
 });
