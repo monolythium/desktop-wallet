@@ -1,10 +1,10 @@
 // Monoscan explorer URL builders.
 //
-// The base URLs and hash-route shape are copied verbatim from the
-// browser-wallet (`src/shared/build-info.ts`) so every wallet links into
-// the same explorer with byte-identical URLs. Keep these in lockstep with
-// the browser build; a drift here means two wallets pointing at different
-// explorer routes for the same hash.
+// The base URLs and hash-route shape are the canonical Monoscan routes shared
+// across the Monolythium wallets, so every wallet links into the same explorer
+// with byte-identical URLs. Keep these in lockstep with that canonical route
+// shape; a drift here means two wallets pointing at different explorer routes
+// for the same hash.
 
 /** Monoscan explorer base for a testnet-69420 transaction (hash-routed SPA).
  *  The wallet only links txs whose canonical hash it knows — its own sent

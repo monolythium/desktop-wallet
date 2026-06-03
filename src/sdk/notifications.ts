@@ -1,11 +1,8 @@
 // Pure notification model — types, key builders, the history cap + newest-
 // first append helper, friendly title strings, and tolerant parsers.
 //
-// Ported nearly verbatim from the browser-wallet's `shared/notifications.ts`
-// so the two wallets share one notification shape contract. The only
-// adaptation for desktop: counterparties are typed bech32m (`mono…`) on
-// every desktop surface, so this module treats `counterparty` as an opaque
-// address string rather than the browser's lowercase `0x` form.
+// This wallet uses typed bech32m (`mono…`) counterparties on every surface,
+// so the module treats `counterparty` as an opaque address string.
 //
 // No `chrome.*`, no DOM, no Tauri IPC, no module-scope state — every helper
 // here is deterministic and unit-testable in vitest without runtime shims.
@@ -13,7 +10,7 @@
 // recording chokepoint (terminal transition of a tracked write) lives in the
 // OperationsDrawer.
 //
-// Invariants this module helps uphold (mirrored from the browser rules):
+// Invariants this module helps uphold:
 //   - Status fidelity: `NotificationRecord.status` is `"confirmed" | "failed"`
 //     only — never optimism inferred from a pending state.
 //   - Dedupe by canonical hash: `notificationId` builds the stable per-record

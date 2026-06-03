@@ -175,8 +175,9 @@ export function Onboarding({ onDone }: Props) {
 
   const onVerified = async () => {
     // Only now — after the user has correctly placed the missing
-    // words — do we touch disk. Browser-wallet 2f83e28 fixed the
-    // same persist-before-verify bug; this is the desktop port.
+    // words — do we touch disk. Ordering is load-bearing: persisting the
+    // vault before the verify step passes would let a phrase the user never
+    // confirmed reach disk, so the write stays gated behind verification.
     if (!mnemonic) {
       setError("Lost the recovery phrase — restart onboarding.");
       setStep("choose-path");

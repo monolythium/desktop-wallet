@@ -10,12 +10,11 @@
 //
 // No `@tauri-apps/*`, no DOM, no RPC client, no module-scope state — every
 // helper here is deterministic and unit-testable in vitest without shims. The
-// only adaptation vs. the browser wallet's tracked-tx core: the chain calls
-// live in `reconcile.ts` (which holds the RpcClient), so this module takes the
-// two raw chain answers (`lyth_txStatus` + the receipt) as inputs and returns
-// a verdict, keeping the decision logic pure.
+// chain calls live in `reconcile.ts` (which holds the RpcClient), so this
+// module takes the two raw chain answers (`lyth_txStatus` + the receipt) as
+// inputs and returns a verdict, keeping the decision logic pure.
 //
-// Invariants this module upholds (mirrored from the browser tracked-tx rules):
+// Invariants this module upholds:
 //   - Status fidelity: a verdict is `"confirmed" | "failed"` ONLY on an
 //     explicit on-chain observation — `lyth_txStatus="found"`, or a receipt
 //     carrying `status === 1` (confirmed) / `status === 0` (failed). Every
@@ -67,7 +66,7 @@ export const PENDING_TX_STORE_KEY = "mono.pending-tx.v1";
  *  this many ms of `submittedAt` is dropped silently (honest absence — the
  *  user already saw the broadcast in the Done pane; we never fabricate a
  *  verdict). Five minutes comfortably covers testnet anchoring + indexer lag
- *  without following a wedged tx forever. Matches the browser's PENDING_TTL. */
+ *  without following a wedged tx forever. */
 export const PENDING_TX_WINDOW_MS = 5 * 60 * 1_000;
 
 /** True once a tracked tx has aged past its tracking window. Pure — the caller
@@ -113,7 +112,7 @@ export type PendingVerdict =
 
 /** Deterministic terminal-state classification for one tracked tx.
  *
- *  Mirrors the browser tracked-tx core (`dropConfirmedPendingByHash`):
+ *  The terminal-state classification rules:
  *    1. `lyth_txStatus="found"` → confirmed (the indexer only surfaces
  *       included txs). Carries the inclusion block number when present.
  *    2. Otherwise consult the receipt: `status === 1` → confirmed,

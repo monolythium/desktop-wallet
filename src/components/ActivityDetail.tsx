@@ -1,7 +1,6 @@
 // Activity-detail modal — a compact summary popup opened by clicking a row
-// in the Activity list (gated behind the experimental flag). Ported from the
-// browser-wallet's `ActivityDetail.tsx`, adapted to the desktop row shapes
-// and design tokens.
+// in the Activity list (gated behind the experimental flag). Built around this
+// wallet's row shapes and design tokens.
 //
 // Honest absence: a "View on Monoscan" link only appears when the row carries
 // a canonical tx hash. On desktop that is the pending-mempool row (it streams

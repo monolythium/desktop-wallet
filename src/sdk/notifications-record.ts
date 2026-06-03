@@ -20,9 +20,8 @@
 //     receipt-success observation and "failed" on a reverted receipt. That is
 //     the single reconcile path; this module no longer polls.
 //
-// This mirrors the browser wallet, whose tracked-tx core also treats
-// `lyth_txStatus="found"` / a success receipt as the confirmed signal and only
-// ever persists explicit "confirmed" / "failed".
+// The tracked-tx core treats `lyth_txStatus="found"` / a success receipt as
+// the confirmed signal and only ever persists explicit "confirmed" / "failed".
 
 import { MONOLYTHIUM_TESTNET_CHAIN_ID } from "@monolythium/core-sdk";
 import { loadActiveWallet } from "./active-wallet";

@@ -1,8 +1,7 @@
 // Shared parts for detail-style modals (currently `ActivityDetail`; any
 // future "tap a row → see structured detail" surface can reuse these).
-// Ported from the browser-wallet's `_detailModalParts.tsx` with the visual
-// language adapted to the desktop design tokens (tokens.css / wallet.css):
-// monospace label/value rows, the `.btn` family for the Monoscan CTA.
+// Built on this wallet's design tokens (tokens.css / wallet.css): monospace
+// label/value rows, the `.btn` family for the Monoscan CTA.
 //
 // The leading underscore in the filename follows the convention for shared
 // internal building blocks that are not a page in their own right.

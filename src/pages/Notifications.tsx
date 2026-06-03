@@ -1,8 +1,8 @@
 // Notifications center.
 //
-// Ported from the browser-wallet's `Notifications.tsx`, adapted to the desktop
-// design system (`.w-page` / `.w-card`, the `.btn` family, inline SVG glyphs in
-// the Sidebar's visual language — there is no shared Icon component here).
+// Built on this wallet's design system (`.w-page` / `.w-card`, the `.btn`
+// family, inline SVG glyphs in the Sidebar's visual language — there is no
+// shared Icon component here).
 //
 // Global inbox: reads every notification scope's entries (merged newest-first
 // by `listAllNotifications`) and renders one row per record. Unread rows carry

@@ -1,16 +1,14 @@
 // Tauri-store-backed notification store.
 //
-// Re-implements the browser-wallet's `chrome.storage`-backed notifications
-// store on top of `@tauri-apps/plugin-store`, mirroring the singleton-store +
-// in-memory-cache pattern used by `vaultCatalog.ts` / `agent-registry.ts`.
+// A `@tauri-apps/plugin-store`-backed notifications store, using the
+// singleton-store + in-memory-cache pattern of `vaultCatalog.ts` /
+// `agent-registry.ts`.
 //
-// The browser keeps one chrome.storage key per (address, chain) scope; here a
-// single JSON store file (`notifications.v1.json`) holds a `scopes` map keyed
-// by the same `mono.notifications.history.<addr>.<chainIdHex>.v1` string, so
-// the on-disk shape stays conceptually identical and the dedupe set lives
-// beside each scope's history.
+// A single JSON store file (`notifications.v1.json`) holds a `scopes` map keyed
+// per (address, chain) by the `mono.notifications.history.<addr>.<chainIdHex>.v1`
+// string, so each scope's dedupe set lives beside its history.
 //
-// Public surface (matches the browser's read/write helpers):
+// Public surface:
 //   - `recordNotification(input)` — dedupe-check, append (capped, newest-
 //     first), persist. Best-effort: every store failure is swallowed so the
 //     caller (the OperationsDrawer terminal-transition hook) can never throw
@@ -49,12 +47,12 @@ const STORE_FILE = "notifications.v1.json";
 const STATE_KEY = "state";
 
 /** On-disk root. `scopes` maps each per-(address, chain) storage key to its
- *  envelope, exactly as the browser keyed chrome.storage. */
+ *  envelope. */
 interface NotificationsState {
   version: 1;
-  // Per-scope envelopes keyed by the same strings the browser keyed
-  // chrome.storage. Values are tolerant-parsed at read time (history /
-  // notified-set / incoming-watermark), so the map value stays `unknown`.
+  // Per-scope envelopes keyed by the per-(address, chain) storage key. Values
+  // are tolerant-parsed at read time (history / notified-set /
+  // incoming-watermark), so the map value stays `unknown`.
   scopes: Record<string, unknown>;
 }
 
