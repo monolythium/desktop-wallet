@@ -21,7 +21,7 @@
     "@noble/hashes": "2.2.0",
     "@noble/post-quantum": "0.6.1",
     "@scure/bip39": "2.2.0",
-    "@tauri-apps/api": "2.10.1",
+    "@tauri-apps/api": "2.11.0",
     "@tauri-apps/plugin-notification": "2.3.3",
     "@tauri-apps/plugin-process": "2.3.1",
     "@tauri-apps/plugin-store": "2.4.3",
@@ -31,7 +31,7 @@
     "react-dom": "19.2.5"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "2.10.1",
+    "@tauri-apps/cli": "2.11.2",
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react": "5.2.0",
