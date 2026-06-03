@@ -70,12 +70,6 @@ rand = { version = "0.8", default-features = false, features = ["getrandom"] }
 base64 = { version = "0.22", default-features = false, features = ["alloc"] }
 zeroize = { version = "1", features = ["derive"] }
 
-# Ledger hardware signer (Stage 4). HID-only — WebUSB is out of scope.
-# `ledger-transport-hid` brings in `hidapi` which links against the system
-# HIDAPI / IOHIDManager (macOS) / hidraw (Linux) / hid.dll (Windows).
-ledger-transport-hid = "0.11"
-ledger-apdu = "0.11"
-
 # OS keychain. Per-platform native backends:
 # - macOS:    apple-native (Security framework)
 # - Windows:  windows-native (Credential Manager)

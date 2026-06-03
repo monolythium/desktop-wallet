@@ -4,19 +4,14 @@
 // - `keychain_unlock` / `keychain_store` / `keychain_delete` — OS keychain bridge.
 // - `vault_create` / `vault_seal_seed` / `vault_seal_v2` / `vault_unlock` /
 //   `vault_reveal` — XChaCha20-Poly1305 seed vault (+ recovery-phrase reveal).
-// - `ledger_*`                           — HID hardware signer (Stage 4).
 //
 // Stage 5 will extend with `monolythium-core-sdk` RPC wrappers + passkey
 // signer.
-
-use std::sync::Arc;
-use tokio::sync::Mutex;
 
 #[cfg(feature = "stele")]
 use tauri::Manager;
 
 mod keychain;
-mod ledger;
 mod mcp_bridge;
 mod name_registry;
 mod studio_host;
@@ -27,8 +22,6 @@ mod stele;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let ledger_state: ledger::LedgerState = Arc::new(Mutex::new(()));
-
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_store::Builder::default().build())
@@ -38,7 +31,6 @@ pub fn run() {
         // (`src/sdk/os-toast.ts`) is the only caller; it gates every toast +
         // permission prompt behind the `wallet.experimentalEnabled` flag.
         .plugin(tauri_plugin_notification::init())
-        .manage(ledger_state)
         .manage(studio_host::StudioSidecarState::default());
 
     #[cfg(feature = "stele")]
@@ -59,12 +51,6 @@ pub fn run() {
         vault::vault_seal_v2,
         vault::vault_unlock,
         vault::vault_reveal,
-        ledger::ledger_enumerate_devices,
-        ledger::ledger_get_address,
-        ledger::ledger_sign_transaction,
-        ledger::ledger_sign_personal_message,
-        ledger::ledger_sign_typed_data,
-        ledger::ledger_default_hd_path,
         mcp_bridge::mcp_shared_wallet_list,
         mcp_bridge::mcp_shared_store_exists,
         name_registry::name_check_availability,
