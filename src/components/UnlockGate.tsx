@@ -66,7 +66,7 @@ export function UnlockGate() {
           }}
         >
           Enter your password to unlock. It decrypts your vault locally with
-          Argon2id and AES-256-GCM; the password is never stored.
+          Argon2id and XChaCha20-Poly1305; the password is never stored.
         </p>
         <label className="w-onboarding__field" style={{ textAlign: "left" }}>
           <span className="cap">Password</span>

@@ -387,7 +387,7 @@ export function Onboarding({ onDone }: Props) {
             <h1 style={{ margin: "0 0 8px" }}>Set a wallet password</h1>
             <p style={{ margin: "0 0 24px", color: "var(--w-text-2)", fontSize: 13 }}>
               The password unwraps a signing key encrypted with Argon2id and
-              AES-256-GCM. We never store the password itself, only the
+              XChaCha20-Poly1305. We never store the password itself, only the
               encrypted vault. Use at least 12 characters with a mix of upper
               and lower case, a number, and a symbol.
             </p>

@@ -519,7 +519,7 @@ function AuthPane({
     <>
       <div className="w-banner">
         Enter your wallet password. The vault decrypts in-process via
-        Argon2id + AES-256-GCM; the password never touches disk.
+        Argon2id + XChaCha20-Poly1305; the password never touches disk.
       </div>
       <label className="w-onboarding__field" style={{ marginTop: 12 }}>
         <span className="cap">Password</span>

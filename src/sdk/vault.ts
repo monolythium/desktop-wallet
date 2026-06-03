@@ -1,7 +1,7 @@
 // Vault bridge — typed wrapper around the Tauri commands defined in
 // `src-tauri/src/vault.rs`.
 //
-// The vault stores an AES-256-GCM-encrypted seed, with the key derived
+// The vault stores an XChaCha20-Poly1305-encrypted seed, with the key derived
 // from the user's password via Argon2id (OWASP 2024 desktop params).
 // What the OS keychain holds is the encrypted blob — the password itself
 // is never persisted.

@@ -1,7 +1,7 @@
 // OS keychain bridge — typed wrapper around the Tauri commands defined in
 // `src-tauri/src/keychain.rs`. Stage 4 wires this together with the vault
 // commands (`src-tauri/src/vault.rs`): the keychain stores the
-// AES-GCM-encrypted blob, never raw seed material.
+// XChaCha20-Poly1305-encrypted blob, never raw seed material.
 //
 // The two callable surfaces:
 //
