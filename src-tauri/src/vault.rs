@@ -428,7 +428,7 @@ fn seal_v2_with_params(
 fn decrypt_v2(password: &[u8], blob_bytes: &[u8]) -> Result<Zeroizing<Vec<u8>>, VaultError> {
     let blob: VaultBlob = serde_json::from_slice(blob_bytes).map_err(|_| {
         // Tampered or corrupt blob — collapse to WrongPassword so we don't
-        // leak which check failed (timing-safe error parity).
+        // leak which check failed (one error shape, timing-safe).
         VaultError::WrongPassword
     })?;
 
