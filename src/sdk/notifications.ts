@@ -86,6 +86,13 @@ export interface NotificationRecord {
    *  backward-compatible — records written before this field simply omit it. */
   clusterId?: number;
   clusterName?: string;
+  /** Owning scope — the lowercased address this record was recorded under (the
+   *  active vault's identity at write time). Optional + backward-compatible:
+   *  records written before this field omit it. It lets a merged/global list
+   *  still tell which vault a record belongs to; per-scope reads additionally
+   *  attribute by the storage-key scope, so a legacy record without this field
+   *  is still owned correctly and never shown under another vault. */
+  scope?: string;
   /** Epoch ms when the terminal transition was observed (the fire-time). */
   createdAtMs: number;
   /** Read state. `false` on insert; `markAllRead` flips per-scope. */
@@ -311,6 +318,7 @@ function asNotificationRecord(raw: unknown): NotificationRecord | null {
       ? r.clusterId
       : undefined;
   const clusterName = typeof r.clusterName === "string" ? r.clusterName : undefined;
+  const scope = typeof r.scope === "string" ? r.scope : undefined;
   return {
     id: r.id,
     txHash: r.txHash,
@@ -321,6 +329,7 @@ function asNotificationRecord(raw: unknown): NotificationRecord | null {
     counterparty: r.counterparty,
     clusterId,
     clusterName,
+    scope,
     createdAtMs: r.createdAtMs,
     read: r.read,
     schemaVersion: 0,

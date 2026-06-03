@@ -199,6 +199,11 @@ export async function recordNotification(
       counterparty: input.counterparty,
       clusterId: input.clusterId,
       clusterName: input.clusterName,
+      // Stamp the owning scope so a merged/global read can still attribute the
+      // record to its vault. `addressLower` is the same address dimension the
+      // history key is built from, so this is the single write chokepoint for
+      // every record-creation path.
+      scope: input.addressLower,
       createdAtMs: Date.now(),
       read: input.read ?? false,
       schemaVersion: 0,
@@ -271,6 +276,35 @@ export async function listAllNotifications(): Promise<NotificationRecord[]> {
     const merged: NotificationRecord[] = [];
     for (const [k, v] of Object.entries(state.scopes)) {
       if (!k.startsWith("mono.notifications.history.")) continue;
+      const env = parseHistoryEnvelope(v);
+      if (!env) continue;
+      merged.push(...env.entries);
+    }
+    merged.sort((a, b) => b.createdAtMs - a.createdAtMs);
+    return merged;
+  } catch {
+    return [];
+  }
+}
+
+/** Per-SCOPE read — only the records recorded under `scope` (the lowercased
+ *  owning address), merged newest-first across that scope's chains. The Activity
+ *  page sources its vault-owned rows (e.g. failed txs) through this so one
+ *  vault's rows can never appear under another.
+ *
+ *  Attribution is by the storage-key scope (the address dimension of
+ *  `notificationsHistoryKey`), which has always encoded the owning address — so
+ *  records written before the `scope` field are still owned correctly and never
+ *  leak, with no fabricated scope. The trailing `.` in the prefix prevents one
+ *  address from matching another that merely shares its prefix. Empty on any
+ *  failure. */
+export async function listForScope(scope: string): Promise<NotificationRecord[]> {
+  try {
+    const state = await loadState();
+    const prefix = `mono.notifications.history.${scope}.`;
+    const merged: NotificationRecord[] = [];
+    for (const [k, v] of Object.entries(state.scopes)) {
+      if (!k.startsWith(prefix)) continue;
       const env = parseHistoryEnvelope(v);
       if (!env) continue;
       merged.push(...env.entries);

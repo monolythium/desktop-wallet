@@ -29,6 +29,7 @@ import {
   __resetNotificationsStoreForTests,
   getUnread,
   listAllNotifications,
+  listForScope,
   markAllNotificationsRead,
   markNotificationRead,
   recordNotification,
@@ -106,6 +107,60 @@ describe("listAllNotifications", () => {
     await recordNotification(input({ txHash: "0x2" }));
     const all = await listAllNotifications();
     expect(all.map((r) => r.txHash)).toEqual(["0x2", "0x1"]);
+  });
+});
+
+describe("scope attribution", () => {
+  it("stamps the owning scope (addressLower) on each record", async () => {
+    const r = await recordNotification(input({ addressLower: "mono1aaa" }));
+    expect(r.record?.scope).toBe("mono1aaa");
+  });
+
+  it("listForScope returns only the records recorded under that scope", async () => {
+    await recordNotification(input({ addressLower: "mono1aaa", txHash: "0xa" }));
+    await recordNotification(input({ addressLower: "mono1bbb", txHash: "0xb" }));
+    expect((await listForScope("mono1aaa")).map((r) => r.txHash)).toEqual(["0xa"]);
+    // A record stamped to scope A is never returned for scope B.
+    expect((await listForScope("mono1bbb")).map((r) => r.txHash)).toEqual(["0xb"]);
+  });
+
+  it("does not match a scope that merely shares an address prefix", async () => {
+    await recordNotification(input({ addressLower: "mono1ab", txHash: "0x1" }));
+    await recordNotification(input({ addressLower: "mono1abc", txHash: "0x2" }));
+    expect((await listForScope("mono1ab")).map((r) => r.txHash)).toEqual(["0x1"]);
+    expect((await listForScope("mono1abc")).map((r) => r.txHash)).toEqual(["0x2"]);
+  });
+
+  it("attributes a legacy record (no scope field) by its storage key — no leak, not dropped", async () => {
+    // Seed a pre-`scope` record directly under scope A's history key.
+    const keyA = `mono.notifications.history.mono1aaa.${CHAIN}.v1`;
+    backing.set("state", {
+      version: 1,
+      scopes: {
+        [keyA]: {
+          schemaVersion: 0,
+          entries: [
+            {
+              id: `${CHAIN}:0xleg`,
+              txHash: "0xleg",
+              status: "failed",
+              blockNumber: null,
+              kind: "send",
+              amountDecimal: "1.00",
+              counterparty: "mono1to",
+              // no `scope` — the legacy shape
+              createdAtMs: 1_700_000_000_000,
+              read: false,
+              schemaVersion: 0,
+            },
+          ],
+        },
+      },
+    });
+    __resetNotificationsStoreForTests();
+    // Tolerant parse of the old shape + correct ownership by storage key.
+    expect((await listForScope("mono1aaa")).map((r) => r.txHash)).toEqual(["0xleg"]);
+    expect(await listForScope("mono1bbb")).toHaveLength(0);
   });
 });
 
