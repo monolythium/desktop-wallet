@@ -16,8 +16,10 @@ import {
   MlDsa65Backend,
   generatePqm1Mnemonic,
   pqm1MnemonicToMlDsa65Seed,
+  pqm1MnemonicToPayload,
+  pqm1PayloadToMnemonic,
 } from "@monolythium/core-sdk/crypto";
-import { createVaultFromSeed, unlockVault, VaultCallError } from "./vault";
+import { createVaultV2, revealVault, unlockVault, VaultCallError } from "./vault";
 
 /** Legacy / first-install slot. New vaults mint fresh slot ids via
  *  `mintVaultSlot()` in vaultCatalog.ts; this constant stays as the
@@ -137,10 +139,11 @@ export interface CreateVaultOptions {
 /**
  * Onboarding helper: generate a fresh PQM-1 mnemonic (or accept an
  * imported one), derive the ML-DSA-65 seed in the TypeScript SDK, then
- * persist an Argon2id-protected vault. Returns the mnemonic + the
- * 20-byte address (`0x…`) the seed maps to so callers can show + verify
- * the phrase AND register the vault in the catalog without a second
- * unlock.
+ * persist an Argon2id-protected vault. The reversible PQM-1 payload is
+ * sealed beside the seed so the phrase can later be revealed in-app.
+ * Returns the mnemonic + the 20-byte address (`0x…`) the seed maps to so
+ * callers can show + verify the phrase AND register the vault in the
+ * catalog without a second unlock.
  */
 export async function createAndStoreVault(
   account: string,
@@ -151,16 +154,50 @@ export async function createAndStoreVault(
     ? options.importMnemonic.trim()
     : generatePqm1Mnemonic();
   const seed = pqm1MnemonicToMlDsa65Seed(mnemonic);
+  const payload = pqm1MnemonicToPayload(mnemonic).bytes;
   let addressHex: string;
   try {
     const backend = MlDsa65Backend.fromSeed(seed);
     addressHex = backend.getAddress().toLowerCase();
-    const blob = await createVaultFromSeed(password, seed);
+    const blob = await createVaultV2(password, seed, payload);
     await store(account, blob);
   } finally {
     seed.fill(0);
+    payload.fill(0);
   }
   return { mnemonic, addressHex };
+}
+
+/** Outcome of a recovery-phrase reveal. `revealable` is false for a vault
+ *  sealed without the payload (e.g. one created before in-app backup). */
+export interface RevealOutcome {
+  revealable: boolean;
+  mnemonic?: string;
+}
+
+/**
+ * Settings "Show recovery phrase": fetch the vault blob for `account` and,
+ * if `password` decrypts it AND the recovery payload was sealed, return the
+ * 24-word phrase. A seed-only vault returns `{ revealable: false }` — no
+ * phrase to show. Throws `VaultCallError` (`wrong_password`) on a bad
+ * password, like `fetchAndUnlockVault`.
+ */
+export async function revealRecoveryPhrase(
+  account: string,
+  password: string,
+): Promise<RevealOutcome> {
+  const blob = await unlock(account);
+  const result = await revealVault(password, blob);
+  if (result.kind === "payload") {
+    const payload = Uint8Array.from(result.payload);
+    try {
+      return { revealable: true, mnemonic: pqm1PayloadToMnemonic(payload) };
+    } finally {
+      payload.fill(0);
+      result.payload.fill(0);
+    }
+  }
+  return { revealable: false };
 }
 
 /**
