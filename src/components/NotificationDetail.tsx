@@ -19,6 +19,7 @@ import {
   truncMiddle,
 } from "./_detailModalParts";
 import {
+  isDelegationKind,
   isZeroAmount,
   notificationTitle,
   type NotificationRecord,
@@ -37,6 +38,13 @@ export function NotificationDetail({ record, onClose }: NotificationDetailProps)
   const title = notificationTitle(record.kind, record.status);
   const showAmount = !isZeroAmount(record.amountDecimal);
   const showBlock = record.blockNumber !== null;
+  // Delegation records name the target cluster in place of the "To" module
+  // address; null when no cluster info was captured (older records) → fall back
+  // to the address "To" row.
+  const clusterLabel = isDelegationKind(record.kind)
+    ? record.clusterName ??
+      (record.clusterId !== undefined ? `Cluster #${record.clusterId}` : null)
+    : null;
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -81,23 +89,38 @@ export function NotificationDetail({ record, onClose }: NotificationDetailProps)
           {showAmount ? (
             <DRow label="Amount" value={`${record.amountDecimal} LYTH`} />
           ) : null}
-          <DRow label="To" value={<CopyableAddress addr={record.counterparty} />} />
+          {clusterLabel !== null ? (
+            <DRow label="Cluster" value={clusterLabel} />
+          ) : (
+            <DRow
+              label={record.kind === "receive" ? "From" : "To"}
+              value={<CopyableAddress addr={record.counterparty} />}
+            />
+          )}
           {showBlock ? (
             <DRow
               label="Block"
               value={`#${record.blockNumber!.toLocaleString("en-US")}`}
             />
           ) : null}
-          <DRow
-            label="Tx hash"
-            value={
-              <span style={{ fontFamily: "var(--f-mono)" }} title={record.txHash}>
-                {truncMiddle(record.txHash)}
-              </span>
-            }
-          />
-          <DRow label="When" value={relativeMs(record.createdAtMs)} />
-          {record.txHash ? <MonoscanTxButton hash={record.txHash} /> : null}
+          {/* Real on-chain hashes link out; the synthetic incoming id
+              (`in:<block>.<txIndex>.<logIndex>`) is never shown or linked. */}
+          {record.txHash.startsWith("0x") ? (
+            <>
+              <DRow
+                label="Tx hash"
+                value={
+                  <span style={{ fontFamily: "var(--f-mono)" }} title={record.txHash}>
+                    {truncMiddle(record.txHash)}
+                  </span>
+                }
+              />
+              <DRow label="When" value={relativeMs(record.createdAtMs)} />
+              <MonoscanTxButton hash={record.txHash} />
+            </>
+          ) : (
+            <DRow label="When" value={relativeMs(record.createdAtMs)} />
+          )}
         </div>
       </div>
     </div>

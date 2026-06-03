@@ -21,5 +21,8 @@ export interface Tx {
   counterparty: string;
   memo: string;
   kind: "transfer" | "reward" | "stake";
+  /** Neutral type-noun for the row eyebrow (e.g. "Outgoing transfer", "Stake"),
+   *  derived from the indexed activity kind via tx-type-label. */
+  typeLabel: string;
   denom: Denom;
 }

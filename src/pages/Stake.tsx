@@ -179,6 +179,7 @@ export function Stake({ experimentalEnabled }: StakeProps = {}) {
         kind: "delegate",
         amountDecimal: principalLyth.toString(),
         counterparty: DELEGATION_PRECOMPILE,
+        clusterId,
       },
       execute: async (ctx) => {
         if (!ctx?.vaultSeed) {
@@ -226,6 +227,7 @@ export function Stake({ experimentalEnabled }: StakeProps = {}) {
         kind: "undelegate",
         amountDecimal: "0",
         counterparty: DELEGATION_PRECOMPILE,
+        clusterId,
       },
       execute: async (ctx) => {
         if (!ctx?.vaultSeed) {
@@ -272,6 +274,7 @@ export function Stake({ experimentalEnabled }: StakeProps = {}) {
         kind: "redelegate",
         amountDecimal: "0",
         counterparty: DELEGATION_PRECOMPILE,
+        clusterId: toCluster,
       },
       execute: async (ctx) => {
         if (!ctx?.vaultSeed) {

@@ -4,14 +4,12 @@
 //
 // Stage 4 keeps this UI minimal on purpose. Future passes will:
 // - Add hardware-bound storage (Secure Enclave / TPM).
-// - Add password-strength meter once we settle on a heuristic that's
-//   honest (zxcvbn-ts) rather than performative.
 //
 // The contract for now: this screen only renders if `keychain_unlock`
 // returns `not_found` for the primary account. Once the vault is stored,
 // the caller flips `done` and the main shell takes over.
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   generatePqm1Mnemonic,
   pqm1MnemonicToMlDsa65Seed,
@@ -28,6 +26,8 @@ import { registerVault } from "../sdk/vaultCatalog";
 import { explainImportError } from "../lib/import-error";
 import { MnemonicGrid } from "./MnemonicGrid";
 import { VerifyPhrase } from "./VerifyPhrase";
+import { PasswordStrengthMeter } from "./PasswordStrengthMeter";
+import { isPasswordValid, getPasswordStrength } from "../lib/password-validation";
 
 interface Props {
   onDone: () => void;
@@ -55,7 +55,16 @@ export function Onboarding({ onDone }: Props) {
   const [importError, setImportError] = useState<string | null>(null);
 
   const canSubmit =
-    !busy && password.length >= 12 && password === confirm && acknowledged;
+    !busy &&
+    isPasswordValid(password) &&
+    getPasswordStrength(password) !== "weak" &&
+    password === confirm &&
+    acknowledged;
+
+  const importWordCount = useMemo(
+    () => importDraft.trim().split(/\s+/).filter(Boolean).length,
+    [importDraft],
+  );
 
   const beginCreate = () => {
     setIsImport(false);
@@ -195,12 +204,43 @@ export function Onboarding({ onDone }: Props) {
       <div className="w-onboarding__card">
         {step === "choose-path" ? (
           <>
-            <div className="cap" style={{ marginBottom: 8 }}>First-run setup</div>
-            <h1 style={{ margin: "0 0 8px" }}>Set up your wallet</h1>
-            <p style={{ margin: "0 0 24px", color: "var(--w-text-2)", fontSize: 13, lineHeight: 1.55 }}>
-              Create a new wallet or restore one you already have using its
-              24-word PQM-1 recovery phrase.
-            </p>
+            <div style={{ textAlign: "center", marginBottom: 22 }}>
+              <div
+                aria-hidden="true"
+                style={{
+                  width: 52,
+                  height: 52,
+                  margin: "0 auto 14px",
+                  borderRadius: 13,
+                  background: "var(--gold)",
+                  boxShadow: "0 0 16px rgba(var(--gold-glow), 0.4)",
+                }}
+              />
+              <h1 style={{ margin: "0 0 6px" }}>Welcome to Monolythium</h1>
+              <div
+                style={{
+                  fontFamily: "var(--f-mono)",
+                  fontSize: 10,
+                  color: "var(--fg-400)",
+                  letterSpacing: "0.16em",
+                  textTransform: "uppercase",
+                }}
+              >
+                Sovereign post-quantum wallet
+              </div>
+              <p
+                style={{
+                  margin: "12px 0 0",
+                  color: "var(--w-text-2)",
+                  fontSize: 13,
+                  lineHeight: 1.55,
+                }}
+              >
+                ML-DSA-65 keys and ML-KEM-768 envelopes, encrypted on this
+                device. Create a new wallet or restore one from its 24-word
+                PQM-1 recovery phrase.
+              </p>
+            </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               <button
                 className="btn btn--primary"
@@ -249,6 +289,31 @@ export function Onboarding({ onDone }: Props) {
                 resize: "vertical",
               }}
             />
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginTop: 10,
+                fontFamily: "var(--f-mono)",
+                fontSize: 11,
+                color:
+                  importWordCount === PQM1_WORDS
+                    ? "var(--ok)"
+                    : importWordCount === 0
+                      ? "var(--fg-400)"
+                      : "var(--warn)",
+              }}
+            >
+              <span>
+                {importWordCount} / {PQM1_WORDS} words
+              </span>
+              {importWordCount > 0 && importWordCount !== PQM1_WORDS ? (
+                <span style={{ color: "var(--fg-400)" }}>
+                  {importWordCount < PQM1_WORDS ? "keep going…" : "too many"}
+                </span>
+              ) : null}
+            </div>
             {importError && (
               <div className="w-banner error" style={{ marginTop: 12 }}>
                 {importError}
@@ -262,7 +327,7 @@ export function Onboarding({ onDone }: Props) {
                 className="btn btn--primary"
                 style={{ marginLeft: "auto" }}
                 onClick={submitImport}
-                disabled={importDraft.trim().length === 0}
+                disabled={importWordCount !== PQM1_WORDS}
               >
                 Continue
               </button>
@@ -272,11 +337,38 @@ export function Onboarding({ onDone }: Props) {
           <>
             <div className="cap" style={{ marginBottom: 8 }}>Recovery phrase</div>
             <h1 style={{ margin: "0 0 8px" }}>Write this down</h1>
-            <p style={{ margin: "0 0 18px", color: "var(--w-text-2)", fontSize: 13 }}>
+            <p style={{ margin: "0 0 14px", color: "var(--w-text-2)", fontSize: 13 }}>
               This PQM-1 phrase is the only recovery path for the encrypted
               local vault. It will not be shown again.
             </p>
+            <div
+              style={{
+                fontFamily: "var(--f-mono)",
+                fontSize: 10,
+                color: "var(--fg-400)",
+                letterSpacing: "0.14em",
+                textTransform: "uppercase",
+                marginBottom: 10,
+              }}
+            >
+              PQM-1 · {PQM1_WORDS} words
+            </div>
             <MnemonicGrid mnemonic={mnemonic} />
+            <div
+              style={{
+                marginTop: 14,
+                padding: "10px 12px",
+                borderRadius: 10,
+                background: "rgba(242,180,65,0.08)",
+                border: "1px solid rgba(242,180,65,0.4)",
+                color: "var(--fg-100)",
+                fontSize: 12,
+                lineHeight: 1.5,
+              }}
+            >
+              Anyone with these words controls your funds — store them offline
+              and never share them. Monolythium cannot recover them for you.
+            </div>
             <div style={{ display: "flex", marginTop: 24 }}>
               <button
                 className="btn btn--primary"
@@ -296,7 +388,8 @@ export function Onboarding({ onDone }: Props) {
             <p style={{ margin: "0 0 24px", color: "var(--w-text-2)", fontSize: 13 }}>
               The password unwraps a signing key encrypted with Argon2id and
               AES-256-GCM. We never store the password itself, only the
-              encrypted vault. Pick at least 12 characters.
+              encrypted vault. Use at least 12 characters with a mix of upper
+              and lower case, a number, and a symbol.
             </p>
 
             <label className="w-onboarding__field">
@@ -326,16 +419,7 @@ export function Onboarding({ onDone }: Props) {
               />
             </label>
 
-            {password && password.length < 12 ? (
-              <div className="w-banner" style={{ marginTop: 12 }}>
-                Password must be at least 12 characters.
-              </div>
-            ) : null}
-            {confirm && password !== confirm ? (
-              <div className="w-banner" style={{ marginTop: 12 }}>
-                Passwords do not match.
-              </div>
-            ) : null}
+            <PasswordStrengthMeter password={password} confirmPassword={confirm} />
 
             <label
               style={{

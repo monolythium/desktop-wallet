@@ -33,6 +33,7 @@ export const NOTIFICATION_HISTORY_CAP = 50;
  *  fallback for untagged / unrecognized paths. */
 export type TxOpKind =
   | "send"
+  | "receive"
   | "delegate"
   | "undelegate"
   | "redelegate"
@@ -46,6 +47,7 @@ export type TxOpKind =
 export function isTxOpKind(v: unknown): v is TxOpKind {
   return (
     v === "send" ||
+    v === "receive" ||
     v === "delegate" ||
     v === "undelegate" ||
     v === "redelegate" ||
@@ -79,6 +81,11 @@ export interface NotificationRecord {
   /** Typed bech32m counterparty — the recipient the user intended to send to,
    *  or the precompile target for contract calls. */
   counterparty: string;
+  /** For delegation kinds: the target cluster, so the row/detail can name the
+   *  cluster rather than the bare delegation-module address. Optional and
+   *  backward-compatible — records written before this field simply omit it. */
+  clusterId?: number;
+  clusterName?: string;
   /** Epoch ms when the terminal transition was observed (the fire-time). */
   createdAtMs: number;
   /** Read state. `false` on insert; `markAllRead` flips per-scope. */
@@ -121,6 +128,41 @@ export function notificationId(chainIdHex: string, txHash: string): string {
   return `${chainIdHex}:${txHash}`;
 }
 
+/** Anchor for incoming-transfer detection — the position of the newest inbound
+ *  row already notified for an (address, chain). Compared lexicographically. */
+export interface IncomingWatermark {
+  blockHeight: number;
+  txIndex: number;
+  logIndex: number;
+}
+
+/** Per-(address, chain) incoming-watermark key inside the store. */
+export function incomingWatermarkKey(
+  addressLower: string,
+  chainIdHex: string,
+): string {
+  return `mono.notifications.incoming-watermark.${addressLower}.${chainIdHex}.v1`;
+}
+
+/** True when anchor `a` is strictly newer than `b` — lexicographic by
+ *  blockHeight, then txIndex, then logIndex. */
+export function anchorAfter(a: IncomingWatermark, b: IncomingWatermark): boolean {
+  if (a.blockHeight !== b.blockHeight) return a.blockHeight > b.blockHeight;
+  if (a.txIndex !== b.txIndex) return a.txIndex > b.txIndex;
+  return a.logIndex > b.logIndex;
+}
+
+/** Tolerant parse of a stored incoming watermark. Malformed → null (caller
+ *  treats it as "no baseline yet" and baselines on the next pass). */
+export function parseIncomingWatermark(raw: unknown): IncomingWatermark | null {
+  if (raw === null || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+  if (typeof r.blockHeight !== "number" || !Number.isFinite(r.blockHeight)) return null;
+  if (typeof r.txIndex !== "number" || !Number.isFinite(r.txIndex)) return null;
+  if (typeof r.logIndex !== "number" || !Number.isFinite(r.logIndex)) return null;
+  return { blockHeight: r.blockHeight, txIndex: r.txIndex, logIndex: r.logIndex };
+}
+
 /** Insert a record newest-first and slice to the cap. Pure. */
 export function appendCapped(
   entries: NotificationRecord[],
@@ -147,6 +189,7 @@ export const NOTIFICATION_LABELS: Record<
   { confirmed: string; failed: string }
 > = {
   send: { confirmed: "Sent", failed: "Send failed" },
+  receive: { confirmed: "Received", failed: "Received" },
   delegate: { confirmed: "Staked", failed: "Stake failed" },
   undelegate: { confirmed: "Unstaked", failed: "Unstake failed" },
   redelegate: { confirmed: "Restaked", failed: "Restake failed" },
@@ -164,6 +207,12 @@ export const NOTIFICATION_LABELS: Record<
     failed: "Transaction failed",
   },
 };
+
+/** True for the delegation precompile kinds whose notification names a cluster
+ *  rather than the bare delegation-module address. */
+export function isDelegationKind(kind: TxOpKind): boolean {
+  return kind === "delegate" || kind === "undelegate" || kind === "redelegate";
+}
 
 /** Render the friendly title for a notification. */
 export function notificationTitle(
@@ -188,11 +237,17 @@ function shortAddress(s: string, head = 10, tail = 6): string {
  *  middle-truncated bech32m address ever appear, never a contact name or any
  *  encrypted payload. The OS-toast layer (`os-toast.ts`) consumes this so the
  *  toast and the in-app record always read identically. */
-export function notificationToast(record: NotificationRecord): {
+export function notificationToast(
+  record: NotificationRecord,
+  includeDetails: boolean = true,
+): {
   title: string;
   body: string;
 } {
   const title = notificationTitle(record.kind, record.status);
+  // Redacted mode: title only — no amount, no address (safer on a shared
+  // screen). The in-app record keeps full detail; only the OS toast is redacted.
+  if (!includeDetails) return { title, body: "" };
   const short = shortAddress(record.counterparty);
   const body = isZeroAmount(record.amountDecimal)
     ? short
@@ -207,6 +262,7 @@ export function notificationToast(record: NotificationRecord): {
  *  {@link pendingOpLabel} so the wording stays centralized here. */
 export const PENDING_OP_LABELS: Record<TxOpKind, string> = {
   send: "Sending…",
+  receive: "Receiving…",
   delegate: "Staking…",
   undelegate: "Unstaking…",
   redelegate: "Restaking…",
@@ -250,6 +306,11 @@ function asNotificationRecord(raw: unknown): NotificationRecord | null {
         ? r.blockNumber
         : undefined;
   if (blockNumber === undefined) return null;
+  const clusterId =
+    typeof r.clusterId === "number" && Number.isFinite(r.clusterId)
+      ? r.clusterId
+      : undefined;
+  const clusterName = typeof r.clusterName === "string" ? r.clusterName : undefined;
   return {
     id: r.id,
     txHash: r.txHash,
@@ -258,6 +319,8 @@ function asNotificationRecord(raw: unknown): NotificationRecord | null {
     kind,
     amountDecimal: r.amountDecimal,
     counterparty: r.counterparty,
+    clusterId,
+    clusterName,
     createdAtMs: r.createdAtMs,
     read: r.read,
     schemaVersion: 0,

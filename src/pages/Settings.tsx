@@ -3,6 +3,25 @@
 import { useCallback, useEffect, useState } from "react";
 import type { ChainInfo } from "@monolythium/core-sdk";
 import { useActiveWallet } from "../sdk/active-wallet";
+import { CopyableAddress } from "../components/_detailModalParts";
+import { deleteAccount } from "../sdk/keychain";
+import { loadCatalog, removeVaultFromCatalog } from "../sdk/vaultCatalog";
+import {
+  AUTO_LOCK_OPTIONS,
+  readAutoLockMinutes,
+  writeAutoLockMinutes,
+} from "../sdk/auto-lock-setting";
+import { useAutoLock } from "../sdk/auto-lock";
+import {
+  readIncomingEnabled,
+  writeIncomingEnabled,
+  readNotificationsEnabled,
+  writeNotificationsEnabled,
+  readNotificationDetails,
+  writeNotificationDetails,
+  readNotifyWhileLocked,
+  writeNotifyWhileLocked,
+} from "../sdk/feature-flags";
 import { fetchLiveTestnetRegistry } from "../sdk/live-registry";
 import {
   outboundMcpStart,
@@ -35,9 +54,24 @@ interface SettingsProps {
   setExperimentalEnabled: (enabled: boolean) => void;
 }
 
+type SettingsSubPage = "main" | "notifications" | "appearance" | "reset";
+
 export function Settings({ developerModeEnabled, setDeveloperModeEnabled, steleEnabled, setSteleEnabled, experimentalEnabled, setExperimentalEnabled }: SettingsProps) {
   const wallet = useActiveWallet();
   const [devkitChannel, setDevkitChannel] = useState<NativeDevkitChannel>(() => readDevkitChannel());
+  const [autoLockMinutes, setAutoLockMinutes] = useState<number>(() => readAutoLockMinutes());
+  const [subPage, setSubPage] = useState<SettingsSubPage>("main");
+  const { lock } = useAutoLock();
+
+  if (subPage === "notifications") {
+    return <ManageNotificationsPage onBack={() => setSubPage("main")} />;
+  }
+  if (subPage === "appearance") {
+    return <AppearancePage onBack={() => setSubPage("main")} />;
+  }
+  if (subPage === "reset") {
+    return <ResetWalletPage onBack={() => setSubPage("main")} />;
+  }
 
   return (
     <div className="w-page">
@@ -46,7 +80,130 @@ export function Settings({ developerModeEnabled, setDeveloperModeEnabled, steleE
         <div className="sub">Customize how your wallet looks and behaves.</div>
       </div>
 
-      <AppearanceCard />
+      <div className="w-card">
+        <div className="w-card__head"><h3>Account</h3></div>
+        <div className="w-card__body">
+          <div className="w-setting-row">
+            <div>
+              <div className="row-label">
+                {wallet.status === "ready" || wallet.status === "locked"
+                  ? wallet.name
+                  : "Active account"}
+              </div>
+              <div className="row-help">The address others use to send you LYTH.</div>
+            </div>
+            {wallet.status === "ready" ? (
+              <CopyableAddress addr={wallet.address} />
+            ) : (
+              <span className="row-help">
+                {wallet.status === "locked"
+                  ? "Unlock to derive address"
+                  : wallet.status === "error"
+                    ? wallet.error
+                    : "No active wallet"}
+              </span>
+            )}
+          </div>
+          <div className="w-setting-row">
+            <div>
+              <div className="row-label">Recovery phrase</div>
+              <div className="row-help">
+                Your 24-word PQM-1 recovery phrase was shown once when this wallet
+                was created — the only way to restore it on another device. The
+                local vault stores only the encrypted signing seed (the phrase is
+                derived from it one way and never written to disk), so it cannot be
+                shown again here. Keep the copy you wrote down at setup.
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="w-card">
+        <div className="w-card__head"><h3>Security</h3></div>
+        <div className="w-card__body">
+          <div className="w-setting-row">
+            <div>
+              <div className="row-label">Auto-lock after</div>
+              <div className="row-help">
+                Lock the wallet and ask for your password again after this much inactivity.
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 6 }}>
+              {AUTO_LOCK_OPTIONS.map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  className={`btn btn--sm${m === autoLockMinutes ? " btn--primary" : ""}`}
+                  onClick={() => {
+                    setAutoLockMinutes(m);
+                    writeAutoLockMinutes(m);
+                  }}
+                >
+                  {m}m
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="w-setting-row">
+            <div>
+              <div className="row-label">Lock wallet now</div>
+              <div className="row-help">
+                Immediately lock the wallet and return to the password screen.
+              </div>
+            </div>
+            <button className="btn btn--sm" onClick={() => lock()}>Lock now</button>
+          </div>
+          <div className="w-setting-row">
+            <div>
+              <div className="row-label">Reset wallet</div>
+              <div className="row-help">
+                Erase this wallet from this device. Only your recovery phrase can restore it.
+              </div>
+            </div>
+            <button className="btn btn--sm" onClick={() => setSubPage("reset")}>Reset…</button>
+          </div>
+        </div>
+      </div>
+
+      <div className="w-card">
+        <div className="w-card__head"><h3>Notifications</h3></div>
+        <div className="w-card__body">
+          <div className="row-help" style={{ lineHeight: 1.6, marginBottom: 4 }}>
+            Control system notifications, what details they show, and how they
+            behave while the wallet is locked.
+          </div>
+          <div className="w-setting-row">
+            <div>
+              <div className="row-label">Manage notifications</div>
+              <div className="row-help">
+                System notifications, transaction details, and locked-state behaviour.
+              </div>
+            </div>
+            <button className="btn btn--sm" onClick={() => setSubPage("notifications")}>
+              Manage
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="w-card">
+        <div className="w-card__head"><h3>Theme</h3></div>
+        <div className="w-card__body">
+          <div className="row-help" style={{ lineHeight: 1.6, marginBottom: 4 }}>
+            Choose the wallet&apos;s colour theme — light, dark, and accent palettes.
+          </div>
+          <div className="w-setting-row">
+            <div>
+              <div className="row-label">Appearance</div>
+              <div className="row-help">Colour theme and layout.</div>
+            </div>
+            <button className="btn btn--sm" onClick={() => setSubPage("appearance")}>
+              Customize
+            </button>
+          </div>
+        </div>
+      </div>
 
       <ChainRegistryCard />
 
@@ -125,37 +282,6 @@ export function Settings({ developerModeEnabled, setDeveloperModeEnabled, steleE
         </div>
       </div>
 
-      <RecoveryPhraseCard />
-
-      <div className="w-card">
-        <div className="w-card__head"><h3>Security</h3></div>
-        <div className="w-card__body">
-          <div className="w-setting-row">
-            <div>
-              <div className="row-label">Active wallet</div>
-              <div className="row-help">
-                {wallet.status === "ready"
-                  ? `${wallet.name} · ${wallet.address}`
-                  : wallet.status === "locked"
-                    ? `${wallet.name} · unlock to derive address`
-                    : wallet.status === "error"
-                      ? wallet.error
-                      : "No active wallet registered."}
-              </div>
-            </div>
-          </div>
-          <div className="w-setting-row">
-            <div>
-              <div className="row-label">Rotate signing key</div>
-              <div className="row-help">
-                Key rotation is not available in this build. Use Wallets to add or import a separate vault.
-              </div>
-            </div>
-            <button className="btn btn--sm" disabled>Unavailable</button>
-          </div>
-        </div>
-      </div>
-
       <div className="w-card">
         <div className="w-card__head"><h3>About</h3></div>
         <div className="w-card__body">
@@ -164,6 +290,196 @@ export function Settings({ developerModeEnabled, setDeveloperModeEnabled, steleE
               <div className="row-label">Wallet</div>
               <div className="row-help">Monolythium Wallet · Stage 2 (consumer surface).</div>
             </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ToggleRow({
+  label,
+  help,
+  on,
+  onToggle,
+}: {
+  label: string;
+  help: string;
+  on: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <div className="w-setting-row">
+      <div>
+        <div className="row-label">{label}</div>
+        <div className="row-help">{help}</div>
+      </div>
+      <button type="button" className={`w-chip ${on ? "is-on" : ""}`} onClick={onToggle}>
+        {on ? "Enabled" : "Disabled"}
+      </button>
+    </div>
+  );
+}
+
+/**
+ * Manage notifications — the system-notification controls. Each toggle persists
+ * a lightweight flag that the OS-toast layer (`os-toast.ts`) reads when it
+ * decides whether/how to raise a toast. The in-app notification record is
+ * always written regardless of any toggle here (the Notifications centre + bell
+ * badge are unaffected). The relationship of the notifications surface to the
+ * experimental flag is unchanged — these are the user-facing controls within it.
+ */
+function ManageNotificationsPage({ onBack }: { onBack: () => void }) {
+  const [sysEnabled, setSysEnabled] = useState(() => readNotificationsEnabled());
+  const [details, setDetails] = useState(() => readNotificationDetails());
+  const [whileLocked, setWhileLocked] = useState(() => readNotifyWhileLocked());
+  const [incoming, setIncoming] = useState(() => readIncomingEnabled());
+
+  return (
+    <div className="w-page">
+      <div className="w-page__header">
+        <button
+          className="btn btn--sm btn--ghost"
+          onClick={onBack}
+          style={{ marginBottom: 12 }}
+        >
+          ← Settings
+        </button>
+        <h1>Manage notifications</h1>
+        <div className="sub">
+          System notifications and how they behave. In-app notifications are
+          always kept.
+        </div>
+      </div>
+      <div className="w-card">
+        <div className="w-card__body">
+          <ToggleRow
+            label="System notifications"
+            help="Show a system notification when a transaction confirms or fails. In-app notifications are always kept."
+            on={sysEnabled}
+            onToggle={() => {
+              const next = !sysEnabled;
+              setSysEnabled(next);
+              writeNotificationsEnabled(next);
+            }}
+          />
+          <ToggleRow
+            label="Show transaction details"
+            help="Include the amount and address in notifications. Off shows only 'Transaction confirmed' — safer on shared screens. In-app details are unaffected."
+            on={details}
+            onToggle={() => {
+              const next = !details;
+              setDetails(next);
+              writeNotificationDetails(next);
+            }}
+          />
+          <ToggleRow
+            label="Notify while locked"
+            help="Notify for transactions that confirm while the wallet is locked. Off holds them until you next unlock. In-app records are always kept."
+            on={whileLocked}
+            onToggle={() => {
+              const next = !whileLocked;
+              setWhileLocked(next);
+              writeNotifyWhileLocked(next);
+            }}
+          />
+          <ToggleRow
+            label="Incoming transfers"
+            help="Show a system notification when LYTH arrives. Detected while the wallet is open; the in-app record is always kept."
+            on={incoming}
+            onToggle={() => {
+              const next = !incoming;
+              setIncoming(next);
+              writeIncomingEnabled(next);
+            }}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Reset wallet — a destructive, type-to-confirm wipe. Removes every vault from
+ * this device by deleting each OS-keychain blob and its catalog entry (the same
+ * commands the Wallets page uses to remove a single vault). On success the
+ * webview reloads so the boot probe re-runs and, finding no vault, routes to
+ * onboarding. On-chain funds are untouched; only the recovery phrase restores.
+ */
+function ResetWalletPage({ onBack }: { onBack: () => void }) {
+  const [confirmText, setConfirmText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const canReset = confirmText.trim().toUpperCase() === "RESET" && !busy;
+
+  const doReset = async () => {
+    if (!canReset) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const catalog = await loadCatalog().catch(() => null);
+      const slots = catalog ? Object.keys(catalog.vaults) : [];
+      for (const slot of slots) {
+        // Wipe the encrypted blob first, then drop the catalog entry — a
+        // keychain failure aborts before we orphan a row.
+        await deleteAccount(slot);
+        await removeVaultFromCatalog(slot);
+      }
+      // Reload so the boot probe re-runs: with no vault left it routes to
+      // onboarding (the fresh-install state).
+      window.location.reload();
+    } catch (cause) {
+      setError((cause as Error)?.message ?? String(cause));
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="w-page">
+      <div className="w-page__header">
+        <button
+          className="btn btn--sm btn--ghost"
+          onClick={onBack}
+          style={{ marginBottom: 12 }}
+        >
+          ← Settings
+        </button>
+        <h1>Reset wallet</h1>
+        <div className="sub">Erase this wallet from this device.</div>
+      </div>
+      <div className="w-card">
+        <div className="w-card__body">
+          <div className="w-banner error" style={{ lineHeight: 1.6 }}>
+            This erases your wallet from this device — every account and its
+            encrypted vault. <strong>Only your recovery phrase can restore it.</strong>{" "}
+            Your funds on-chain are unaffected.
+          </div>
+          <label className="w-onboarding__field" style={{ marginTop: 16 }}>
+            <span className="cap">Type RESET to confirm</span>
+            <input
+              type="text"
+              autoFocus
+              autoCapitalize="characters"
+              autoComplete="off"
+              spellCheck={false}
+              value={confirmText}
+              onChange={(e) => setConfirmText(e.target.value)}
+              placeholder="RESET"
+            />
+          </label>
+          {error ? (
+            <div className="w-banner error" style={{ marginTop: 12 }}>{error}</div>
+          ) : null}
+          <div style={{ display: "flex", gap: 8, marginTop: 20 }}>
+            <button className="btn" onClick={onBack} disabled={busy}>Cancel</button>
+            <button
+              className="btn btn--primary"
+              style={{ marginLeft: "auto" }}
+              disabled={!canReset}
+              onClick={() => void doReset()}
+            >
+              {busy ? "Erasing…" : "Erase wallet"}
+            </button>
           </div>
         </div>
       </div>
@@ -332,7 +648,7 @@ function shortHex(s: string, head = 10, tail = 6): string {
  * paint on the next launch. The default theme ("monolythium") renders the
  * native :root palette (no attribute).
  */
-function AppearanceCard() {
+function AppearancePage({ onBack }: { onBack: () => void }) {
   const [theme, setTheme] = useState<string>(() => readTheme());
   const [layout, setLayout] = useState<LayoutId>(() => readLayout());
 
@@ -346,9 +662,23 @@ function AppearanceCard() {
   };
 
   return (
-    <div className="w-card">
-      <div className="w-card__head"><h3>Appearance</h3></div>
-      <div className="w-card__body">
+    <div className="w-page">
+      <div className="w-page__header">
+        <button
+          className="btn btn--sm btn--ghost"
+          onClick={onBack}
+          style={{ marginBottom: 12 }}
+        >
+          ← Settings
+        </button>
+        <h1>Appearance</h1>
+        <div className="sub">
+          Choose the wallet&apos;s colour theme and layout. Applies across the
+          wallet and persists on this device.
+        </div>
+      </div>
+      <div className="w-card">
+        <div className="w-card__body">
         <div style={{ marginBottom: 14 }}>
           <div className="row-label">Theme</div>
           <div className="row-help" style={{ marginBottom: 12 }}>
@@ -397,45 +727,6 @@ function AppearanceCard() {
           options={LAYOUTS}
           onChange={pickLayout}
         />
-      </div>
-    </div>
-  );
-}
-
-/**
- * Recovery phrase. The local vault (src-tauri/src/vault.rs) seals only the
- * 32-byte ML-DSA-65 SEED — the 24-word PQM-1 phrase is derived from the
- * mnemonic one-way (SHAKE256 KDF, see `pqm1MnemonicToMlDsa65Seed`), so it
- * cannot be reconstructed from what is stored. Onboarding shows the phrase
- * once at setup; this surface is honest about that and never fakes a reveal.
- *
- * A real in-app reveal would require the Rust vault wire-format to ALSO seal
- * the encrypted mnemonic (a separate, security-sensitive vault change). Until
- * that lands, the only recovery path is the phrase the user wrote down at
- * setup — which is what this card states.
- */
-function RecoveryPhraseCard() {
-  return (
-    <div className="w-card">
-      <div className="w-card__head"><h3>Recovery phrase</h3></div>
-      <div className="w-card__body">
-        <div className="row-help" style={{ lineHeight: 1.6 }}>
-          Your 24-word PQM-1 recovery phrase was shown once when this wallet was
-          created. It is the only way to restore the wallet on another device.
-        </div>
-        <div className="w-setting-row">
-          <div>
-            <div className="row-label">Reveal recovery phrase</div>
-            <div className="row-help">
-              Not available in this build. The local vault stores only the
-              encrypted signing seed — the recovery phrase is derived from it
-              one way and is never written to disk, so it cannot be shown again
-              from here. Keep the copy you wrote down at setup; if you have
-              lost it, move your funds to a freshly created wallet whose phrase
-              you do record.
-            </div>
-          </div>
-          <button className="btn btn--sm" disabled>Unavailable</button>
         </div>
       </div>
     </div>

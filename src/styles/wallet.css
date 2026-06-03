@@ -745,6 +745,9 @@ body[data-denom="private"] .w-nav__item.is-active::before {
 }
 .w-tx__dir.in  { color: var(--ok); }
 .w-tx__dir.out { color: var(--alert); }
+/* Outgoing + confirmed gets the brand accent on the icon only; the amount
+   keeps its directional colour. Incoming/failed/pending are untouched. */
+.w-tx__dir.out.sent-ok { color: var(--gold); }
 .w-tx__info .eyebrow {
   display: flex; gap: 6px; align-items: center;
   font-family: var(--f-mono); font-size: 10px;

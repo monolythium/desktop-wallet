@@ -47,6 +47,9 @@ export interface OperationNotifyContext {
   kind: TxOpKind;
   amountDecimal: string;
   counterparty: string;
+  /** For delegation kinds: the target cluster (optional). */
+  clusterId?: number;
+  clusterName?: string;
 }
 
 /** Record a terminal FAILURE for an operation that threw. Honest + immediate:
@@ -69,6 +72,8 @@ export async function recordOperationFailure(
     kind: meta.kind,
     amountDecimal: meta.amountDecimal,
     counterparty: meta.counterparty,
+    clusterId: meta.clusterId,
+    clusterName: meta.clusterName,
   });
   // Raise an OS toast ONLY for a genuinely-new record (added === true), reusing
   // the store's `${chainIdHex}:${txHash}` dedupe. Best-effort + flag-gated

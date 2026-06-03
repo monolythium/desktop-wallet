@@ -9,13 +9,7 @@ interface Props {
 }
 
 export function TxRow({ tx, onClick }: Props) {
-  const typeLabel = tx.kind === "reward"
-    ? "Reward"
-    : tx.kind === "stake"
-    ? "Stake"
-    : tx.direction === "in"
-    ? "Received"
-    : "Sent";
+  const typeLabel = tx.typeLabel;
   const label = tx.kind === "reward"
     ? tx.counterparty
     : tx.kind === "stake"
@@ -29,7 +23,7 @@ export function TxRow({ tx, onClick }: Props) {
 
   return (
     <div className="w-tx" onClick={onClick} role={onClick ? "button" : undefined}>
-      <div className={`w-tx__dir ${tx.direction}`}>
+      <div className={`w-tx__dir ${tx.direction}${tx.direction === "out" ? " sent-ok" : ""}`}>
         {tx.direction === "in" ? (
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M7 17 17 7M17 7H9M17 7v8" />

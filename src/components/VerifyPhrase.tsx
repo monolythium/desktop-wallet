@@ -10,13 +10,14 @@ interface VerifyPhraseProps {
   onBack?: () => void;
 }
 
-// Number of slots to hide. 3 hidden positions × ~8-word bank ≈ 5×10^2
-// random-guess hit rate — tight enough to gate "did the user actually
-// write it down", loose enough to be solvable in seconds for someone
-// who did. Matches browser-wallet's 0439943 tuning.
+// Number of phrase positions to blank out and ask the user to refill.
+// Three hidden slots out of 24, re-chosen at random on every attempt —
+// tight enough to gate "did the user actually write it down", loose
+// enough to solve in seconds for someone who did.
 const HIDDEN_COUNT = 3;
-// BIP-39 distractors mixed into the bank alongside the 6 hidden words.
-// Total bank size = 6 + DISTRACTOR_COUNT.
+// BIP-39 distractor words mixed into the bank alongside the hidden words.
+// Total bank size = HIDDEN_COUNT + DISTRACTOR_COUNT (3 + 5 = 8): the three
+// correct missing words plus five decoys.
 const DISTRACTOR_COUNT = 5;
 
 function shuffle<T>(arr: readonly T[]): T[] {
@@ -83,11 +84,11 @@ function buildChallenge(words: readonly string[]): Challenge {
 }
 
 /**
- * MetaMask-style fill-in-the-blanks recovery verifier. Hides 6 random
- * positions and asks the user to drop in the correct words from a bank
- * of 6 correct + 5 BIP-39 distractors. On a wrong arrangement, "Try
- * again" rebuilds the challenge with a fresh set of hidden positions so
- * position memorisation doesn't help.
+ * Fill-in-the-blanks recovery verifier. Hides three random positions and
+ * asks the user to drop in the correct words from a bank of the three
+ * correct words plus five BIP-39 distractors (eight tiles). On a wrong
+ * arrangement, "Try again" rebuilds the challenge with a fresh set of
+ * hidden positions so position memorisation doesn't help.
  */
 export function VerifyPhrase({
   mnemonic,

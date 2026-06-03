@@ -3,7 +3,6 @@
 # Local-only development context (NEVER push these)
 LOCAL_NOTES.md
 .local-notes/
-.local-skills/
 .local-tools/
 plans/
 docs-internal/

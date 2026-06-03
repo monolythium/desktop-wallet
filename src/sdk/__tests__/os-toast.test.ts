@@ -12,10 +12,23 @@ vi.mock("@tauri-apps/plugin-notification", () => ({
   sendNotification: (opts: unknown) => sendNotification(opts),
 }));
 
-// Scriptable feature-flag read.
+// Scriptable feature-flag reads.
 let experimental = true;
+let notificationsEnabled = true;
+let notificationDetails = true;
+let notifyWhileLocked = true;
 vi.mock("../feature-flags", () => ({
   readExperimentalEnabled: () => experimental,
+  readNotificationsEnabled: () => notificationsEnabled,
+  readNotificationDetails: () => notificationDetails,
+  readNotifyWhileLocked: () => notifyWhileLocked,
+}));
+
+// Scriptable lock state — os-toast suppresses while locked when the user opts
+// out of notify-while-locked.
+let walletLocked = false;
+vi.mock("../auto-lock", () => ({
+  isWalletLocked: () => walletLocked,
 }));
 
 import { toastTerminalNotification } from "../os-toast";
@@ -54,6 +67,10 @@ beforeEach(() => {
   requestPermission.mockClear();
   requestPermission.mockResolvedValue("granted");
   experimental = true;
+  notificationsEnabled = true;
+  notificationDetails = true;
+  notifyWhileLocked = true;
+  walletLocked = false;
   setTauri(true);
 });
 
@@ -106,5 +123,33 @@ describe("toastTerminalNotification", () => {
     isPermissionGranted.mockRejectedValue(new Error("boom"));
     await expect(toastTerminalNotification(rec())).resolves.toBeUndefined();
     expect(sendNotification).not.toHaveBeenCalled();
+  });
+
+  it("does NOT send when system notifications are off", async () => {
+    notificationsEnabled = false;
+    await toastTerminalNotification(rec());
+    expect(isPermissionGranted).not.toHaveBeenCalled();
+    expect(sendNotification).not.toHaveBeenCalled();
+  });
+
+  it("redacts the toast to the title only when details are off", async () => {
+    notificationDetails = false;
+    await toastTerminalNotification(rec());
+    expect(sendNotification).toHaveBeenCalledTimes(1);
+    expect(sendNotification).toHaveBeenCalledWith({ title: "Sent" });
+  });
+
+  it("holds the toast while locked when notify-while-locked is off", async () => {
+    walletLocked = true;
+    notifyWhileLocked = false;
+    await toastTerminalNotification(rec());
+    expect(sendNotification).not.toHaveBeenCalled();
+  });
+
+  it("still toasts while locked when notify-while-locked is on", async () => {
+    walletLocked = true;
+    notifyWhileLocked = true;
+    await toastTerminalNotification(rec());
+    expect(sendNotification).toHaveBeenCalledTimes(1);
   });
 });

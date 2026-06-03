@@ -2,7 +2,7 @@
 //
 // Mounts a single modal that collects:
 //   - a user-facing name
-//   - a password (with confirm + 8-char minimum)
+//   - a password (with confirm; same strength policy as onboarding)
 //   - a mode: Create (fresh PQM-1 mnemonic) or Import (paste a phrase)
 //
 // On submit it mints a fresh keychain slot via mintVaultSlot,
@@ -23,6 +23,8 @@ import {
   registerVault,
 } from "../sdk/vaultCatalog";
 import { notifyActiveWalletChanged } from "../sdk/active-wallet";
+import { PasswordStrengthMeter } from "./PasswordStrengthMeter";
+import { isPasswordValid, getPasswordStrength } from "../lib/password-validation";
 
 interface Props {
   onClose: () => void;
@@ -33,7 +35,6 @@ interface Props {
 type Mode = "create" | "import";
 type Stage = "compose" | "show-phrase";
 
-const MIN_PASSWORD_LEN = 8;
 const PQM1_WORDS = 24;
 
 export function AddVaultModal({ onClose, onAdded }: Props) {
@@ -59,7 +60,8 @@ export function AddVaultModal({ onClose, onAdded }: Props) {
   const canSubmit =
     !busy &&
     name.trim().length > 0 &&
-    password.length >= MIN_PASSWORD_LEN &&
+    isPasswordValid(password) &&
+    getPasswordStrength(password) !== "weak" &&
     password === confirm &&
     (mode === "create" || importDraft.trim().length > 0);
 
@@ -224,7 +226,7 @@ export function AddVaultModal({ onClose, onAdded }: Props) {
               autoComplete="new-password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder={`At least ${MIN_PASSWORD_LEN} characters`}
+              placeholder="At least 12 characters"
               style={inputStyle}
             />
 
@@ -236,6 +238,8 @@ export function AddVaultModal({ onClose, onAdded }: Props) {
               onChange={(e) => setConfirm(e.target.value)}
               style={inputStyle}
             />
+
+            <PasswordStrengthMeter password={password} confirmPassword={confirm} />
 
             {mode === "import" && (
               <>
@@ -278,16 +282,6 @@ export function AddVaultModal({ onClose, onAdded }: Props) {
               <span>Set as active wallet</span>
             </label>
 
-            {password && password.length < MIN_PASSWORD_LEN && (
-              <div className="w-banner" style={{ marginTop: 12 }}>
-                Password must be at least {MIN_PASSWORD_LEN} characters.
-              </div>
-            )}
-            {confirm && password !== confirm && (
-              <div className="w-banner" style={{ marginTop: 8 }}>
-                Passwords do not match.
-              </div>
-            )}
             {error && (
               <div className="w-banner error" style={{ marginTop: 12 }}>
                 {error}

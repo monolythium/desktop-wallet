@@ -19,11 +19,13 @@ import type { CSSProperties, ReactElement } from "react";
 import { NotificationDetail } from "../components/NotificationDetail";
 import { truncMiddle } from "../components/_detailModalParts";
 import {
+  isDelegationKind,
   isZeroAmount,
   notificationTitle,
   type NotificationRecord,
   type TxOpKind,
 } from "../sdk/notifications";
+import { txTypeLabelForOpKind } from "../sdk/tx-type-label";
 import {
   listAllNotifications,
   markAllNotificationsRead,
@@ -85,6 +87,8 @@ function iconForKind(kind: TxOpKind): ReactElement {
   switch (kind) {
     case "send":
       return ICON_SEND;
+    case "receive":
+      return ICON_RECEIVE;
     case "delegate":
     case "undelegate":
     case "redelegate":
@@ -204,9 +208,22 @@ function NotificationRow({
   onOpen: () => void;
 }) {
   const title = notificationTitle(record.kind, record.status);
-  const short = truncMiddle(record.counterparty);
+  const typeNoun = txTypeLabelForOpKind(record.kind);
+  // Delegation rows name the cluster (real name, else "Cluster #<id>") in place
+  // of the bare delegation-module address; fall back to the address when no
+  // cluster info was captured (older records) — never blank, never fabricated.
+  const clusterDisplay = isDelegationKind(record.kind)
+    ? record.clusterName ??
+      (record.clusterId !== undefined ? `Cluster #${record.clusterId}` : null)
+    : null;
+  const short = clusterDisplay ?? truncMiddle(record.counterparty);
   const showAmount = !isZeroAmount(record.amountDecimal);
   const ring = badgeRingColor(record.status);
+  // Outgoing + confirmed records accent the glyph with the brand colour; the
+  // status ring stays green/red. Failed (red) and pending are untouched.
+  const isOutgoingConfirmed =
+    record.status === "confirmed" && record.kind !== "receive";
+  const glyphColor = isOutgoingConfirmed ? "var(--gold)" : ring;
 
   return (
     <div
@@ -233,7 +250,7 @@ function NotificationRow({
             height: 28,
             borderRadius: "50%",
             border: `1px solid ${ring}`,
-            color: ring,
+            color: glyphColor,
             background: "rgba(255,255,255,0.03)",
             flexShrink: 0,
           }}
@@ -246,7 +263,9 @@ function NotificationRow({
             {!record.read ? <span style={unreadDot} aria-label="Unread" /> : null}
           </div>
           <div className="row-help mono" style={ellipsis}>
-            {showAmount ? `${record.amountDecimal} LYTH · ${short}` : short}
+            {showAmount
+              ? `${typeNoun} · ${record.amountDecimal} LYTH · ${short}`
+              : `${typeNoun} · ${short}`}
           </div>
         </div>
       </div>

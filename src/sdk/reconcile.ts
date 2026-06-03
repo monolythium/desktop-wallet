@@ -71,6 +71,8 @@ export async function trackOperationTx(
     opKind: meta.kind,
     amountDecimal: meta.amountDecimal,
     counterparty: meta.counterparty,
+    clusterId: meta.clusterId,
+    clusterName: meta.clusterName,
     submittedAt: Date.now(),
   };
   await enqueuePendingTx(tx);
@@ -182,6 +184,8 @@ export async function reconcilePendingOnce(
         kind: tx.opKind,
         amountDecimal: tx.amountDecimal,
         counterparty: tx.counterparty,
+        clusterId: tx.clusterId,
+        clusterName: tx.clusterName,
       });
       // Raise an OS toast ONLY for a genuinely-new record (added === true), so
       // the store's `${chainIdHex}:${txHash}` dedupe also dedupes the toast — a

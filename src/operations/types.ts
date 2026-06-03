@@ -96,6 +96,10 @@ export interface OperationNotifyMeta {
   amountDecimal: string;
   /** Typed bech32m counterparty (recipient or precompile target). */
   counterparty: string;
+  /** For delegation kinds: the target cluster, so the recorded notification can
+   *  name the cluster instead of the bare delegation-module address. Optional. */
+  clusterId?: number;
+  clusterName?: string;
 }
 
 export interface OperationExecutionContext {
