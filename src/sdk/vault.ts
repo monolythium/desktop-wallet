@@ -1,7 +1,7 @@
 // Vault bridge — typed wrapper around the Tauri commands defined in
 // `src-tauri/src/vault.rs`.
 //
-// The vault stores an AES-256-GCM-encrypted seed, with the key derived
+// The vault stores an XChaCha20-Poly1305-encrypted seed, with the key derived
 // from the user's password via Argon2id (OWASP 2024 desktop params).
 // What the OS keychain holds is the encrypted blob — the password itself
 // is never persisted.
@@ -106,6 +106,63 @@ export async function unlockVault(password: string, blob: Uint8Array): Promise<U
       blobBytes: Array.from(blob),
     });
     return new Uint8Array(seed);
+  } catch (raw) {
+    throw normalizeError(raw);
+  }
+}
+
+/**
+ * Seal a 32-byte seed and, optionally, the 32-byte PQM-1 payload that makes
+ * the recovery phrase revealable. New wallet creation / import uses this:
+ * pass the payload to get a reveal-capable vault, or `null` for seed-only.
+ */
+export async function createVaultV2(
+  password: string,
+  seed: Uint8Array,
+  payload: Uint8Array | null,
+): Promise<Uint8Array> {
+  if (!password) {
+    throw new VaultCallError({ code: "invalid_argument", message: "password is empty" });
+  }
+  if (seed.length !== 32) {
+    throw new VaultCallError({ code: "invalid_argument", message: `seed must be 32 bytes, got ${seed.length}` });
+  }
+  if (payload && payload.length !== 32) {
+    throw new VaultCallError({ code: "invalid_argument", message: `payload must be 32 bytes, got ${payload.length}` });
+  }
+  try {
+    const bytes = await invoke<number[]>("vault_seal_v2", {
+      password,
+      seedBytes: Array.from(seed),
+      payloadBytes: payload ? Array.from(payload) : null,
+    });
+    return new Uint8Array(bytes);
+  } catch (raw) {
+    throw normalizeError(raw);
+  }
+}
+
+/** Outcome of `vault_reveal`: either the 32-byte PQM-1 payload, or a signal
+ *  that the vault was sealed without one (seed-only → no phrase to show).
+ *  Shape matches the Rust `RevealResult` (serde `kind` discriminator). */
+export type RevealResult =
+  | { kind: "payload"; payload: number[] }
+  | { kind: "no_recovery_material" };
+
+/**
+ * Decrypt `blob` and return the recovery payload if it was sealed. Distinct
+ * from `unlockVault` so the signing path never carries the payload. Throws
+ * `VaultCallError` with `cause.code === "wrong_password"` on a bad password.
+ */
+export async function revealVault(password: string, blob: Uint8Array): Promise<RevealResult> {
+  if (!password) {
+    throw new VaultCallError({ code: "invalid_argument", message: "password is empty" });
+  }
+  try {
+    return await invoke<RevealResult>("vault_reveal", {
+      password,
+      blobBytes: Array.from(blob),
+    });
   } catch (raw) {
     throw normalizeError(raw);
   }

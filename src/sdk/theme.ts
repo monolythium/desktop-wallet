@@ -25,8 +25,8 @@ export interface ThemeOption {
   desc: string;
 }
 
-// Must mirror the Monarch palette list (designs `WALLET_THEMES`,
-// browser-wallet `themes.css`) so the three wallets stay visually identical.
+// Must match the Monarch palette list (designs `WALLET_THEMES`) so the
+// Monolythium wallets stay visually identical.
 export const THEMES: readonly ThemeOption[] = [
   { id: "monolythium", label: "Monolythium", swatch: "#6366F1", desc: "Indigo on cool black" },
   { id: "default", label: "Amber", swatch: "#e8a942", desc: "Warm amber on slate" },

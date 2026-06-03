@@ -175,8 +175,9 @@ export function Onboarding({ onDone }: Props) {
 
   const onVerified = async () => {
     // Only now — after the user has correctly placed the missing
-    // words — do we touch disk. Browser-wallet 2f83e28 fixed the
-    // same persist-before-verify bug; this is the desktop port.
+    // words — do we touch disk. Ordering is load-bearing: persisting the
+    // vault before the verify step passes would let a phrase the user never
+    // confirmed reach disk, so the write stays gated behind verification.
     if (!mnemonic) {
       setError("Lost the recovery phrase — restart onboarding.");
       setStep("choose-path");
@@ -387,7 +388,7 @@ export function Onboarding({ onDone }: Props) {
             <h1 style={{ margin: "0 0 8px" }}>Set a wallet password</h1>
             <p style={{ margin: "0 0 24px", color: "var(--w-text-2)", fontSize: 13 }}>
               The password unwraps a signing key encrypted with Argon2id and
-              AES-256-GCM. We never store the password itself, only the
+              XChaCha20-Poly1305. We never store the password itself, only the
               encrypted vault. Use at least 12 characters with a mix of upper
               and lower case, a number, and a symbol.
             </p>

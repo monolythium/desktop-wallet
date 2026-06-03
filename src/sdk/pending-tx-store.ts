@@ -1,10 +1,9 @@
 // Tauri-store-backed durable tracked-tx store.
 //
-// The browser wallet keeps its tracked-tx set in `chrome.storage.local` under
-// `mono.activity.pending.*` keys so a tx that confirms while every surface is
-// closed still notifies. The desktop equivalent persists the same set on top
-// of `@tauri-apps/plugin-store` (its own `pending-tx.v1.json` file), reusing
-// the singleton-store + in-memory-cache pattern from `notifications-store.ts`.
+// The tracked-tx set is persisted on top of `@tauri-apps/plugin-store` (its own
+// `pending-tx.v1.json` file under `mono.activity.pending.*` keys), reusing the
+// singleton-store + in-memory-cache pattern from `notifications-store.ts`, so a
+// tx that confirms while every surface is closed still notifies.
 //
 // Why durable: the old desktop design polled `lyth_txStatus` inside the
 // OperationsDrawer with a ~15s budget that died the moment the drawer closed,

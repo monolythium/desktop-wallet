@@ -5,8 +5,8 @@
 // publish + wallet bump.
 //
 // 5-minute in-memory TTL; falls back to the SDK-bundled snapshot when
-// the GitHub fetch fails. Same shape as browser-wallet's
-// shared/live-registry.ts so the wallets stay aligned.
+// the GitHub fetch fails. Follows the canonical live-registry shape so the
+// Monolythium wallets stay aligned.
 
 import {
   fetchChainInfoLatest,

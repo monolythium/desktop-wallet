@@ -4,7 +4,13 @@ import { useCallback, useEffect, useState } from "react";
 import type { ChainInfo } from "@monolythium/core-sdk";
 import { useActiveWallet } from "../sdk/active-wallet";
 import { CopyableAddress } from "../components/_detailModalParts";
-import { deleteAccount } from "../sdk/keychain";
+import { MnemonicGrid } from "../components/MnemonicGrid";
+import {
+  deleteAccount,
+  getActiveAccount,
+  revealRecoveryPhrase,
+} from "../sdk/keychain";
+import { VaultCallError } from "../sdk/vault";
 import { loadCatalog, removeVaultFromCatalog } from "../sdk/vaultCatalog";
 import {
   AUTO_LOCK_OPTIONS,
@@ -54,7 +60,7 @@ interface SettingsProps {
   setExperimentalEnabled: (enabled: boolean) => void;
 }
 
-type SettingsSubPage = "main" | "notifications" | "appearance" | "reset";
+type SettingsSubPage = "main" | "notifications" | "appearance" | "reset" | "reveal";
 
 export function Settings({ developerModeEnabled, setDeveloperModeEnabled, steleEnabled, setSteleEnabled, experimentalEnabled, setExperimentalEnabled }: SettingsProps) {
   const wallet = useActiveWallet();
@@ -71,6 +77,9 @@ export function Settings({ developerModeEnabled, setDeveloperModeEnabled, steleE
   }
   if (subPage === "reset") {
     return <ResetWalletPage onBack={() => setSubPage("main")} />;
+  }
+  if (subPage === "reveal") {
+    return <RevealPhrasePage onBack={() => setSubPage("main")} />;
   }
 
   return (
@@ -108,13 +117,14 @@ export function Settings({ developerModeEnabled, setDeveloperModeEnabled, steleE
             <div>
               <div className="row-label">Recovery phrase</div>
               <div className="row-help">
-                Your 24-word PQM-1 recovery phrase was shown once when this wallet
-                was created — the only way to restore it on another device. The
-                local vault stores only the encrypted signing seed (the phrase is
-                derived from it one way and never written to disk), so it cannot be
-                shown again here. Keep the copy you wrote down at setup.
+                Show your 24-word PQM-1 recovery phrase — the only way to restore
+                this wallet on another device. Anyone who has these words controls
+                the wallet, so reveal them only where no one can see.
               </div>
             </div>
+            <button className="btn btn--sm" onClick={() => setSubPage("reveal")}>
+              Show…
+            </button>
           </div>
         </div>
       </div>
@@ -481,6 +491,150 @@ function ResetWalletPage({ onBack }: { onBack: () => void }) {
               {busy ? "Erasing…" : "Erase wallet"}
             </button>
           </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Settings → Show recovery phrase. Re-prompts for the password, decrypts the
+ * vault's recovery payload via `revealRecoveryPhrase`, and renders the 24 words
+ * with MnemonicGrid behind a warning banner. A vault sealed without the payload
+ * reports an honest "not stored" message — no dead control, no fabricated
+ * phrase. The auto-lock idle timer is paused while the page is mounted and the
+ * phrase is dropped from state on leave.
+ */
+function RevealPhrasePage({ onBack }: { onBack: () => void }) {
+  const { pauseTimer, resumeTimer } = useAutoLock();
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [mnemonic, setMnemonic] = useState<string | null>(null);
+  const [notStored, setNotStored] = useState(false);
+
+  // Suspend the idle auto-lock while the phrase may be on screen; resume and
+  // drop the phrase from state when leaving.
+  useEffect(() => {
+    pauseTimer();
+    return () => {
+      resumeTimer();
+      setMnemonic(null);
+    };
+  }, [pauseTimer, resumeTimer]);
+
+  const submit = async () => {
+    if (busy || password.length === 0) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const out = await revealRecoveryPhrase(getActiveAccount(), password);
+      setPassword("");
+      if (out.revealable && out.mnemonic) {
+        setMnemonic(out.mnemonic);
+      } else {
+        setNotStored(true);
+      }
+    } catch (cause) {
+      if (cause instanceof VaultCallError && cause.cause.code === "wrong_password") {
+        setError("Wrong password. Try again.");
+      } else {
+        setError((cause as Error)?.message ?? "Could not reveal the phrase.");
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="w-page">
+      <div className="w-page__header">
+        <button
+          className="btn btn--sm btn--ghost"
+          onClick={onBack}
+          style={{ marginBottom: 12 }}
+        >
+          ← Settings
+        </button>
+        <h1>Recovery phrase</h1>
+        <div className="sub">Show the 24 words that restore this wallet.</div>
+      </div>
+      <div className="w-card">
+        <div className="w-card__body">
+          {mnemonic ? (
+            <>
+              <div
+                className="w-banner"
+                style={{
+                  borderColor: "var(--gold)",
+                  background: "rgba(var(--gold-glow), 0.10)",
+                  lineHeight: 1.6,
+                }}
+              >
+                <strong>Never share these words.</strong> Anyone who has them can
+                move your funds. Write them down and store them offline — don't
+                screenshot them or paste them anywhere that syncs.
+              </div>
+              <div style={{ marginTop: 16 }}>
+                <MnemonicGrid mnemonic={mnemonic} />
+              </div>
+              <div style={{ display: "flex", marginTop: 20 }}>
+                <button
+                  className="btn btn--primary"
+                  style={{ width: "100%" }}
+                  onClick={onBack}
+                >
+                  Done
+                </button>
+              </div>
+            </>
+          ) : notStored ? (
+            <>
+              <div className="w-banner" style={{ lineHeight: 1.6 }}>
+                This wallet doesn't have its recovery phrase stored, so it can't
+                be shown here. Keep using the 24 words you wrote down at setup. To
+                enable in-app reveal, re-import those words as a new wallet.
+              </div>
+              <div style={{ display: "flex", marginTop: 20 }}>
+                <button className="btn" onClick={onBack}>Back</button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="w-banner" style={{ lineHeight: 1.6 }}>
+                Enter your password to decrypt and show your recovery phrase.
+                Make sure no one can see your screen.
+              </div>
+              <label className="w-onboarding__field" style={{ marginTop: 16 }}>
+                <span className="cap">Password</span>
+                <input
+                  type="password"
+                  autoFocus
+                  autoComplete="current-password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") void submit();
+                  }}
+                  disabled={busy}
+                />
+              </label>
+              {error ? (
+                <div className="w-banner error" style={{ marginTop: 12 }}>{error}</div>
+              ) : null}
+              <div style={{ display: "flex", gap: 8, marginTop: 20 }}>
+                <button className="btn" onClick={onBack} disabled={busy}>Cancel</button>
+                <button
+                  className="btn btn--primary"
+                  style={{ marginLeft: "auto" }}
+                  disabled={busy || password.length === 0}
+                  onClick={() => void submit()}
+                >
+                  {busy ? "Revealing…" : "Show phrase"}
+                </button>
+              </div>
+            </>
+          )}
         </div>
       </div>
     </div>

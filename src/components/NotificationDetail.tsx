@@ -1,9 +1,8 @@
 // Per-notification detail modal.
 //
-// Ported from the browser-wallet's `NotificationDetail.tsx`, adapted to the
-// desktop design tokens: the same `.w-card` overlay shell as `ActivityDetail`,
-// a stack of `DRow`s for the structured fields, and the shared
-// `MonoscanTxButton` CTA when the record carries a tx hash.
+// Uses this wallet's design tokens: the same `.w-card` overlay shell as
+// `ActivityDetail`, a stack of `DRow`s for the structured fields, and the
+// shared `MonoscanTxButton` CTA when the record carries a tx hash.
 //
 // Honest absence: rows for fields that have nothing to show (amount on a
 // zero-LYTH claim, block on the `lyth_txStatus="found"` fast-path that didn't

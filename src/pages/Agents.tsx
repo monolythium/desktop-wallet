@@ -238,8 +238,8 @@ export function Agents() {
 
   // Step 1 of the policy flow: collect the form, build the canonical args, and
   // open the WYSIWYS review surface. NOTHING is signed or submitted here — the
-  // review must show every signed term first (§25 WYSIWYS parity with the
-  // browser wallet's T3-01). `existing` decides the eventual selector.
+  // review must show every signed term first (the §25 WYSIWYS requirement).
+  // `existing` decides the eventual selector.
   const openRegister = (agent: AgentEntry) => {
     if (!principalBech32m) {
       window.alert("No active principal wallet address resolved.");
@@ -804,7 +804,7 @@ function collectPolicyForm(
 }
 
 /**
- * WYSIWYS policy-review surface (§25 / browser-wallet T3-01 parity). Before
+ * WYSIWYS policy-review surface (the §25 requirement). Before
  * any key signs the policy, render EVERY term the principal (and, for a fresh
  * sub-account, the agent) is about to sign — caps, allow/deny + category
  * roots, the time window, expiry — sourced from the canonical

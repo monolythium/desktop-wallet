@@ -34,7 +34,7 @@ import {
   pendingOpLabel,
   type NotificationRecord,
 } from "../sdk/notifications";
-import { listAllNotifications } from "../sdk/notifications-store";
+import { listForScope } from "../sdk/notifications-store";
 import { detectAndNotifyIncoming } from "../sdk/incoming-detect";
 import { txTypeLabelForOpKind } from "../sdk/tx-type-label";
 import type { PendingTx } from "../sdk/pending-tx";
@@ -108,12 +108,15 @@ export function Activity({ denom, experimentalEnabled }: Props) {
     }
     setBusy(true);
     try {
-      const [activityOutcome, allNotifications] = await Promise.all([
+      const [activityOutcome, scopedNotifications] = await Promise.all([
         loadLiveAddressActivity(walletAddress),
-        listAllNotifications(),
+        // Active-vault scope only — another vault's failed rows must never
+        // appear here (records are owned by the address they were recorded
+        // under, which matches the active wallet's lowercased address).
+        listForScope(walletAddress.toLowerCase()),
       ]);
       setActivity(activityOutcome);
-      setFailed(allNotifications.filter((r) => r.status === "failed"));
+      setFailed(scopedNotifications.filter((r) => r.status === "failed"));
       // Announce newly-arrived incoming native LYTH (records + toasts once).
       // Runs here on the open, focused surface and is gated by the experimental
       // flag like the rest of the notifications layer; best-effort.

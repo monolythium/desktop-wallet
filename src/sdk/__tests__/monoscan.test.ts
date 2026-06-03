@@ -9,8 +9,8 @@ import {
 import { relativeMs, truncMiddle } from "../../components/_detailModalParts";
 
 describe("monoscan explorer URL builders", () => {
-  // These bases must stay byte-identical to the browser-wallet's
-  // build-info.ts so every wallet links into the same explorer routes.
+  // These bases must stay byte-identical to the canonical Monoscan routes so
+  // every Monolythium wallet links into the same explorer routes.
   it("pins the hash-routed tx + wallet bases", () => {
     expect(MONOSCAN_TX_BASE).toBe("https://monoscan.xyz/#/tx/");
     expect(MONOSCAN_ADDRESS_BASE).toBe("https://monoscan.xyz/#/wallet/");

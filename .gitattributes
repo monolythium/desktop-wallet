@@ -1,0 +1,22 @@
+# Consistent line endings across platforms.
+#
+# Store text files as LF in the repository AND keep LF in the working tree
+# (this repo's files are already LF). With core.autocrlf=true on Windows, a
+# text file without an explicit rule is otherwise expected to be CRLF on
+# checkout, which shows up as a phantom "modified" with a zero content diff
+# (e.g. src-tauri/Cargo.toml). Pinning text to LF removes that ambiguity.
+* text=auto eol=lf
+
+# Explicitly binary — never apply line-ending normalization to these.
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.webp binary
+*.woff  binary
+*.woff2 binary
+*.ttf  binary
+*.otf  binary
+*.wasm binary
+*.icns binary

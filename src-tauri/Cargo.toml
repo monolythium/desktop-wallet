@@ -60,19 +60,15 @@ sha3 = { version = "0.10", optional = true }
 bech32 = { version = "0.11", default-features = false, features = ["alloc"], optional = true }
 fips204 = { version = "0.4.6", default-features = false, features = ["ml-dsa-65"], optional = true }
 
-# Vault crypto. Argon2id KDF + AES-256-GCM encryption of the wallet seed.
-# Stable releases of the RustCrypto password-hashes / AEADs lines.
+# Vault crypto. Argon2id KDF + XChaCha20-Poly1305 encryption of the wallet
+# seed (whitepaper §13.3 keystore default). Stable releases of the RustCrypto
+# password-hashes / AEADs lines; chacha20poly1305 is exact-pinned and is the
+# sole `aead`-trait crate in the tree.
 argon2 = { version = "0.5", default-features = false, features = ["alloc", "password-hash"] }
-aes-gcm = { version = "0.10", default-features = false, features = ["aes", "alloc"] }
+chacha20poly1305 = { version = "=0.10.1", default-features = false, features = ["alloc"] }
 rand = { version = "0.8", default-features = false, features = ["getrandom"] }
 base64 = { version = "0.22", default-features = false, features = ["alloc"] }
 zeroize = { version = "1", features = ["derive"] }
-
-# Ledger hardware signer (Stage 4). HID-only — WebUSB is out of scope.
-# `ledger-transport-hid` brings in `hidapi` which links against the system
-# HIDAPI / IOHIDManager (macOS) / hidraw (Linux) / hid.dll (Windows).
-ledger-transport-hid = "0.11"
-ledger-apdu = "0.11"
 
 # OS keychain. Per-platform native backends:
 # - macOS:    apple-native (Security framework)

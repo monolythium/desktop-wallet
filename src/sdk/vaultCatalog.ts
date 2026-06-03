@@ -15,7 +15,7 @@
 //         "name":         string,   // user label
 //         "addressHex":   string | null,  // hex `0x…`, null if not yet captured
 //         "createdAt":    number,   // ms epoch
-//         "kind":         "local"   // future: "ledger" | "passkey"
+//         "kind":         "local"   // future: "passkey"
 //       },
 //       ...
 //     },
