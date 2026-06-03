@@ -46,9 +46,8 @@ logs/
 # --- Rust additions (append to gitignore.base) ---
 target/
 **/target/
-Cargo.lock
-# For library crates, uncomment the next line to commit Cargo.lock anyway.
-# !Cargo.lock
+# Cargo.lock IS tracked — this is a wallet binary, so the lockfile is committed
+# for byte-reproducible builds and supply-chain pinning of the transitive deps.
 *.rs.bk
 rustc-ice-*.txt
 # --- Node / TS / Vite additions (append to gitignore.base) ---
