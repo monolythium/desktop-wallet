@@ -2,7 +2,8 @@
 //
 // Registers the Tauri command surface for the wallet:
 // - `keychain_unlock` / `keychain_store` / `keychain_delete` — OS keychain bridge.
-// - `vault_create` / `vault_seal_seed` / `vault_unlock` — seed vault.
+// - `vault_create` / `vault_seal_seed` / `vault_seal_v2` / `vault_unlock` /
+//   `vault_reveal` — XChaCha20-Poly1305 seed vault (+ recovery-phrase reveal).
 // - `ledger_*`                           — HID hardware signer (Stage 4).
 //
 // Stage 5 will extend with `monolythium-core-sdk` RPC wrappers + passkey
@@ -55,7 +56,9 @@ pub fn run() {
         keychain::keychain_delete,
         vault::vault_create,
         vault::vault_seal_seed,
+        vault::vault_seal_v2,
         vault::vault_unlock,
+        vault::vault_reveal,
         ledger::ledger_enumerate_devices,
         ledger::ledger_get_address,
         ledger::ledger_sign_transaction,
