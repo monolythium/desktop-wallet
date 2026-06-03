@@ -23,7 +23,6 @@ type WalletBalanceState =
 import { useOperations } from "../operations/context";
 import { AddVaultModal } from "../components/AddVaultModal";
 import { notifyActiveWalletChanged } from "../sdk/active-wallet";
-import { enumerateDevices, type LedgerDeviceInfo } from "../sdk/ledger";
 import { formatLyth } from "@monolythium/core-sdk";
 import {
   deriveLiveWalletIdentity,
@@ -50,9 +49,6 @@ export function Wallets() {
   const [identity, setIdentity] = useState<LiveWalletIdentity | null>(null);
   const [balance, setBalance] = useState<LiveWalletBalance | null>(null);
   const [identityError, setIdentityError] = useState<string | null>(null);
-  const [devices, setDevices] = useState<LedgerDeviceInfo[] | null>(null);
-  const [deviceError, setDeviceError] = useState<string | null>(null);
-  const [devicesBusy, setDevicesBusy] = useState(false);
 
   const [vaults, setVaults] = useState<VaultEntry[]>([]);
   // Per-wallet live native balance, keyed by slot. Each entry is its own
@@ -251,18 +247,6 @@ export function Wallets() {
     });
   };
 
-  const refreshDevices = async () => {
-    setDevicesBusy(true);
-    setDeviceError(null);
-    try {
-      setDevices(await enumerateDevices());
-    } catch (cause) {
-      setDevices(null);
-      setDeviceError(errorMessage(cause));
-    } finally {
-      setDevicesBusy(false);
-    }
-  };
 
   return (
     <div className="w-page">
@@ -527,41 +511,6 @@ export function Wallets() {
               RPC preview unavailable: {identityError}
             </div>
           )}
-        </div>
-      </div>
-
-      <div className="w-card">
-        <div className="w-card__head">
-          <h3>Live hardware discovery</h3>
-          <span className="w-live-pill">live</span>
-          <span className="w-card__head__spacer" />
-          <button
-            className="btn btn--sm"
-            onClick={refreshDevices}
-            disabled={devicesBusy}
-          >
-            {devicesBusy ? "Scanning…" : "Scan"}
-          </button>
-        </div>
-        <div className="w-card__body">
-          {deviceError && <div className="w-live-error">{deviceError}</div>}
-          {devices === null && !deviceError && (
-            <div className="row-help">
-              Scan for Ledger devices attached to this desktop.
-            </div>
-          )}
-          {devices?.length === 0 && (
-            <div className="row-help">No Ledger device found.</div>
-          )}
-          {devices?.map((device) => (
-            <div className="w-live-row" key={device.deviceId}>
-              <div>
-                <div className="row-label">{device.product}</div>
-                <div className="row-help mono">{device.deviceId}</div>
-              </div>
-              <span className="w-live-pill">attached</span>
-            </div>
-          ))}
         </div>
       </div>
 
