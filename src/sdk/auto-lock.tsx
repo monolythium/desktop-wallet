@@ -20,6 +20,7 @@ import {
   type ReactNode,
 } from "react";
 import { readAutoLockMinutes } from "./auto-lock-setting";
+import { clearUnlockLockout } from "./unlock-lockout";
 
 // How long the window may stay unfocused before the wallet locks. A short
 // grace avoids re-prompting for a quick alt-tab (e.g. to a password manager);
@@ -88,6 +89,9 @@ export function LockProvider({ children }: { children: ReactNode }) {
   }, [clearTimer]);
 
   const unlock = useCallback(() => {
+    // A successful unlock clears the brute-force lockout counter (the only
+    // caller, UnlockGate, reaches here only after the password verified).
+    clearUnlockLockout();
     setIsLocked(false);
     arm();
   }, [arm]);
