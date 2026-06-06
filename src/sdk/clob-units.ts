@@ -6,7 +6,7 @@
 // how Send converts LYTH → lythoshi), and back for display.
 //
 // The only live market is the native LYTH spot market, where both legs are
-// LYTH-decimals (8). There is no per-asset decimals registry on-chain, so the
+// LYTH-decimals (18). There is no per-asset decimals registry on-chain, so the
 // caller passes the decimals it knows (defaulting to NATIVE_LYTH_DECIMALS) and
 // the UI states that assumption — we never silently guess a foreign token's
 // scale.
