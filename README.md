@@ -1,6 +1,6 @@
 # desktop-wallet
 
-> Monolythium Desktop Wallet — Tauri 2 + React 19. Holds Monolythium keys behind OS-keychain auth + Ledger hardware signer, routes every destructive action through a typed Operations drawer.
+> Monolythium Desktop Wallet — Tauri 2 + React 19. Holds Monolythium keys behind OS-keychain auth, routes every destructive action through a typed Operations drawer.
 
 **License:** Apache-2.0 · **Status:** preview (testnet only) · **Stack:** Tauri 2 · Rust · React 19 · TypeScript · Vite
 
@@ -12,7 +12,7 @@
 
 ## Status: preview
 
-Functional desktop shell with substantive Rust backend, real hardware-wallet integration, and a working Operations drawer — but not yet production-grade. Set expectations before adopting:
+Functional desktop shell with substantive Rust backend and a working Operations drawer — but not yet production-grade. Set expectations before adopting:
 
 - **Chain target is testnet.** Monolythium mainnet has not launched. Anything you connect to here runs against the public testnet today; mainnet activation is gated on separate protocol milestones.
 - **Preview builds are on [GitHub Releases](https://github.com/monolythium/desktop-wallet/releases); the fully signed channel hasn't run end-to-end yet.** The four-platform release workflow exists (macOS signed + notarized, Windows Azure Trusted Signing, Linux .deb + .AppImage) but no tagged release has driven it start to finish. Until then, use the preview builds or install from source.
@@ -31,13 +31,13 @@ A native desktop wallet for Monolythium, built on Tauri 2 with a Rust backend an
 
 Architecture splits into:
 
-- **Tauri Rust host** (`src-tauri/src/`) — owns the OS-keychain bridge (`keychain.rs`), Argon2id + AES-GCM vault (`vault.rs`), Ledger HID signer (`ledger.rs`), MCP shared-store bridge (`mcp_bridge.rs`), Studio devkit host (`studio_host.rs`), and the optional Stele marketplace runtime (`stele/`, gated behind a Cargo feature).
+- **Tauri Rust host** (`src-tauri/src/`) — owns the OS-keychain bridge (`keychain.rs`), Argon2id + XChaCha20-Poly1305 vault (`vault.rs`), MCP shared-store bridge (`mcp_bridge.rs`), Studio devkit host (`studio_host.rs`), and the optional Stele marketplace runtime (`stele/`, gated behind a Cargo feature).
 - **React 19 frontend** (`src/`) — pages for Home, Activity, Wallets, Tokens, Stake, Contacts, RISC-V, Studio, Trade, AI Trading, News, Stele (settings-gated), Inbox (settings-gated), Provider (settings-gated), Settings. Sidebar nav + top-bar shell + Operations drawer overlay.
-- **Operations drawer** (`src/operations/`) — the audit boundary. Every privileged action (send, sign, stake, swap, rotate key, etc.) routes through `OperationsDrawer.tsx`'s `preview → auth → executing → done` state machine. Auth surface is "keychain" (OS-keychain unlock) or "ledger" (HID device). No silent signing.
+- **Operations drawer** (`src/operations/`) — the audit boundary. Every privileged action (send, sign, stake, swap, rotate key, etc.) routes through `OperationsDrawer.tsx`'s `preview → auth → executing → done` state machine. Auth surface is "keychain" (OS-keychain unlock). No silent signing.
 
 ## Who this is for
 
-End users and traders who want to hold and move LYTH from their own machine, with hardware-signer support and an Operations drawer that previews every destructive action before it leaves the device.
+End users and traders who want to hold and move LYTH from their own machine, with an Operations drawer that previews every destructive action before it leaves the device.
 
 ## Prerequisites
 
@@ -60,17 +60,11 @@ cd desktop-wallet
 less src-tauri/src/keychain.rs
 less src-tauri/src/vault.rs
 
-# Read the Ledger HID signer
-less src-tauri/src/ledger.rs
-
 # Read the Operations drawer state machine (audit boundary)
 less src/operations/OperationsDrawer.tsx
 
 # Read the Stele marketplace runtime (settings-gated; off by default)
 less src-tauri/src/stele/
-
-# Read the hardware-signer doc
-less docs/hardware-signer.md
 ```
 
 To build and run the full app:
@@ -109,31 +103,28 @@ desktop-wallet/
 │   │                               # (the audit boundary — every privileged
 │   │                               # action goes through here)
 │   └── sdk/                        # Tauri bridge, chain client, live hooks,
-│                                   # Ledger signer, Stele wrappers, etc.
+│                                   # Stele wrappers, etc.
 ├── src-tauri/                      # Rust backend
 │   └── src/
 │       ├── main.rs, lib.rs
 │       ├── keychain.rs             # OS keychain bridge (Apple Security
 │       │                           # framework / Windows Credential Manager /
 │       │                           # libsecret on Linux)
-│       ├── vault.rs                # Argon2id + AES-GCM vault
-│       ├── ledger.rs               # Ledger HID signer
+│       ├── vault.rs                # Argon2id + XChaCha20-Poly1305 vault
 │       ├── mcp_bridge.rs           # Read-only bridge to lyth_mcp shared
 │       │                           # wallet store at ~/.lyth_mcp/wallets.json
 │       ├── studio_host.rs          # Mono Studio devkit host integration
 │       └── stele/                  # Stele marketplace runtime (settings-
 │                                   # gated, off by default — see below)
-├── docs/
-│   └── hardware-signer.md          # Ledger HID transport architecture
 └── .github/workflows/release.yml   # 4-platform signed-release pipeline
 ```
 
 ## Crypto stack
 
 - **`@noble/post-quantum`** for ML-DSA-65 keygen + signing (post-quantum signature path used for Monolythium-native chain keys)
-- **`@noble/ciphers`** + **`@noble/hashes`** for AES-GCM vault encryption and Argon2id KEK derivation
-- **`ed25519-dalek`** (Rust) for the Ledger pubkey verification path
-- **`ledger-transport-hid`** + **`ledger-apdu`** for the HID-only Ledger transport (WebUSB out of scope — see [`docs/hardware-signer.md`](./docs/hardware-signer.md))
+- **`@noble/ciphers`** + **`@noble/hashes`** for XChaCha20-Poly1305 vault encryption and Argon2id KEK derivation
+- **`argon2`** + **`chacha20poly1305`** (Rust) for the native-side Argon2id KEK derivation and XChaCha20-Poly1305 vault AEAD
+- **`ed25519-dalek`** (Rust) for verifying the Mono Studio devkit archive signature
 - **`keyring`** (Rust) for native OS-keychain access per-platform
 
 No custom crypto. All sensitive operations go through audited, RustCrypto-aligned dependencies.
@@ -156,7 +147,6 @@ The Stele runtime is intentionally separable — if you don't want any marketpla
 - The encrypted vault lives in the OS keychain (Apple Security framework / Windows Credential Manager / Linux libsecret), keyed by an Argon2id-derived KEK.
 - The unlocked seed lives in service-worker-equivalent state in the Tauri host for the duration of one operation, then is zeroed.
 - Every destructive operation routes through the Operations drawer (`preview → auth → executing → done`) — no silent signing.
-- Hardware-wallet operations use the Ledger HID transport; WebUSB is intentionally out of scope.
 - When the Stele feature is enabled, the loopback approval bridge requires a per-session bearer token + the user's explicit click for every destructive op forwarded by `lyth_mcp`.
 - The Tauri webview's CSP is currently `null` (Tauri-app practice for dynamic styles); the equivalent guarantees come from the IPC capability allowlist in `src-tauri/capabilities/`.
 
@@ -192,7 +182,7 @@ See [`CONTRIBUTING.md`](./CONTRIBUTING.md). Short version: run the three gates (
 
 ## Security
 
-See [`SECURITY.md`](./SECURITY.md). Short version: vulnerability reports to `security@monolythium.com`, **not** the public issue tracker. The in-scope categories cover keychain exfiltration, vault tamper, Operations drawer bypass, Stele approval-bridge bypass, approval-bridge replay, OS sandbox escape, chain-config corruption, Ledger transport abuse, runtime-provenance corruption, and unlocked-seed leak.
+See [`SECURITY.md`](./SECURITY.md). Short version: vulnerability reports to `security@monolythium.com`, **not** the public issue tracker. The in-scope categories cover keychain exfiltration, vault tamper, Operations drawer bypass, Stele approval-bridge bypass, approval-bridge replay, OS sandbox escape, chain-config corruption, runtime-provenance corruption, and unlocked-seed leak.
 
 ## License
 
