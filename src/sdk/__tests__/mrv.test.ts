@@ -248,11 +248,10 @@ describe("MRV desktop-wallet SDK layer", () => {
     expect(calls).toHaveLength(0);
   });
 
-  it("refuses encrypted deploy and call submission while MB-3 threshold decryption is gated off", async () => {
-    // SDK 0.3.15 retires the single-key `scheme: 0` encrypted envelope: the
-    // encrypted-mempool submit path now hard-rejects until MB-3 threshold
-    // decryption is live. The wallet must surface that gate, not emit an
-    // envelope a single operator could decrypt.
+  it("refuses encrypted deploy and call submission without cluster seal keys", async () => {
+    // Private submission now requires the cluster seal roster. The wallet must
+    // surface that missing-key gate instead of emitting an envelope that cannot
+    // be opened by the active cluster.
     const { client } = mockRpc({ nonce: 21n });
 
     await expect(
@@ -264,7 +263,7 @@ describe("MRV desktop-wallet SDK layer", () => {
         executionUnitLimit: 100_000n,
         maxExecutionFeeLythoshi: "25",
       }),
-    ).rejects.toThrow(/encrypted mempool submission unavailable until MB-3/);
+    ).rejects.toThrow(/private submission requires cluster seal keys/);
 
     await expect(
       submitMrvCallTransaction({
@@ -276,6 +275,6 @@ describe("MRV desktop-wallet SDK layer", () => {
         executionUnitLimit: 50_000n,
         maxExecutionFeeLythoshi: "10",
       }),
-    ).rejects.toThrow(/encrypted mempool submission unavailable until MB-3/);
+    ).rejects.toThrow(/private submission requires cluster seal keys/);
   });
 });
