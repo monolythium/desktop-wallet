@@ -1,12 +1,20 @@
 // Staking SDK seam — wraps `lyth_clusterDirectory`, `lyth_getDelegations`,
 // and the delegation-precompile (Law §5.4 / §7.6) calldata encoders.
 //
+// NON-CUSTODIAL ARK staking: delegation is balance-weighted and never
+// escrows tokens. `delegate(cluster, weightBps)` records a `weightBps`
+// fraction of the caller's LIVE balance — the contribution to a cluster is
+// the effective weight `floor(balance × weightBps / 10000)`. Tokens stay
+// fully liquid and spendable. The delegate tx is sent with value = 0; the
+// chain reverts (UnexpectedValue, tag 0x020e) if any native value is
+// attached. There is no redemption queue: `undelegate` is instant.
+//
 // Delegation lives at precompile `0x…100A`. Calldata is a 4-byte
 // selector + 32-byte ABI words:
 //
-//   delegate(uint256 clusterId, uint256 weightBps)
-//   undelegate(uint256 clusterId, uint256 weightBps)
-//   redelegate(uint256 srcCluster, uint256 dstCluster, uint256 weightBps)
+//   delegate(uint32 clusterId, uint16 weightBps)
+//   undelegate(uint32 clusterId)
+//   redelegate(uint32 srcCluster, uint32 dstCluster, uint16 weightBps)
 //
 // The chain may reject the call at the precompile-gate if delegation
 // isn't activated yet on the connected network — wallets surface the
@@ -14,7 +22,6 @@
 
 import {
   encodeClaimCalldata,
-  encodeCompleteRedemptionCalldata,
   encodeDelegateCalldata,
   encodeRedelegateCalldata,
   encodeSetAutoCompoundCalldata,
@@ -25,7 +32,6 @@ import type {
   ClusterDirectoryPageResponse,
   DelegationsResponse,
   PendingRewardsResponse,
-  RedemptionQueueResponse,
 } from "@monolythium/core-sdk";
 import { requireTypedUserAddress, requireTypedUserAddressHex } from "./address";
 import { getProvider } from "./client";
@@ -35,18 +41,14 @@ import { submitNativeTx } from "./submit";
 export const DELEGATION_PRECOMPILE =
   "0x000000000000000000000000000000000000100a";
 
-/** A delegate/undelegate/redelegate/claim/completeRedemption call carries a
- *  small ABI payload; size the execution-unit budget above the observed cost
- *  with headroom (the SDK transfer default of ~100k would underprovision the
- *  precompile work). */
+/** A delegate/undelegate/redelegate/claim call carries a small ABI payload;
+ *  size the execution-unit budget above the observed cost with headroom (the
+ *  SDK transfer default of ~100k would underprovision the precompile work). */
 const STAKING_EXECUTION_UNIT_LIMIT = 150_000n;
 
 export interface SubmitStakingTxArgs {
   seed: Uint8Array;
   data: string;
-  /** msg.value in lythoshi. For `delegate` this is the principal stake;
-   *  for every other staking op pass `0n`. */
-  valueLythoshi?: bigint;
   executionUnitLimit?: bigint;
 }
 
@@ -54,6 +56,9 @@ export interface SubmitStakingTxResult {
   txHash: string;
 }
 
+/** `delegate(uint32 clusterId, uint16 weightBps)` calldata. NON-CUSTODIAL:
+ *  submit via `submitStakingTx` (value = 0). `weightBps` is the fraction of
+ *  the caller's live balance to contribute; no principal is escrowed. */
 export function buildDelegateCalldata(
   clusterId: number,
   weightBps: number,
@@ -85,16 +90,6 @@ export function buildSetAutoCompoundCalldata(enabled: boolean): string {
   return encodeSetAutoCompoundCalldata(enabled);
 }
 
-/** `completeRedemption(uint64 index)` calldata (chain-canonical selector
- *  `0x26169d0a`). Settles the matured redemption ticket at `index`,
- *  returning the queued principal to the caller and pruning the ticket.
- *  With liquid bonding the ticket matures at the undelegate height, so
- *  this is claimable in the same/next anchor as the `undelegate` that
- *  created it. Submit via `submitStakingTx` with `valueLythoshi: 0n`. */
-export function buildCompleteRedemptionCalldata(ticketIndex: number): string {
-  return encodeCompleteRedemptionCalldata(ticketIndex);
-}
-
 export async function fetchClusterDirectory(
   page: number = 1,
   limit: number = 20,
@@ -117,19 +112,6 @@ export async function fetchPendingRewards(
 ): Promise<PendingRewardsResponse> {
   const typed = requireTypedUserAddress(walletBech32m, "wallet");
   return getProvider().rpcClient.lythPendingRewards(typed);
-}
-
-/** `lyth_redemptionQueue` — the wallet's open unbonding/redemption tickets.
- *  Each ticket carries the redeeming cluster + weight and a maturity height;
- *  a matured ticket is settled with `completeRedemption(index)`. Note: the
- *  ticket exposes weight (basis points), NOT a principal LYTH amount — the
- *  delegation precompile tracks weight, so the wallet renders weight here
- *  rather than a fabricated LYTH figure. */
-export async function fetchRedemptionQueue(
-  walletBech32m: string,
-): Promise<RedemptionQueueResponse> {
-  const typed = requireTypedUserAddress(walletBech32m, "wallet");
-  return getProvider().rpcClient.lythRedemptionQueue(typed);
 }
 
 /**
@@ -160,11 +142,14 @@ export function hasClaimableRewards(rewards: PendingRewardsResponse | null): boo
 
 /**
  * Submit a delegation-precompile call (delegate / undelegate / redelegate /
- * claim rewards / completeRedemption). Routes through the shared
- * `submitNativeTx` seam: PLAINTEXT `mesh_submitTx` by default (the path that
- * confirms on the live chain), with `to` = the precompile and the staking
- * execution-unit budget. Caller (OperationsDrawer.execute) supplies the
- * unlocked seed.
+ * claim rewards / setAutoCompound). Routes through the shared `submitNativeTx`
+ * seam: PLAINTEXT `mesh_submitTx` by default (the path that confirms on the
+ * live chain), with `to` = the precompile and the staking execution-unit
+ * budget. Caller (OperationsDrawer.execute) supplies the unlocked seed.
+ *
+ * NON-CUSTODIAL: every staking call (including delegate) is sent with
+ * value = 0. The chain reverts (UnexpectedValue, tag 0x020e) if any native
+ * value is attached to a delegate.
  */
 export async function submitStakingTx(
   args: SubmitStakingTxArgs,
@@ -173,7 +158,7 @@ export async function submitStakingTx(
     seed: args.seed,
     to: DELEGATION_PRECOMPILE,
     input: args.data,
-    valueLythoshi: args.valueLythoshi ?? 0n,
+    valueLythoshi: 0n,
     executionUnitLimit: args.executionUnitLimit ?? STAKING_EXECUTION_UNIT_LIMIT,
   });
   return { txHash: result.txHash };

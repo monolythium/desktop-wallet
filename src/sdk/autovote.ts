@@ -2,12 +2,16 @@
 //
 // Consumes the read-only per-cluster diversity scoring
 // (lyth_getClusterDiversity → ClusterDiversityView) to turn one of four
-// delegator intents into a concrete {clusterId, weightBps, principalLyth}
-// allocation plan. The plan is then submitted as N sequential delegate
-// calls reusing the staking seam (buildDelegateCalldata + submitStakingTx)
-// — there is no new write path; autovote is a planner on top of delegate.
+// delegator intents into a concrete {clusterId, weightBps} allocation plan.
+// The plan is then submitted as N sequential delegate calls reusing the
+// staking seam (buildDelegateCalldata + submitStakingTx) — there is no new
+// write path; autovote is a planner on top of delegate.
+//
+// NON-CUSTODIAL: the plan distributes a WEIGHT BUDGET (basis points of the
+// wallet's balance) across clusters. No principal is escrowed — each delegate
+// is sent with value = 0 and the effective weight tracks the live balance.
 
-import { DIVERSITY_SCORE_MAX, LYTHOSHI_PER_LYTH } from "@monolythium/core-sdk";
+import { DIVERSITY_SCORE_MAX } from "@monolythium/core-sdk";
 import type {
   ClusterDirectoryEntryResponse,
   ClusterDiversityView,
@@ -25,8 +29,6 @@ export interface AutovoteAllocation {
   clusterId: number;
   /** Basis points of total wallet weight assigned to this cluster. */
   weightBps: number;
-  /** Whole-LYTH principal assigned to this cluster. */
-  principalLyth: bigint;
 }
 
 export interface AutovotePlanInput {
@@ -34,9 +36,7 @@ export interface AutovotePlanInput {
   clusters: ClusterDirectoryEntryResponse[];
   /** Per-cluster diversity reads keyed by clusterId (maxDiversity / maxDecentralization). */
   diversities: Map<number, ClusterDiversityView>;
-  /** Total principal to spread across the selected clusters. */
-  totalPrincipalLyth: bigint;
-  /** Total weight budget (cap) the plan must not exceed, in basis points. */
+  /** Total weight budget (cap) the plan distributes + must not exceed, in basis points. */
   capBps: number;
   /**
    * Pre-built per-cluster allocation for `custom` mode (passthrough).
@@ -113,8 +113,8 @@ function decentralizationWeight(view: ClusterDiversityView | undefined): number 
 /**
  * Turn an intent into a concrete allocation plan. Active clusters only.
  * Weights are proportional to each mode's scoring function, normalised to
- * exactly the cap budget; principal is split proportionally. Enforces
- * sum(weightBps) <= capBps at plan time.
+ * exactly the cap budget. Enforces sum(weightBps) <= capBps at plan time.
+ * Non-custodial — there is no principal to split.
  */
 export function buildAutovotePlan(input: AutovotePlanInput): AutovotePlan {
   const warnings: string[] = [];
@@ -172,27 +172,18 @@ export function buildAutovotePlan(input: AutovotePlanInput): AutovotePlan {
 
   const allocations: AutovoteAllocation[] = [];
   let assignedBps = 0;
-  let assignedPrincipal = 0n;
   for (const [i, entry] of scored.entries()) {
     const { cluster, raw } = entry;
     const frac = raw / totalRaw;
     const isLast = i === scored.length - 1;
-    // Last entry takes the remainder so rounding never overshoots the cap
-    // or under/over-spends the principal.
-    const weightBps = isLast
-      ? cap - assignedBps
-      : Math.floor(cap * frac);
-    const principalLyth = isLast
-      ? input.totalPrincipalLyth - assignedPrincipal
-      : (input.totalPrincipalLyth * BigInt(Math.floor(frac * 1_000_000))) /
-        1_000_000n;
-    if (weightBps <= 0 || principalLyth <= 0n) {
+    // Last entry takes the remainder so rounding never overshoots the cap.
+    const weightBps = isLast ? cap - assignedBps : Math.floor(cap * frac);
+    if (weightBps <= 0) {
       // Skip dust allocations; their remainder rolls into the last entry.
       continue;
     }
     assignedBps += weightBps;
-    assignedPrincipal += principalLyth;
-    allocations.push({ clusterId: cluster.clusterId, weightBps, principalLyth });
+    allocations.push({ clusterId: cluster.clusterId, weightBps });
   }
 
   const totalWeightBps = allocations.reduce((s, a) => s + a.weightBps, 0);
@@ -211,8 +202,9 @@ export interface SubmitAutovotePlanResult {
 
 /**
  * Submit an autovote plan as N sequential delegate calls. Reuses the
- * staking seam verbatim — `value` is the per-cluster principal stake.
- * Sequential (not parallel) so each call lands on the previous nonce.
+ * staking seam verbatim — NON-CUSTODIAL, each delegate carries no value
+ * (only weightBps). Sequential (not parallel) so each call lands on the
+ * previous nonce.
  */
 export async function submitAutovotePlan(
   plan: AutovotePlan,
@@ -221,12 +213,7 @@ export async function submitAutovotePlan(
   const txHashes: string[] = [];
   for (const a of plan.allocations) {
     const calldata = buildDelegateCalldata(a.clusterId, a.weightBps);
-    const principalLythoshi = a.principalLyth * LYTHOSHI_PER_LYTH; // whole-LYTH principal -> lythoshi
-    const result = await submitStakingTx({
-      seed,
-      data: calldata,
-      valueLythoshi: principalLythoshi,
-    });
+    const result = await submitStakingTx({ seed, data: calldata });
     txHashes.push(result.txHash);
   }
   return { txHashes };

@@ -1,9 +1,9 @@
 // Shared native-tx submission seam.
 //
 // Every wallet write — send / delegate / undelegate / redelegate / claim /
-// completeRedemption / register (spending-policy) / CLOB / MRV — routes
-// through `submitNativeTx` here so there is exactly ONE place that decides
-// the privacy posture and the fee shape.
+// register (spending-policy) / CLOB / MRV — routes through `submitNativeTx`
+// here so there is exactly ONE place that decides the privacy posture and
+// the fee shape.
 //
 // DEFAULT = PLAINTEXT. The function delegates to the SDK
 // `submitTransactionWithPrivacy` with `private: false`, which builds + signs

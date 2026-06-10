@@ -49,7 +49,6 @@ describe("autovote planner", () => {
       mode: "maxDiversity",
       clusters,
       diversities,
-      totalPrincipalLyth: 300n,
       capBps: 5000,
     });
     expect(plan.allocations.length).toBeGreaterThan(0);
@@ -61,19 +60,18 @@ describe("autovote planner", () => {
     }
   });
 
-  it("conserves the total principal across allocations", () => {
+  it("distributes the full weight budget across allocations (non-custodial)", () => {
     const plan = buildAutovotePlan({
       mode: "maxDiversity",
       clusters,
       diversities,
-      totalPrincipalLyth: 300n,
       capBps: 6000,
     });
-    const sumPrincipal = plan.allocations.reduce(
-      (s, a) => s + a.principalLyth,
-      0n,
-    );
-    expect(sumPrincipal).toBe(300n);
+    // Weight-only: the plan spreads the whole budget, no principal involved.
+    expect(plan.totalWeightBps).toBe(6000);
+    for (const a of plan.allocations) {
+      expect(a).not.toHaveProperty("principalLyth");
+    }
   });
 
   it("weights the highest-diversity cluster most under Max Diversity", () => {
@@ -81,7 +79,6 @@ describe("autovote planner", () => {
       mode: "maxDiversity",
       clusters,
       diversities,
-      totalPrincipalLyth: 1000n,
       capBps: 9000,
     });
     const byCluster = new Map(
@@ -100,7 +97,6 @@ describe("autovote planner", () => {
       mode: "maxYield",
       clusters: mixed,
       diversities: new Map(),
-      totalPrincipalLyth: 200n,
       capBps: 4000,
     });
     expect(plan.totalWeightBps).toBeLessThanOrEqual(4000);
@@ -120,7 +116,6 @@ describe("autovote planner", () => {
         [1, diversity(1, 8000)],
         [2, diversity(2, 8000)],
       ]),
-      totalPrincipalLyth: 100n,
       capBps: 5000,
     });
     expect(plan.allocations.every((a) => a.clusterId !== 2)).toBe(true);
@@ -131,11 +126,10 @@ describe("autovote planner", () => {
       mode: "custom",
       clusters,
       diversities,
-      totalPrincipalLyth: 100n,
       capBps: 2000,
       customAllocations: [
-        { clusterId: 1, weightBps: 1500, principalLyth: 50n },
-        { clusterId: 2, weightBps: 1500, principalLyth: 50n },
+        { clusterId: 1, weightBps: 1500 },
+        { clusterId: 2, weightBps: 1500 },
       ],
     });
     expect(plan.totalWeightBps).toBe(3000);

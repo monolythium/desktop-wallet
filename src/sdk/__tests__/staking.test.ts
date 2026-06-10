@@ -10,7 +10,6 @@ import type { PendingRewardsResponse } from "@monolythium/core-sdk";
 import {
   DELEGATION_PRECOMPILE,
   buildClaimRewardsCalldata,
-  buildCompleteRedemptionCalldata,
   buildDelegateCalldata,
   buildRedelegateCalldata,
   buildSetAutoCompoundCalldata,
@@ -56,12 +55,6 @@ describe("staking calldata selectors", () => {
     );
     expect(selectorOf(buildSetAutoCompoundCalldata(false))).toBe(
       DELEGATION_SELECTORS.setAutoCompound,
-    );
-  });
-
-  it("completeRedemption uses the chain-canonical selector", () => {
-    expect(selectorOf(buildCompleteRedemptionCalldata(0))).toBe(
-      DELEGATION_SELECTORS.completeRedemption,
     );
   });
 });

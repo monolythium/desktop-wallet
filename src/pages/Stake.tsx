@@ -7,26 +7,22 @@
 // delegation precompile call → encrypted-envelope submit).
 
 import { useEffect, useState } from "react";
-import { LYTHOSHI_PER_LYTH } from "@monolythium/core-sdk";
 import type {
   ClusterDirectoryEntryResponse,
   ClusterDiversityView,
   PendingRewardsResponse,
-  RedemptionQueueResponse,
 } from "@monolythium/core-sdk";
 import { useOperations } from "../operations/context";
 import { useActiveWallet } from "../sdk/active-wallet";
 import {
   DELEGATION_PRECOMPILE,
   buildClaimRewardsCalldata,
-  buildCompleteRedemptionCalldata,
   buildDelegateCalldata,
   buildRedelegateCalldata,
   buildSetAutoCompoundCalldata,
   buildUndelegateCalldata,
   fetchClusterDirectory,
   fetchPendingRewards,
-  fetchRedemptionQueue,
   formatRewardLyth,
   hasClaimableRewards,
   submitStakingTx,
@@ -57,11 +53,9 @@ export function Stake({ experimentalEnabled }: StakeProps = {}) {
   const [busy, setBusy] = useState(false);
   const [directory, setDirectory] = useState<ClusterDirectoryEntryResponse[]>([]);
   const [directoryError, setDirectoryError] = useState<string | null>(null);
-  // Pending delegation rewards (lyth_pendingRewards) + open redemption tickets
-  // (lyth_redemptionQueue). Both are RpcOutcomes so a node failure surfaces the
-  // verbatim error rather than a blank/fabricated zero.
+  // Pending delegation rewards (lyth_pendingRewards). RpcOutcome so a node
+  // failure surfaces the verbatim error rather than a blank/fabricated zero.
   const [rewards, setRewards] = useState<RpcOutcome<PendingRewardsResponse> | null>(null);
-  const [redemptions, setRedemptions] = useState<RpcOutcome<RedemptionQueueResponse> | null>(null);
   const [openForm, setOpenForm] = useState<number | null>(null);
   // Redelegate draft: which source delegation row is open, plus the
   // destination cluster + weight to move. Distinct from the delegate form.
@@ -70,7 +64,6 @@ export function Stake({ experimentalEnabled }: StakeProps = {}) {
   const [redelegateWeightBps, setRedelegateWeightBps] = useState("1000");
   const [redelegateError, setRedelegateError] = useState<string | null>(null);
   const [draftWeightBps, setDraftWeightBps] = useState("1000");
-  const [draftPrincipalLyth, setDraftPrincipalLyth] = useState("100");
   const [draftError, setDraftError] = useState<string | null>(null);
   // Read-only per-cluster diversity scores (lyth_getClusterDiversity, PF-6),
   // keyed by clusterId. Drives both the directory column and the autovote
@@ -82,8 +75,7 @@ export function Stake({ experimentalEnabled }: StakeProps = {}) {
   // clusterId. A missing key means no yield has accrued yet / the read failed,
   // so the directory row shows "—" rather than a misleading 0.00%.
   const [apys, setApys] = useState<Map<number, number>>(new Map());
-  // Autovote (§25.1): total principal to spread + weight cap + last-built plan.
-  const [autoPrincipalLyth, setAutoPrincipalLyth] = useState("100");
+  // Autovote (§25.1): weight budget (cap) to spread across clusters.
   const [autoCapBps, setAutoCapBps] = useState("5000");
   const [autovoteBusy, setAutovoteBusy] = useState(false);
   const [autovoteError, setAutovoteError] = useState<string | null>(null);
@@ -94,24 +86,21 @@ export function Stake({ experimentalEnabled }: StakeProps = {}) {
       setDirectory([]);
       setDirectoryError(null);
       setRewards(null);
-      setRedemptions(null);
       setApys(new Map());
       return;
     }
     setBusy(true);
     try {
-      const [s, dir, rew, red] = await Promise.all([
+      const [s, dir, rew] = await Promise.all([
         loadLiveStakeStatus(walletAddress),
         fetchClusterDirectory(1, 20).catch((cause: unknown) => {
           setDirectoryError((cause as Error)?.message ?? "directory unavailable");
           return null;
         }),
         capture(() => fetchPendingRewards(walletAddress)),
-        capture(() => fetchRedemptionQueue(walletAddress)),
       ]);
       setStatus(s);
       setRewards(rew);
-      setRedemptions(red);
       if (dir) {
         setDirectory(dir.clusters);
         setDirectoryError(null);
@@ -151,33 +140,32 @@ export function Stake({ experimentalEnabled }: StakeProps = {}) {
 
   const selfBech32m = walletAddress;
 
-  const openDelegate = (clusterId: number, weightBps: number, principalLyth: bigint) => {
+  const openDelegate = (clusterId: number, weightBps: number) => {
     const weightLabel = `${(weightBps / 100).toFixed(2)}%`;
-    const principalLythoshi = principalLyth * LYTHOSHI_PER_LYTH; // whole-LYTH principal -> lythoshi
     ops.open({
-      title: `Delegate ${principalLyth} LYTH to cluster ${clusterId}`,
-      subtitle: `Stake ${weightLabel} of wallet weight, ${principalLyth} LYTH principal`,
+      title: `Delegate ${weightLabel} to cluster ${clusterId}`,
+      subtitle: `Weight ${weightLabel} of your balance — non-custodial, tokens stay liquid`,
       auth: "keychain",
       diff: [
         { k: "From", v: selfBech32m },
         { k: "Cluster", v: String(clusterId) },
-        { k: "Weight", v: weightLabel },
-        { k: "Principal", v: `${principalLyth} LYTH (${principalLythoshi.toString()} lythoshi)` },
+        { k: "Weight", v: `${weightLabel} of balance` },
+        { k: "Value", v: "0 LYTH (non-custodial)" },
         { k: "Precompile", v: "0x…100a" },
       ],
       effects: [
         { text: "Unlocks the local vault for this operation only." },
         { text: "Encodes delegate(uint32 clusterId, uint16 weightBps) calldata via @monolythium/core-sdk." },
-        { text: `Travels msg.value=${principalLythoshi.toString()} lythoshi — this is the principal stake.` },
+        { text: "Sends value = 0 — NO tokens are escrowed. Your effective weight = balance × weightBps; the LYTH stays in your wallet and remains spendable." },
         { text: "Wraps the native tx in an encrypted envelope; submits via lyth_submitEncrypted." },
         {
-          text: "Chain rejects at the precompile gate if delegation is gated off, the cluster is inactive, or the per-cluster cap would be exceeded — verbatim error surfaces here.",
+          text: "Chain rejects at the precompile gate if delegation is gated off, the cluster is inactive, the per-cluster cap would be exceeded, or any value is attached (UnexpectedValue) — verbatim error surfaces here.",
           level: "warn",
         },
       ],
       notify: {
         kind: "delegate",
-        amountDecimal: principalLyth.toString(),
+        amountDecimal: "0",
         counterparty: DELEGATION_PRECOMPILE,
         clusterId,
       },
@@ -189,10 +177,9 @@ export function Stake({ experimentalEnabled }: StakeProps = {}) {
         const result = await submitStakingTx({
           seed: ctx.vaultSeed,
           data: calldata,
-          valueLythoshi: principalLythoshi,
         });
         return {
-          headline: `Delegated ${principalLyth} LYTH @ ${weightLabel} to cluster ${clusterId}`,
+          headline: `Delegated ${weightLabel} of balance to cluster ${clusterId}`,
           detail: result.txHash,
           txHash: result.txHash,
         };
@@ -206,7 +193,7 @@ export function Stake({ experimentalEnabled }: StakeProps = {}) {
     const weightLabel = `${(weightBps / 100).toFixed(2)}%`;
     ops.open({
       title: `Unstake from cluster ${clusterId}`,
-      subtitle: `Undelegate ${weightLabel} of wallet weight, queue the principal for redemption`,
+      subtitle: `Undelegate ${weightLabel} of wallet weight — instant, nothing was locked`,
       auth: "keychain",
       diff: [
         { k: "From", v: selfBech32m },
@@ -216,8 +203,8 @@ export function Stake({ experimentalEnabled }: StakeProps = {}) {
       ],
       effects: [
         { text: "Unlocks the local vault for this operation only." },
-        { text: "Encodes undelegate(uint32 clusterId) calldata via @monolythium/core-sdk — removes the entire delegation row for this cluster." },
-        { text: "Appends a redemption ticket; the principal becomes claimable via Complete redemption once the ticket matures (see the Redemptions card)." },
+        { text: "Encodes undelegate(uint32 clusterId) calldata via @monolythium/core-sdk — instantly removes the entire delegation row for this cluster." },
+        { text: "Instant — no redemption queue or cooldown. Your tokens were never escrowed, so the weighting simply drops." },
         {
           text: "Chain rejects at the precompile gate if delegation is gated off or no delegation row exists for this cluster — verbatim error surfaces here.",
           level: "warn",
@@ -331,50 +318,6 @@ export function Stake({ experimentalEnabled }: StakeProps = {}) {
     });
   };
 
-  const openCompleteRedemption = (ticketIndex: number, weightBps: number, cluster: number) => {
-    const weightLabel = `${(weightBps / 100).toFixed(2)}%`;
-    ops.open({
-      title: `Complete redemption #${ticketIndex}`,
-      subtitle: `Settle the matured redemption ticket and return the queued principal`,
-      auth: "keychain",
-      diff: [
-        { k: "From", v: selfBech32m },
-        { k: "Ticket index", v: String(ticketIndex) },
-        { k: "Source cluster", v: String(cluster) },
-        { k: "Redeeming weight", v: weightLabel },
-        { k: "Precompile", v: "0x…100a" },
-      ],
-      effects: [
-        { text: "Unlocks the local vault for this operation only." },
-        { text: "Encodes completeRedemption(uint64 index) calldata via @monolythium/core-sdk — settles the matured ticket and returns the queued principal to this wallet." },
-        {
-          text: "Chain rejects at the precompile gate if the ticket is not yet mature, was already settled, or the principal is unavailable — verbatim error surfaces here.",
-          level: "warn",
-        },
-      ],
-      notify: {
-        // No dedicated redemption op kind in TxOpKind — it is a delegation
-        // precompile call, so it records as a generic contract call rather
-        // than a fabricated kind.
-        kind: "contract_call",
-        amountDecimal: "0",
-        counterparty: DELEGATION_PRECOMPILE,
-      },
-      execute: async (ctx) => {
-        if (!ctx?.vaultSeed) {
-          throw new Error("vault seed unavailable after keychain authorization");
-        }
-        const calldata = buildCompleteRedemptionCalldata(ticketIndex);
-        const result = await submitStakingTx({ seed: ctx.vaultSeed, data: calldata });
-        return {
-          headline: `Completed redemption #${ticketIndex}`,
-          detail: result.txHash,
-          txHash: result.txHash,
-        };
-      },
-    });
-  };
-
   const openAutoCompoundToggle = (next: boolean) => {
     ops.open({
       title: next ? "Enable auto-compound" : "Disable auto-compound",
@@ -420,20 +363,9 @@ export function Stake({ experimentalEnabled }: StakeProps = {}) {
   const runAutovote = (mode: Exclude<AutovoteMode, "custom">) => {
     setAutovoteError(null);
 
-    let totalPrincipal: bigint;
-    try {
-      totalPrincipal = BigInt(autoPrincipalLyth);
-    } catch {
-      setAutovoteError("Total principal must be a positive integer of whole LYTH.");
-      return;
-    }
-    if (totalPrincipal <= 0n) {
-      setAutovoteError("Total principal must be > 0 whole LYTH.");
-      return;
-    }
     const capBps = parseInt(autoCapBps, 10);
     if (!Number.isFinite(capBps) || capBps <= 0 || capBps > 10_000) {
-      setAutovoteError("Weight cap must be 1-10000 basis points (0.01% – 100%).");
+      setAutovoteError("Weight budget must be 1-10000 basis points (0.01% – 100%).");
       return;
     }
 
@@ -441,7 +373,6 @@ export function Stake({ experimentalEnabled }: StakeProps = {}) {
       mode,
       clusters: directory,
       diversities,
-      totalPrincipalLyth: totalPrincipal,
       capBps,
     });
 
@@ -460,16 +391,16 @@ export function Stake({ experimentalEnabled }: StakeProps = {}) {
 
     ops.open({
       title: `Autovote · ${modeLabel[mode]}`,
-      subtitle: `Spread ${totalPrincipal} LYTH across ${plan.allocations.length} clusters (${plan.totalWeightBps} bps total)`,
+      subtitle: `Spread a ${(plan.totalWeightBps / 100).toFixed(2)}% weight budget across ${plan.allocations.length} clusters — non-custodial`,
       auth: "keychain",
       diff: [
         { k: "From", v: selfBech32m },
         { k: "Mode", v: modeLabel[mode] },
         { k: "Clusters", v: String(plan.allocations.length) },
-        { k: "Total weight", v: `${(plan.totalWeightBps / 100).toFixed(2)}%` },
+        { k: "Total weight", v: `${(plan.totalWeightBps / 100).toFixed(2)}% of balance` },
         ...plan.allocations.map((a) => ({
           k: `Cluster ${a.clusterId}`,
-          v: `${(a.weightBps / 100).toFixed(2)}% · ${a.principalLyth} LYTH`,
+          v: `${(a.weightBps / 100).toFixed(2)}%`,
         })),
       ],
       effects: [
@@ -825,75 +756,6 @@ export function Stake({ experimentalEnabled }: StakeProps = {}) {
         </div>
       ) : null}
 
-      {/* Redemptions — open unbonding tickets from undelegate (lyth_redemptionQueue).
-          A matured ticket is settled with Complete redemption. Tickets carry
-          weight (basis points), not a principal LYTH amount — the precompile
-          tracks weight, so weight is what we surface (no fabricated figure). */}
-      {walletAddress && redemptions && redemptions.ok && redemptions.value && redemptions.value.tickets.length > 0 ? (
-        <div className="w-card">
-          <div className="w-card__head">
-            <h3>Redemptions</h3>
-            <span className="w-card__head__spacer" />
-            <span className="row-help mono">
-              {redemptions.value.count.toString()} ticket
-              {redemptions.value.count === 1n ? "" : "s"}
-            </span>
-          </div>
-          <div className="w-card__body">
-            <div className="w-live-list">
-              {redemptions.value.tickets.map((t) => {
-                const matured = t.mature === true;
-                return (
-                  <div className="w-live-row" key={t.index.toString()}>
-                    <div>
-                      <div className="row-label">
-                        Ticket #{t.index.toString()} · cluster {t.cluster}
-                      </div>
-                      <div className="row-help mono">
-                        {(t.weightBps / 100).toFixed(2)}% weight · queued at block{" "}
-                        {t.createdHeight.toString()} · matures{" "}
-                        {t.maturityHeight.toString()}
-                      </div>
-                    </div>
-                    <div
-                      className="w-live-right"
-                      style={{ display: "flex", alignItems: "center", gap: 8 }}
-                    >
-                      <span className={`w-live-pill ${matured ? "" : "is-muted"}`}>
-                        {t.mature === null ? "—" : matured ? "mature" : "pending"}
-                      </span>
-                      <button
-                        className="btn btn--sm btn--primary"
-                        disabled={!matured}
-                        title={
-                          matured
-                            ? "Settle this matured ticket"
-                            : "Ticket is not yet mature"
-                        }
-                        onClick={() =>
-                          openCompleteRedemption(Number(t.index), t.weightBps, t.cluster)
-                        }
-                      >
-                        Complete
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-      ) : walletAddress && redemptions && redemptions.ok === false ? (
-        <div className="w-card">
-          <div className="w-card__head">
-            <h3>Redemptions</h3>
-          </div>
-          <div className="w-card__body">
-            <div className="w-live-error">redemption queue: {redemptions.error}</div>
-          </div>
-        </div>
-      ) : null}
-
       {experimentalEnabled ? (
       <div className="w-card">
         <div className="w-card__head">
@@ -907,9 +769,10 @@ export function Stake({ experimentalEnabled }: StakeProps = {}) {
         </div>
         <div className="w-card__body">
           <div className="row-help" style={{ marginBottom: 10, lineHeight: 1.5 }}>
-            Spread a principal across active clusters by a chosen objective.
-            Diversity / Decentralization consume live per-cluster diversity
-            scoring; Custom keeps the per-cluster Delegate form below.
+            Spread a weight budget (% of your balance) across active clusters by
+            a chosen objective. Non-custodial — no tokens are escrowed; your LYTH
+            stays liquid. Diversity / Decentralization consume live per-cluster
+            diversity scoring; Custom keeps the per-cluster Delegate form below.
           </div>
           <div
             style={{
@@ -930,32 +793,7 @@ export function Stake({ experimentalEnabled }: StakeProps = {}) {
                   marginBottom: 6,
                 }}
               >
-                Total principal (whole LYTH)
-              </label>
-              <input
-                type="number"
-                inputMode="numeric"
-                min={1}
-                value={autoPrincipalLyth}
-                onChange={(e) => {
-                  setAutoPrincipalLyth(e.target.value);
-                  setAutovoteError(null);
-                }}
-                style={autovoteInputStyle}
-              />
-            </div>
-            <div style={{ flex: "1 1 160px" }}>
-              <label
-                style={{
-                  display: "block",
-                  fontSize: 11,
-                  letterSpacing: "0.06em",
-                  textTransform: "uppercase",
-                  color: "var(--fg-400)",
-                  marginBottom: 6,
-                }}
-              >
-                Weight cap (bps · 100 = 1%)
+                Weight budget (bps · 100 = 1%)
               </label>
               <input
                 type="number"
@@ -1125,7 +963,7 @@ export function Stake({ experimentalEnabled }: StakeProps = {}) {
                         color: "var(--fg-400)",
                       }}
                     >
-                      Weight (basis points · 100 = 1%)
+                      Weight — % of balance (basis points · 100 = 1%)
                     </label>
                     <input
                       type="number"
@@ -1148,36 +986,11 @@ export function Stake({ experimentalEnabled }: StakeProps = {}) {
                         outline: "none",
                       }}
                     />
-                    <label
-                      style={{
-                        fontSize: 11,
-                        letterSpacing: "0.06em",
-                        textTransform: "uppercase",
-                        color: "var(--fg-400)",
-                      }}
-                    >
-                      Principal (whole LYTH)
-                    </label>
-                    <input
-                      type="number"
-                      inputMode="numeric"
-                      min={1}
-                      value={draftPrincipalLyth}
-                      onChange={(e) => {
-                        setDraftPrincipalLyth(e.target.value);
-                        setDraftError(null);
-                      }}
-                      style={{
-                        padding: "8px 10px",
-                        fontSize: 14,
-                        fontFamily: "var(--f-mono)",
-                        background: "rgba(255,255,255,0.04)",
-                        border: "1px solid rgba(255,255,255,0.12)",
-                        borderRadius: 8,
-                        color: "var(--fg-100)",
-                        outline: "none",
-                      }}
-                    />
+                    <div className="row-help" style={{ lineHeight: 1.5 }}>
+                      Non-custodial: this delegates a percent of your balance —
+                      no tokens are escrowed. Your LYTH stays in your wallet and
+                      remains spendable; effective weight = balance × weightBps.
+                    </div>
                     {draftError && (
                       <div className="row-help" style={{ color: "var(--err)" }}>
                         {draftError}
@@ -1204,18 +1017,7 @@ export function Stake({ experimentalEnabled }: StakeProps = {}) {
                             );
                             return;
                           }
-                          let principal: bigint;
-                          try {
-                            principal = BigInt(draftPrincipalLyth);
-                          } catch {
-                            setDraftError("Principal must be a positive integer of whole LYTH.");
-                            return;
-                          }
-                          if (principal <= 0n) {
-                            setDraftError("Principal must be > 0 whole LYTH.");
-                            return;
-                          }
-                          openDelegate(c.clusterId, bps, principal);
+                          openDelegate(c.clusterId, bps);
                         }}
                         style={{ flex: 1 }}
                       >
