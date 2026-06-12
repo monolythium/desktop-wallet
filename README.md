@@ -16,7 +16,7 @@ Functional desktop shell with substantive Rust backend and a working Operations 
 
 - **Chain target is testnet.** Monolythium mainnet has not launched. Anything you connect to here runs against the public testnet today; mainnet activation is gated on separate protocol milestones.
 - **Preview builds are on [GitHub Releases](https://github.com/monolythium/desktop-wallet/releases); the fully signed channel hasn't run end-to-end yet.** The four-platform release workflow exists (macOS signed + notarized, Windows Azure Trusted Signing, Linux .deb + .AppImage) but no tagged release has driven it start to finish. Until then, use the preview builds or install from source.
-- **SDK comes from npm.** `package.json` pins `@monolythium/core-sdk` to the exact version `0.3.13` from npm. The SDK is public ([`monolythium/mono-core-sdk`](https://github.com/monolythium/mono-core-sdk)) — `pnpm install` pulls it straight from the registry, no sibling checkout required.
+- **SDK comes from npm.** `package.json` pins `@monolythium/core-sdk` to the exact version `0.4.17` from npm. The SDK is public ([`monolythium/mono-core-sdk`](https://github.com/monolythium/mono-core-sdk)) — `pnpm install` pulls it straight from the registry, no sibling checkout required.
 - **Packaged builds default to the public testnet RPC gateway.** `VITE_MONO_RPC_URL` still overrides the endpoint; local dev uses Vite's `/rpc` proxy against the SDK registry's operator list.
 - **Missing backend state fails closed.** Pages read live chain state, wallet-local state, or show an empty/disabled state; they do not fall back to hardcoded balances, trades, or news.
 - **The Stele marketplace tab is settings-gated and off by default.** Even when enabled, marketplace flows require the `lyth_mcp` sidecar running locally — see the Stele integration section below.
@@ -46,7 +46,7 @@ End users and traders who want to hold and move LYTH from their own machine, wit
 - **Rust** 1.77+
 - Tauri 2 platform prerequisites — see <https://v2.tauri.app/start/prerequisites/>
 
-`pnpm install` resolves all dependencies from npm — including `@monolythium/core-sdk`, which is pinned to the exact version `0.3.13` ([`monolythium/mono-core-sdk`](https://github.com/monolythium/mono-core-sdk)). No sibling checkout is required.
+`pnpm install` resolves all dependencies from npm — including `@monolythium/core-sdk`, which is pinned to the exact version `0.4.17` ([`monolythium/mono-core-sdk`](https://github.com/monolythium/mono-core-sdk)). No sibling checkout is required.
 
 ## Quick start
 
