@@ -44,6 +44,7 @@ import type { NativeEvmTxFields } from "@monolythium/core-sdk/crypto";
 import { getProvider } from "./client";
 import { rpcClientOptions } from "./http";
 import { getNativeTransactionCount } from "./native-rpc";
+import { nextSendNonce, recordSubmittedNonce } from "./pending-nonce";
 
 /** Fee-resolution class — picks the SDK default execution-unit limit. */
 export type SubmitFeeClass = "transfer" | "registry";
@@ -106,13 +107,18 @@ export async function submitNativeTx(
       ? undefined
       : { executionUnitLimit: args.executionUnitLimit };
 
-  const [nonce, fee, encryptionKey] = await Promise.all([
+  const [committedNonce, fee, encryptionKey] = await Promise.all([
     getNativeTransactionCount(client, fromHex),
     args.feeClass === "registry"
       ? resolveRegistryExecutionFee(client, feeOptions)
       : resolveExecutionFee(client, feeOptions),
     wantPrivate ? fetchEncryptionKey(client) : Promise.resolve(undefined),
   ]);
+  // Local pending-nonce: sign max(committed, lastSubmitted+1) so a 2nd submit
+  // before the 1st commits doesn't reuse the nonce (the chain exposes only the
+  // committed nonce). Recorded on success below; covers every native submit
+  // path (send / register / CLOB / MRV) since they all route through here.
+  const nonce = nextSendNonce(fromHex, MONOLYTHIUM_TESTNET_CHAIN_ID, committedNonce);
 
   const tx: NativeEvmTxFields = {
     chainId: MONOLYTHIUM_TESTNET_CHAIN_ID,
@@ -132,6 +138,8 @@ export async function submitNativeTx(
     private: wantPrivate,
     ...(encryptionKey === undefined ? {} : { encryptionKey }),
   });
+  // Success — advance the local pending nonce so the next submit won't reuse it.
+  recordSubmittedNonce(fromHex, MONOLYTHIUM_TESTNET_CHAIN_ID, nonce);
 
   return { txHash, fromHex, fee, wasPrivate: wantPrivate };
 }
