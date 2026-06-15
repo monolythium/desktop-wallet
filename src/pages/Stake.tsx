@@ -11,6 +11,7 @@ import type {
   ClusterDirectoryEntryResponse,
   ClusterDiversityView,
   PendingRewardsResponse,
+  RedemptionQueueResponse,
 } from "@monolythium/core-sdk";
 import { useOperations } from "../operations/context";
 import { useActiveWallet } from "../sdk/active-wallet";
@@ -23,6 +24,7 @@ import {
   buildUndelegateCalldata,
   fetchClusterDirectory,
   fetchPendingRewards,
+  fetchRedemptionQueue,
   formatRewardLyth,
   hasClaimableRewards,
   submitStakingTx,
@@ -56,6 +58,12 @@ export function Stake({ experimentalEnabled }: StakeProps = {}) {
   // Pending delegation rewards (lyth_pendingRewards). RpcOutcome so a node
   // failure surfaces the verbatim error rather than a blank/fabricated zero.
   const [rewards, setRewards] = useState<RpcOutcome<PendingRewardsResponse> | null>(null);
+  // Open redemption tickets (lyth_redemptionQueue) — READ ONLY. The model is
+  // non-custodial: undelegate is instant, so a healthy wallet's queue is empty.
+  // Surfaced for transparency over any legacy ticket; there is no settle action
+  // (the chain removed completeRedemption — calling it now reverts). RpcOutcome
+  // so a node failure shows the verbatim error rather than a fabricated empty.
+  const [redemptions, setRedemptions] = useState<RpcOutcome<RedemptionQueueResponse> | null>(null);
   const [openForm, setOpenForm] = useState<number | null>(null);
   // Redelegate draft: which source delegation row is open, plus the
   // destination cluster + weight to move. Distinct from the delegate form.
@@ -86,21 +94,24 @@ export function Stake({ experimentalEnabled }: StakeProps = {}) {
       setDirectory([]);
       setDirectoryError(null);
       setRewards(null);
+      setRedemptions(null);
       setApys(new Map());
       return;
     }
     setBusy(true);
     try {
-      const [s, dir, rew] = await Promise.all([
+      const [s, dir, rew, red] = await Promise.all([
         loadLiveStakeStatus(walletAddress),
         fetchClusterDirectory(1, 20).catch((cause: unknown) => {
           setDirectoryError((cause as Error)?.message ?? "directory unavailable");
           return null;
         }),
         capture(() => fetchPendingRewards(walletAddress)),
+        capture(() => fetchRedemptionQueue(walletAddress)),
       ]);
       setStatus(s);
       setRewards(rew);
+      setRedemptions(red);
       if (dir) {
         setDirectory(dir.clusters);
         setDirectoryError(null);
@@ -755,6 +766,86 @@ export function Stake({ experimentalEnabled }: StakeProps = {}) {
           </div>
         </div>
       ) : null}
+
+      {/* Redemptions — open unbonding tickets (lyth_redemptionQueue). READ
+          ONLY: delegation is non-custodial and undelegate is instant, so a
+          healthy wallet never queues a ticket and this card stays hidden. We
+          mount it only to surface a legacy ticket the node still reports, or a
+          read error — never with a settle button, because the chain removed
+          the completeRedemption selector (calling it now reverts). */}
+      {walletAddress && redemptions
+        ? redemptions.ok && redemptions.value && redemptions.value.tickets.length > 0
+          ? (() => {
+              const q = redemptions.value;
+              return (
+                <div className="w-card">
+                  <div className="w-card__head">
+                    <h3>Redemptions</h3>
+                    <span className="w-live-pill">live</span>
+                    <span className="w-card__head__spacer" />
+                    <span className="row-help mono">
+                      {q.count.toString()} ticket{q.count === 1n ? "" : "s"}
+                    </span>
+                  </div>
+                  <div className="w-card__body">
+                    <div className="row-help" style={{ marginBottom: 10, lineHeight: 1.5 }}>
+                      Legacy unbonding tickets. Delegation is now non-custodial —
+                      undelegate is instant and queues nothing — so these settle
+                      on-chain automatically as they mature. There is no manual
+                      completion step (the completeRedemption call was removed
+                      from the chain). Tickets carry weight (basis points) only,
+                      never a principal LYTH amount.
+                    </div>
+                    <div className="w-live-list">
+                      {q.tickets.map((t) => (
+                        <div className="w-live-row" key={t.index.toString()}>
+                          <div>
+                            <div className="row-label">
+                              Ticket #{t.index.toString()} · cluster {t.cluster}
+                            </div>
+                            <div className="row-help mono">
+                              queued block {t.createdHeight.toString()} · matures{" "}
+                              {t.maturityHeight.toString()}
+                            </div>
+                          </div>
+                          <div
+                            className="w-live-right"
+                            style={{ display: "flex", alignItems: "center", gap: 8 }}
+                          >
+                            <span className="mono">{(t.weightBps / 100).toFixed(2)}%</span>
+                            <span
+                              className={`w-live-pill ${t.mature ? "" : "is-muted"}`}
+                            >
+                              {t.mature === null
+                                ? "pending"
+                                : t.mature
+                                  ? "mature"
+                                  : "cooling down"}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              );
+            })()
+          : redemptions.ok === false
+            ? (
+                <div className="w-card">
+                  <div className="w-card__head">
+                    <h3>Redemptions</h3>
+                    <span className="w-card__head__spacer" />
+                  </div>
+                  <div className="w-card__body">
+                    <div className="w-live-error">
+                      redemption queue: {redemptions.error}
+                    </div>
+                  </div>
+                </div>
+              )
+            : null
+        : null}
 
       {experimentalEnabled ? (
       <div className="w-card">

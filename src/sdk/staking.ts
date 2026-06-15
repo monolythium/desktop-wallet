@@ -32,6 +32,7 @@ import type {
   ClusterDirectoryPageResponse,
   DelegationsResponse,
   PendingRewardsResponse,
+  RedemptionQueueResponse,
 } from "@monolythium/core-sdk";
 import { requireTypedUserAddress, requireTypedUserAddressHex } from "./address";
 import { getProvider } from "./client";
@@ -112,6 +113,23 @@ export async function fetchPendingRewards(
 ): Promise<PendingRewardsResponse> {
   const typed = requireTypedUserAddress(walletBech32m, "wallet");
   return getProvider().rpcClient.lythPendingRewards(typed);
+}
+
+/**
+ * `lyth_redemptionQueue` — open redemption tickets for a wallet (READ ONLY).
+ *
+ * This is a *vestigial* read. The current delegation model is non-custodial:
+ * `undelegate` is instant and never queues an unbonding ticket, so a healthy
+ * wallet returns an empty queue. The chain removed the `completeRedemption`
+ * selector entirely (calling it now reverts), so there is deliberately no
+ * "settle ticket" write action — any legacy ticket the node still reports is
+ * surfaced for transparency only, never with a fabricated completion button.
+ */
+export async function fetchRedemptionQueue(
+  walletBech32m: string,
+): Promise<RedemptionQueueResponse> {
+  const typed = requireTypedUserAddress(walletBech32m, "wallet");
+  return getProvider().rpcClient.lythRedemptionQueue(typed);
 }
 
 /**

@@ -10,6 +10,7 @@ import { TokenRow } from "../components/TokenRow";
 import type { Route } from "../components/types";
 import { useActiveWallet } from "../sdk/active-wallet";
 import { errorMessage, loadLiveTokenStatus, type LiveTokenStatus } from "../sdk/live";
+import { MONOSCAN_GET_LYTH_URL } from "../sdk/monoscan";
 import { NATIVE_TOKEN_REF, writeSelectedToken } from "../sdk/selected-token";
 import { liveTokenStatusToRows } from "../sdk/token-rows";
 
@@ -78,6 +79,19 @@ export function Tokens({ goto }: Props) {
           <h3>Holdings</h3>
           <span className="w-live-pill">live</span>
           <span className="w-card__head__spacer" />
+          {/* No on-ramp primitive exists in the wallet (or the SDK) — Buy opens
+              the canonical monoscan sale page externally, the same honest link
+              the Home hero and the token-detail action bar use. We never ship a
+              fake in-app card/bank/exchange on-ramp. */}
+          <a
+            className="btn btn--sm"
+            href={MONOSCAN_GET_LYTH_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ textDecoration: "none" }}
+          >
+            Buy
+          </a>
           <button className="btn btn--sm" onClick={refresh} disabled={busy}>
             {busy ? "Refreshing…" : "Refresh"}
           </button>

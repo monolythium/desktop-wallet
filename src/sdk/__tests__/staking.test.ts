@@ -4,9 +4,13 @@
 // rejected on-chain — here it fails fast in CI) and the pure reward-formatting
 // helpers. No live chain: the calldata builders + helpers are pure.
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { DELEGATION_SELECTORS } from "@monolythium/core-sdk";
-import type { PendingRewardsResponse } from "@monolythium/core-sdk";
+import type {
+  PendingRewardsResponse,
+  RedemptionQueueResponse,
+} from "@monolythium/core-sdk";
+import { resetProviderForTest, setProviderForTest } from "../client";
 import {
   DELEGATION_PRECOMPILE,
   buildClaimRewardsCalldata,
@@ -14,6 +18,7 @@ import {
   buildRedelegateCalldata,
   buildSetAutoCompoundCalldata,
   buildUndelegateCalldata,
+  fetchRedemptionQueue,
   formatRewardLyth,
   hasClaimableRewards,
 } from "../staking";
@@ -104,5 +109,51 @@ describe("hasClaimableRewards", () => {
 
   it("is false for a malformed total (never throws)", () => {
     expect(hasClaimableRewards(rewards("garbage"))).toBe(false);
+  });
+});
+
+describe("fetchRedemptionQueue", () => {
+  // A real, checksum-valid user (mono1…) address — derived from the ML-DSA
+  // backend so it passes the typed-address guard rather than a hand-rolled
+  // bech32m that would fail the checksum.
+  const WALLET = "mono1dytvzzug96qtr0k09em5qm95hqn83cdyag8k3u";
+
+  afterEach(() => {
+    resetProviderForTest();
+  });
+
+  it("reads lyth_redemptionQueue for the typed wallet and returns the response", async () => {
+    const queue: RedemptionQueueResponse = {
+      wallet: WALLET,
+      tickets: [],
+      count: 0n,
+      returned: 0,
+      block: null,
+    };
+    const lythRedemptionQueue = vi.fn().mockResolvedValue(queue);
+    setProviderForTest({
+      endpoint: "http://test",
+      rpcClient: { lythRedemptionQueue } as never,
+    });
+
+    const result = await fetchRedemptionQueue(WALLET);
+
+    expect(result).toBe(queue);
+    expect(lythRedemptionQueue).toHaveBeenCalledTimes(1);
+    // The seam forwards the typed bech32m address verbatim (not a raw 0x form).
+    expect(lythRedemptionQueue).toHaveBeenCalledWith(WALLET);
+  });
+
+  it("rejects a raw 0x address before any RPC call (typed-address guard)", async () => {
+    const lythRedemptionQueue = vi.fn();
+    setProviderForTest({
+      endpoint: "http://test",
+      rpcClient: { lythRedemptionQueue } as never,
+    });
+
+    await expect(
+      fetchRedemptionQueue("0x6916c10b882e80b1becf2e77406cb4b82678e1a4"),
+    ).rejects.toThrow(/raw 0x addresses are retired/);
+    expect(lythRedemptionQueue).not.toHaveBeenCalled();
   });
 });
