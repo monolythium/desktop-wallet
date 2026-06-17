@@ -326,7 +326,7 @@ function PlaceLimitOrderCard({
         });
         return {
           headline: `Submitted ${side} @ ${priceStr}`,
-          detail: `${result.txHash} · from ${result.from} · ${result.envelopeWireBytes} bytes envelope`,
+          detail: `${result.txHash} · from ${result.from} · ${result.calldataBytes}B calldata${result.wasPrivate ? " · private" : ""}`,
         };
       },
     });
@@ -487,7 +487,7 @@ function CancelOrderCard() {
         const result = await cancelClobOrder({ seed: ctx.vaultSeed, orderIdHex: trimmed });
         return {
           headline: `Submitted cancelOrder`,
-          detail: `${result.txHash} · from ${result.from} · ${result.envelopeWireBytes} bytes envelope`,
+          detail: `${result.txHash} · from ${result.from} · ${result.calldataBytes}B calldata${result.wasPrivate ? " · private" : ""}`,
         };
       },
     });

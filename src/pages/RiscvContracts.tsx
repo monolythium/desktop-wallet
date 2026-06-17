@@ -39,7 +39,7 @@ export function RiscvContracts() {
     }
     ops.open({
       title: "Deploy RISC-V contract",
-      subtitle: "MRV native encrypted transaction",
+      subtitle: "MRV native transaction",
       auth: "keychain",
       diff: [
         { k: "Artifact", v: byteSummary(normalized.artifactBytes) },
@@ -57,7 +57,7 @@ export function RiscvContracts() {
       ],
       effects: [
         { text: "Submits an MRV deploy payload from the unlocked vault." },
-        { text: "Uses encrypted ML-DSA submission and native lythoshi fee fields." },
+        { text: "Uses plaintext ML-DSA submission (mesh_submitTx) — the confirming path; native lythoshi fee fields." },
       ],
       execute: async (ctx) => {
         if (!ctx?.vaultSeed) throw new Error("vault seed unavailable after keychain authorization");
@@ -94,7 +94,7 @@ export function RiscvContracts() {
     }
     ops.open({
       title: "Call RISC-V contract",
-      subtitle: "MRV native encrypted transaction",
+      subtitle: "MRV native transaction",
       auth: "keychain",
       diff: [
         { k: "Contract", v: normalized.contractAddress },
@@ -152,7 +152,7 @@ export function RiscvContracts() {
           <div className="w-card__head">
             <h3>Deploy</h3>
             <div className="w-card__head__spacer" />
-            <span className="w-live-pill is-muted">encrypted</span>
+            <span className="w-live-pill is-muted">plaintext</span>
           </div>
           <div className="w-card__body">
             <div className="w-form-stack">
@@ -195,7 +195,7 @@ export function RiscvContracts() {
           <div className="w-card__head">
             <h3>Call</h3>
             <div className="w-card__head__spacer" />
-            <span className="w-live-pill is-muted">encrypted</span>
+            <span className="w-live-pill is-muted">plaintext</span>
           </div>
           <div className="w-card__body">
             <div className="w-form-stack">

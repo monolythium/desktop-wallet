@@ -1,33 +1,27 @@
-// CLOB trade submission — encrypted-mempool path.
+// CLOB trade submission.
 //
 // Encodes `placeLimitOrder(bytes32 base, bytes32 quote, uint8 side,
-// uint256 price, uint256 quantity, uint64 expiresAtBlock)` calldata
-// against the CLOB precompile (`0x1001`), signs with the wallet's
-// ML-DSA-65 backend, wraps in the encrypted envelope per ADR-0021,
-// and posts via `lyth_submitEncrypted`. Mirrors `sendNativeLyth` —
-// same submission shape, different precompile target + value=0.
+// uint256 price, uint256 quantity, uint64 expiresAtBlock)` / `cancelOrder`
+// calldata against the CLOB precompile (`0x1001`), then submits through the
+// shared `submitNativeTx` seam.
+//
+// PLAINTEXT by default (`mesh_submitTx`) — the path that confirms. Encryption is
+// OPTIONAL and costs more; the encrypted mempool is never mandatory and
+// threshold-encrypted INCLUSION is not live on-chain yet, so a CLOB order is
+// never forced through the encrypted path. The `private` opt-in is wired through
+// to the SDK for when inclusion goes live (gate it behind Developer Mode in the
+// UI, like the native send); leaving it unset sends plaintext.
 
 import {
   CLOB_SELECTORS,
-  MONOLYTHIUM_TESTNET_CHAIN_ID,
   PRECOMPILE_ADDRESSES,
-  RpcClient,
   addressToTypedBech32,
   deriveClobMarketId,
   encodeCancelOrderCalldata,
   encodePlaceLimitOrderCalldata,
   type SpotLimitOrderSide,
 } from "@monolythium/core-sdk";
-import {
-  MlDsa65Backend,
-  buildEncryptedSubmission,
-  fetchEncryptionKey,
-} from "@monolythium/core-sdk/crypto";
-import { submitEncryptedEnvelope } from "@monolythium/core-sdk/crypto";
-import type { NativeEvmTxFields } from "@monolythium/core-sdk/crypto";
-import { getProvider } from "./client";
-import { rpcClientOptions } from "./http";
-import { getExecutionUnitPriceLythoshi, getNativeTransactionCount } from "./native-rpc";
+import { submitNativeTx } from "./submit";
 
 const SPOT_LIMIT_ORDER_EXECUTION_UNIT_LIMIT = 250_000n;
 const CLOB_CANCEL_EXECUTION_UNIT_LIMIT = 80_000n;
@@ -50,30 +44,24 @@ export interface PlaceClobLimitOrderArgs {
   /** Optional execution-unit limit override; defaults to a value sized for
    *  a typical place + cross + escrow + (one or two) fills. */
   executionUnitLimit?: bigint;
+  /** Opt into the encrypted-mempool (private) lane. DEFAULT FALSE = plaintext
+   *  `mesh_submitTx`, the path that confirms. Encryption costs more and is never
+   *  mandatory; encrypted inclusion isn't live yet, so gate this behind
+   *  Developer Mode. */
+  private?: boolean;
 }
 
 export interface PlaceClobLimitOrderResult {
   txHash: string;
   from: string;
-  innerSighashHex: string;
-  envelopeWireBytes: number;
   calldataBytes: number;
+  /** True if this went through the encrypted (preview) path. */
+  wasPrivate: boolean;
 }
 
 export async function placeClobLimitOrder(
   args: PlaceClobLimitOrderArgs,
 ): Promise<PlaceClobLimitOrderResult> {
-  const backend = MlDsa65Backend.fromSeed(args.seed);
-  const provider = getProvider();
-  const client = new RpcClient(provider.rpcClient.endpoint, rpcClientOptions());
-  const fromHex = backend.getAddress();
-
-  const [nonce, executionUnitPrice, encryptionKey] = await Promise.all([
-    getNativeTransactionCount(client, fromHex),
-    getExecutionUnitPriceLythoshi(client),
-    fetchEncryptionKey(client),
-  ]);
-
   const marketId = deriveClobMarketId(args.baseTokenIdHex, args.quoteTokenIdHex);
   const calldataHex = encodePlaceLimitOrderCalldata({
     marketId,
@@ -85,30 +73,20 @@ export async function placeClobLimitOrder(
     expiryBlock: args.expiresAtBlock ?? 0n,
   });
 
-  const tx: NativeEvmTxFields = {
-    chainId: MONOLYTHIUM_TESTNET_CHAIN_ID,
-    nonce,
-    maxFeePerGas: executionUnitPrice,
-    maxPriorityFeePerGas: executionUnitPrice,
-    gasLimit: args.executionUnitLimit ?? SPOT_LIMIT_ORDER_EXECUTION_UNIT_LIMIT,
+  const result = await submitNativeTx({
+    seed: args.seed,
     to: PRECOMPILE_ADDRESSES.CLOB,
-    value: 0n,
     input: calldataHex,
-  };
-
-  const wrapped = await buildEncryptedSubmission({
-    backend,
-    encryptionKey,
-    tx,
+    executionUnitLimit:
+      args.executionUnitLimit ?? SPOT_LIMIT_ORDER_EXECUTION_UNIT_LIMIT,
+    private: args.private === true,
   });
 
-  const txHash = await submitEncryptedEnvelope(client, wrapped.envelopeWireHex);
   return {
-    txHash,
-    from: addressToTypedBech32("user", fromHex),
-    innerSighashHex: wrapped.innerSighashHex,
-    envelopeWireBytes: (wrapped.envelopeWireHex.length - 2) / 2,
+    txHash: result.txHash,
+    from: addressToTypedBech32("user", result.fromHex),
     calldataBytes: (calldataHex.length - 2) / 2,
+    wasPrivate: result.wasPrivate,
   };
 }
 
@@ -121,51 +99,36 @@ export interface CancelClobOrderArgs {
   /** 32-byte order id (`0x…`). */
   orderIdHex: string;
   executionUnitLimit?: bigint;
+  /** Opt into the encrypted-mempool (private) lane. DEFAULT FALSE = plaintext.
+   *  See {@link PlaceClobLimitOrderArgs.private}. */
+  private?: boolean;
 }
 
 export interface CancelClobOrderResult {
   txHash: string;
   from: string;
-  innerSighashHex: string;
-  envelopeWireBytes: number;
   calldataBytes: number;
+  wasPrivate: boolean;
 }
 
 export async function cancelClobOrder(
   args: CancelClobOrderArgs,
 ): Promise<CancelClobOrderResult> {
-  const backend = MlDsa65Backend.fromSeed(args.seed);
-  const provider = getProvider();
-  const client = new RpcClient(provider.rpcClient.endpoint, rpcClientOptions());
-  const fromHex = backend.getAddress();
-
-  const [nonce, executionUnitPrice, encryptionKey] = await Promise.all([
-    getNativeTransactionCount(client, fromHex),
-    getExecutionUnitPriceLythoshi(client),
-    fetchEncryptionKey(client),
-  ]);
-
   const calldataHex = encodeCancelOrderCalldata({ orderId: args.orderIdHex });
 
-  const tx: NativeEvmTxFields = {
-    chainId: MONOLYTHIUM_TESTNET_CHAIN_ID,
-    nonce,
-    maxFeePerGas: executionUnitPrice,
-    maxPriorityFeePerGas: executionUnitPrice,
-    gasLimit: args.executionUnitLimit ?? CLOB_CANCEL_EXECUTION_UNIT_LIMIT,
+  const result = await submitNativeTx({
+    seed: args.seed,
     to: PRECOMPILE_ADDRESSES.CLOB,
-    value: 0n,
     input: calldataHex,
-  };
+    executionUnitLimit: args.executionUnitLimit ?? CLOB_CANCEL_EXECUTION_UNIT_LIMIT,
+    private: args.private === true,
+  });
 
-  const wrapped = await buildEncryptedSubmission({ backend, encryptionKey, tx });
-  const txHash = await submitEncryptedEnvelope(client, wrapped.envelopeWireHex);
   return {
-    txHash,
-    from: addressToTypedBech32("user", fromHex),
-    innerSighashHex: wrapped.innerSighashHex,
-    envelopeWireBytes: (wrapped.envelopeWireHex.length - 2) / 2,
+    txHash: result.txHash,
+    from: addressToTypedBech32("user", result.fromHex),
     calldataBytes: (calldataHex.length - 2) / 2,
+    wasPrivate: result.wasPrivate,
   };
 }
 
