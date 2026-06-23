@@ -2,23 +2,14 @@
 //
 // Every wallet write — send / delegate / undelegate / redelegate / claim /
 // register (spending-policy) / CLOB / MRV — routes through `submitNativeTx`
-// here so there is exactly ONE place that decides the privacy posture and
-// the fee shape.
+// here so there is exactly ONE place that decides the fee shape.
 //
-// DEFAULT = PLAINTEXT. The function delegates to the SDK
+// Submission is PLAINTEXT. The function delegates to the SDK
 // `submitTransactionWithPrivacy` with `private: false`, which builds + signs
 // + posts the bincode `SignedTransaction` through `mesh_submitTx` (the node
-// routes it to `MempoolTx::plaintext`). That is the inclusion path that
-// actually confirms on a chain running with `encrypted_mempool_required =
-// false` (the live optional-encryption testnet posture).
-//
-// `private: true` engages the Ferveo encrypt-then-submit pipeline
-// (`lyth_submitEncrypted`). Threshold-encrypted INCLUSION is NOT live yet on
-// the chain, so encrypted submits will not confirm — surfaces that expose a
-// privacy toggle MUST keep it default-off + preview-gated (see
-// SendComposeModal). The plumbing here is correct and ready for the
-// fast-follow flip; nothing should call it with `private: true` from a
-// user-reachable path until threshold inclusion ships.
+// routes it to `MempoolTx::plaintext`). That is the only inclusion path the
+// chain exposes — the encrypted mempool was removed, so there is no longer a
+// private/encrypted submit lane to route to.
 //
 // FEES come from the SDK sane-fee resolvers (`resolveExecutionFee` /
 // `resolveRegistryExecutionFee`): they read the live `lyth_executionUnitPrice`
@@ -37,7 +28,6 @@ import {
 import type { ResolvedExecutionFee } from "@monolythium/core-sdk";
 import {
   MlDsa65Backend,
-  fetchEncryptionKey,
   submitTransactionWithPrivacy,
 } from "@monolythium/core-sdk/crypto";
 import type { NativeEvmTxFields } from "@monolythium/core-sdk/crypto";
@@ -65,12 +55,6 @@ export interface SubmitNativeTxArgs {
   executionUnitLimit?: bigint;
   /** Fee-resolution class. `transfer` (default) vs `registry`/`register`. */
   feeClass?: SubmitFeeClass;
-  /**
-   * Privacy posture. DEFAULT FALSE = plaintext `mesh_submitTx` (the working,
-   * confirming path). TRUE = Ferveo encrypted submit, which is NOT live for
-   * inclusion yet — callers must gate it (see SendComposeModal).
-   */
-  private?: boolean;
 }
 
 export interface SubmitNativeTxResult {
@@ -80,22 +64,17 @@ export interface SubmitNativeTxResult {
   fromHex: string;
   /** Resolved per-unit fee + execution-unit limit actually used. */
   fee: ResolvedExecutionFee;
-  /** True if this went through the encrypted (preview) path. */
-  wasPrivate: boolean;
 }
 
 /**
- * Build, sign, and submit a native transaction. PLAINTEXT by default
- * (`submitTransactionWithPrivacy({ private: false })` → `mesh_submitTx`).
+ * Build, sign, and submit a native transaction over the plaintext
+ * `mesh_submitTx` path (`submitTransactionWithPrivacy({ private: false })`).
  *
- * Resolves nonce + sane SDK fee defaults, then hands the explicit privacy
- * toggle straight to the SDK. The encryption key is fetched ONLY when
- * `private === true`.
+ * Resolves nonce + sane SDK fee defaults, then hands the signed tx to the SDK.
  */
 export async function submitNativeTx(
   args: SubmitNativeTxArgs,
 ): Promise<SubmitNativeTxResult> {
-  const wantPrivate = args.private === true;
   const backend = MlDsa65Backend.fromSeed(args.seed);
   // A fresh transport bound to the shared provider endpoint, matching the
   // prior per-seam behaviour (the SDK client is request-scoped, not pooled).
@@ -107,12 +86,11 @@ export async function submitNativeTx(
       ? undefined
       : { executionUnitLimit: args.executionUnitLimit };
 
-  const [committedNonce, fee, encryptionKey] = await Promise.all([
+  const [committedNonce, fee] = await Promise.all([
     getNativeTransactionCount(client, fromHex),
     args.feeClass === "registry"
       ? resolveRegistryExecutionFee(client, feeOptions)
       : resolveExecutionFee(client, feeOptions),
-    wantPrivate ? fetchEncryptionKey(client) : Promise.resolve(undefined),
   ]);
   // Local pending-nonce: sign max(committed, lastSubmitted+1) so a 2nd submit
   // before the 1st commits doesn't reuse the nonce (the chain exposes only the
@@ -135,11 +113,10 @@ export async function submitNativeTx(
     client,
     backend,
     tx,
-    private: wantPrivate,
-    ...(encryptionKey === undefined ? {} : { encryptionKey }),
+    private: false,
   });
   // Success — advance the local pending nonce so the next submit won't reuse it.
   recordSubmittedNonce(fromHex, MONOLYTHIUM_TESTNET_CHAIN_ID, nonce);
 
-  return { txHash, fromHex, fee, wasPrivate: wantPrivate };
+  return { txHash, fromHex, fee };
 }

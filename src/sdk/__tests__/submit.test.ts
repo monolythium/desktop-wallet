@@ -1,15 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// The submit seam's contract: DEFAULT submit is PLAINTEXT. We assert that
-// `submitNativeTx` delegates to the SDK 0.3.11 `submitTransactionWithPrivacy`
-// with `private: false` by default (the `mesh_submitTx` path that confirms on
-// the live chain), never fetching the encryption key on the default path, and
-// only routes encrypted + fetches the key when `private: true` is requested.
+// The submit seam's contract: submit is PLAINTEXT. We assert that
+// `submitNativeTx` delegates to the SDK `submitTransactionWithPrivacy` with
+// `private: false` (the `mesh_submitTx` path that confirms on the chain) and
+// never fetches an encryption key — the encrypted mempool was removed.
 
 // Capture the args every call to the SDK privacy submit receives.
 interface RecordedSubmitArgs {
   private: boolean;
-  encryptionKey?: unknown;
   tx: {
     gasLimit: bigint;
     maxFeePerGas: bigint;
@@ -87,17 +85,15 @@ beforeEach(() => {
   } as unknown as MonolythiumClient);
 });
 
-describe("submitNativeTx — default plaintext path", () => {
-  it("submits PLAINTEXT (private:false) by default and never fetches the encryption key", async () => {
+describe("submitNativeTx — plaintext path", () => {
+  it("submits PLAINTEXT (private:false) and never fetches the encryption key", async () => {
     const res = await submitNativeTx({ seed: SEED, to: TO, valueLythoshi: 5n });
 
     expect(submitWithPrivacySpy).toHaveBeenCalledTimes(1);
     const call = submitWithPrivacySpy.mock.calls[0]![0];
     expect(call.private).toBe(false);
-    expect(call.encryptionKey).toBeUndefined();
     expect(fetchEncryptionKeySpy).not.toHaveBeenCalled();
     expect(res.txHash).toBe("0xdeadbeef");
-    expect(res.wasPrivate).toBe(false);
   });
 
   it("uses the SDK transfer fee defaults (no hardcoded limit) by default", async () => {
@@ -112,15 +108,5 @@ describe("submitNativeTx — default plaintext path", () => {
     await submitNativeTx({ seed: SEED, to: TO, feeClass: "registry" });
     const call = submitWithPrivacySpy.mock.calls[0]![0];
     expect(call.tx.gasLimit).toBe(250_000n);
-  });
-
-  it("routes ENCRYPTED and fetches the key only when private:true is requested", async () => {
-    const res = await submitNativeTx({ seed: SEED, to: TO, private: true });
-
-    const call = submitWithPrivacySpy.mock.calls[0]![0];
-    expect(call.private).toBe(true);
-    expect(call.encryptionKey).toEqual({ kind: "encryption-key" });
-    expect(fetchEncryptionKeySpy).toHaveBeenCalledTimes(1);
-    expect(res.wasPrivate).toBe(true);
   });
 });

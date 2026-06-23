@@ -308,7 +308,7 @@ function PlaceLimitOrderCard({
       effects: [
         { text: "Unlocks the local vault for this operation only." },
         { text: "Encodes placeLimitOrder calldata via @monolythium/core-sdk." },
-        { text: "Signs with ML-DSA-65 and posts via lyth_submitEncrypted (CLOB @ 0x1001)." },
+        { text: "Signs with ML-DSA-65 and posts via the plaintext mesh_submitTx path (CLOB @ 0x1001)." },
         { text: "Crossing fills emit OrderMatched -> swaps; remainder rests on the book." },
       ],
       execute: async (ctx) => {
@@ -326,7 +326,7 @@ function PlaceLimitOrderCard({
         });
         return {
           headline: `Submitted ${side} @ ${priceStr}`,
-          detail: `${result.txHash} · from ${result.from} · ${result.calldataBytes}B calldata${result.wasPrivate ? " · private" : ""}`,
+          detail: `${result.txHash} · from ${result.from} · ${result.calldataBytes}B calldata`,
         };
       },
     });
@@ -477,7 +477,7 @@ function CancelOrderCard() {
       effects: [
         { text: "Unlocks the local vault for this operation only." },
         { text: "Encodes cancelOrder calldata via @monolythium/core-sdk." },
-        { text: "Signs with ML-DSA-65 and posts via lyth_submitEncrypted (CLOB @ 0x1001)." },
+        { text: "Signs with ML-DSA-65 and posts via the plaintext mesh_submitTx path (CLOB @ 0x1001)." },
         { text: "Emits OrderCancelled(orderId, owner, refundedBase, refundedQuote) — indexed into the events table." },
       ],
       execute: async (ctx) => {
@@ -487,7 +487,7 @@ function CancelOrderCard() {
         const result = await cancelClobOrder({ seed: ctx.vaultSeed, orderIdHex: trimmed });
         return {
           headline: `Submitted cancelOrder`,
-          detail: `${result.txHash} · from ${result.from} · ${result.calldataBytes}B calldata${result.wasPrivate ? " · private" : ""}`,
+          detail: `${result.txHash} · from ${result.from} · ${result.calldataBytes}B calldata`,
         };
       },
     });

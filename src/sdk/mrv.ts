@@ -1,8 +1,8 @@
 // MRV contract deploy/call consumer layer.
 //
-// The core SDK owns the MRV request builders, native tx adapter fields, and
-// encrypted-envelope signing. This module keeps the desktop-wallet surface
-// app-facing: typed MRV requests, lythoshi values, and fee previews.
+// The core SDK owns the MRV request builders and native tx adapter fields.
+// This module keeps the desktop-wallet surface app-facing: typed MRV requests,
+// lythoshi values, and fee previews. Submission is plaintext (`mesh_submitTx`).
 
 import {
   assertMrvCallNativeSubmissionPlan,
@@ -31,15 +31,7 @@ import type {
 } from "@monolythium/core-sdk";
 import {
   MlDsa65Backend,
-  buildEncryptedSubmission,
-  fetchEncryptionKey,
-  submitEncryptedEnvelope,
   submitTransactionWithPrivacy,
-} from "@monolythium/core-sdk/crypto";
-import type {
-  EncryptionKey,
-  MempoolClass,
-  NativeEvmTxFields,
 } from "@monolythium/core-sdk/crypto";
 import { getProvider } from "./client";
 import { getExecutionUnitPriceLythoshi, getNativeTransactionCount } from "./native-rpc";
@@ -82,28 +74,11 @@ export interface BuildMrvCallTransactionPlanArgs
   executionUnitLimit?: IntegerLike;
 }
 
-interface MrvEncryptedArgs {
-  encryptionKey?: EncryptionKey;
-  class?: MempoolClass;
-  /** Opt into the encrypted-mempool (private) lane. DEFAULT FALSE = plaintext
-   *  `mesh_submitTx`, the path that confirms. Encryption costs more and is never
-   *  mandatory; encrypted inclusion isn't live on-chain yet, so gate this behind
-   *  Developer Mode in the UI. When false, no encryption key is fetched. */
-  private?: boolean;
-}
-
 export type SubmitMrvDeployPayloadTransactionArgs =
-  BuildMrvDeployPayloadTransactionPlanArgs & MrvEncryptedArgs;
+  BuildMrvDeployPayloadTransactionPlanArgs;
 
 export type SubmitMrvCallTransactionArgs =
-  BuildMrvCallTransactionPlanArgs & MrvEncryptedArgs;
-
-export interface MrvEnvelopePreview {
-  innerSighashHex: string;
-  innerTxHashHex: string;
-  innerWireBytes: number;
-  envelopeWireBytes: number;
-}
+  BuildMrvCallTransactionPlanArgs;
 
 interface MrvAppPlanBase {
   from: string;
@@ -129,28 +104,13 @@ export interface MrvCallTransactionPlan extends MrvAppPlanBase {
   contractAddress: string;
 }
 
-export type MrvDeployPayloadEncryptedPlan =
-  MrvDeployPayloadTransactionPlan & MrvEnvelopePreview;
+export type MrvDeployPayloadSubmission = MrvDeployPayloadTransactionPlan & {
+  txHash: string;
+};
 
-export type MrvCallEncryptedPlan =
-  MrvCallTransactionPlan & MrvEnvelopePreview;
-
-// Submission types carry the envelope preview ONLY on the encrypted path; the
-// plaintext (default) path has no envelope, so those fields are optional and
-// `wasPrivate` tells the two apart.
-export type MrvDeployPayloadSubmission = MrvDeployPayloadTransactionPlan &
-  Partial<MrvEnvelopePreview> & {
-    txHash: string;
-    /** True if this went through the encrypted (preview) path. */
-    wasPrivate: boolean;
-  };
-
-export type MrvCallSubmission = MrvCallTransactionPlan &
-  Partial<MrvEnvelopePreview> & {
-    txHash: string;
-    /** True if this went through the encrypted (preview) path. */
-    wasPrivate: boolean;
-  };
+export type MrvCallSubmission = MrvCallTransactionPlan & {
+  txHash: string;
+};
 
 interface PreparedDeployPayloadPlan {
   client: RpcClient;
@@ -178,67 +138,33 @@ export async function buildMrvCallTransactionPlan(
   return (await prepareCallPlan(args)).appPlan;
 }
 
-export async function buildMrvDeployPayloadEncryptedPlan(
-  args: SubmitMrvDeployPayloadTransactionArgs,
-): Promise<MrvDeployPayloadEncryptedPlan> {
-  const prepared = await prepareDeployPayloadPlan(args);
-  const envelope = await buildEnvelopePreview(prepared.client, prepared.backend, prepared.rawPlan.tx, args);
-  return {
-    ...prepared.appPlan,
-    ...envelope.preview,
-  };
-}
-
-export async function buildMrvCallEncryptedPlan(
-  args: SubmitMrvCallTransactionArgs,
-): Promise<MrvCallEncryptedPlan> {
-  const prepared = await prepareCallPlan(args);
-  const envelope = await buildEnvelopePreview(prepared.client, prepared.backend, prepared.rawPlan.tx, args);
-  return {
-    ...prepared.appPlan,
-    ...envelope.preview,
-  };
-}
-
 export async function submitMrvDeployPayloadTransaction(
   args: SubmitMrvDeployPayloadTransactionArgs,
 ): Promise<MrvDeployPayloadSubmission> {
   const prepared = await prepareDeployPayloadPlan(args);
-  if (args.private === true) {
-    // Opt-in encrypted lane (not live on-chain yet — dev-gated in the UI).
-    const envelope = await buildEnvelopePreview(prepared.client, prepared.backend, prepared.rawPlan.tx, args);
-    const txHash = await submitEncryptedEnvelope(prepared.client, envelope.envelopeWireHex);
-    return { ...prepared.appPlan, ...envelope.preview, txHash, wasPrivate: true };
-  }
-  // Default: plaintext `mesh_submitTx` (the confirming path). The same native tx
-  // — extensions included — is signed + submitted, just without the envelope.
+  // Plaintext `mesh_submitTx` (the confirming path). The native tx —
+  // extensions included — is signed + submitted.
   const txHash = await submitTransactionWithPrivacy({
     client: prepared.client,
     backend: prepared.backend,
     tx: prepared.rawPlan.tx,
     private: false,
   });
-  return { ...prepared.appPlan, txHash, wasPrivate: false };
+  return { ...prepared.appPlan, txHash };
 }
 
 export async function submitMrvCallTransaction(
   args: SubmitMrvCallTransactionArgs,
 ): Promise<MrvCallSubmission> {
   const prepared = await prepareCallPlan(args);
-  if (args.private === true) {
-    // Opt-in encrypted lane (not live on-chain yet — dev-gated in the UI).
-    const envelope = await buildEnvelopePreview(prepared.client, prepared.backend, prepared.rawPlan.tx, args);
-    const txHash = await submitEncryptedEnvelope(prepared.client, envelope.envelopeWireHex);
-    return { ...prepared.appPlan, ...envelope.preview, txHash, wasPrivate: true };
-  }
-  // Default: plaintext `mesh_submitTx` (the confirming path).
+  // Plaintext `mesh_submitTx` (the confirming path).
   const txHash = await submitTransactionWithPrivacy({
     client: prepared.client,
     backend: prepared.backend,
     tx: prepared.rawPlan.tx,
     private: false,
   });
-  return { ...prepared.appPlan, txHash, wasPrivate: false };
+  return { ...prepared.appPlan, txHash };
 }
 
 export function normalizeMrvContractAddress(address: string): string {
@@ -369,29 +295,6 @@ async function resolveNativeContext(
   };
 }
 
-async function buildEnvelopePreview(
-  client: RpcClient,
-  backend: MlDsa65Backend,
-  tx: NativeEvmTxFields,
-  args: MrvEncryptedArgs,
-): Promise<{ envelopeWireHex: string; preview: MrvEnvelopePreview }> {
-  const encrypted = await buildEncryptedSubmission({
-    backend,
-    tx,
-    encryptionKey: args.encryptionKey ?? (await fetchEncryptionKey(client)),
-    class: args.class,
-  });
-  return {
-    envelopeWireHex: encrypted.envelopeWireHex,
-    preview: {
-      innerSighashHex: encrypted.innerSighashHex,
-      innerTxHashHex: encrypted.innerTxHashHex,
-      innerWireBytes: encrypted.innerWireBytes,
-      envelopeWireBytes: hexByteLength(encrypted.envelopeWireHex),
-    },
-  };
-}
-
 function resolveArtifact(args: {
   artifactBytes: MrvBytesLike;
   artifactMetadata?: MrvArtifactMetadata;
@@ -507,8 +410,4 @@ function normalizeInteger(field: string, value: IntegerLike): bigint {
     throw new MrvValidationError(`${field} must be a canonical decimal integer`);
   }
   return BigInt(value);
-}
-
-function hexByteLength(hex: string): number {
-  return hex.startsWith("0x") ? (hex.length - 2) / 2 : hex.length / 2;
 }
