@@ -7,11 +7,9 @@ vi.mock("@tauri-apps/api/core", () => ({
   invoke: (cmd: string, args?: unknown) => invoke(cmd, args),
 }));
 
-import {
-  generatePqm1Mnemonic,
-  pqm1MnemonicToPayload,
-  pqm1PayloadToMnemonic,
-} from "@monolythium/core-sdk/crypto";
+import { generateMnemonic } from "@monolythium/core-sdk/crypto";
+import { entropyToMnemonic, mnemonicToEntropy } from "@scure/bip39";
+import { wordlist } from "@scure/bip39/wordlists/english.js";
 import {
   createAndStoreVault,
   fetchAndUnlockVault,
@@ -23,9 +21,9 @@ beforeEach(() => {
 });
 
 describe("createAndStoreVault seals a v2 vault with the recovery payload", () => {
-  it("passes the seed and the matching 32-byte PQM-1 payload to vault_seal_v2", async () => {
-    const mnemonic = generatePqm1Mnemonic();
-    const expectedPayload = Array.from(pqm1MnemonicToPayload(mnemonic).bytes);
+  it("passes the seed and the matching 32-byte BIP-39 entropy to vault_seal_v2", async () => {
+    const mnemonic = generateMnemonic();
+    const expectedPayload = Array.from(mnemonicToEntropy(mnemonic, wordlist));
 
     const calls: Record<string, any> = {};
     invoke.mockImplementation(async (cmd: string, args: unknown) => {
@@ -75,8 +73,8 @@ describe("fetchAndUnlockVault keeps the signing contract", () => {
 
 describe("revealRecoveryPhrase", () => {
   it("maps a returned payload back to the exact 24-word phrase", async () => {
-    const mnemonic = generatePqm1Mnemonic();
-    const payload = Array.from(pqm1MnemonicToPayload(mnemonic).bytes);
+    const mnemonic = generateMnemonic();
+    const payload = Array.from(mnemonicToEntropy(mnemonic, wordlist));
     invoke.mockImplementation(async (cmd: string) => {
       if (cmd === "keychain_unlock") return [1, 2, 3];
       if (cmd === "vault_reveal") return { kind: "payload", payload };
@@ -85,7 +83,7 @@ describe("revealRecoveryPhrase", () => {
 
     const out = await revealRecoveryPhrase("kc:test:v1", "pw");
     expect(out.revealable).toBe(true);
-    // Round-trip: the SDK re-encodes the payload to the original phrase.
+    // Round-trip: the BIP-39 entropy re-encodes to the original phrase.
     expect(out.mnemonic).toBe(mnemonic);
   });
 
@@ -101,9 +99,9 @@ describe("revealRecoveryPhrase", () => {
     expect(out.mnemonic).toBeUndefined();
   });
 
-  it("sanity: payload re-encodes to the same phrase the SDK derived", () => {
-    const mnemonic = generatePqm1Mnemonic();
-    const payload = pqm1MnemonicToPayload(mnemonic).bytes;
-    expect(pqm1PayloadToMnemonic(payload)).toBe(mnemonic);
+  it("sanity: BIP-39 entropy re-encodes to the same phrase", () => {
+    const mnemonic = generateMnemonic();
+    const payload = mnemonicToEntropy(mnemonic, wordlist);
+    expect(entropyToMnemonic(payload, wordlist)).toBe(mnemonic);
   });
 });

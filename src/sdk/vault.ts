@@ -71,7 +71,7 @@ export async function createVault(password: string): Promise<Uint8Array> {
 
 /**
  * Seal a caller-provided 32-byte seed. New wallet creation uses this after
- * deriving the seed from a PQM-1 mnemonic in the TypeScript SDK.
+ * deriving the seed from a BIP-39 mnemonic in the TypeScript SDK.
  */
 export async function createVaultFromSeed(password: string, seed: Uint8Array): Promise<Uint8Array> {
   if (!password) {
@@ -112,7 +112,7 @@ export async function unlockVault(password: string, blob: Uint8Array): Promise<U
 }
 
 /**
- * Seal a 32-byte seed and, optionally, the 32-byte PQM-1 payload that makes
+ * Seal a 32-byte seed and, optionally, the 32-byte BIP-39 entropy that makes
  * the recovery phrase revealable. New wallet creation / import uses this:
  * pass the payload to get a reveal-capable vault, or `null` for seed-only.
  */
@@ -142,7 +142,7 @@ export async function createVaultV2(
   }
 }
 
-/** Outcome of `vault_reveal`: either the 32-byte PQM-1 payload, or a signal
+/** Outcome of `vault_reveal`: either the 32-byte BIP-39 entropy payload, or a signal
  *  that the vault was sealed without one (seed-only → no phrase to show).
  *  Shape matches the Rust `RevealResult` (serde `kind` discriminator). */
 export type RevealResult =

@@ -117,7 +117,7 @@ export function Settings({ developerModeEnabled, setDeveloperModeEnabled, steleE
             <div>
               <div className="row-label">Recovery phrase</div>
               <div className="row-help">
-                Show your 24-word PQM-1 recovery phrase — the only way to restore
+                Show your 24-word recovery phrase — the only way to restore
                 this wallet on another device. Anyone who has these words controls
                 the wallet, so reveal them only where no one can see.
               </div>

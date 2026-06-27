@@ -14,12 +14,18 @@
 import { invoke } from "@tauri-apps/api/core";
 import {
   MlDsa65Backend,
-  generatePqm1Mnemonic,
-  pqm1MnemonicToMlDsa65Seed,
-  pqm1MnemonicToPayload,
-  pqm1PayloadToMnemonic,
+  generateMnemonic,
+  mnemonicToMlDsa65Seed,
 } from "@monolythium/core-sdk/crypto";
+import { entropyToMnemonic, mnemonicToEntropy } from "@scure/bip39";
+import { wordlist } from "@scure/bip39/wordlists/english.js";
 import { createVaultV2, revealVault, unlockVault, VaultCallError } from "./vault";
+
+/** Trim, lowercase, and collapse internal whitespace so the mnemonic matches
+ *  the form the SDK derives the seed from and the BIP-39 wordlist expects. */
+function normalizeMnemonic(mnemonic: string): string {
+  return mnemonic.trim().toLowerCase().replace(/\s+/g, " ");
+}
 
 /** Legacy / first-install slot. New vaults mint fresh slot ids via
  *  `mintVaultSlot()` in vaultCatalog.ts; this constant stays as the
@@ -130,16 +136,16 @@ export async function deleteAccount(account: string): Promise<void> {
 }
 
 export interface CreateVaultOptions {
-  /** Import an existing PQM-1 v1 mnemonic instead of generating one.
-   *  pqm1MnemonicToMlDsa65Seed validates algo + version tags + word
-   *  count; non-PQM-1-v1 phrases throw before any vault is created. */
+  /** Import an existing 24-word BIP-39 recovery phrase instead of generating
+   *  one. mnemonicToMlDsa65Seed validates the word count + BIP-39 checksum;
+   *  invalid phrases throw before any vault is created. */
   importMnemonic?: string;
 }
 
 /**
- * Onboarding helper: generate a fresh PQM-1 mnemonic (or accept an
- * imported one), derive the ML-DSA-65 seed in the TypeScript SDK, then
- * persist an Argon2id-protected vault. The reversible PQM-1 payload is
+ * Onboarding helper: generate a fresh 24-word BIP-39 recovery phrase (or
+ * accept an imported one), derive the ML-DSA-65 seed in the TypeScript SDK,
+ * then persist an Argon2id-protected vault. The reversible BIP-39 entropy is
  * sealed beside the seed so the phrase can later be revealed in-app.
  * Returns the mnemonic + the 20-byte address (`0x…`) the seed maps to so
  * callers can show + verify the phrase AND register the vault in the
@@ -151,10 +157,12 @@ export async function createAndStoreVault(
   options: CreateVaultOptions = {},
 ): Promise<{ mnemonic: string; addressHex: string }> {
   const mnemonic = options.importMnemonic
-    ? options.importMnemonic.trim()
-    : generatePqm1Mnemonic();
-  const seed = pqm1MnemonicToMlDsa65Seed(mnemonic);
-  const payload = pqm1MnemonicToPayload(mnemonic).bytes;
+    ? normalizeMnemonic(options.importMnemonic)
+    : generateMnemonic();
+  const seed = mnemonicToMlDsa65Seed(mnemonic);
+  // The recovery payload is the standard 32-byte BIP-39 entropy backing the
+  // 24-word phrase — re-encoding it reproduces the exact mnemonic on reveal.
+  const payload = mnemonicToEntropy(mnemonic, wordlist);
   let addressHex: string;
   try {
     const backend = MlDsa65Backend.fromSeed(seed);
@@ -191,7 +199,7 @@ export async function revealRecoveryPhrase(
   if (result.kind === "payload") {
     const payload = Uint8Array.from(result.payload);
     try {
-      return { revealable: true, mnemonic: pqm1PayloadToMnemonic(payload) };
+      return { revealable: true, mnemonic: entropyToMnemonic(payload, wordlist) };
     } finally {
       payload.fill(0);
       result.payload.fill(0);

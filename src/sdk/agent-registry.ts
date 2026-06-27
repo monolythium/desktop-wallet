@@ -1,5 +1,5 @@
 // Agent sub-account registry — tracks which keychain slots are §18.8 agent
-// sub-accounts (a fresh PQM-1 keypair the principal controls), separate
+// sub-accounts (a fresh ML-DSA-65 keypair the principal controls), separate
 // from the main wallet vault catalog.
 //
 // We keep this out of `vaultCatalog.ts` on purpose: agent sub-accounts are

@@ -1,6 +1,6 @@
 // Agents page — §18.8 agent sub-account + spending-policy surface.
 //
-// An agent sub-account is a fresh PQM-1 / ML-DSA-65 keypair the principal
+// An agent sub-account is a fresh ML-DSA-65 keypair the principal
 // wallet controls. Lifecycle:
 //
 //   create   — mint the agent vault (its own seed); show the mnemonic once.
