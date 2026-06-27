@@ -359,7 +359,13 @@ async function resolveNativeContext(
     nonce,
     executionUnitLimit: normalizeU64("executionUnitLimit", args.executionUnitLimit),
     maxExecutionFeeLythoshi,
-    priorityTipLythoshi: normalizeLythoshi("priorityTipLythoshi", args.priorityTipLythoshi ?? 0n),
+    priorityTipLythoshi: normalizeLythoshi(
+      "priorityTipLythoshi",
+      // Default to the 1 gwei mempool priority-tip floor — a tip of 0n is
+      // rejected at admission with -32047, so MRV deploy/call with no explicit
+      // tip always failed.
+      args.priorityTipLythoshi ?? 1_000_000_000n,
+    ),
   };
 }
 
