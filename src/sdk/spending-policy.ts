@@ -11,7 +11,7 @@
 // two-key dance — the SUB-ACCOUNT signs `composeClaimBoundMessage(chainId,
 // args)` with its OWN ML-DSA-65 key (pubkey 1952B + signature 3309B
 // appended to the calldata), and the PRINCIPAL signs + submits the outer
-// encrypted tx. `setPolicy` (no-claim) is documented re-claim-only and
+// tx. `setPolicy` (no-claim) is documented re-claim-only and
 // would be rejected on a fresh sub-account.
 //
 // The precompile is GATEABLE on the connected network — a register /

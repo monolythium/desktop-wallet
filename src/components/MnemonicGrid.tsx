@@ -17,7 +17,7 @@ const CLEAR_AFTER_MS = 30_000;
 const FEEDBACK_RESET_MS = 3_000;
 
 /**
- * Two-column 24-word grid for PQM-1 recovery phrase display. Splits on
+ * Two-column 24-word grid for recovery phrase display. Splits on
  * whitespace internally; callers pass the raw mnemonic string. The
  * optional Copy-to-clipboard button mirrors the on-screen layout
  * ("1.word 2.word ... 24.word") and auto-clears 30 s after copy.

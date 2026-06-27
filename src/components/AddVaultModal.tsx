@@ -3,7 +3,7 @@
 // Mounts a single modal that collects:
 //   - a user-facing name
 //   - a password (with confirm; same strength policy as onboarding)
-//   - a mode: Create (fresh PQM-1 mnemonic) or Import (paste a phrase)
+//   - a mode: Create (fresh BIP-39 mnemonic) or Import (paste a phrase)
 //
 // On submit it mints a fresh keychain slot via mintVaultSlot,
 // createAndStoreVault writes the encrypted blob, then registerVault
@@ -18,6 +18,7 @@ import {
 } from "../sdk/keychain";
 import { VaultCallError } from "../sdk/vault";
 import { explainImportError } from "../lib/import-error";
+import { validateMnemonic } from "@monolythium/core-sdk/crypto";
 import {
   mintVaultSlot,
   registerVault,
@@ -35,7 +36,7 @@ interface Props {
 type Mode = "create" | "import";
 type Stage = "compose" | "show-phrase";
 
-const PQM1_WORDS = 24;
+const RECOVERY_WORDS = 24;
 
 export function AddVaultModal({ onClose, onAdded }: Props) {
   const [stage, setStage] = useState<Stage>("compose");
@@ -73,9 +74,16 @@ export function AddVaultModal({ onClose, onAdded }: Props) {
     if (mode === "import") {
       const cleaned = importDraft.trim().split(/\s+/).join(" ").toLowerCase();
       const wordCount = cleaned.split(/\s+/).filter(Boolean).length;
-      if (wordCount !== PQM1_WORDS) {
+      if (wordCount !== RECOVERY_WORDS) {
         setError(
-          `Expected ${PQM1_WORDS} words, got ${wordCount}. PQM-1 v1 phrases are exactly 24 words.`,
+          `Expected ${RECOVERY_WORDS} words, got ${wordCount}. Recovery phrases are exactly 24 words.`,
+        );
+        setBusy(false);
+        return;
+      }
+      if (!validateMnemonic(cleaned)) {
+        setError(
+          "Invalid recovery phrase — one or more words aren't in the BIP-39 wordlist, or the checksum is wrong. Check for typos.",
         );
         setBusy(false);
         return;
@@ -162,7 +170,7 @@ export function AddVaultModal({ onClose, onAdded }: Props) {
                 lineHeight: 1.55,
               }}
             >
-              Write down or copy this PQM-1 phrase. It will not be shown
+              Write down or copy this recovery phrase. It will not be shown
               again — the only way to recover this wallet later is from
               these 24 words.
             </p>

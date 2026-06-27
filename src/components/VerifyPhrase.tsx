@@ -182,7 +182,7 @@ export function VerifyPhrase({
               maxWidth: 320,
             }}
           >
-            Double-check your 24-word PQM-1 recovery phrase and try again.
+            Double-check your 24-word recovery phrase and try again.
             We&apos;ll show you a fresh set of positions so the attempt is
             fair.
           </p>

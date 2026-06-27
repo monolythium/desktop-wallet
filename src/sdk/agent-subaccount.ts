@@ -1,10 +1,10 @@
 // Agent sub-account lifecycle seam (WP §18.8).
 //
-// An "agent sub-account" is a SECOND PQM-1 / ML-DSA-65 keypair the
+// An "agent sub-account" is a SECOND ML-DSA-65 keypair the
 // principal wallet controls — a fresh vault slot, not a derivation of the
 // principal. Its lifecycle:
 //
-//   1. create  — mint a fresh PQM-1 mnemonic + ML-DSA-65 seed in its own
+//   1. create  — mint a fresh BIP-39 mnemonic + ML-DSA-65 seed in its own
 //                 keychain slot (reuses `keychain.createAndStoreVault`).
 //   2. fund    — an ORDINARY native LYTH transfer from the principal to the
 //                 sub-account address (reuses `native-send.sendNativeLyth`).
@@ -27,7 +27,7 @@ import type { SpendingPolicyArgs } from "@monolythium/core-sdk";
 export interface CreateAgentSubAccountResult {
   /** Keychain slot the fresh agent vault lives under. */
   slot: string;
-  /** The fresh PQM-1 mnemonic (show + back up once, never persisted plain). */
+  /** The fresh BIP-39 mnemonic (show + back up once, never persisted plain). */
   mnemonic: string;
   /** Internal 20-byte address (`0x…`). */
   addressHex: string;
@@ -36,7 +36,7 @@ export interface CreateAgentSubAccountResult {
 }
 
 /**
- * Mint a fresh agent sub-account: a brand-new PQM-1 mnemonic + ML-DSA-65
+ * Mint a fresh agent sub-account: a brand-new BIP-39 mnemonic + ML-DSA-65
  * seed under a freshly-minted keychain slot. The principal controls it (it
  * is a separate key the user owns), but it carries its own seed so it can
  * sign the §18.8 policy claim. The caller is responsible for registering

@@ -1,15 +1,12 @@
 // Native Monolythium send path.
 //
-// Routes through the shared `submitNativeTx` seam, which
-// submits PLAINTEXT by default via `submitTransactionWithPrivacy({ private:
-// false })` → `mesh_submitTx` (the inclusion path that actually confirms on
-// the live optional-encryption chain). Pass `private: true` to engage the
-// encrypted preview path — but threshold-encrypted inclusion is NOT live yet,
-// so only the Send screen's preview-gated toggle should ever set it.
+// Routes through the shared `submitNativeTx` seam, which submits PLAINTEXT via
+// `submitTransaction` → `mesh_submitTx` (the inclusion path that confirms on
+// the chain).
 //
-// The SDK owns signing, native tx bincode, the plaintext/encrypted submit
-// fork, and sane fee defaults (we no longer hardcode an execution-unit limit
-// — the transfer default ~100k + clamped tip comes from the SDK).
+// The SDK owns signing, native tx bincode, and sane fee defaults (we no longer
+// hardcode an execution-unit limit — the transfer default ~100k + clamped tip
+// comes from the SDK).
 
 import {
   addressToTypedBech32,
@@ -26,12 +23,6 @@ export interface SendNativeLythArgs {
   to: string;
   amountLyth: string;
   executionUnitLimit?: bigint;
-  /**
-   * Privacy posture. DEFAULT FALSE = plaintext (the confirming path). TRUE
-   * routes through the encrypted PREVIEW path (not live for inclusion yet) —
-   * only the preview-gated Send toggle should pass true.
-   */
-  private?: boolean;
 }
 
 export interface SendNativeLythResult {
@@ -39,8 +30,6 @@ export interface SendNativeLythResult {
   from: string;
   amountLythoshi: string;
   amountDisplay: string;
-  /** True if this went through the encrypted (preview) path. */
-  wasPrivate: boolean;
 }
 
 export interface NativeLythTransferPlanArgs {
@@ -97,7 +86,6 @@ export async function sendNativeLyth(args: SendNativeLythArgs): Promise<SendNati
     ...(args.executionUnitLimit === undefined
       ? {}
       : { executionUnitLimit: args.executionUnitLimit }),
-    private: args.private === true,
   });
 
   return {
@@ -105,6 +93,5 @@ export async function sendNativeLyth(args: SendNativeLythArgs): Promise<SendNati
     from: addressToTypedBech32("user", result.fromHex),
     amountLythoshi,
     amountDisplay: formatLyth(amountLythoshi, { includeUnit: false }),
-    wasPrivate: result.wasPrivate,
   };
 }

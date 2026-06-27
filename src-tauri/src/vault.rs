@@ -9,8 +9,8 @@
 // Two pieces of secret material can be sealed together:
 //   - the 32-byte ML-DSA-65 keygen seed (always present) — what every unlock
 //     returns and what signing consumes; and
-//   - the 32-byte PQM-1 payload (the reversible BIP-39 entropy) — present for
-//     wallets created or imported in-app, and what powers "Show recovery
+//   - the 32-byte BIP-39 entropy (the reversible recovery payload) — present
+//     for wallets created or imported in-app, and what powers "Show recovery
 //     phrase". A vault sealed without it simply cannot reveal a phrase.
 //
 //   seal:    password → argon2id → KEK
@@ -78,7 +78,7 @@ const VAULT_AAD: &[u8] = b"monolythium.vault.v2";
 /// Seed length in bytes (the ML-DSA-65 keygen seed).
 const SEED_LEN: usize = 32;
 
-/// PQM-1 payload length in bytes (the reversible BIP-39 entropy).
+/// Recovery payload length in bytes (the reversible 32-byte BIP-39 entropy).
 const PAYLOAD_LEN: usize = 32;
 
 /// Salt length in bytes. 16 bytes is the OWASP-recommended minimum for
@@ -90,7 +90,7 @@ const XNONCE_LEN: usize = 24;
 
 /// `secret_kind` byte: only the seed is sealed (no recovery phrase to reveal).
 const KIND_SEED_ONLY: u8 = 0x01;
-/// `secret_kind` byte: seed followed by the 32-byte PQM-1 payload (revealable).
+/// `secret_kind` byte: seed followed by the 32-byte BIP-39 entropy (revealable).
 const KIND_SEED_AND_PAYLOAD: u8 = 0x02;
 
 /// OWASP 2024 Argon2id parameters (desktop tier). Memory cost is in KiB, so
@@ -186,8 +186,8 @@ pub enum VaultError {
     Backend { message: String },
 }
 
-/// Outcome of a `vault_reveal` call. `Payload` carries the 32-byte PQM-1
-/// payload (the reversible BIP-39 entropy); `NoRecoveryMaterial` means the
+/// Outcome of a `vault_reveal` call. `Payload` carries the 32-byte BIP-39
+/// entropy (the reversible recovery payload); `NoRecoveryMaterial` means the
 /// vault was sealed seed-only and has no phrase to show. Serialized with a
 /// `kind` discriminator so the TS side gets `{ kind: "payload", payload }` or
 /// `{ kind: "no_recovery_material" }`.
@@ -202,7 +202,7 @@ pub enum RevealResult {
 /// serialized JSON bytes the caller persists in the OS keychain.
 ///
 /// Kept for compatibility with older UI code. New wallet creation generates a
-/// PQM-1 mnemonic in TypeScript, derives the ML-DSA-65 seed via
+/// BIP-39 mnemonic in TypeScript, derives the ML-DSA-65 seed via
 /// `@monolythium/core-sdk/crypto`, and calls `vault_seal_v2` with the payload.
 #[tauri::command]
 pub fn vault_create(password: String) -> Result<Vec<u8>, VaultError> {
@@ -247,9 +247,9 @@ pub fn vault_seal_seed(password: String, seed_bytes: Vec<u8>) -> Result<Vec<u8>,
     result
 }
 
-/// Seal a 32-byte seed and, optionally, the 32-byte PQM-1 payload that makes
-/// the recovery phrase revealable. This is the path PQM-1 wallet creation /
-/// import uses: TypeScript owns mnemonic generation + KDF, Rust owns password
+/// Seal a 32-byte seed and, optionally, the 32-byte BIP-39 entropy that makes
+/// the recovery phrase revealable. This is the path wallet creation / import
+/// uses: TypeScript owns mnemonic generation + KDF, Rust owns password
 /// encryption and OS-safe storage.
 #[tauri::command]
 pub fn vault_seal_v2(
@@ -433,8 +433,9 @@ fn decrypt_v2(password: &[u8], blob_bytes: &[u8]) -> Result<Zeroizing<Vec<u8>>, 
     })?;
 
     if blob.version != VAULT_VERSION {
-        // Not a lockout in practice: PQM-1 is deterministic, so re-importing
-        // the 24-word phrase reproduces the same wallet. Give a clear cue.
+        // Not a lockout in practice: derivation is deterministic, so
+        // re-importing the 24-word phrase reproduces the same wallet. Give a
+        // clear cue.
         return Err(VaultError::Backend {
             message: format!(
                 "This vault uses an older, unsupported format (v{}). Re-import your 24-word recovery phrase to use it with this version.",
@@ -541,11 +542,9 @@ mod tests {
     }
 
     fn sample_payload() -> [u8; PAYLOAD_LEN] {
-        // [algo 0x01][version 0x01][30 bytes entropy] — shape only; opaque here.
+        // 32 bytes of opaque BIP-39 entropy — the vault treats it as bytes.
         let mut p = [0u8; PAYLOAD_LEN];
-        p[0] = 0x01;
-        p[1] = 0x01;
-        for (i, b) in p.iter_mut().enumerate().skip(2) {
+        for (i, b) in p.iter_mut().enumerate() {
             *b = i as u8;
         }
         p

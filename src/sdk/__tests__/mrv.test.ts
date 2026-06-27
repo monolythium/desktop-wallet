@@ -6,11 +6,7 @@ import {
   mrvCodeHashHex,
 } from "@monolythium/core-sdk";
 import type { MrvArtifactMetadata } from "@monolythium/core-sdk";
-import {
-  ML_DSA_65_SEED_LEN,
-  ML_KEM_768_ENCAPSULATION_KEY_LEN,
-  bytesToHex,
-} from "@monolythium/core-sdk/crypto";
+import { ML_DSA_65_SEED_LEN } from "@monolythium/core-sdk/crypto";
 import {
   buildMrvCallTransactionPlan,
   buildMrvDeployPayloadTransactionPlan,
@@ -65,15 +61,11 @@ function mockRpc(options: {
 } = {}): {
   client: RpcClient;
   calls: CapturedCall[];
-  submittedEnvelopes: string[];
 } {
   const calls: CapturedCall[] = [];
-  const submittedEnvelopes: string[] = [];
   let nonce = options.nonce ?? 7n;
-  let submitCount = 0;
   const chainId = options.chainId ?? 69_420n;
   const executionFee = options.executionFee ?? 25n;
-  const encryptionKey = new Uint8Array(ML_KEM_768_ENCAPSULATION_KEY_LEN).fill(0x33);
 
   const fetchStub: typeof fetch = async (_url, init) => {
     if (typeof init?.body !== "string") {
@@ -106,18 +98,6 @@ function mockRpc(options: {
           source: "test",
         };
         break;
-      case "lyth_getEncryptionKey":
-        result = {
-          algo: "ml-kem-768",
-          epoch: "9",
-          encapsulationKey: bytesToHex(encryptionKey),
-        };
-        break;
-      case "lyth_submitEncrypted":
-        submittedEnvelopes.push(params[0] as string);
-        result = submitCount === 0 ? `0x${"aa".repeat(32)}` : `0x${"bb".repeat(32)}`;
-        submitCount += 1;
-        break;
       case "mesh_submitTx":
         // Plaintext submission path (the default). Echo a canonical-looking hash.
         result = `0x${"cc".repeat(32)}`;
@@ -142,7 +122,6 @@ function mockRpc(options: {
   return {
     client: new RpcClient("http://test.invalid", { fetch: fetchStub }),
     calls,
-    submittedEnvelopes,
   };
 }
 
@@ -180,7 +159,9 @@ describe("MRV desktop-wallet SDK layer", () => {
       valueLythoshi: "1250000000000000000",
       executionUnitLimit: 100_000n,
       maxExecutionFeeLythoshi: "25",
-      priorityTipLythoshi: "0",
+      // No explicit tip → SDK defaults to the 1 gwei mempool priority-tip floor
+      // (fix #6/#7) so a no-tip deploy is admissible.
+      priorityTipLythoshi: "1000000000",
     });
     expect(plan.feePreview).toEqual({
       totalLythoshi: "25",
@@ -188,7 +169,7 @@ describe("MRV desktop-wallet SDK layer", () => {
       cyclesUsed: 100_000n,
       executionUnitLimit: 100_000n,
       maxExecutionFeeLythoshi: "25",
-      priorityTipLythoshi: "0",
+      priorityTipLythoshi: "1000000000",
     });
     expect("tx" in plan).toBe(false);
     expect(appJson(plan)).not.toMatch(/\b(gas|gwei|wei)\b/i);
@@ -252,13 +233,12 @@ describe("MRV desktop-wallet SDK layer", () => {
     expect(calls).toHaveLength(0);
   });
 
-  it("DEFAULTS to plaintext (mesh_submitTx) for deploy + call — never fetches the cluster seal roster", async () => {
-    // Encryption is opt-in + costs more; the default MRV deploy/call goes
-    // PLAINTEXT via mesh_submitTx (the confirming path) and must NOT touch the
-    // cluster seal roster or the encrypted submit. The mock echoes a placeholder
-    // hash, so the SDK's canonical-hash echo check rejects — which is exactly the
-    // proof the PLAINTEXT submit ran (it computed a real hash and posted
-    // mesh_submitTx), not the seal-keys gate. We assert on the route taken.
+  it("submits plaintext (mesh_submitTx) for deploy + call — never an encrypted lane", async () => {
+    // The encrypted mempool was removed; MRV deploy/call go PLAINTEXT via
+    // mesh_submitTx (the confirming path). The mock echoes a placeholder hash,
+    // so the SDK's canonical-hash echo check rejects — which is exactly the proof
+    // the PLAINTEXT submit ran (it computed a real hash and posted mesh_submitTx).
+    // We assert on the route taken.
     const deploy = mockRpc({ nonce: 21n });
     await expect(
       submitMrvDeployPayloadTransaction({
@@ -273,7 +253,6 @@ describe("MRV desktop-wallet SDK layer", () => {
     expect(deploy.calls.some((c) => c.method === "mesh_submitTx")).toBe(true);
     expect(deploy.calls.some((c) => c.method === "lyth_getClusterSealKeys")).toBe(false);
     expect(deploy.calls.some((c) => c.method === "lyth_submitEncrypted")).toBe(false);
-    expect(deploy.submittedEnvelopes).toHaveLength(0);
 
     const call = mockRpc({ nonce: 21n });
     await expect(
@@ -290,37 +269,5 @@ describe("MRV desktop-wallet SDK layer", () => {
     expect(call.calls.some((c) => c.method === "mesh_submitTx")).toBe(true);
     expect(call.calls.some((c) => c.method === "lyth_getClusterSealKeys")).toBe(false);
     expect(call.calls.some((c) => c.method === "lyth_submitEncrypted")).toBe(false);
-  });
-
-  it("refuses the OPT-IN private deploy + call submission without cluster seal keys", async () => {
-    // The opt-in private path (private: true) still requires the cluster seal
-    // roster; without it the wallet surfaces the missing-key gate instead of
-    // emitting an envelope the active cluster cannot open.
-    const { client } = mockRpc({ nonce: 21n });
-
-    await expect(
-      submitMrvDeployPayloadTransaction({
-        client,
-        seed: seed(),
-        artifactBytes: CODE,
-        constructorInput: "0x0102",
-        executionUnitLimit: 100_000n,
-        maxExecutionFeeLythoshi: "25",
-        private: true,
-      }),
-    ).rejects.toThrow(/private submission requires cluster seal keys/);
-
-    await expect(
-      submitMrvCallTransaction({
-        client,
-        seed: seed(),
-        contractAddress: CONTRACT_HEX,
-        input: "0x0102",
-        valueLythoshi: "3",
-        executionUnitLimit: 50_000n,
-        maxExecutionFeeLythoshi: "10",
-        private: true,
-      }),
-    ).rejects.toThrow(/private submission requires cluster seal keys/);
   });
 });

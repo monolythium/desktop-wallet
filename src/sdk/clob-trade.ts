@@ -5,12 +5,7 @@
 // calldata against the CLOB precompile (`0x1001`), then submits through the
 // shared `submitNativeTx` seam.
 //
-// PLAINTEXT by default (`mesh_submitTx`) — the path that confirms. Encryption is
-// OPTIONAL and costs more; the encrypted mempool is never mandatory and
-// threshold-encrypted INCLUSION is not live on-chain yet, so a CLOB order is
-// never forced through the encrypted path. The `private` opt-in is wired through
-// to the SDK for when inclusion goes live (gate it behind Developer Mode in the
-// UI, like the native send); leaving it unset sends plaintext.
+// Submits PLAINTEXT via `mesh_submitTx` — the path that confirms on the chain.
 
 import {
   CLOB_SELECTORS,
@@ -44,19 +39,12 @@ export interface PlaceClobLimitOrderArgs {
   /** Optional execution-unit limit override; defaults to a value sized for
    *  a typical place + cross + escrow + (one or two) fills. */
   executionUnitLimit?: bigint;
-  /** Opt into the encrypted-mempool (private) lane. DEFAULT FALSE = plaintext
-   *  `mesh_submitTx`, the path that confirms. Encryption costs more and is never
-   *  mandatory; encrypted inclusion isn't live yet, so gate this behind
-   *  Developer Mode. */
-  private?: boolean;
 }
 
 export interface PlaceClobLimitOrderResult {
   txHash: string;
   from: string;
   calldataBytes: number;
-  /** True if this went through the encrypted (preview) path. */
-  wasPrivate: boolean;
 }
 
 export async function placeClobLimitOrder(
@@ -79,14 +67,12 @@ export async function placeClobLimitOrder(
     input: calldataHex,
     executionUnitLimit:
       args.executionUnitLimit ?? SPOT_LIMIT_ORDER_EXECUTION_UNIT_LIMIT,
-    private: args.private === true,
   });
 
   return {
     txHash: result.txHash,
     from: addressToTypedBech32("user", result.fromHex),
     calldataBytes: (calldataHex.length - 2) / 2,
-    wasPrivate: result.wasPrivate,
   };
 }
 
@@ -99,16 +85,12 @@ export interface CancelClobOrderArgs {
   /** 32-byte order id (`0x…`). */
   orderIdHex: string;
   executionUnitLimit?: bigint;
-  /** Opt into the encrypted-mempool (private) lane. DEFAULT FALSE = plaintext.
-   *  See {@link PlaceClobLimitOrderArgs.private}. */
-  private?: boolean;
 }
 
 export interface CancelClobOrderResult {
   txHash: string;
   from: string;
   calldataBytes: number;
-  wasPrivate: boolean;
 }
 
 export async function cancelClobOrder(
@@ -121,14 +103,12 @@ export async function cancelClobOrder(
     to: PRECOMPILE_ADDRESSES.CLOB,
     input: calldataHex,
     executionUnitLimit: args.executionUnitLimit ?? CLOB_CANCEL_EXECUTION_UNIT_LIMIT,
-    private: args.private === true,
   });
 
   return {
     txHash: result.txHash,
     from: addressToTypedBech32("user", result.fromHex),
     calldataBytes: (calldataHex.length - 2) / 2,
-    wasPrivate: result.wasPrivate,
   };
 }
 

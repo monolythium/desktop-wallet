@@ -307,7 +307,7 @@ mod tests {
                 "name": "agent-bot.agent.alice.mono",
                 "address": "monos1xyz",
                 "publicKey": "abc",
-                "algorithm": "PQM1-MLDSA65",
+                "algorithm": "ML-DSA-65",
                 "keyProtection": "local_machine_key",
                 "createdAt": "2026-05-23T17:00:00Z",
                 "encryptedMnemonic": { "cipher": "aes-256-gcm" },
