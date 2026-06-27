@@ -31,7 +31,7 @@ import type {
 } from "@monolythium/core-sdk";
 import {
   MlDsa65Backend,
-  submitTransactionWithPrivacy,
+  submitTransaction,
 } from "@monolythium/core-sdk/crypto";
 import { getProvider } from "./client";
 import { getExecutionUnitPriceLythoshi, getNativeTransactionCount } from "./native-rpc";
@@ -144,11 +144,10 @@ export async function submitMrvDeployPayloadTransaction(
   const prepared = await prepareDeployPayloadPlan(args);
   // Plaintext `mesh_submitTx` (the confirming path). The native tx —
   // extensions included — is signed + submitted.
-  const txHash = await submitTransactionWithPrivacy({
+  const txHash = await submitTransaction({
     client: prepared.client,
     backend: prepared.backend,
     tx: prepared.rawPlan.tx,
-    private: false,
   });
   return { ...prepared.appPlan, txHash };
 }
@@ -158,11 +157,10 @@ export async function submitMrvCallTransaction(
 ): Promise<MrvCallSubmission> {
   const prepared = await prepareCallPlan(args);
   // Plaintext `mesh_submitTx` (the confirming path).
-  const txHash = await submitTransactionWithPrivacy({
+  const txHash = await submitTransaction({
     client: prepared.client,
     backend: prepared.backend,
     tx: prepared.rawPlan.tx,
-    private: false,
   });
   return { ...prepared.appPlan, txHash };
 }

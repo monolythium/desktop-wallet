@@ -159,7 +159,9 @@ describe("MRV desktop-wallet SDK layer", () => {
       valueLythoshi: "1250000000000000000",
       executionUnitLimit: 100_000n,
       maxExecutionFeeLythoshi: "25",
-      priorityTipLythoshi: "0",
+      // No explicit tip → SDK defaults to the 1 gwei mempool priority-tip floor
+      // (fix #6/#7) so a no-tip deploy is admissible.
+      priorityTipLythoshi: "1000000000",
     });
     expect(plan.feePreview).toEqual({
       totalLythoshi: "25",
@@ -167,7 +169,7 @@ describe("MRV desktop-wallet SDK layer", () => {
       cyclesUsed: 100_000n,
       executionUnitLimit: 100_000n,
       maxExecutionFeeLythoshi: "25",
-      priorityTipLythoshi: "0",
+      priorityTipLythoshi: "1000000000",
     });
     expect("tx" in plan).toBe(false);
     expect(appJson(plan)).not.toMatch(/\b(gas|gwei|wei)\b/i);

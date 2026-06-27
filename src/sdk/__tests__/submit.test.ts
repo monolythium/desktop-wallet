@@ -1,13 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // The submit seam's contract: submit is PLAINTEXT. We assert that
-// `submitNativeTx` delegates to the SDK `submitTransactionWithPrivacy` with
-// `private: false` (the `mesh_submitTx` path that confirms on the chain) and
-// never fetches an encryption key — the encrypted mempool was removed.
+// `submitNativeTx` delegates to the SDK `submitTransaction` (the
+// `mesh_submitTx` path that confirms on the chain). The encrypted mempool was
+// removed (DEC-029), so there is no privacy flag and no encryption-key fetch —
+// the SDK no longer exposes either.
 
-// Capture the args every call to the SDK privacy submit receives.
+// Capture the args every call to the SDK plaintext submit receives.
 interface RecordedSubmitArgs {
-  private: boolean;
   tx: {
     gasLimit: bigint;
     maxFeePerGas: bigint;
@@ -17,11 +17,8 @@ interface RecordedSubmitArgs {
     to: string;
   };
 }
-const submitWithPrivacySpy = vi.fn(
+const submitTransactionSpy = vi.fn(
   (_args: RecordedSubmitArgs): Promise<string> => Promise.resolve("0xdeadbeef"),
-);
-const fetchEncryptionKeySpy = vi.fn((): Promise<unknown> =>
-  Promise.resolve({ kind: "encryption-key" }),
 );
 
 vi.mock("@monolythium/core-sdk/crypto", () => ({
@@ -31,9 +28,7 @@ vi.mock("@monolythium/core-sdk/crypto", () => ({
       getAddress: () => "0x000000000000000000000000000000000000abcd",
     }),
   },
-  fetchEncryptionKey: (...a: unknown[]) => fetchEncryptionKeySpy(...(a as [])),
-  submitTransactionWithPrivacy: (args: RecordedSubmitArgs) =>
-    submitWithPrivacySpy(args),
+  submitTransaction: (args: RecordedSubmitArgs) => submitTransactionSpy(args),
 }));
 
 // Stub the fee resolvers + chain id so submit.ts builds a tx without a node.
@@ -76,8 +71,7 @@ const SEED = new Uint8Array(32).fill(7);
 const TO = "0x000000000000000000000000000000000000dead";
 
 beforeEach(() => {
-  submitWithPrivacySpy.mockClear();
-  fetchEncryptionKeySpy.mockClear();
+  submitTransactionSpy.mockClear();
   resetProviderForTest();
   setProviderForTest({
     rpcClient: { endpoint: "http://test/rpc" },
@@ -86,19 +80,16 @@ beforeEach(() => {
 });
 
 describe("submitNativeTx — plaintext path", () => {
-  it("submits PLAINTEXT (private:false) and never fetches the encryption key", async () => {
+  it("submits PLAINTEXT via the SDK submitTransaction seam", async () => {
     const res = await submitNativeTx({ seed: SEED, to: TO, valueLythoshi: 5n });
 
-    expect(submitWithPrivacySpy).toHaveBeenCalledTimes(1);
-    const call = submitWithPrivacySpy.mock.calls[0]![0];
-    expect(call.private).toBe(false);
-    expect(fetchEncryptionKeySpy).not.toHaveBeenCalled();
+    expect(submitTransactionSpy).toHaveBeenCalledTimes(1);
     expect(res.txHash).toBe("0xdeadbeef");
   });
 
   it("uses the SDK transfer fee defaults (no hardcoded limit) by default", async () => {
     await submitNativeTx({ seed: SEED, to: TO });
-    const call = submitWithPrivacySpy.mock.calls[0]![0];
+    const call = submitTransactionSpy.mock.calls[0]![0];
     expect(call.tx.gasLimit).toBe(100_000n);
     // Tip is clamped to the max by the resolver — never exceeds maxFeePerGas.
     expect(call.tx.maxPriorityFeePerGas).toBeLessThanOrEqual(call.tx.maxFeePerGas);
@@ -106,7 +97,7 @@ describe("submitNativeTx — plaintext path", () => {
 
   it("uses the registry fee class default (~250k) for register-class writes", async () => {
     await submitNativeTx({ seed: SEED, to: TO, feeClass: "registry" });
-    const call = submitWithPrivacySpy.mock.calls[0]![0];
+    const call = submitTransactionSpy.mock.calls[0]![0];
     expect(call.tx.gasLimit).toBe(250_000n);
   });
 });

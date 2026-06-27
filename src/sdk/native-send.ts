@@ -1,8 +1,8 @@
 // Native Monolythium send path.
 //
 // Routes through the shared `submitNativeTx` seam, which submits PLAINTEXT via
-// `submitTransactionWithPrivacy({ private: false })` → `mesh_submitTx` (the
-// inclusion path that confirms on the chain).
+// `submitTransaction` → `mesh_submitTx` (the inclusion path that confirms on
+// the chain).
 //
 // The SDK owns signing, native tx bincode, and sane fee defaults (we no longer
 // hardcode an execution-unit limit — the transfer default ~100k + clamped tip

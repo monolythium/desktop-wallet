@@ -5,10 +5,10 @@
 // here so there is exactly ONE place that decides the fee shape.
 //
 // Submission is PLAINTEXT. The function delegates to the SDK
-// `submitTransactionWithPrivacy` with `private: false`, which builds + signs
-// + posts the bincode `SignedTransaction` through `mesh_submitTx` (the node
-// routes it to `MempoolTx::plaintext`). That is the only inclusion path the
-// chain exposes — the encrypted mempool was removed, so there is no longer a
+// `submitTransaction`, which builds + signs + posts the bincode
+// `SignedTransaction` through `mesh_submitTx` (the node routes it to
+// `MempoolTx::plaintext`). That is the only inclusion path the chain exposes
+// — the encrypted mempool was removed (DEC-029), so there is no longer a
 // private/encrypted submit lane to route to.
 //
 // FEES come from the SDK sane-fee resolvers (`resolveExecutionFee` /
@@ -28,7 +28,7 @@ import {
 import type { ResolvedExecutionFee } from "@monolythium/core-sdk";
 import {
   MlDsa65Backend,
-  submitTransactionWithPrivacy,
+  submitTransaction,
 } from "@monolythium/core-sdk/crypto";
 import type { NativeEvmTxFields } from "@monolythium/core-sdk/crypto";
 import { getProvider } from "./client";
@@ -68,7 +68,7 @@ export interface SubmitNativeTxResult {
 
 /**
  * Build, sign, and submit a native transaction over the plaintext
- * `mesh_submitTx` path (`submitTransactionWithPrivacy({ private: false })`).
+ * `mesh_submitTx` path (`submitTransaction`).
  *
  * Resolves nonce + sane SDK fee defaults, then hands the signed tx to the SDK.
  */
@@ -109,11 +109,10 @@ export async function submitNativeTx(
     input: args.input ?? "0x",
   };
 
-  const txHash = await submitTransactionWithPrivacy({
+  const txHash = await submitTransaction({
     client,
     backend,
     tx,
-    private: false,
   });
   // Success — advance the local pending nonce so the next submit won't reuse it.
   recordSubmittedNonce(fromHex, MONOLYTHIUM_TESTNET_CHAIN_ID, nonce);
