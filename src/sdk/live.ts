@@ -21,6 +21,10 @@ import { getNativeTransactionCount } from "./native-rpc";
 import { requireTypedUserAddress, requireTypedUserAddressHex } from "./address";
 import { selectNativeSpotMarket, type SelectedNativeSpotMarket } from "./market";
 import { walletFetch } from "./http";
+import {
+  normaliseActivityCoverageKind,
+  type ActivityCoverageKind,
+} from "./activity-coverage";
 
 export interface RpcOutcome<T> {
   ok: boolean;
@@ -294,6 +298,24 @@ export async function loadLiveAddressActivity(wallet: string): Promise<RpcOutcom
     const entries = await getProvider().rpcClient.enrichAddressActivity(typedWallet, 30);
     return entries.map(toLiveAddressActivityRow);
   });
+}
+
+/** Probe the indexer's coverage for an address (`lyth_addressActivityKind`) so an
+ *  empty feed can say WHY it's empty — nothing indexed yet, the indexer off, the
+ *  window pruned — instead of a single generic line. Falls back to "not_found"
+ *  (the historical "no activity yet" copy) on any read failure or a node that
+ *  lacks the method, so a probe failure never alarms the user or regresses the
+ *  empty state. */
+export async function loadAddressActivityKind(
+  wallet: string,
+): Promise<ActivityCoverageKind> {
+  try {
+    const typedWallet = requireTypedUserAddress(wallet, "wallet");
+    const res = await getProvider().rpcClient.lythAddressActivityKind(typedWallet);
+    return normaliseActivityCoverageKind(res.kind);
+  } catch {
+    return "not_found";
+  }
 }
 
 /** Map one enriched address-activity entry onto the wallet's row shape. The

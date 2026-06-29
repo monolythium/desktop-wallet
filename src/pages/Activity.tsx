@@ -23,10 +23,15 @@ import {
   mergeActivityNewestFirst,
 } from "../sdk/activity-rows";
 import {
+  loadAddressActivityKind,
   loadLiveAddressActivity,
   type LiveAddressActivityRow,
   type RpcOutcome,
 } from "../sdk/live";
+import {
+  emptyActivityCopy,
+  type ActivityCoverageKind,
+} from "../sdk/activity-coverage";
 import {
   isDelegationKind,
   isZeroAmount,
@@ -49,6 +54,9 @@ export function Activity({ experimentalEnabled }: Props) {
   const walletAddress = wallet.status === "ready" ? wallet.address : "";
   const [activity, setActivity] = useState<RpcOutcome<LiveAddressActivityRow[]> | null>(null);
   const [failed, setFailed] = useState<NotificationRecord[]>([]);
+  // Indexer coverage for the empty-feed message — only probed (and only used)
+  // when the confirmed feed comes back empty, so the user learns WHY it's empty.
+  const [coverage, setCoverage] = useState<ActivityCoverageKind | null>(null);
   const [busy, setBusy] = useState(false);
   // Two detail modals: ActivityDetail for pending/confirmed rows, and the
   // shared NotificationDetail for a failed record (it has the right shape).
@@ -102,6 +110,7 @@ export function Activity({ experimentalEnabled }: Props) {
     if (!walletAddress) {
       setActivity(null);
       setFailed([]);
+      setCoverage(null);
       return;
     }
     setBusy(true);
@@ -115,6 +124,13 @@ export function Activity({ experimentalEnabled }: Props) {
       ]);
       setActivity(activityOutcome);
       setFailed(scopedNotifications.filter((r) => r.status === "failed"));
+      // Only when the confirmed feed is empty do we probe the indexer's coverage
+      // so the empty state can explain the reason; a non-empty feed never needs it.
+      if (activityOutcome.ok && (activityOutcome.value?.length ?? 0) === 0) {
+        setCoverage(await loadAddressActivityKind(walletAddress));
+      } else {
+        setCoverage(null);
+      }
       // Announce newly-arrived incoming native LYTH (records + toasts once).
       // Runs here on the open, focused surface and is gated by the experimental
       // flag like the rest of the notifications layer; best-effort.
@@ -288,12 +304,23 @@ export function Activity({ experimentalEnabled }: Props) {
             })
           ) : activity?.ok ? (
             <div className="w-empty">
-              <h4>{filtersActive ? "No matching activity" : "No activity yet"}</h4>
-              <p>
-                {filtersActive
-                  ? "No rows match the current filter. Clear it to see every transaction for this address."
-                  : "The indexer has no transactions for this address. Sent and received transfers appear here once they confirm."}
-              </p>
+              {(() => {
+                // Filtered: the rows exist but none match — keep the filter copy.
+                // Unfiltered: the feed is genuinely empty, so explain the reason
+                // from the indexer-coverage probe (falls back to "no activity yet").
+                const copy = filtersActive
+                  ? {
+                      title: "No matching activity",
+                      body: "No rows match the current filter. Clear it to see every transaction for this address.",
+                    }
+                  : emptyActivityCopy(coverage ?? "not_found");
+                return (
+                  <>
+                    <h4>{copy.title}</h4>
+                    <p>{copy.body}</p>
+                  </>
+                );
+              })()}
               {filtersActive ? (
                 <button
                   className="btn btn--sm"
