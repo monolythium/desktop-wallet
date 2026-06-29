@@ -1,6 +1,5 @@
 // Contacts page — local wallet address book.
-// Denom-segregated: public denom shows on-chain addresses; private denom
-// shows view-keys.
+// Shows on-chain addresses with last-used, labels, and tags.
 //
 // A compact AddressBookCard also lives in Inbox.tsx; this is the canonical
 // full-page management surface (list, search, add, remove, live account
@@ -18,23 +17,15 @@ import {
 } from "../sdk/addressbook";
 import { errorMessage, loadAccountPolicy } from "../sdk/live";
 
-interface Props {
-  denom: "public" | "private";
-}
-
 const MAX_NAME_LEN = 64;
 const MAX_NOTE_LEN = 256;
 
-export function Contacts({ denom }: Props) {
+export function Contacts() {
   return (
     <div className="w-page">
       <div className="w-page__header">
         <h1>Contacts</h1>
-        <div className="sub">
-          {denom === "public"
-            ? "On-chain addresses · last-used, labels, tags."
-            : "Private view-keys · receiver-flagged, never on-chain."}
-        </div>
+        <div className="sub">On-chain addresses · last-used, labels, tags.</div>
       </div>
 
       <AddressBookSection />

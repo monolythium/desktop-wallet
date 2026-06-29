@@ -43,12 +43,6 @@
   --err:   #ff8a9a;
   --info:  #7c7fff;
 
-  /* Two-denomination */
-  --denom-public-fg:  var(--gold);
-  --denom-public-bg:  var(--gold-bg);
-  --denom-private-fg: #c9ccd8;
-  --denom-private-bg: #15172d;
-
   /* Radii */
   --r-2: 4px; --r-4: 6px; --r-6: 8px; --r-8: 12px; --r-10: 14px;
   --r-md: 18px; --r-lg: 22px; --r-xl: 30px; --r-pill: 999px;

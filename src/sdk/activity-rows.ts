@@ -15,7 +15,7 @@
 // public row with no amount). Token labels are the raw indexer token id (no
 // name registry exists); native rows show "LYTH".
 
-import type { Denom, Tx } from "../data/types";
+import type { Tx } from "../data/types";
 import type { LiveAddressActivityRow } from "./live";
 import type { NotificationRecord } from "./notifications";
 import type { PendingTx } from "./pending-tx";
@@ -92,11 +92,9 @@ export function activityCounterparty(row: LiveAddressActivityRow): string {
 }
 
 /**
- * Map one indexed activity row onto a `Tx` for `TxRow`. `denom` is the page's
- * active denomination (public/private), threaded through so TxRow can pick the
- * honest empty-amount label.
+ * Map one indexed activity row onto a `Tx` for `TxRow`.
  */
-export function activityRowToTx(row: LiveAddressActivityRow, denom: Denom): Tx {
+export function activityRowToTx(row: LiveAddressActivityRow): Tx {
   return {
     id: `${row.blockHeight}-${row.txIndex}-${row.logIndex}`,
     when: activityWhen(row),
@@ -108,7 +106,6 @@ export function activityRowToTx(row: LiveAddressActivityRow, denom: Denom): Tx {
     memo: "",
     kind: activityKindToTxKind(row.subKind ? `${row.kind} ${row.subKind}` : row.kind),
     typeLabel: txTypeLabelForActivity(row),
-    denom,
   };
 }
 

@@ -1,4 +1,4 @@
-// Tokens page — full asset list. Public denom only.
+// Tokens page — full asset list.
 //
 // The list is live: the native LYTH balance plus any indexed MRC-20 rows
 // from `loadLiveTokenStatus`. There is no price oracle and no token-name

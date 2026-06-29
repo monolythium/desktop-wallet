@@ -1,5 +1,3 @@
-export type Denom = "public" | "private";
-
 export interface Token {
   sym: string;
   name: string;
@@ -24,5 +22,4 @@ export interface Tx {
   /** Neutral type-noun for the row eyebrow (e.g. "Outgoing transfer", "Stake"),
    *  derived from the indexed activity kind via tx-type-label. */
   typeLabel: string;
-  denom: Denom;
 }

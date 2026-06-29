@@ -53,13 +53,6 @@ body::before {
   pointer-events: none;
   animation: bloomDrift 40s ease-in-out infinite;
 }
-body[data-denom="private"]::before {
-  background:
-    radial-gradient(ellipse 120% 80% at 50% 120%, oklch(0.22 0.06 250 / 0.8), transparent 60%),
-    radial-gradient(60vw 60vw at -10vw 100vh, oklch(0.62 0.18 230 / 0.55) 0%, transparent 55%),
-    radial-gradient(55vw 55vw at 110vw -10vh, oklch(0.58 0.20 260 / 0.55) 0%, transparent 55%),
-    linear-gradient(180deg, var(--ink-000) 0%, var(--ink-100) 50%, var(--ink-050) 100%);
-}
 body::after {
   content: "";
   position: fixed; inset: 0;
@@ -120,14 +113,10 @@ html[data-layout="topbar"] .w-side {
   overflow-x: auto;
   overflow-y: hidden;
 }
-/* Brand, denom toggle, and footer collapse out of the horizontal rail — the
-   topbar already shows the title/identity; the denom toggle stays in the rail. */
+/* Brand and footer collapse out of the horizontal rail — the topbar already
+   shows the title/identity. */
 html[data-layout="topbar"] .w-brand,
 html[data-layout="topbar"] .w-side__footer { display: none; }
-html[data-layout="topbar"] .w-denom-toggle {
-  margin: 0 4px 0 0;
-  flex-shrink: 0;
-}
 html[data-layout="topbar"] .w-nav {
   flex-direction: row;
   align-items: center;
@@ -173,10 +162,6 @@ html[data-layout="topbar"] .w-main > * {
   background: var(--gold);
   box-shadow: 0 0 10px rgba(var(--gold-glow), 0.35);
 }
-body[data-denom="private"] .w-brand__mark {
-  background: oklch(0.75 0.14 240);
-  box-shadow: 0 0 10px oklch(0.75 0.14 240 / 0.35);
-}
 .w-brand b { display: block; font-size: 15px; font-weight: 600; letter-spacing: 0.01em; }
 .w-brand small {
   display: block; font-family: var(--f-mono);
@@ -206,10 +191,6 @@ body[data-denom="private"] .w-brand__mark {
   background: var(--gold);
   box-shadow: 0 0 10px rgba(var(--gold-glow), 0.6);
 }
-body[data-denom="private"] .w-nav__item.is-active::before {
-  background: oklch(0.75 0.14 240);
-  box-shadow: 0 0 10px oklch(0.75 0.14 240 / 0.6);
-}
 .w-nav__item__icon { display: grid; place-items: center; opacity: 0.75; width: 16px; }
 .w-nav__item.is-active .w-nav__item__icon { opacity: 1; }
 
@@ -223,33 +204,6 @@ body[data-denom="private"] .w-nav__item.is-active::before {
   color: var(--fg-400);
   margin-top: 4px;
   word-break: break-all;
-}
-
-/* ============ Denom toggle ============ */
-.w-denom-toggle {
-  display: flex;
-  background: var(--w-bg);
-  border: 1px solid var(--w-line);
-  border-radius: 10px;
-  padding: 3px;
-  margin: 6px 0 14px;
-}
-.w-denom-toggle button {
-  flex: 1;
-  padding: 6px 8px;
-  border-radius: 7px;
-  font-size: 11.5px;
-  font-family: var(--f-mono);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--fg-400);
-  transition: all 160ms var(--e-out);
-}
-.w-denom-toggle button.is-on[data-denom="public"] {
-  background: var(--gold-bg); color: var(--gold);
-}
-.w-denom-toggle button.is-on[data-denom="private"] {
-  background: oklch(0.75 0.14 240 / 0.14); color: oklch(0.85 0.10 240);
 }
 
 /* ============ Topbar ============ */

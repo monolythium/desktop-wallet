@@ -1,7 +1,6 @@
 // Sidebar — wallet navigation. Node-ops screens live in Monarch Desktop.
 
 import type { ReactElement } from "react";
-import type { Denom } from "../data/types";
 import { useActiveWallet } from "../sdk/active-wallet";
 import type { Route } from "./types";
 
@@ -9,7 +8,6 @@ interface NavItem {
   id: Route;
   label: string;
   icon: () => ReactElement;
-  publicOnly?: boolean;
   developerOnly?: boolean;
   steleOnly?: boolean;
   experimentalOnly?: boolean;
@@ -134,8 +132,6 @@ const ICON_SETTINGS = () => (
 );
 
 interface Props {
-  denom: Denom;
-  setDenom: (d: Denom) => void;
   route: Route;
   setRoute: (r: Route) => void;
   developerModeEnabled: boolean;
@@ -147,15 +143,15 @@ const NAV: NavItem[] = [
   { id: "home", label: "Home", icon: ICON_HOME },
   { id: "activity", label: "Activity", icon: ICON_ACTIVITY },
   { id: "wallets", label: "Wallets", icon: ICON_WALLETS },
-  { id: "tokens", label: "Tokens", icon: ICON_TOKENS, publicOnly: true },
-  { id: "stake", label: "Stake", icon: ICON_STAKE, publicOnly: true },
-  { id: "bridges", label: "Bridges", icon: ICON_BRIDGES, publicOnly: true },
-  { id: "agents", label: "Agents", icon: ICON_AGENTS, publicOnly: true, experimentalOnly: true, badge: "preview" },
+  { id: "tokens", label: "Tokens", icon: ICON_TOKENS },
+  { id: "stake", label: "Stake", icon: ICON_STAKE },
+  { id: "bridges", label: "Bridges", icon: ICON_BRIDGES },
+  { id: "agents", label: "Agents", icon: ICON_AGENTS, experimentalOnly: true, badge: "preview" },
   { id: "contacts", label: "Contacts", icon: ICON_CONTACTS },
-  { id: "riscv", label: "RISC-V", icon: ICON_RISCV, publicOnly: true },
-  { id: "studio", label: "Studio", icon: ICON_STUDIO, publicOnly: true, developerOnly: true, badge: "dev" },
-  { id: "trade", label: "Trade", icon: ICON_TRADE, publicOnly: true },
-  { id: "ai-trade", label: "AI Trading", icon: ICON_AI, publicOnly: true, experimentalOnly: true, badge: "preview" },
+  { id: "riscv", label: "RISC-V", icon: ICON_RISCV },
+  { id: "studio", label: "Studio", icon: ICON_STUDIO, developerOnly: true, badge: "dev" },
+  { id: "trade", label: "Trade", icon: ICON_TRADE },
+  { id: "ai-trade", label: "AI Trading", icon: ICON_AI, experimentalOnly: true, badge: "preview" },
   { id: "stele", label: "Stele", icon: ICON_STELE, steleOnly: true, badge: "early" },
   { id: "inbox", label: "Inbox", icon: ICON_INBOX, steleOnly: true },
   { id: "provider", label: "Provider", icon: ICON_PROVIDER, steleOnly: true },
@@ -166,11 +162,10 @@ const NAV_FOOTER: NavItem[] = [
   { id: "settings", label: "Settings", icon: ICON_SETTINGS },
 ];
 
-export function Sidebar({ denom, setDenom, route, setRoute, developerModeEnabled, steleEnabled, experimentalEnabled }: Props) {
+export function Sidebar({ route, setRoute, developerModeEnabled, steleEnabled, experimentalEnabled }: Props) {
   const wallet = useActiveWallet();
   const visible = NAV.filter(
     (n) =>
-      (!n.publicOnly || denom === "public") &&
       (!n.developerOnly || developerModeEnabled) &&
       (!n.steleOnly || steleEnabled) &&
       (!n.experimentalOnly || experimentalEnabled),
@@ -184,19 +179,6 @@ export function Sidebar({ denom, setDenom, route, setRoute, developerModeEnabled
           <b>Monolythium</b>
           <small>Wallet</small>
         </div>
-      </div>
-
-      <div className="w-denom-toggle">
-        {(["public", "private"] as const).map((d) => (
-          <button
-            key={d}
-            data-denom={d}
-            className={denom === d ? "is-on" : ""}
-            onClick={() => setDenom(d)}
-          >
-            {d}
-          </button>
-        ))}
       </div>
 
       <div className="w-nav w-nav--main">

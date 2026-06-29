@@ -1,4 +1,4 @@
-// Activity page — denom-segregated, single chronological feed.
+// Activity page — single chronological feed.
 //
 // One newest-first feed merges the wallet's three activity sources:
 //   1. durable tracked-pending txs (in-flight, no block yet — float to the top),
@@ -14,7 +14,6 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { MONOLYTHIUM_TESTNET_CHAIN_ID } from "@monolythium/core-sdk";
-import type { Denom } from "../data/types";
 import { ActivityDetail, type DetailRow } from "../components/ActivityDetail";
 import { NotificationDetail } from "../components/NotificationDetail";
 import { TxRow } from "../components/TxRow";
@@ -42,11 +41,10 @@ import { usePendingTxs } from "../sdk/use-pending-tx";
 import { useActiveWallet } from "../sdk/active-wallet";
 
 interface Props {
-  denom: Denom;
   experimentalEnabled: boolean;
 }
 
-export function Activity({ denom, experimentalEnabled }: Props) {
+export function Activity({ experimentalEnabled }: Props) {
   const wallet = useActiveWallet();
   const walletAddress = wallet.status === "ready" ? wallet.address : "";
   const [activity, setActivity] = useState<RpcOutcome<LiveAddressActivityRow[]> | null>(null);
@@ -140,16 +138,12 @@ export function Activity({ denom, experimentalEnabled }: Props) {
     <div className="w-page">
       <div className="w-page__header">
         <h1>Activity</h1>
-        <div className="sub">
-          {denom === "public"
-            ? "Public-denomination transactions on this wallet."
-            : "Private-denomination envelopes — counterparties and amounts are protocol-hidden."}
-        </div>
+        <div className="sub">Transactions on this wallet.</div>
       </div>
 
       <div className="w-card">
         <div className="w-card__head">
-          <h3>{denom === "public" ? "Recent activity" : "Private envelopes"}</h3>
+          <h3>Recent activity</h3>
           <span className="w-card__head__spacer" />
           {activityRows.length > 0 ? (
             <div className="w-chip-group">
@@ -287,7 +281,7 @@ export function Activity({ denom, experimentalEnabled }: Props) {
               return (
                 <TxRow
                   key={`c:${row.blockHeight}-${row.txIndex}-${row.logIndex}`}
-                  tx={activityRowToTx(row, denom)}
+                  tx={activityRowToTx(row)}
                   onClick={() => setSelected(indexedRowToDetail(row))}
                 />
               );
@@ -298,9 +292,7 @@ export function Activity({ denom, experimentalEnabled }: Props) {
               <p>
                 {filtersActive
                   ? "No rows match the current filter. Clear it to see every transaction for this address."
-                  : denom === "private"
-                    ? "Private-denomination activity is not exposed as public indexed rows."
-                    : "The indexer has no transactions for this address. Sent and received transfers appear here once they confirm."}
+                  : "The indexer has no transactions for this address. Sent and received transfers appear here once they confirm."}
               </p>
               {filtersActive ? (
                 <button
@@ -317,11 +309,7 @@ export function Activity({ denom, experimentalEnabled }: Props) {
             </div>
           ) : (
             <div style={{ padding: "16px 0", color: "var(--w-text-3)", fontSize: 13 }}>
-              {walletAddress
-                ? denom === "private"
-                  ? "Private-denomination activity is not exposed as public indexed rows."
-                  : "Loading indexed activity…"
-                : "No active wallet address."}
+              {walletAddress ? "Loading indexed activity…" : "No active wallet address."}
             </div>
           )}
         </div>

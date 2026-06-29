@@ -1,9 +1,7 @@
 // Home wallet overview.
 //
-// Public denom: consumer portfolio facts (Available / Staked / APR), a staking
-// summary card, token + recent-activity previews, and Send / Receive / Stake /
-// Buy hero CTAs.
-// Private denom: hero with amount-hidden disclosure + activity note.
+// Consumer portfolio facts (Available / Staked / APR), a staking summary card,
+// token + recent-activity previews, and Send / Receive / Stake / Buy hero CTAs.
 //
 // HONESTY:
 //  - "Available" is the live native balance (loadLiveTokenStatus → eth_getBalance).
@@ -21,7 +19,6 @@ import { ReceiveModal } from "../components/ReceiveModal";
 import { SendComposeModal } from "../components/SendComposeModal";
 import { TokenRow } from "../components/TokenRow";
 import { TxRow } from "../components/TxRow";
-import type { Denom } from "../data/types";
 import type { Route } from "../components/types";
 import { useActiveWallet } from "../sdk/active-wallet";
 import { activityRowToTx } from "../sdk/activity-rows";
@@ -49,12 +46,10 @@ import {
 import type { PendingRewardsResponse } from "@monolythium/core-sdk";
 
 interface Props {
-  denom: Denom;
   goto: (r: Route) => void;
 }
 
-export function Home({ denom, goto }: Props) {
-  const isPub = denom === "public";
+export function Home({ goto }: Props) {
   const wallet = useActiveWallet();
   const walletAddress = wallet.status === "ready" ? wallet.address : "";
   const [liveTokens, setLiveTokens] = useState<LiveTokenStatus | null>(null);
@@ -73,7 +68,7 @@ export function Home({ denom, goto }: Props) {
   const chain = useChainSnapshot(walletAddress);
 
   useEffect(() => {
-    if (!isPub || !walletAddress) {
+    if (!walletAddress) {
       setLiveTokens(null);
       setLiveActivity(null);
       setStakeStatus(null);
@@ -113,7 +108,7 @@ export function Home({ denom, goto }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [isPub, walletAddress]);
+  }, [walletAddress]);
 
   const openNativeSend = () => setSendOpen(true);
   const openReceive = () => setReceiveOpen(true);
@@ -149,38 +144,26 @@ export function Home({ denom, goto }: Props) {
       {/* Hero */}
       <div className="w-hero">
         <div className="w-hero__label">
-          {isPub ? "Total balance" : "Private balance"}
+          Total balance
           <span style={{ color: "var(--w-text-3)" }}>·</span>
           <span style={{ fontFamily: "var(--f-mono)", fontSize: 11, color: "var(--w-text-3)" }}>
-            {isPub ? "live LYTH" : "LYTH-p, shielded"}
+            live LYTH
           </span>
         </div>
 
-        {isPub ? (
-          <div className="w-hero__amount">
-            {availableLyth}
-            <span className="tok">LYTH</span>
-          </div>
-        ) : (
-          <div className="w-hero__amount" style={{ color: "var(--w-text-2)" }}>
-            — <span className="tok" style={{ fontStyle: "italic" }}>amount hidden by design</span>
-          </div>
-        )}
+        <div className="w-hero__amount">
+          {availableLyth}
+          <span className="tok">LYTH</span>
+        </div>
 
         <div className="w-hero__meta">
-          {isPub ? (
-            <>
-              <span>Available <b>{availableLyth} LYTH</b></span>
-              {/* Staked is delegated *weight* (bps) — no principal LYTH read
-                  exists, so we never render a fabricated LYTH stake here. */}
-              <span>Staked <b>{summary.totalWeightLabel}</b> weight</span>
-              {/* Live APR — best APY across the wallet's delegated clusters
-                  (lyth_clusterApr). "—" until some yield accrues. */}
-              <span>APR <b>{aprLabel}</b></span>
-            </>
-          ) : (
-            <span>Only you and your recipients can read the amount.</span>
-          )}
+          <span>Available <b>{availableLyth} LYTH</b></span>
+          {/* Staked is delegated *weight* (bps) — no principal LYTH read
+              exists, so we never render a fabricated LYTH stake here. */}
+          <span>Staked <b>{summary.totalWeightLabel}</b> weight</span>
+          {/* Live APR — best APY across the wallet's delegated clusters
+              (lyth_clusterApr). "—" until some yield accrues. */}
+          <span>APR <b>{aprLabel}</b></span>
         </div>
 
         <div className="w-hero__bar">
@@ -197,81 +180,75 @@ export function Home({ denom, goto }: Props) {
             </svg>
             <span>Receive</span>
           </button>
-          {isPub && (
-            <>
-              <button className="w-hbtn" onClick={() => goto("stake")}>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <circle cx="12" cy="12" r="3" />
-                  <circle cx="5" cy="7" r="2" />
-                  <circle cx="19" cy="7" r="2" />
-                  <circle cx="5" cy="17" r="2" />
-                  <circle cx="19" cy="17" r="2" />
-                </svg>
-                <span>Stake</span>
-              </button>
-              {/* No on-ramp primitive exists in the wallet — Buy opens the
-                  canonical monoscan sale page externally (honest external link,
-                  not a fake in-app card/bank/exchange on-ramp). */}
-              <a
-                className="w-hbtn"
-                href={MONOSCAN_GET_LYTH_URL}
-                target="_blank"
-                rel="noopener noreferrer"
-                style={{ textDecoration: "none" }}
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M12 5v14M5 12h14" />
-                </svg>
-                <span>Buy</span>
-              </a>
-            </>
-          )}
+          <button className="w-hbtn" onClick={() => goto("stake")}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="3" />
+              <circle cx="5" cy="7" r="2" />
+              <circle cx="19" cy="7" r="2" />
+              <circle cx="5" cy="17" r="2" />
+              <circle cx="19" cy="17" r="2" />
+            </svg>
+            <span>Stake</span>
+          </button>
+          {/* No on-ramp primitive exists in the wallet — Buy opens the
+              canonical monoscan sale page externally (honest external link,
+              not a fake in-app card/bank/exchange on-ramp). */}
+          <a
+            className="w-hbtn"
+            href={MONOSCAN_GET_LYTH_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ textDecoration: "none" }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 5v14M5 12h14" />
+            </svg>
+            <span>Buy</span>
+          </a>
         </div>
       </div>
 
-      {isPub ? (
-        <div className="w-grid-2">
-          <div className="w-card">
-            <div className="w-card__head">
-              <h3>Your tokens</h3>
-              <div className="w-card__head__spacer" />
-              <button className="btn btn--sm btn--ghost" onClick={() => goto("tokens")}>View all</button>
-            </div>
-            <div className="w-card__body">
-              {liveTokens === null ? (
-                <div className="row-help">{walletAddress ? "Loading token balances…" : "Select or unlock a wallet to load balances."}</div>
-              ) : (
-                <>
-                  {tokenRows.slice(0, 4).map((token) => (
-                    <TokenRow key={token.primary ? "native" : token.sym} token={token} />
-                  ))}
-                  {liveTokens.tokenBalances.ok === false ? (
-                    <div className="w-live-error">{liveTokens.tokenBalances.error}</div>
-                  ) : null}
-                </>
-              )}
-            </div>
+      <div className="w-grid-2">
+        <div className="w-card">
+          <div className="w-card__head">
+            <h3>Your tokens</h3>
+            <div className="w-card__head__spacer" />
+            <button className="btn btn--sm btn--ghost" onClick={() => goto("tokens")}>View all</button>
           </div>
-
-          <div className="w-card">
-            <div className="w-card__head">
-              <h3>Staking</h3>
-              <div className="w-card__head__spacer" />
-              <button className="btn btn--sm btn--ghost" onClick={() => goto("stake")}>Manage</button>
-            </div>
-            <div className="w-card__body">
-              <StakeSummaryCard
-                summary={summary}
-                earnedLyth={earnedLyth}
-                aprLabel={aprLabel}
-                hasAddress={Boolean(walletAddress)}
-                loading={stakeStatus === null}
-                goto={goto}
-              />
-            </div>
+          <div className="w-card__body">
+            {liveTokens === null ? (
+              <div className="row-help">{walletAddress ? "Loading token balances…" : "Select or unlock a wallet to load balances."}</div>
+            ) : (
+              <>
+                {tokenRows.slice(0, 4).map((token) => (
+                  <TokenRow key={token.primary ? "native" : token.sym} token={token} />
+                ))}
+                {liveTokens.tokenBalances.ok === false ? (
+                  <div className="w-live-error">{liveTokens.tokenBalances.error}</div>
+                ) : null}
+              </>
+            )}
           </div>
         </div>
-      ) : null}
+
+        <div className="w-card">
+          <div className="w-card__head">
+            <h3>Staking</h3>
+            <div className="w-card__head__spacer" />
+            <button className="btn btn--sm btn--ghost" onClick={() => goto("stake")}>Manage</button>
+          </div>
+          <div className="w-card__body">
+            <StakeSummaryCard
+              summary={summary}
+              earnedLyth={earnedLyth}
+              aprLabel={aprLabel}
+              hasAddress={Boolean(walletAddress)}
+              loading={stakeStatus === null}
+              goto={goto}
+            />
+          </div>
+        </div>
+      </div>
 
       <div className="w-card">
         <div className="w-card__head">
@@ -280,25 +257,19 @@ export function Home({ denom, goto }: Props) {
           <button className="btn btn--sm btn--ghost" onClick={() => goto("activity")}>View all</button>
         </div>
         <div className="w-card__body">
-          {isPub ? (
-            liveActivity?.ok && activityRows.length > 0 ? (
-              activityRows.slice(0, 5).map((row) => (
-                <TxRow
-                  key={`${row.blockHeight}-${row.txIndex}-${row.logIndex}`}
-                  tx={activityRowToTx(row, denom)}
-                />
-              ))
-            ) : liveActivity?.ok === false ? (
-              <div className="w-live-error">{liveActivity.error}</div>
-            ) : liveActivity?.ok ? (
-              <div className="row-help">No indexed activity returned for this address.</div>
-            ) : (
-              <div className="row-help">{walletAddress ? "Loading indexed activity…" : "Select or unlock a wallet to load activity."}</div>
-            )
+          {liveActivity?.ok && activityRows.length > 0 ? (
+            activityRows.slice(0, 5).map((row) => (
+              <TxRow
+                key={`${row.blockHeight}-${row.txIndex}-${row.logIndex}`}
+                tx={activityRowToTx(row)}
+              />
+            ))
+          ) : liveActivity?.ok === false ? (
+            <div className="w-live-error">{liveActivity.error}</div>
+          ) : liveActivity?.ok ? (
+            <div className="row-help">No indexed activity returned for this address.</div>
           ) : (
-            <div className="row-help">
-              Private-denomination activity is not exposed as public indexed rows.
-            </div>
+            <div className="row-help">{walletAddress ? "Loading indexed activity…" : "Select or unlock a wallet to load activity."}</div>
           )}
         </div>
       </div>

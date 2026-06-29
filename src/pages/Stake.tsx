@@ -1,4 +1,4 @@
-// Stake page — DVT cluster delegation. Public denom only.
+// Stake page — DVT cluster delegation.
 //
 // Top card: live read-only RPC snapshot (clusters / active / healthy /
 // delegations) — unchanged from the scaffold.

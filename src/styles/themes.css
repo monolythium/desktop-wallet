@@ -41,7 +41,6 @@ html[data-theme="default"] {
   --err:   #e88a7a;
   --info:  #8ab4d6;
 
-  --denom-private-bg: #1b1e23;
 }
 
 /* ---------- MONOLABS (teal) ---------- */
@@ -76,7 +75,6 @@ html[data-theme="monolabs"] {
   --err:   #f08a8a;
   --info:  #3bd0c4;
 
-  --denom-private-bg: #142724;
 }
 
 /* ---------- MONOPLAY (crimson) ---------- */
@@ -111,7 +109,6 @@ html[data-theme="monoplay"] {
   --err:   #ff8a6b;
   --info:  #d88a95;
 
-  --denom-private-bg: #261416;
 }
 
 /* ---------- MONO (pure black, thin stroke, amber accent) ---------- */
@@ -146,7 +143,6 @@ html[data-theme="mono"] {
   --err:   #e88a7a;
   --info:  #8ab4d6;
 
-  --denom-private-bg: #0a0a0a;
 }
 /* Mono theme: flat black surfaces, thin hairline borders, no glass lift. */
 html[data-theme="mono"] .w-side,
@@ -196,7 +192,6 @@ html[data-theme="glass"] {
   --err:   #ff8fb8;
   --info:  #7fb2ff;
 
-  --denom-private-bg: rgba(255,255,255,0.04);
 }
 /* Glass body: layered bloom (periwinkle + violet nebula + vignette). */
 html[data-theme="glass"] body {
@@ -274,7 +269,6 @@ html[data-theme="aurora"] {
   --err:   #ff89b0;
   --info:  #6c9dff;
 
-  --denom-private-bg: #1d123c;
 }
 html[data-theme="aurora"] body {
   background:
@@ -315,7 +309,6 @@ html[data-theme="crimson"] {
   --err:   #ffa07a;
   --info:  #e29090;
 
-  --denom-private-bg: #24100f;
 }
 html[data-theme="crimson"] body {
   background:
@@ -356,7 +349,6 @@ html[data-theme="neon"] {
   --err:   #ff4f8a;
   --info:  #4ab8ff;
 
-  --denom-private-bg: #091012;
 }
 html[data-theme="neon"] body {
   background:
@@ -401,7 +393,6 @@ html[data-theme="midnight"] {
   --err:   #ff8ca8;
   --info:  #9d7cff;
 
-  --denom-private-bg: #18112e;
 }
 html[data-theme="midnight"] body {
   background:
@@ -442,7 +433,6 @@ html[data-theme="retro"] {
   --err:   #ff8a5a;
   --info:  #e4a864;
 
-  --denom-private-bg: #2b2113;
 }
 /* Retro: subtle scanline overlay. */
 html[data-theme="retro"] body::after {
@@ -492,7 +482,6 @@ html[data-theme="light"] {
   --err:   #b54a3a;
   --info:  #3b6a8a;
 
-  --denom-private-bg: #efeeea;
 
   /* Shadows adjusted for light backgrounds. */
   --shadow-1: 0 1px 2px rgba(20, 16, 8, 0.06);
