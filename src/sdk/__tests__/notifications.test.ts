@@ -3,6 +3,7 @@ import {
   NOTIFICATION_HISTORY_CAP,
   NOTIFICATION_LABELS,
   appendCapped,
+  delegationClusterLabel,
   isTxOpKind,
   isZeroAmount,
   notificationId,
@@ -101,6 +102,49 @@ describe("notificationToast", () => {
     expect(t.title).toBe("Monolythium Wallet");
     expect(t.title).not.toBe(notificationTitle("send", "confirmed"));
     expect(t.body).toBe("");
+  });
+
+  it("names the cluster (not the module address) for a delegation body", () => {
+    // A delegate's counterparty is the bare precompile + amount is zero; the body
+    // should read the cluster, matching the in-app row — never "0x…/mono1module".
+    const t = notificationToast(
+      rec({
+        kind: "delegate",
+        status: "confirmed",
+        amountDecimal: "0",
+        counterparty: "mono1module",
+        clusterId: 5,
+      }),
+    );
+    expect(t.body).toBe("Cluster #5");
+    const named = notificationToast(
+      rec({ kind: "redelegate", amountDecimal: "0", clusterName: "atlas.cluster.mono" }),
+    );
+    expect(named.body).toBe("atlas.cluster.mono");
+  });
+
+  it("falls back to the truncated address when a delegation has no cluster metadata", () => {
+    const t = notificationToast(
+      rec({
+        kind: "undelegate",
+        amountDecimal: "0",
+        counterparty: "mono1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq",
+      }),
+    );
+    expect(t.body).toBe("mono1qqqqq…qqqqqq");
+  });
+});
+
+describe("delegationClusterLabel", () => {
+  it("prefers the captured name, then #id, for delegation kinds", () => {
+    expect(delegationClusterLabel(rec({ kind: "delegate", clusterName: "alpha", clusterId: 2 }))).toBe("alpha");
+    expect(delegationClusterLabel(rec({ kind: "undelegate", clusterId: 9 }))).toBe("Cluster #9");
+  });
+
+  it("is null for a delegation with no cluster metadata and for non-delegation kinds", () => {
+    expect(delegationClusterLabel(rec({ kind: "redelegate" }))).toBeNull();
+    expect(delegationClusterLabel(rec({ kind: "send", clusterId: 3 }))).toBeNull();
+    expect(delegationClusterLabel(rec({ kind: "claim", clusterId: 3 }))).toBeNull();
   });
 });
 

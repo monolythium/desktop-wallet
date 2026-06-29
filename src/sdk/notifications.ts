@@ -218,6 +218,19 @@ export function isDelegationKind(kind: TxOpKind): boolean {
   return kind === "delegate" || kind === "undelegate" || kind === "redelegate";
 }
 
+/** Display label for a delegation record's target cluster — the captured name,
+ *  else `Cluster #<id>`, else `null` when no cluster metadata was captured
+ *  (legacy records) or the kind isn't a delegation. The in-app row + detail
+ *  derive the same label, so every surface names the cluster identically rather
+ *  than the bare delegation-module precompile address. */
+export function delegationClusterLabel(record: NotificationRecord): string | null {
+  if (!isDelegationKind(record.kind)) return null;
+  return (
+    record.clusterName ??
+    (record.clusterId !== undefined ? `Cluster #${record.clusterId}` : null)
+  );
+}
+
 /** Render the friendly title for a notification. */
 export function notificationTitle(
   kind: TxOpKind,
@@ -258,7 +271,11 @@ export function notificationToast(
   // the action is surfaced on the OS toast. The in-app record keeps full detail.
   if (!includeDetails) return { title: REDACTED_TOAST_TITLE, body: "" };
   const title = notificationTitle(record.kind, record.status);
-  const short = shortAddress(record.counterparty);
+  // A delegation tx's counterparty is the bare delegation-module precompile;
+  // name the target cluster instead (the same label the in-app row shows),
+  // falling back to the truncated address only when no cluster metadata was
+  // captured (legacy records).
+  const short = delegationClusterLabel(record) ?? shortAddress(record.counterparty);
   const body = isZeroAmount(record.amountDecimal)
     ? short
     : `${record.amountDecimal} LYTH · ${short}`;
