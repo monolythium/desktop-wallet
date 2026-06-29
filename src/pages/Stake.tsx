@@ -4,7 +4,7 @@
 // delegations) — unchanged from the scaffold.
 // Lower card: cluster directory rows with an inline Delegate form that
 // routes through the OperationsDrawer (password unlock → vault seed →
-// delegation precompile call → encrypted-envelope submit).
+// delegation precompile call → plaintext mesh_submitTx submit).
 
 import { useEffect, useState } from "react";
 import type {

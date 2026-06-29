@@ -10,7 +10,7 @@
 // READ-AND-RECORD ONLY: it reads public tx status / receipts for hashes the
 // wallet already broadcast and writes only the notification store + the
 // tracked-tx store. It never touches signing, broadcast, fees, nonces, or any
-// encrypted payload.
+// vault material.
 //
 // Status fidelity (the load-bearing invariant) lives in `classifyPending`
 // (`pending-tx.ts`): a notification is recorded ONLY on an explicit on-chain

@@ -354,7 +354,6 @@ function InfoTab({
     },
     { k: "Policy mode", v: policyString(policy, "mode") },
     { k: "Transparent transfers", v: policyBool(policy, "allowTransparent") },
-    { k: "Shielded transfers", v: policyBool(policy, "allowShielded") },
     { k: "Confidential transfers", v: policyBool(policy, "allowConfidential") },
     { k: "Stealth transfers", v: policyBool(policy, "allowStealth") },
     { k: "Requires KYC", v: policyBool(policy, "requireKyc") },

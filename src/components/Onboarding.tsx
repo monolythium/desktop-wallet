@@ -244,9 +244,8 @@ export function Onboarding({ onDone }: Props) {
                   lineHeight: 1.55,
                 }}
               >
-                ML-DSA-65 keys and ML-KEM-768 envelopes, encrypted on this
-                device. Create a new wallet or restore one from its 24-word
-                recovery phrase.
+                ML-DSA-65 signing keys, encrypted on this device. Create a new
+                wallet or restore one from its 24-word recovery phrase.
               </p>
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>

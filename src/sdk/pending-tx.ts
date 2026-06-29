@@ -1,8 +1,8 @@
 // Pure tracked-tx model — types, the store key, the dedupe id, the window-
 // expiry predicate, and the per-tx terminal-state classifier.
 //
-// A "tracked tx" is one the wallet broadcast (the node accepted the encrypted
-// envelope and returned a canonical inner-tx hash) and now follows to a real
+// A "tracked tx" is one the wallet broadcast (the node accepted the tx and
+// returned a canonical inner-tx hash) and now follows to a real
 // terminal state. The durable store (`pending-tx-store.ts`) persists the set
 // across drawer-close and app restart; the app-level poller (`reconcile.ts`)
 // drives this classifier on an interval and records ONE notification per

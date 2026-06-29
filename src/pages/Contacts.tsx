@@ -471,10 +471,6 @@ function LiveAccountPolicyCard() {
             <LiveCell label="Mode" value={String(policy.mode ?? "unknown")} />
             <LiveCell label="Explicit" value={String(policy.explicit ?? false)} />
             <LiveCell
-              label="Shielded"
-              value={String(policy.allowShielded ?? false)}
-            />
-            <LiveCell
               label="Confidential"
               value={String(policy.allowConfidential ?? false)}
             />

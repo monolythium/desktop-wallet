@@ -1,7 +1,7 @@
 // Trade page — native CLOB spot. Read-only telemetry plus a
 // single-pair place-limit-order panel that signs through the
-// operations drawer's keychain unlock and posts via the encrypted
-// mempool.
+// operations drawer's keychain unlock and posts via the plaintext
+// mesh_submitTx path.
 
 import { useEffect, useState } from "react";
 import type {
@@ -292,7 +292,7 @@ function PlaceLimitOrderCard({
     const expiryLabel = expiryBlocks === null ? "GTC" : `block ${resolvedExpiry.toString()}`;
     ops.open({
       title: `${side === "buy" ? "Buy" : "Sell"} ${qtyStr} @ ${priceStr}`,
-      subtitle: "Native CLOB placeLimitOrder, encrypted-mempool submit",
+      subtitle: "Native CLOB placeLimitOrder, plaintext mesh_submitTx",
       auth: "keychain",
       diff: [
         { k: "Side", v: side === "buy" ? "BUY" : "SELL" },
@@ -337,7 +337,7 @@ function PlaceLimitOrderCard({
       <div className="w-card__head">
         <h3>Place limit order</h3>
         <span className={`w-live-pill ${marketId ? "" : "is-muted"}`}>
-          {marketId ? "encrypted submit" : "market required"}
+          {marketId ? "plaintext submit" : "market required"}
         </span>
       </div>
       <div className="w-card__body" style={{ display: "grid", gap: 10 }}>
@@ -471,7 +471,7 @@ function CancelOrderCard() {
     }
     ops.open({
       title: `Cancel order ${trimmed.slice(0, 18)}…`,
-      subtitle: "Native CLOB cancelOrder, encrypted-mempool submit",
+      subtitle: "Native CLOB cancelOrder, plaintext mesh_submitTx",
       auth: "keychain",
       diff: [{ k: "Order id", v: trimmed }],
       effects: [
@@ -496,7 +496,7 @@ function CancelOrderCard() {
     <div className="w-card">
       <div className="w-card__head">
         <h3>Cancel order</h3>
-        <span className="w-live-pill">encrypted submit</span>
+        <span className="w-live-pill">plaintext submit</span>
       </div>
       <div className="w-card__body" style={{ display: "grid", gap: 10 }}>
         <label style={{ display: "grid", gap: 4 }}>
