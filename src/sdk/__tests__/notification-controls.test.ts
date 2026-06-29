@@ -30,9 +30,11 @@ describe("notificationToast detail redaction", () => {
     expect(body).toContain("mono1");
   });
 
-  it("redacts the body to the title only when details are off", () => {
+  it("redacts to a generic title and no body when details are off", () => {
     const { title, body } = notificationToast(rec, false);
-    expect(title).toBe("Sent");
+    // The action ("Sent") is hidden too — only the generic app name shows.
+    expect(title).toBe("Monolythium Wallet");
+    expect(title).not.toBe("Sent");
     expect(body).toBe("");
   });
 

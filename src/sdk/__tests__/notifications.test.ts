@@ -90,6 +90,18 @@ describe("notificationToast", () => {
     // No contact name, no raw seed/payload — just the public amount + address.
     expect(t.body).toMatch(/^3\.14 LYTH · mono1[a-z0-9]+…[a-z0-9]+$/);
   });
+
+  it("redacts to a generic title and an empty body when details are off", () => {
+    const t = notificationToast(
+      rec({ kind: "send", status: "confirmed", amountDecimal: "12.50" }),
+      false,
+    );
+    // Generic app-name title — never the action (Sent/Staked/…) — and no body,
+    // so neither the operation nor the amount/address leaks on a shared screen.
+    expect(t.title).toBe("Monolythium Wallet");
+    expect(t.title).not.toBe(notificationTitle("send", "confirmed"));
+    expect(t.body).toBe("");
+  });
 });
 
 describe("isTxOpKind", () => {

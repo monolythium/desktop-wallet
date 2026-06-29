@@ -241,6 +241,12 @@ function shortAddress(s: string, head = 10, tail = 6): string {
  *  middle-truncated bech32m address ever appear, never a contact name or any
  *  encrypted payload. The OS-toast layer (`os-toast.ts`) consumes this so the
  *  toast and the in-app record always read identically. */
+/** Generic, content-free title shown on the OS toast when "Show transaction
+ *  details" is off — so a glanceable toast leaks neither the amount/address NOR
+ *  the action (Sent / Staked / …) on a shared screen. The in-app record always
+ *  keeps the full friendly title + detail; only the OS toast is redacted. */
+const REDACTED_TOAST_TITLE = "Monolythium Wallet";
+
 export function notificationToast(
   record: NotificationRecord,
   includeDetails: boolean = true,
@@ -248,10 +254,10 @@ export function notificationToast(
   title: string;
   body: string;
 } {
+  // Redacted mode: a generic title and no body — neither the amount/address nor
+  // the action is surfaced on the OS toast. The in-app record keeps full detail.
+  if (!includeDetails) return { title: REDACTED_TOAST_TITLE, body: "" };
   const title = notificationTitle(record.kind, record.status);
-  // Redacted mode: title only — no amount, no address (safer on a shared
-  // screen). The in-app record keeps full detail; only the OS toast is redacted.
-  if (!includeDetails) return { title, body: "" };
   const short = shortAddress(record.counterparty);
   const body = isZeroAmount(record.amountDecimal)
     ? short
