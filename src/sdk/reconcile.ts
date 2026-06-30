@@ -23,7 +23,7 @@
 import { MONOLYTHIUM_TESTNET_CHAIN_ID } from "@monolythium/core-sdk";
 import { loadActiveWallet } from "./active-wallet";
 import { getProvider } from "./client";
-import { decodeClaimedAmount } from "./live";
+import { decodeClaimedAmount, decodeTxFeeLythoshi } from "./live";
 import { recordNotification } from "./notifications-store";
 import { toastTerminalNotification } from "./os-toast";
 import {
@@ -187,6 +187,12 @@ export async function reconcilePendingOnce(
         verdict.kind === "confirmed" && tx.opKind === "claim"
           ? ((await decodeClaimedAmount(tx.txHash)) ?? undefined)
           : undefined;
+      // The network fee for any confirmed tx, decoded from lyth_decodeTx.
+      // Undefined (no fee row) when undecodable — never a fabricated 0.
+      const feeLythoshi =
+        verdict.kind === "confirmed"
+          ? ((await decodeTxFeeLythoshi(tx.txHash)) ?? undefined)
+          : undefined;
       // Terminal — record the genuine status verbatim (once; the store dedupes).
       const { added, record } = await recordNotification({
         addressLower: tx.addressLower,
@@ -200,6 +206,7 @@ export async function reconcilePendingOnce(
         clusterId: tx.clusterId,
         clusterName: tx.clusterName,
         claimedAmount,
+        feeLythoshi,
       });
       // Raise an OS toast ONLY for a genuinely-new record (added === true), so
       // the store's `${chainIdHex}:${txHash}` dedupe also dedupes the toast — a

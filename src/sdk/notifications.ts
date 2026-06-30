@@ -89,6 +89,10 @@ export interface NotificationRecord {
    *  legacy-safe — an absent record or an undecodable log falls back to the
    *  claimable amount shown at submit. */
   claimedAmount?: string;
+  /** The tx's network fee in raw lythoshi, decoded from `lyth_decodeTx` at the
+   *  confirmed terminal. Optional + legacy-safe — an absent record or an
+   *  undecodable fee omits the fee row (honest absence, never a fabricated 0). */
+  feeLythoshi?: string;
   /** Owning scope — the lowercased address this record was recorded under (the
    *  active vault's identity at write time). Optional + backward-compatible:
    *  records written before this field omit it. It lets a merged/global list
@@ -372,6 +376,10 @@ function asNotificationRecord(raw: unknown): NotificationRecord | null {
     typeof r.claimedAmount === "string" && r.claimedAmount.length > 0
       ? r.claimedAmount
       : undefined;
+  const feeLythoshi =
+    typeof r.feeLythoshi === "string" && r.feeLythoshi.length > 0
+      ? r.feeLythoshi
+      : undefined;
   const scope = typeof r.scope === "string" ? r.scope : undefined;
   return {
     id: r.id,
@@ -384,6 +392,7 @@ function asNotificationRecord(raw: unknown): NotificationRecord | null {
     clusterId,
     clusterName,
     claimedAmount,
+    feeLythoshi,
     scope,
     createdAtMs: r.createdAtMs,
     read: r.read,
