@@ -596,6 +596,19 @@ export async function decodeClaimedAmount(txHash: string): Promise<string | null
   }
 }
 
+/** Decode the network fee (raw lythoshi string) from a confirmed tx via
+ *  `lyth_decodeTx`. Returns null when the fee can't be decoded — the caller
+ *  omits the fee row (honest absence, never a fabricated 0). */
+export async function decodeTxFeeLythoshi(txHash: string): Promise<string | null> {
+  try {
+    const decoded = await getProvider().rpcClient.lythDecodeTx(txHash);
+    const total = decoded.fee?.total_lythoshi;
+    return typeof total === "string" && total.length > 0 ? total : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function loadAccountPolicy(address: string) {
   return getProvider().rpcClient.lythGetAccountPolicy(requireTypedUserAddress(address, "account policy address"));
 }

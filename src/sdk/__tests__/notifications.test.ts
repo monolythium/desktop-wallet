@@ -273,6 +273,16 @@ describe("parseHistoryEnvelope", () => {
     expect(without?.entries[0]!.claimedAmount).toBeUndefined();
   });
 
+  it("round-trips feeLythoshi and tolerates its absence (legacy records)", () => {
+    const withFee = parseHistoryEnvelope({
+      schemaVersion: 0,
+      entries: [rec({ feeLythoshi: "2100000000000000" })],
+    });
+    expect(withFee?.entries[0]!.feeLythoshi).toBe("2100000000000000");
+    const without = parseHistoryEnvelope({ schemaVersion: 0, entries: [rec()] });
+    expect(without?.entries[0]!.feeLythoshi).toBeUndefined();
+  });
+
   it("drops malformed entries but keeps the good ones", () => {
     const env = {
       schemaVersion: 0,

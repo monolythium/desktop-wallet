@@ -23,6 +23,7 @@ import {
   notificationTitle,
   type NotificationRecord,
 } from "../sdk/notifications";
+import { formatLythDisplay } from "../sdk/lyth-display";
 
 export interface NotificationDetailProps {
   record: NotificationRecord;
@@ -39,6 +40,9 @@ export function NotificationDetail({ record, onClose }: NotificationDetailProps)
   // show the plain amount. Null ⇒ omit the row (zero/absent — honest absence).
   const amountLabel = notificationAmountLabel(record);
   const showBlock = record.blockNumber !== null;
+  // Network fee (display LYTH, 4 dp) decoded at the confirmed terminal; null ⇒
+  // omit the row (undecodable / older record — honest absence, never a fake 0).
+  const feeLabel = formatLythDisplay(record.feeLythoshi);
   // Delegation records name the target cluster in place of the "To" module
   // address; null when no cluster info was captured (older records) → fall back
   // to the address "To" row.
@@ -106,6 +110,9 @@ export function NotificationDetail({ record, onClose }: NotificationDetailProps)
               label="Block"
               value={`#${record.blockNumber!.toLocaleString("en-US")}`}
             />
+          ) : null}
+          {feeLabel !== null ? (
+            <DRow label="Network fee" value={`${feeLabel} LYTH`} />
           ) : null}
           {/* Real on-chain hashes link out; the synthetic incoming id
               (`in:<block>.<txIndex>.<logIndex>`) is never shown or linked. */}
