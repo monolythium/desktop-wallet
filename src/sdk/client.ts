@@ -130,7 +130,14 @@ export async function loadChainSnapshot(address: string): Promise<ChainSnapshot>
       rpcClient.lythCurrentRound(),
       rpcClient.lythAddressProfile(address),
     ]);
-    const lythoshi = profile.account.nativeBalance;
+    // SDK 0.6.0 renamed the profile balance field to `nativeBalanceLythoshi`
+    // (the SDK type still declares `nativeBalance`), so read the new field first
+    // and fall back to the old one, else "0" — never undefined into formatLyth.
+    const account = profile.account as {
+      nativeBalance?: string;
+      nativeBalanceLythoshi?: string;
+    };
+    const lythoshi = account.nativeBalanceLythoshi ?? account.nativeBalance ?? "0";
     return {
       endpoint,
       chainId,
