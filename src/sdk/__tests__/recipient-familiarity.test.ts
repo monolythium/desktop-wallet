@@ -77,6 +77,26 @@ describe("classifyRecipient", () => {
     ).toBe("unknown");
   });
 
+  it("is 'unknown' when the CONFIRMED history is unreadable even if pending is readable-but-empty", () => {
+    // pending ([]) can't prove "never sent before" — only confirmed history can.
+    // A readable-empty pending must NOT upgrade an unreadable history to "new".
+    expect(
+      classifyRecipient({ recipientLower: R, fromLower: FROM, isContact: false, rows: null, pending: [] }),
+    ).toBe("unknown");
+  });
+
+  it("still resolves 'known' from a pending send even when confirmed history is unreadable", () => {
+    expect(
+      classifyRecipient({
+        recipientLower: R,
+        fromLower: FROM,
+        isContact: false,
+        rows: null,
+        pending: [{ counterparty: R, addressLower: FROM }],
+      }),
+    ).toBe("known");
+  });
+
   it("is 'unknown' for an empty/invalid recipient", () => {
     expect(
       classifyRecipient({ recipientLower: "", fromLower: FROM, isContact: false, rows: [], pending: [] }),
