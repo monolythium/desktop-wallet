@@ -654,11 +654,18 @@ function nativeMarketOrderBookDeltasQuery(filter: {
   };
 }
 
-function normalizeBalanceHex(balance: unknown): string {
+/** Normalize an `eth_getBalance` result to a BigInt-parsable balance string.
+ *  SDK 0.6.0 returns an `AccountProofResponse` whose balance is the `value`
+ *  field (a 0x-hex string), not a bare hex string nor a `balance` key — reading
+ *  the wrong shape yielded a constant 0. Accepts the bare string + the legacy
+ *  `balance` key too; anything unrecognized falls back to "0x0". Exported for
+ *  unit tests. */
+export function normalizeBalanceHex(balance: unknown): string {
   if (typeof balance === "string") return balance;
-  if (balance && typeof balance === "object" && "balance" in balance) {
-    const raw = (balance as { balance?: unknown }).balance;
-    if (typeof raw === "string") return raw;
+  if (balance && typeof balance === "object") {
+    const obj = balance as { value?: unknown; balance?: unknown };
+    if (typeof obj.value === "string") return obj.value;
+    if (typeof obj.balance === "string") return obj.balance;
   }
   return "0x0";
 }
