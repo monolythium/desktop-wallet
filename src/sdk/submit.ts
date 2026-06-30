@@ -64,6 +64,9 @@ export interface SubmitNativeTxResult {
   fromHex: string;
   /** Resolved per-unit fee + execution-unit limit actually used. */
   fee: ResolvedExecutionFee;
+  /** The account nonce this tx signed with — surfaced so the tracked-tx layer
+   *  can detect a dropped tx (a later nonce confirmed while this stays pending). */
+  nonce: number;
 }
 
 /**
@@ -117,5 +120,5 @@ export async function submitNativeTx(
   // Success — advance the local pending nonce so the next submit won't reuse it.
   recordSubmittedNonce(fromHex, MONOLYTHIUM_TESTNET_CHAIN_ID, nonce);
 
-  return { txHash, fromHex, fee };
+  return { txHash, fromHex, fee, nonce: Number(nonce) };
 }

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   PENDING_ABSOLUTE_CAP_MS,
+  PENDING_DROP_GRACE_MS,
   PENDING_SLOW_MS,
   PENDING_TERMINAL_RETAIN_MS,
   PENDING_TX_STORE_KEY,
@@ -117,28 +118,70 @@ describe("classifyPending — never synthesizes a verdict (keeps pending)", () =
   });
 });
 
-describe("classifyStalePending — time-based lifecycle", () => {
+describe("classifyStalePending — time-based lifecycle (no committed nonce)", () => {
   const base = tx({ submittedAt: 1_000_000 });
 
   it("is pending inside the slow threshold", () => {
-    expect(classifyStalePending(base, 1_000_000)).toBe("pending");
-    expect(classifyStalePending(base, 1_000_000 + PENDING_SLOW_MS - 1)).toBe("pending");
+    expect(classifyStalePending(base, null, 1_000_000)).toBe("pending");
+    expect(classifyStalePending(base, null, 1_000_000 + PENDING_SLOW_MS - 1)).toBe("pending");
   });
 
   it("is slow from the slow threshold up to the absolute cap", () => {
-    expect(classifyStalePending(base, 1_000_000 + PENDING_SLOW_MS)).toBe("slow");
-    expect(classifyStalePending(base, 1_000_000 + PENDING_ABSOLUTE_CAP_MS - 1)).toBe("slow");
+    expect(classifyStalePending(base, null, 1_000_000 + PENDING_SLOW_MS)).toBe("slow");
+    expect(classifyStalePending(base, null, 1_000_000 + PENDING_ABSOLUTE_CAP_MS - 1)).toBe("slow");
   });
 
   it("is expired at and past the absolute cap", () => {
-    expect(classifyStalePending(base, 1_000_000 + PENDING_ABSOLUTE_CAP_MS)).toBe("expired");
+    expect(classifyStalePending(base, null, 1_000_000 + PENDING_ABSOLUTE_CAP_MS)).toBe("expired");
+  });
+});
+
+describe("classifyStalePending — nonce-based dropped detection", () => {
+  const T0 = 1_000_000;
+  // nonce 5, young enough that the time-based path alone would be "pending".
+  const young = tx({ submittedAt: T0, nonce: 5 });
+
+  it("stays on the time-based path when the committed nonce has NOT passed", () => {
+    expect(classifyStalePending(young, 5, T0 + 1)).toBe("pending"); // committed == nonce
+    expect(classifyStalePending(young, 4, T0 + 1)).toBe("pending"); // committed < nonce
+  });
+
+  it("is slow within the drop grace once the committed nonce passes", () => {
+    // First observation (noncePassedAtMs unset) anchors the grace at `now`.
+    expect(classifyStalePending(young, 6, T0 + 1)).toBe("slow");
+    const stamped = tx({ submittedAt: T0, nonce: 5, noncePassedAtMs: T0 });
+    expect(classifyStalePending(stamped, 6, T0 + PENDING_DROP_GRACE_MS - 1)).toBe("slow");
+  });
+
+  it("is dropped once the drop grace elapses after the nonce passed", () => {
+    const stamped = tx({ submittedAt: T0, nonce: 5, noncePassedAtMs: T0 });
+    expect(classifyStalePending(stamped, 6, T0 + PENDING_DROP_GRACE_MS)).toBe("dropped");
+  });
+
+  it("a null committed-nonce read never drops, and never un-drops a dropped row", () => {
+    expect(classifyStalePending(young, null, T0 + 1)).toBe("pending"); // never advances to dropped
+    const droppedRow = tx({ submittedAt: T0, nonce: 5, noncePassedAtMs: T0, lifecycle: "dropped" });
+    expect(classifyStalePending(droppedRow, null, T0 + PENDING_DROP_GRACE_MS * 100)).toBe("dropped");
+  });
+
+  it("a real read showing the nonce NOT passed un-drops a dropped row", () => {
+    const droppedRow = tx({ submittedAt: T0, nonce: 5, noncePassedAtMs: T0, lifecycle: "dropped" });
+    expect(classifyStalePending(droppedRow, 5, T0 + 1)).toBe("pending"); // back to time-based
+  });
+
+  it("falls back to time-based when the tx carries no captured nonce", () => {
+    const noNonce = tx({ submittedAt: T0 });
+    expect(classifyStalePending(noNonce, 999, T0 + 1)).toBe("pending");
   });
 });
 
 describe("transitionPending — relabel + bounded terminal removal", () => {
+  const NO_NONCES = new Map<string, number | null>();
+
   it("stamps the lifecycle and flags changed when it moves", () => {
     const { next, changed } = transitionPending(
       [tx({ submittedAt: 1_000_000 })],
+      NO_NONCES,
       1_000_000 + PENDING_SLOW_MS,
     );
     expect(changed).toBe(true);
@@ -148,18 +191,20 @@ describe("transitionPending — relabel + bounded terminal removal", () => {
   it("never removes a pending or slow row", () => {
     const { next } = transitionPending(
       [tx({ submittedAt: 1_000_000 })],
+      NO_NONCES,
       1_000_000 + PENDING_SLOW_MS, // slow, not terminal
     );
     expect(next).toHaveLength(1);
   });
 
   it("keeps an expired row visible until the retention window, then removes it", () => {
-    const kept = transitionPending([tx({ submittedAt: 0 })], PENDING_ABSOLUTE_CAP_MS);
+    const kept = transitionPending([tx({ submittedAt: 0 })], NO_NONCES, PENDING_ABSOLUTE_CAP_MS);
     expect(kept.next).toHaveLength(1);
     expect(kept.next[0]!.lifecycle).toBe("expired");
 
     const removed = transitionPending(
       [tx({ submittedAt: 0, lifecycle: "expired" })],
+      NO_NONCES,
       PENDING_TERMINAL_RETAIN_MS,
     );
     expect(removed.next).toHaveLength(0);
@@ -168,7 +213,7 @@ describe("transitionPending — relabel + bounded terminal removal", () => {
 
   it("is a no-op (changed=false) when every lifecycle is already current", () => {
     const slow = tx({ submittedAt: 1_000_000, lifecycle: "slow" });
-    expect(transitionPending([slow], 1_000_000 + PENDING_SLOW_MS).changed).toBe(false);
+    expect(transitionPending([slow], NO_NONCES, 1_000_000 + PENDING_SLOW_MS).changed).toBe(false);
   });
 
   it("passes a BRIDGED row through untouched — never relabels or removes it", () => {
@@ -180,10 +225,34 @@ describe("transitionPending — relabel + bounded terminal removal", () => {
       confirmedBlockHeight: 5,
       confirmedTxIndex: 0,
     });
-    const out = transitionPending([bridged], PENDING_TERMINAL_RETAIN_MS * 10);
+    const out = transitionPending([bridged], NO_NONCES, PENDING_TERMINAL_RETAIN_MS * 10);
     expect(out.next).toHaveLength(1);
     expect(out.next[0]).toBe(bridged); // same reference — untouched
     expect(out.changed).toBe(false);
+  });
+
+  it("stamps noncePassedAtMs and moves to slow the first tick the committed nonce passes", () => {
+    const now = 2_000_000;
+    // Young (age 1s < slow), so a move to slow can only come from the nonce path.
+    const row = tx({ submittedAt: now - 1_000, nonce: 5 });
+    const nonces = new Map<string, number | null>([["mono1self", 6]]);
+    const { next, changed } = transitionPending([row], nonces, now);
+    expect(changed).toBe(true);
+    expect(next[0]!.noncePassedAtMs).toBe(now);
+    expect(next[0]!.lifecycle).toBe("slow"); // within grace this first tick
+  });
+
+  it("moves a nonce-passed row to dropped once the grace elapses", () => {
+    const now = 2_000_000;
+    const row = tx({
+      submittedAt: now - 1_000, // young: time-based alone would be pending
+      nonce: 5,
+      noncePassedAtMs: now - PENDING_DROP_GRACE_MS,
+    });
+    const nonces = new Map<string, number | null>([["mono1self", 6]]);
+    const { next } = transitionPending([row], nonces, now);
+    expect(next).toHaveLength(1); // dropped but retained (well within retention)
+    expect(next[0]!.lifecycle).toBe("dropped");
   });
 });
 

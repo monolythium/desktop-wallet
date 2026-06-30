@@ -224,6 +224,7 @@ export function Stake({ experimentalEnabled }: StakeProps = {}) {
           headline: `Delegated ${weightLabel} of balance to cluster ${clusterId}`,
           detail: result.txHash,
           txHash: result.txHash,
+          nonce: result.nonce,
         };
       },
     });
@@ -269,6 +270,7 @@ export function Stake({ experimentalEnabled }: StakeProps = {}) {
           headline: `Unstaked ${weightLabel} from cluster ${clusterId}`,
           detail: result.txHash,
           txHash: result.txHash,
+          nonce: result.nonce,
         };
       },
     });
@@ -317,6 +319,7 @@ export function Stake({ experimentalEnabled }: StakeProps = {}) {
           headline: `Redelegated ${weightLabel} from cluster ${fromCluster} to ${toCluster}`,
           detail: result.txHash,
           txHash: result.txHash,
+          nonce: result.nonce,
         };
       },
     });
@@ -357,6 +360,7 @@ export function Stake({ experimentalEnabled }: StakeProps = {}) {
           headline: `Claimed ${totalLyth} LYTH of staking rewards`,
           detail: result.txHash,
           txHash: result.txHash,
+          nonce: result.nonce,
         };
       },
     });
@@ -399,6 +403,7 @@ export function Stake({ experimentalEnabled }: StakeProps = {}) {
           headline: `Auto-compound ${next ? "enabled" : "disabled"}`,
           detail: result.txHash,
           txHash: result.txHash,
+          nonce: result.nonce,
         };
       },
     });

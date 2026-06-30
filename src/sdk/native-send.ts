@@ -30,6 +30,8 @@ export interface SendNativeLythResult {
   from: string;
   amountLythoshi: string;
   amountDisplay: string;
+  /** Account nonce this send signed with (for dropped-tx detection). */
+  nonce: number;
 }
 
 export interface NativeLythTransferPlanArgs {
@@ -93,5 +95,6 @@ export async function sendNativeLyth(args: SendNativeLythArgs): Promise<SendNati
     from: addressToTypedBech32("user", result.fromHex),
     amountLythoshi,
     amountDisplay: formatLyth(amountLythoshi, { includeUnit: false }),
+    nonce: result.nonce,
   };
 }
