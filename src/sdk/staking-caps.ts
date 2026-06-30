@@ -1,0 +1,136 @@
+// Delegation cap logic (WP §16.7 anti-capture) — pure, React-free, unit-pinnable.
+//
+// Two caps the chain enforces and the wallet warns about BEFORE signing:
+//  - a per-cluster 50% (5000 bps) per-wallet cap (chain revert 0x0213), and
+//  - a global 100% (10000 bps) total-delegation cap (chain revert 0x0205).
+//
+// The 50% per-cluster value is a FIXED protocol floor the chain always enforces;
+// no RPC exposes a live per-wallet cap, so it is hardcoded. A configurable
+// cluster-aggregate cap (lyth_getDelegationCap) only TIGHTENS it when present —
+// a disabled/unread aggregate cap (null) never lifts the floor (fail-closed).
+
+/** Per-cluster per-wallet delegation cap floor, in basis points (5000 = 50%). */
+export const DELEGATION_PER_WALLET_CAP_BPS = 5000;
+
+/** Global total-delegation cap across all clusters, in basis points (100%). */
+export const WALLET_TOTAL_CAP_BPS = 10000;
+
+/** The chain's "no aggregate cap" sentinel (u32::MAX). */
+export const CHAIN_CAP_DISABLED = 0xffffffff;
+
+/** Normalize a raw aggregate-cap reading to an honest bps value or null. The
+ *  u32::MAX disabled sentinel, an absent/non-finite value, all map to null —
+ *  NEVER a fabricated cap (e.g. rendering u32::MAX as 42949672.95%). */
+export function normalizeAggregateCapBps(raw: number | null | undefined): number | null {
+  if (raw === null || raw === undefined || !Number.isFinite(raw)) return null;
+  if (raw === CHAIN_CAP_DISABLED) return null;
+  return raw;
+}
+
+/** The binding per-cluster cap: the §16.7 floor always applies; a present
+ *  aggregate cap tightens it. A null aggregate cap fails closed to the floor. */
+export function bindingPerClusterCapBps(aggregateCapBps: number | null): number {
+  return aggregateCapBps !== null
+    ? Math.min(aggregateCapBps, DELEGATION_PER_WALLET_CAP_BPS)
+    : DELEGATION_PER_WALLET_CAP_BPS;
+}
+
+/** True when adding `moveBps` to a cluster's existing weight would exceed the
+ *  binding per-cluster cap (→ chain revert 0x0213). */
+export function exceedsPerClusterCap(
+  dstExistingWeightBps: number,
+  moveBps: number,
+  aggregateCapBps: number | null,
+): boolean {
+  return dstExistingWeightBps + moveBps > bindingPerClusterCapBps(aggregateCapBps);
+}
+
+/** True when a cluster is ALREADY at the binding cap — any positive move
+ *  reverts; surface a "pick another cluster" message. */
+export function destinationAtPerClusterCap(
+  dstExistingWeightBps: number,
+  aggregateCapBps: number | null,
+): boolean {
+  return dstExistingWeightBps >= bindingPerClusterCapBps(aggregateCapBps);
+}
+
+/** Global headroom for a delegate: total delegated weight may not exceed 100%
+ *  (chain revert 0x0205). Never negative. */
+export function walletTotalHeadroomBps(totalDelegatedBps: number): number {
+  return Math.max(0, WALLET_TOTAL_CAP_BPS - totalDelegatedBps);
+}
+
+/** Clear message for a chain 0x0213 PerWalletCapExceeded revert / pre-flight. */
+export const PER_WALLET_CAP_REVERT_MESSAGE =
+  "This cluster is already at the 50% per-wallet cap — reduce the amount or choose another cluster.";
+
+/** Clear message for a chain 0x0205 WalletTotalExceeded revert / pre-flight. */
+export const WALLET_TOTAL_CAP_REVERT_MESSAGE =
+  "This would exceed your total delegation limit (100%) — reduce the amount.";
+
+/** On-submit pre-flight: block a delegate that would hit a chain cap revert,
+ *  so the wallet never signs a guaranteed-revert tx. An undelegate removes
+ *  weight → never over-cap. */
+export function preflightDelegationVerdict(args: {
+  action: "delegate" | "undelegate" | "redelegate";
+  dstExistingWeightBps: number;
+  totalDelegatedBps: number;
+  moveBps: number;
+  capBps: number | null;
+}): { ok: true } | { ok: false; message: string } {
+  const { action, dstExistingWeightBps, totalDelegatedBps, moveBps, capBps } = args;
+  if (action === "undelegate") return { ok: true };
+  if (exceedsPerClusterCap(dstExistingWeightBps, moveBps, capBps)) {
+    return { ok: false, message: PER_WALLET_CAP_REVERT_MESSAGE };
+  }
+  if (action === "delegate" && totalDelegatedBps + moveBps > WALLET_TOTAL_CAP_BPS) {
+    return { ok: false, message: WALLET_TOTAL_CAP_REVERT_MESSAGE };
+  }
+  return { ok: true };
+}
+
+/** The always-on cap note + the active dual-cap warning (if any) for a delegate
+ *  form, given the cluster's existing weight, the wallet total, the entered move
+ *  (null while the input isn't a positive integer), and the aggregate cap.
+ *  Pure — drives the Stake delegate-form messaging and is unit-pinnable. */
+export function delegateCapWarning(args: {
+  existingWeightBps: number;
+  totalDelegatedBps: number;
+  additionalBps: number | null;
+  aggregateCapBps: number | null;
+}): { note: string; warning: string | null } {
+  const binding = bindingPerClusterCapBps(args.aggregateCapBps);
+  const note = `Per-wallet limit: ${(binding / 100).toFixed(0)}% to any one cluster.`;
+
+  // Already at the per-cluster cap — independent of the entered amount.
+  if (destinationAtPerClusterCap(args.existingWeightBps, args.aggregateCapBps)) {
+    return {
+      note,
+      warning: `You've already delegated the ${(binding / 100).toFixed(0)}% per-cluster maximum to this cluster — choose another cluster to delegate more.`,
+    };
+  }
+
+  if (args.additionalBps === null || args.additionalBps <= 0) {
+    return { note, warning: null };
+  }
+
+  // This delegate would exceed the per-cluster cap — show the overage.
+  if (exceedsPerClusterCap(args.existingWeightBps, args.additionalBps, args.aggregateCapBps)) {
+    const overageBps = args.existingWeightBps + args.additionalBps - binding;
+    return {
+      note,
+      warning: `Delegation would exceed the ${(binding / 100).toFixed(0)}% per-wallet cap for one cluster by ${(overageBps / 100).toFixed(2)}%.`,
+    };
+  }
+
+  // This delegate would exceed the global 100% total.
+  const headroom = walletTotalHeadroomBps(args.totalDelegatedBps);
+  if (args.additionalBps > headroom) {
+    return {
+      note,
+      warning: `You can delegate at most ${(headroom / 100).toFixed(2)}% more — total delegation across all clusters can't exceed 100%.`,
+    };
+  }
+
+  return { note, warning: null };
+}

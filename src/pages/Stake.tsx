@@ -46,6 +46,11 @@ import {
   loadLiveStakeStatus,
   type LiveStakeStatus,
 } from "../sdk/live";
+import {
+  delegateCapWarning,
+  normalizeAggregateCapBps,
+  preflightDelegationVerdict,
+} from "../sdk/staking-caps";
 
 interface StakeProps {
   /** Gate the autovote planner + per-cluster diversity column (experimental). */
@@ -160,6 +165,16 @@ export function Stake({ experimentalEnabled }: StakeProps = {}) {
   const active = status?.activeClusters.ok ? status.activeClusters.value ?? [] : [];
   const healthy = status?.healthyClusters.ok ? status.healthyClusters.value ?? [] : [];
   const delegations = status?.delegations.ok ? status.delegations.value : null;
+  // Live cluster-aggregate cap, normalized: the u32::MAX disabled sentinel and a
+  // failed/absent read both collapse to null (→ the fixed 50% per-cluster floor
+  // applies), never a fabricated cap.
+  const aggregateCapBps = (() => {
+    const cap = status?.delegationCap;
+    if (!cap || !cap.ok) return null;
+    const v = cap.value as { capBps?: unknown } | null;
+    const raw = v && typeof v.capBps === "number" ? v.capBps : null;
+    return normalizeAggregateCapBps(raw);
+  })();
   const delegationHistory = status?.delegationHistory.ok
     ? status.delegationHistory.value ?? []
     : [];
@@ -980,6 +995,19 @@ export function Stake({ experimentalEnabled }: StakeProps = {}) {
           )}
           {directory.map((c) => {
             const isOpen = openForm === c.clusterId;
+            // Dual-cap state for this cluster's delegate form: existing weight
+            // here + the wallet total drive the per-cluster 50% and global 100%
+            // warnings against the entered amount.
+            const existingWeightBps =
+              delegations?.rows.find((r) => r.cluster === c.clusterId)?.weightBps ?? 0;
+            const totalDelegatedBps = delegations?.totalBps ?? 0;
+            const draftBps = Number.parseInt(draftWeightBps, 10);
+            const capState = delegateCapWarning({
+              existingWeightBps,
+              totalDelegatedBps,
+              additionalBps: Number.isFinite(draftBps) && draftBps > 0 ? draftBps : null,
+              aggregateCapBps,
+            });
             return (
               <div
                 key={c.clusterId}
@@ -1100,6 +1128,14 @@ export function Stake({ experimentalEnabled }: StakeProps = {}) {
                       no tokens are escrowed. Your LYTH stays in your wallet and
                       remains spendable; effective weight = balance × weightBps.
                     </div>
+                    <div className="row-help" style={{ lineHeight: 1.5 }}>
+                      {capState.note}
+                    </div>
+                    {capState.warning && (
+                      <div className="row-help" style={{ color: "var(--warn)", lineHeight: 1.5 }}>
+                        {capState.warning}
+                      </div>
+                    )}
                     {draftError && (
                       <div className="row-help" style={{ color: "var(--err)" }}>
                         {draftError}
@@ -1124,6 +1160,19 @@ export function Stake({ experimentalEnabled }: StakeProps = {}) {
                             setDraftError(
                               "Weight must be 1-10000 basis points (0.01% – 100%).",
                             );
+                            return;
+                          }
+                          // Block a delegate the chain would revert on a cap
+                          // (per-cluster 50% / global 100%) before signing.
+                          const verdict = preflightDelegationVerdict({
+                            action: "delegate",
+                            dstExistingWeightBps: existingWeightBps,
+                            totalDelegatedBps,
+                            moveBps: bps,
+                            capBps: aggregateCapBps,
+                          });
+                          if (!verdict.ok) {
+                            setDraftError(verdict.message);
                             return;
                           }
                           openDelegate(c.clusterId, bps);
