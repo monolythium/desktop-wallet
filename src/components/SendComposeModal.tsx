@@ -6,6 +6,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   ADDRESS_KIND_HRPS,
+  MONOLYTHIUM_TESTNET_CHAIN_ID,
   NATIVE_LYTH_DECIMALS,
   formatLyth,
   parseLythToLythoshi,
@@ -15,7 +16,14 @@ import { useOperations } from "../operations/context";
 import { sendNativeLyth } from "../sdk/native-send";
 import { addressbookLookup } from "../sdk/addressbook";
 import { fetchFinalityPosture } from "../sdk/finality";
-import { errorMessage, loadLiveWalletBalance } from "../sdk/live";
+import { errorMessage, loadLiveAddressActivity, loadLiveWalletBalance } from "../sdk/live";
+import { activityCacheKey } from "../sdk/activity-cache";
+import { readConfirmedCache } from "../sdk/activity-cache-store";
+import { pendingTxsSnapshot } from "../sdk/pending-tx-store";
+import {
+  classifyRecipient,
+  type RecipientFamiliarity,
+} from "../sdk/recipient-familiarity";
 import {
   maxFeeLythoshiFrom,
   previewTransferFee,
@@ -54,6 +62,12 @@ export function SendComposeModal({ fromBech32m, onClose }: Props) {
   // in-compose so the fee + total are visible before the user confirms.
   const [feePreview, setFeePreview] = useState<NativeFeePreview | null>(null);
   const [feeError, setFeeError] = useState<string | null>(null);
+  // First-time-recipient signal — derived from real send history + contacts;
+  // "unknown" asserts nothing. `historyUnreadable` distinguishes "valid address
+  // but no history readable" (→ neutral verify caution) from "not yet a valid
+  // address" (→ nothing).
+  const [familiarity, setFamiliarity] = useState<RecipientFamiliarity>("unknown");
+  const [historyUnreadable, setHistoryUnreadable] = useState(false);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -102,6 +116,67 @@ export function SendComposeModal({ fromBech32m, onClose }: Props) {
       cancelled = true;
     };
   }, [fromBech32m]);
+
+  // Sync recipient-only validity: a typed user address that parses and isn't
+  // our own. Gates the familiarity read (and which caution, if any, to show).
+  const recipientValid = useMemo(() => {
+    const t = recipient.trim();
+    if (!t.toLowerCase().startsWith(`${USER_HRP}1`)) return false;
+    if (t.toLowerCase() === fromBech32m.toLowerCase()) return false;
+    try {
+      typedBech32ToAddress(t, "user");
+      return true;
+    } catch {
+      return false;
+    }
+  }, [recipient, fromBech32m]);
+
+  // Classify the recipient from real history (saved contacts + confirmed
+  // activity cache ∪ live read + in-flight pending sends), all scoped to this
+  // account. Never claims "known" without a backing prior send/contact, and
+  // never claims "new" unless history was actually readable.
+  useEffect(() => {
+    if (!recipientValid) {
+      setFamiliarity("unknown");
+      setHistoryUnreadable(false);
+      return;
+    }
+    if (resolvedContactName) {
+      setFamiliarity("known");
+      setHistoryUnreadable(false);
+      return;
+    }
+    let cancelled = false;
+    setFamiliarity("unknown"); // clear any stale value while the read is in flight
+    const recipientLower = recipient.trim().toLowerCase();
+    const fromLower = fromBech32m.toLowerCase();
+    void (async () => {
+      const chainIdHex = `0x${MONOLYTHIUM_TESTNET_CHAIN_ID.toString(16)}`;
+      const scopeKey = activityCacheKey(fromLower, chainIdHex);
+      const cached = await readConfirmedCache(scopeKey).catch(() => null);
+      const live = await loadLiveAddressActivity(fromBech32m).catch(() => null);
+      const liveRows = live && live.ok ? live.value ?? [] : null;
+      const cachedRows = cached ? cached.rows : null;
+      const rows =
+        cachedRows === null && liveRows === null
+          ? null
+          : [...(cachedRows ?? []), ...(liveRows ?? [])];
+      let pending: ReturnType<typeof pendingTxsSnapshot> | null;
+      try {
+        pending = pendingTxsSnapshot();
+      } catch {
+        pending = null;
+      }
+      if (cancelled) return;
+      setFamiliarity(
+        classifyRecipient({ recipientLower, fromLower, isContact: false, rows, pending }),
+      );
+      setHistoryUnreadable(rows === null && pending === null);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [recipientValid, recipient, resolvedContactName, fromBech32m]);
 
   const validate = useMemo(
     () => () => {
@@ -186,6 +261,7 @@ export function SendComposeModal({ fromBech32m, onClose }: Props) {
         { k: "Finality", v: finality.label, kind: "value" },
       ],
       effects: [
+        { text: "Transactions are irreversible. Confirm the recipient and amount carefully." },
         { text: "Unlocks the local vault for this operation only." },
         { text: "Derives an ML-DSA-65 signer with @monolythium/core-sdk/crypto." },
         {
@@ -329,6 +405,21 @@ export function SendComposeModal({ fromBech32m, onClose }: Props) {
             }}
           >
             Saved as <strong style={{ color: "var(--fg-200)" }}>{resolvedContactName}</strong>
+          </div>
+        )}
+        {!resolvedContactName && familiarity === "new" && (
+          <div style={cautionBox}>
+            <strong>First-time recipient.</strong> You haven't sent to this
+            address from this account before — double-check the destination is
+            what you intended.
+          </div>
+        )}
+        {!resolvedContactName && familiarity === "unknown" && recipientValid && historyUnreadable && (
+          // Honest fallback: history couldn't be read, so we don't claim
+          // first-time or known — just a neutral verify-the-address caution.
+          <div style={cautionBox}>
+            Double-check the recipient address before sending — transactions
+            can't be reversed.
           </div>
         )}
 
@@ -475,6 +566,17 @@ const feeKey: React.CSSProperties = {
 const feeVal: React.CSSProperties = {
   fontFamily: "var(--f-mono)",
   color: "var(--fg-100)",
+};
+
+const cautionBox: React.CSSProperties = {
+  marginTop: 8,
+  padding: "8px 10px",
+  fontSize: 12,
+  lineHeight: 1.5,
+  color: "var(--fg-200)",
+  background: "rgba(244,201,122,0.08)",
+  border: "1px solid rgba(244,201,122,0.4)",
+  borderRadius: 8,
 };
 
 const inputStyle: React.CSSProperties = {
