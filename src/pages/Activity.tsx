@@ -32,6 +32,11 @@ import {
   emptyActivityCopy,
   type ActivityCoverageKind,
 } from "../sdk/activity-coverage";
+import { activityCacheKey, mergeConfirmedRows } from "../sdk/activity-cache";
+import {
+  readConfirmedCache,
+  writeConfirmedCache,
+} from "../sdk/activity-cache-store";
 import {
   isDelegationKind,
   isZeroAmount,
@@ -53,6 +58,12 @@ export function Activity({ experimentalEnabled }: Props) {
   const wallet = useActiveWallet();
   const walletAddress = wallet.status === "ready" ? wallet.address : "";
   const [activity, setActivity] = useState<RpcOutcome<LiveAddressActivityRow[]> | null>(null);
+  // The confirmed rows actually rendered: seeded instantly from the persisted
+  // cache, then replaced by the cache⊕live merge. Sourcing the feed from this
+  // (rather than the raw live outcome) gives an instant first paint, keeps the
+  // last-known rows visible through an indexer blip, and is the durable surface
+  // later lifecycle work threads captured fields through.
+  const [confirmedRows, setConfirmedRows] = useState<LiveAddressActivityRow[]>([]);
   const [failed, setFailed] = useState<NotificationRecord[]>([]);
   // Indexer coverage for the empty-feed message — only probed (and only used)
   // when the confirmed feed comes back empty, so the user learns WHY it's empty.
@@ -74,7 +85,7 @@ export function Activity({ experimentalEnabled }: Props) {
   const [dirFilter, setDirFilter] = useState<"all" | "in" | "out">("all");
   const [tokenFilter, setTokenFilter] = useState<string>("all");
 
-  const activityRows = activity?.ok ? activity.value ?? [] : [];
+  const activityRows = confirmedRows;
 
   const tokenOptions = useMemo(() => {
     const set = new Set<string>();
@@ -111,33 +122,54 @@ export function Activity({ experimentalEnabled }: Props) {
       setActivity(null);
       setFailed([]);
       setCoverage(null);
+      setConfirmedRows([]);
       return;
     }
     setBusy(true);
+    const addrLower = walletAddress.toLowerCase();
+    const chainIdHex = `0x${MONOLYTHIUM_TESTNET_CHAIN_ID.toString(16)}`;
+    const scopeKey = activityCacheKey(addrLower, chainIdHex);
     try {
+      // 1. Instant paint from the persisted cache (also replaces a prior wallet's
+      //    rows when switching accounts; null cache ⇒ empty until the live read).
+      const cached = await readConfirmedCache(scopeKey);
+      setConfirmedRows(cached?.rows ?? []);
+      // 2. Live read + scoped failed records.
       const [activityOutcome, scopedNotifications] = await Promise.all([
         loadLiveAddressActivity(walletAddress),
         // Active-vault scope only — another vault's failed rows must never
         // appear here (records are owned by the address they were recorded
         // under, which matches the active wallet's lowercased address).
-        listForScope(walletAddress.toLowerCase()),
+        listForScope(addrLower),
       ]);
       setActivity(activityOutcome);
       setFailed(scopedNotifications.filter((r) => r.status === "failed"));
-      // Only when the confirmed feed is empty do we probe the indexer's coverage
-      // so the empty state can explain the reason; a non-empty feed never needs it.
-      if (activityOutcome.ok && (activityOutcome.value?.length ?? 0) === 0) {
+      // 3. Merge live into the cache (live wins; older cached rows retained),
+      //    render the merged set, and persist. On a live error we keep the cached
+      //    rows visible (the error band still surfaces above).
+      let mergedConfirmed = cached?.rows ?? [];
+      if (activityOutcome.ok) {
+        mergedConfirmed = mergeConfirmedRows(
+          cached?.rows ?? [],
+          activityOutcome.value ?? [],
+        );
+        setConfirmedRows(mergedConfirmed);
+        await writeConfirmedCache(scopeKey, mergedConfirmed, Date.now());
+      }
+      // Only when the merged confirmed feed is empty do we probe the indexer's
+      // coverage so the empty state can explain the reason.
+      if (activityOutcome.ok && mergedConfirmed.length === 0) {
         setCoverage(await loadAddressActivityKind(walletAddress));
       } else {
         setCoverage(null);
       }
-      // Announce newly-arrived incoming native LYTH (records + toasts once).
-      // Runs here on the open, focused surface and is gated by the experimental
-      // flag like the rest of the notifications layer; best-effort.
+      // Announce newly-arrived incoming native LYTH (records + toasts once) from
+      // the LIVE rows, not the merged cache. Open, focused surface only; gated by
+      // the experimental flag like the rest of the notifications layer.
       if (showExtra && activityOutcome.ok) {
         void detectAndNotifyIncoming(
-          walletAddress.toLowerCase(),
-          `0x${MONOLYTHIUM_TESTNET_CHAIN_ID.toString(16)}`,
+          addrLower,
+          chainIdHex,
           activityOutcome.value ?? [],
         );
       }
