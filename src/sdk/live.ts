@@ -603,7 +603,15 @@ export async function decodeTxFeeLythoshi(txHash: string): Promise<string | null
   try {
     const decoded = await getProvider().rpcClient.lythDecodeTx(txHash);
     const total = decoded.fee?.total_lythoshi;
-    return typeof total === "string" && total.length > 0 ? total : null;
+    if (typeof total !== "string" || total.length === 0) return null;
+    // A zero (or unparseable) fee is treated as absent — a confirmed tx's fee is
+    // never a real 0, so omit the row rather than render a fabricated "0 LYTH".
+    try {
+      if (BigInt(total) <= 0n) return null;
+    } catch {
+      return null;
+    }
+    return total;
   } catch {
     return null;
   }
