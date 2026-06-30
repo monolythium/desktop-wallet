@@ -12,6 +12,7 @@ import {
 } from "../sdk/keychain";
 import { VaultCallError } from "../sdk/vault";
 import { useAutoLock } from "../sdk/auto-lock";
+import { resetConfirmMatches, resetWalletOnThisDevice } from "../sdk/reset";
 import {
   lockoutRemainingMs,
   readLockoutState,
@@ -25,6 +26,13 @@ export function UnlockGate() {
   const [busy, setBusy] = useState(false);
   const [lockoutUntil, setLockoutUntil] = useState(0);
   const [now, setNow] = useState(() => Date.now());
+  // Forgot-password recovery: the only escape hatch for a locked, password-lost
+  // user. Reveals a type-to-confirm reset that reuses the shared wipe path; the
+  // device re-onboards (re-import from the recovery phrase) after the reload.
+  const [forgotOpen, setForgotOpen] = useState(false);
+  const [confirmText, setConfirmText] = useState("");
+  const [resetBusy, setResetBusy] = useState(false);
+  const [resetError, setResetError] = useState<string | null>(null);
 
   // Re-check the persisted brute-force lockout against the wall clock on mount,
   // so a relaunch can't sidestep an in-progress lockout.
@@ -82,6 +90,24 @@ export function UnlockGate() {
     setBusy(false);
   };
 
+  const doReset = async () => {
+    if (!resetConfirmMatches(confirmText) || resetBusy) return;
+    setResetBusy(true);
+    setResetError(null);
+    try {
+      await resetWalletOnThisDevice();
+    } catch (cause) {
+      setResetError((cause as Error)?.message ?? String(cause));
+      setResetBusy(false);
+    }
+  };
+
+  const closeForgot = () => {
+    setForgotOpen(false);
+    setConfirmText("");
+    setResetError(null);
+  };
+
   return (
     <div className="w-onboarding">
       <div className="w-onboarding__card" style={{ textAlign: "center" }}>
@@ -96,51 +122,124 @@ export function UnlockGate() {
             boxShadow: "0 0 16px rgba(var(--gold-glow), 0.4)",
           }}
         />
-        <h1 style={{ margin: "0 0 6px" }}>Wallet locked</h1>
-        <p
-          style={{
-            margin: "0 0 20px",
-            color: "var(--w-text-2)",
-            fontSize: 13,
-            lineHeight: 1.55,
-          }}
-        >
-          Enter your password to unlock. It decrypts your vault locally with
-          Argon2id and XChaCha20-Poly1305; the password is never stored.
-        </p>
-        <label className="w-onboarding__field" style={{ textAlign: "left" }}>
-          <span className="cap">Password</span>
-          <input
-            type="password"
-            autoFocus
-            autoComplete="current-password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") void submit();
-            }}
-            disabled={busy || lockedOut}
-          />
-        </label>
-        {lockedOut ? (
-          <div className="w-banner error" style={{ marginTop: 12, textAlign: "left" }}>
-            Too many wrong attempts. Try again in {remainingSec}s.
-          </div>
-        ) : error ? (
-          <div className="w-banner error" style={{ marginTop: 12, textAlign: "left" }}>
-            {error}
-          </div>
-        ) : null}
-        <div style={{ display: "flex", marginTop: 20 }}>
-          <button
-            className="btn btn--primary"
-            style={{ width: "100%" }}
-            disabled={busy || password.length === 0 || lockedOut}
-            onClick={() => void submit()}
-          >
-            {lockedOut ? `Locked — ${remainingSec}s` : busy ? "Unlocking…" : "Unlock"}
-          </button>
-        </div>
+        {forgotOpen ? (
+          <>
+            <h1 style={{ margin: "0 0 6px" }}>Forgot your password?</h1>
+            <p
+              style={{
+                margin: "0 0 16px",
+                color: "var(--w-text-2)",
+                fontSize: 13,
+                lineHeight: 1.55,
+              }}
+            >
+              We can't recover your password. To regain access, reset this
+              device's wallet, then add your accounts back with your 24-word
+              recovery phrase.
+            </p>
+            <div className="w-banner error" style={{ lineHeight: 1.6, textAlign: "left" }}>
+              This erases your wallet from this device — every account and its
+              encrypted vault. <strong>Only your recovery phrase can restore it.</strong>{" "}
+              Your funds on-chain are unaffected.
+            </div>
+            <label className="w-onboarding__field" style={{ marginTop: 16, textAlign: "left" }}>
+              <span className="cap">Type RESET to confirm</span>
+              <input
+                type="text"
+                autoFocus
+                autoCapitalize="characters"
+                autoComplete="off"
+                spellCheck={false}
+                value={confirmText}
+                onChange={(e) => setConfirmText(e.target.value)}
+                placeholder="RESET"
+              />
+            </label>
+            {resetError ? (
+              <div className="w-banner error" style={{ marginTop: 12, textAlign: "left" }}>
+                {resetError}
+              </div>
+            ) : null}
+            <div style={{ display: "flex", gap: 8, marginTop: 20 }}>
+              <button className="btn" disabled={resetBusy} onClick={closeForgot}>
+                Cancel
+              </button>
+              <button
+                className="btn btn--primary"
+                style={{ marginLeft: "auto" }}
+                disabled={!resetConfirmMatches(confirmText) || resetBusy}
+                onClick={() => void doReset()}
+              >
+                {resetBusy ? "Erasing…" : "Erase wallet"}
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            <h1 style={{ margin: "0 0 6px" }}>Wallet locked</h1>
+            <p
+              style={{
+                margin: "0 0 20px",
+                color: "var(--w-text-2)",
+                fontSize: 13,
+                lineHeight: 1.55,
+              }}
+            >
+              Enter your password to unlock. It decrypts your vault locally with
+              Argon2id and XChaCha20-Poly1305; the password is never stored.
+            </p>
+            <label className="w-onboarding__field" style={{ textAlign: "left" }}>
+              <span className="cap">Password</span>
+              <input
+                type="password"
+                autoFocus
+                autoComplete="current-password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void submit();
+                }}
+                disabled={busy || lockedOut}
+              />
+            </label>
+            {lockedOut ? (
+              <div className="w-banner error" style={{ marginTop: 12, textAlign: "left" }}>
+                Too many wrong attempts. Try again in {remainingSec}s.
+              </div>
+            ) : error ? (
+              <div className="w-banner error" style={{ marginTop: 12, textAlign: "left" }}>
+                {error}
+              </div>
+            ) : null}
+            <div style={{ display: "flex", marginTop: 20 }}>
+              <button
+                className="btn btn--primary"
+                style={{ width: "100%" }}
+                disabled={busy || password.length === 0 || lockedOut}
+                onClick={() => void submit()}
+              >
+                {lockedOut ? `Locked — ${remainingSec}s` : busy ? "Unlocking…" : "Unlock"}
+              </button>
+            </div>
+            {/* Recovery escape hatch — always available (even while locked out),
+                since a password-lost user has no other way back in. */}
+            <button
+              type="button"
+              onClick={() => setForgotOpen(true)}
+              style={{
+                marginTop: 16,
+                background: "none",
+                border: "none",
+                color: "var(--gold)",
+                fontSize: 12,
+                textDecoration: "underline",
+                cursor: "pointer",
+              }}
+            >
+              Forgot your password?
+            </button>
+          </>
+        )}
       </div>
     </div>
   );
