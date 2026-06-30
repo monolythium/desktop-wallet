@@ -17,6 +17,11 @@
 
 import type { Tx } from "../data/types";
 import type { LiveAddressActivityRow } from "./live";
+import {
+  formatLythDisplay,
+  isNativeLythTokenId,
+  tokenUnitLabel,
+} from "./lyth-display";
 import type { NotificationRecord } from "./notifications";
 import type { PendingTx } from "./pending-tx";
 import { txTypeLabelForActivity } from "./tx-type-label";
@@ -35,17 +40,6 @@ export function activityKindToTxKind(kind: string): Tx["kind"] {
  *  has only two states; the eyebrow carries the precise kind regardless). */
 export function activityDirection(direction: string | null): Tx["direction"] {
   return direction === "in" ? "in" : "out";
-}
-
-/** Parse a decimal amount string into a number, or `null` when the row carries
- *  no amount (e.g. a weight-only delegation). Non-numeric values collapse to
- *  `null` rather than 0 so TxRow renders an em-dash rather than a fake "0". */
-export function parseActivityAmount(amount: string | null): number | null {
-  if (amount === null) return null;
-  const cleaned = amount.replace(/,/g, "").trim();
-  if (cleaned === "") return null;
-  const n = Number(cleaned);
-  return Number.isFinite(n) ? n : null;
 }
 
 /** Relative time from a block-header UNIX-second timestamp. Returns a human
@@ -93,18 +87,41 @@ export function activityCounterparty(row: LiveAddressActivityRow): string {
 
 /**
  * Map one indexed activity row onto a `Tx` for `TxRow`.
+ *
+ * Per-kind amount/unit resolution:
+ *  - stake (delegation) rows carry no LYTH amount — their weight lives in a
+ *    separate field surfaced elsewhere — so the amount slot is an em-dash here;
+ *  - native value + reward amounts are raw lythoshi converted to display LYTH;
+ *  - an MRC-20 amount stays in its base units with the token id as the unit
+ *    (there is no on-chain symbol registry).
  */
 export function activityRowToTx(row: LiveAddressActivityRow): Tx {
+  const kind = activityKindToTxKind(
+    row.subKind ? `${row.kind} ${row.subKind}` : row.kind,
+  );
+  let amountText: string | null;
+  let unit: string;
+  if (kind === "stake") {
+    amountText = null;
+    unit = "LYTH";
+  } else if (isNativeLythTokenId(row.tokenId)) {
+    amountText = formatLythDisplay(row.amount);
+    unit = "LYTH";
+  } else {
+    amountText = row.amount ?? null;
+    unit = tokenUnitLabel(row.tokenId);
+  }
   return {
     id: `${row.blockHeight}-${row.txIndex}-${row.logIndex}`,
     when: activityWhen(row),
-    amount: parseActivityAmount(row.amount),
-    token: row.tokenId ?? "LYTH",
+    amountText,
+    unit,
+    signed: kind !== "stake",
     direction: activityDirection(row.direction),
     counterparty: activityCounterparty(row),
     // The indexer stream carries no memo — left empty so TxRow omits it.
     memo: "",
-    kind: activityKindToTxKind(row.subKind ? `${row.kind} ${row.subKind}` : row.kind),
+    kind,
     typeLabel: txTypeLabelForActivity(row),
   };
 }
