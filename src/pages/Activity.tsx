@@ -40,10 +40,12 @@ import {
 import {
   isDelegationKind,
   isZeroAmount,
+  notificationTitle,
   pendingOpLabel,
   type NotificationRecord,
 } from "../sdk/notifications";
 import { listForScope } from "../sdk/notifications-store";
+import { removePendingTx } from "../sdk/pending-tx-store";
 import { detectAndNotifyIncoming } from "../sdk/incoming-detect";
 import { txTypeLabelForOpKind } from "../sdk/tx-type-label";
 import { pendingLifecycleNote, type PendingTx } from "../sdk/pending-tx";
@@ -182,6 +184,25 @@ export function Activity({ experimentalEnabled }: Props) {
     void refresh();
   }, [walletAddress]);
 
+  // Retire bridged pending rows whose canonical confirmed row has surfaced (the
+  // merge already suppresses them visually; this drops them from the durable
+  // store so it doesn't accumulate confirmed rows). Runs whenever either side
+  // changes; a removal re-renders and converges.
+  useEffect(() => {
+    const anchors = new Set(
+      confirmedRows.map((r) => `${Number(r.blockHeight)}.${r.txIndex}`),
+    );
+    for (const tx of tracked) {
+      if (
+        tx.confirmedBlockHeight !== undefined &&
+        tx.confirmedTxIndex !== undefined &&
+        anchors.has(`${tx.confirmedBlockHeight}.${tx.confirmedTxIndex}`)
+      ) {
+        void removePendingTx(tx.chainIdHex, tx.txHash);
+      }
+    }
+  }, [confirmedRows, tracked]);
+
   return (
     <div className="w-page">
       <div className="w-page__header">
@@ -248,10 +269,14 @@ export function Activity({ experimentalEnabled }: Props) {
                 const tx = item.tx;
                 const showAmount = !isZeroAmount(tx.amountDecimal);
                 const lifecycle = tx.lifecycle ?? "pending";
-                // A still-trackable tx (pending/slow) keeps the spinner; one that
-                // has aged into a visible terminal state ("status unknown") swaps
-                // it for a muted clock so it no longer reads as actively working.
-                const stalled = lifecycle === "expired" || lifecycle === "dropped";
+                // Bridged: a real receipt confirmed it ahead of the indexer, so
+                // render it confirmed (a green check + the terminal title) at
+                // chain speed. Otherwise a still-trackable tx (pending/slow) keeps
+                // the spinner; one aged into a visible terminal state ("status
+                // unknown") swaps it for a muted clock.
+                const bridged = tx.confirmedBlockHeight !== undefined;
+                const stalled =
+                  !bridged && (lifecycle === "expired" || lifecycle === "dropped");
                 return (
                   <div
                     className="w-tx"
@@ -263,9 +288,28 @@ export function Activity({ experimentalEnabled }: Props) {
                     <div
                       className="w-tx__dir"
                       aria-hidden
-                      style={stalled ? { color: "var(--w-text-3)" } : undefined}
+                      style={
+                        bridged
+                          ? { color: "var(--ok)" }
+                          : stalled
+                            ? { color: "var(--w-text-3)" }
+                            : undefined
+                      }
                     >
-                      {stalled ? (
+                      {bridged ? (
+                        <svg
+                          width="14"
+                          height="14"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        >
+                          <path d="m5 12 5 5L20 7" />
+                        </svg>
+                      ) : stalled ? (
                         <svg
                           width="14"
                           height="14"
@@ -285,9 +329,13 @@ export function Activity({ experimentalEnabled }: Props) {
                     </div>
                     <div className="w-tx__info">
                       <div className="eyebrow">
-                        <span>{pendingOpLabel(tx.opKind)}</span>
+                        <span>
+                          {bridged
+                            ? notificationTitle(tx.opKind, "confirmed")
+                            : pendingOpLabel(tx.opKind)}
+                        </span>
                         <span className="sep" />
-                        <span>{pendingLifecycleNote(lifecycle)}</span>
+                        <span>{bridged ? "Confirmed" : pendingLifecycleNote(lifecycle)}</span>
                       </div>
                       <div className="label mono">
                         {tx.counterparty.length > 0

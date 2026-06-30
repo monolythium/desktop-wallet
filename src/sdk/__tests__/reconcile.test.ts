@@ -61,7 +61,7 @@ type TxStatusAnswer =
   | { status: "not_found" }
   | { throws: true };
 type ReceiptAnswer =
-  | { status: number; block_number: bigint }
+  | { status: number; block_number: bigint; tx_index?: number }
   | null
   | { throws: true };
 
@@ -139,14 +139,15 @@ function seedActiveVault(): void {
   });
 }
 
-describe("reconcilePendingOnce — confirmed path", () => {
-  it("records a 'confirmed' notification on lyth_txStatus=found and stops tracking", async () => {
+describe("reconcilePendingOnce — confirmed path (bridge)", () => {
+  it("records a confirmed notification on found and BRIDGES (keeps it, stamps the slot)", async () => {
     await enqueuePendingTx(tx({ txHash: "0xc1" }));
-    txStatusScript.set("0xc1", { status: "found", blockNumber: 321 });
+    txStatusScript.set("0xc1", { status: "found", blockNumber: 321 }); // fake found → txIndex 0
 
     const res = await reconcilePendingOnce();
     expect(res.recorded).toBe(1);
-    expect(res.remaining).toBe(0);
+    // Bridged rows stay tracked (rendered confirmed) until the feed retires them.
+    expect(res.remaining).toBe(1);
 
     const notes = await listAllNotifications();
     expect(notes).toHaveLength(1);
@@ -154,18 +155,37 @@ describe("reconcilePendingOnce — confirmed path", () => {
     expect(notes[0]!.txHash).toBe("0xc1");
     expect(notes[0]!.blockNumber).toBe(321);
 
-    // Removed from the tracked set — won't re-fire next tick.
-    expect(await listPendingTxs()).toHaveLength(0);
+    const tracked = await listPendingTxs();
+    expect(tracked).toHaveLength(1);
+    expect(tracked[0]!.confirmedBlockHeight).toBe(321);
+    expect(tracked[0]!.confirmedTxIndex).toBe(0);
   });
 
-  it("confirms via a success receipt when txStatus hasn't surfaced", async () => {
+  it("confirms + bridges via a success receipt when txStatus hasn't surfaced", async () => {
     await enqueuePendingTx(tx({ txHash: "0xc2" }));
-    receiptScript.set("0xc2", { status: 1, block_number: 88n });
+    receiptScript.set("0xc2", { status: 1, block_number: 88n, tx_index: 2 });
 
     await reconcilePendingOnce();
     const notes = await listAllNotifications();
     expect(notes[0]!.status).toBe("confirmed");
     expect(notes[0]!.blockNumber).toBe(88);
+
+    const tracked = await listPendingTxs();
+    expect(tracked[0]!.confirmedBlockHeight).toBe(88);
+    expect(tracked[0]!.confirmedTxIndex).toBe(2);
+  });
+
+  it("skips a bridged row on later ticks — no re-record, no re-toast", async () => {
+    await enqueuePendingTx(tx({ txHash: "0xc3" }));
+    txStatusScript.set("0xc3", { status: "found", blockNumber: 5 });
+    await reconcilePendingOnce();
+    expect(toastSpy).toHaveBeenCalledTimes(1);
+
+    const res = await reconcilePendingOnce(); // bridged → skipped
+    expect(res.recorded).toBe(0);
+    expect(res.remaining).toBe(1);
+    expect(await listAllNotifications()).toHaveLength(1);
+    expect(toastSpy).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -211,10 +231,11 @@ describe("reconcilePendingOnce — never synthesizes; keeps tracking", () => {
 });
 
 describe("reconcilePendingOnce — lifecycle retention (honest absence)", () => {
-  it("does NOT drop a slow tx; still records it when the chain confirms", async () => {
+  it("does NOT drop a slow tx; records + bridges it when the chain confirms", async () => {
     const now = Date.now();
     // Older than the slow threshold but well within the retention window — the
-    // old blind 5-min silent drop is gone, so the tx is followed and recorded.
+    // old blind 5-min silent drop is gone, so the tx is followed, recorded, and
+    // bridged (kept, rendered confirmed) rather than vanishing.
     await enqueuePendingTx(
       tx({ txHash: "0xs1", submittedAt: now - PENDING_SLOW_MS - 1_000 }),
     );
@@ -223,9 +244,11 @@ describe("reconcilePendingOnce — lifecycle retention (honest absence)", () => 
     const res = await reconcilePendingOnce(now);
     expect(res.recorded).toBe(1);
     expect(res.expired).toBe(0);
-    expect(res.remaining).toBe(0);
+    expect(res.remaining).toBe(1); // bridged, kept
     expect(await listAllNotifications()).toHaveLength(1);
-    expect(await listPendingTxs()).toHaveLength(0);
+    const tracked = await listPendingTxs();
+    expect(tracked).toHaveLength(1);
+    expect(tracked[0]!.confirmedBlockHeight).toBe(5);
   });
 
   it("silently removes a still-pending tx past the retention window (no record)", async () => {
@@ -254,9 +277,9 @@ describe("reconcilePendingOnce — dedupe across ticks", () => {
     // Same hash tracked again (e.g. a stale re-submit) + terminal again.
     await enqueuePendingTx(tx({ txHash: "0xd1" }));
     const res = await reconcilePendingOnce();
-    // It's removed from tracking, but the notification store dedupes on
-    // ${chainIdHex}:${txHash}, so no second record is added.
-    expect(res.remaining).toBe(0);
+    // The first confirm bridged it (still tracked, remaining 1), but the store
+    // dedupes on ${chainIdHex}:${txHash}, so no second record is added.
+    expect(res.remaining).toBe(1);
     expect(await listAllNotifications()).toHaveLength(1);
   });
 });
@@ -317,7 +340,7 @@ describe("reconcilePendingOnce — OS toast fires once per new record", () => {
 });
 
 describe("reconcilePendingOnce — mixed batch in one tick", () => {
-  it("confirms one, fails one, keeps one, expires one", async () => {
+  it("bridges one, fails one, keeps one, expires one", async () => {
     const now = Date.now();
     await enqueuePendingTx(tx({ txHash: "0xok" }));
     await enqueuePendingTx(tx({ txHash: "0xrevert" }));
@@ -331,13 +354,15 @@ describe("reconcilePendingOnce — mixed batch in one tick", () => {
     const res = await reconcilePendingOnce(now);
     expect(res.recorded).toBe(2);
     expect(res.expired).toBe(1);
-    expect(res.remaining).toBe(1);
+    // 0xok bridged (kept, rendered confirmed) + 0xwait still pending; 0xrevert
+    // removed (failed) and 0xold removed (retention).
+    expect(res.remaining).toBe(2);
 
     const byHash = Object.fromEntries(
       (await listAllNotifications()).map((n) => [n.txHash, n.status]),
     );
     expect(byHash).toEqual({ "0xok": "confirmed", "0xrevert": "failed" });
-    expect((await listPendingTxs()).map((t) => t.txHash)).toEqual(["0xwait"]);
+    expect((await listPendingTxs()).map((t) => t.txHash)).toEqual(["0xok", "0xwait"]);
   });
 });
 

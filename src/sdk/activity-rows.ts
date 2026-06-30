@@ -135,9 +135,30 @@ export function mergeActivityNewestFirst(
   confirmed: ReadonlyArray<LiveAddressActivityRow>,
   failed: ReadonlyArray<NotificationRecord>,
 ): MergedActivityItem[] {
+  // Confirmed inclusion slots. A BRIDGED pending row (confirmed via receipt
+  // ahead of the indexer) whose canonical row has now surfaced is SUPPRESSED
+  // here — so a confirmed tx is never shown twice (no duplicate). A bridged row
+  // still ahead of the indexer stays visible, rendered confirmed (no drop).
+  const confirmedAnchors = new Set(
+    confirmed.map((row) => `${Number(row.blockHeight)}.${row.txIndex}`),
+  );
   const ranked: RankedActivityItem[] = [];
   for (const tx of pending) {
-    ranked.push({ item: { tag: "pending", tx }, block: Infinity, ms: tx.submittedAt });
+    const bridged =
+      tx.confirmedBlockHeight !== undefined && tx.confirmedTxIndex !== undefined;
+    if (
+      bridged &&
+      confirmedAnchors.has(`${tx.confirmedBlockHeight}.${tx.confirmedTxIndex}`)
+    ) {
+      continue; // the indexer's canonical row represents it now
+    }
+    ranked.push({
+      item: { tag: "pending", tx },
+      // A bridged row interleaves at its real inclusion block; an un-bridged
+      // (still in-flight) row floats to the top.
+      block: bridged ? tx.confirmedBlockHeight! : Infinity,
+      ms: tx.submittedAt,
+    });
   }
   for (const row of confirmed) {
     ranked.push({

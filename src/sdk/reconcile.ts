@@ -32,6 +32,7 @@ import {
 } from "./pending-tx";
 import {
   applyPendingTransition,
+  bridgePendingTx,
   enqueuePendingTx,
   listPendingTxs,
   removePendingTx,
@@ -97,6 +98,10 @@ async function probeTx(txHash: string): Promise<ChainProbe> {
           Number.isFinite(status.blockNumber)
             ? status.blockNumber
             : null,
+        txIndex:
+          typeof status.txIndex === "number" && Number.isFinite(status.txIndex)
+            ? status.txIndex
+            : null,
       };
       // Already terminal-confirmed; no need to spend a receipt round-trip.
       return { txStatus, receipt: { kind: "skipped" } };
@@ -115,10 +120,12 @@ async function probeTx(txHash: string): Promise<ChainProbe> {
       receipt = { kind: "null" };
     } else {
       const blockNumber = Number(r.block_number);
+      const txIndex = Number(r.tx_index);
       receipt = {
         kind: "receipt",
         status: r.status,
         blockNumber: Number.isFinite(blockNumber) ? blockNumber : null,
+        txIndex: Number.isFinite(txIndex) ? txIndex : null,
       };
     }
   } catch {
@@ -140,14 +147,15 @@ export interface ReconcileTickResult {
 /** One reconcile pass over the durable tracked set.
  *
  *  For each tracked tx, in order:
- *    1. TTL-evict first — a tx aged past its tracking window is dropped
- *       SILENTLY (no record; honest absence) so it's neither notified nor
- *       re-probed.
- *    2. Probe the chain and classify. On a terminal verdict, record ONE
- *       notification (confirmed with the block number, or failed) and remove
- *       the tx from the tracked set. The notification store dedupes on
- *       `${chainIdHex}:${txHash}`, so a record can never re-fire.
- *    3. Otherwise leave the tx tracked for the next tick.
+ *    1. Probe the chain and classify. On a terminal verdict, record ONE
+ *       notification (confirmed with the block number, or failed). The store
+ *       dedupes on `${chainIdHex}:${txHash}`, so a record can never re-fire.
+ *       A CONFIRMED tx is then BRIDGED — stamped with its inclusion slot and
+ *       kept visible (rendered confirmed at chain speed) until the indexer
+ *       surfaces the canonical row and the feed retires it by (block, txIndex).
+ *       A FAILED tx (or a slot-less confirm) stops tracking immediately.
+ *    2. Recompute the survivors' lifecycle and silently drop rows past the
+ *       terminal-retention window (bridged rows pass through untouched).
  *
  *  Best-effort: never throws out of the caller's interval. Exported for unit
  *  tests (driven against the in-memory store stub) and called by the
@@ -164,10 +172,13 @@ export async function reconcilePendingOnce(
     //    retention removal in step 2.
     const txs = await listPendingTxs();
     for (const tx of txs) {
+      // A bridged row is already confirmed-and-recorded; skip it. The feed
+      // retires it once the indexer surfaces the canonical row at its slot.
+      if (tx.confirmedBlockHeight !== undefined) continue;
       const probe = await probeTx(tx.txHash);
       const verdict = classifyPending(probe);
       if (verdict.kind === "pending") continue;
-      // Terminal — record the genuine status verbatim, then stop tracking.
+      // Terminal — record the genuine status verbatim (once; the store dedupes).
       const { added, record } = await recordNotification({
         addressLower: tx.addressLower,
         chainIdHex: tx.chainIdHex,
@@ -185,7 +196,25 @@ export async function reconcilePendingOnce(
       // re-observed terminal hash neither re-records nor re-toasts. Best-effort
       // + flag-gated inside the helper; never throws back into this tick.
       if (added && record) void toastTerminalNotification(record);
-      await removePendingTx(tx.chainIdHex, tx.txHash);
+      if (
+        verdict.kind === "confirmed" &&
+        verdict.blockNumber !== null &&
+        verdict.txIndex !== null
+      ) {
+        // Bridge: stamp the inclusion slot + KEEP it visible (rendered confirmed)
+        // at chain speed until the indexer surfaces the canonical row and the
+        // feed retires it by (block, txIndex).
+        await bridgePendingTx(
+          tx.chainIdHex,
+          tx.txHash,
+          verdict.blockNumber,
+          verdict.txIndex,
+        );
+      } else {
+        // Failed — or a confirmed verdict carrying no inclusion slot to bridge —
+        // stops tracking (a slot-less confirm is represented by the indexer row).
+        await removePendingTx(tx.chainIdHex, tx.txHash);
+      }
       recorded++;
     }
     // 2. Recompute the survivors' lifecycle (so the feed relabels pending →

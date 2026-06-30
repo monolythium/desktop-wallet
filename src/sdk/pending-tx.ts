@@ -57,6 +57,12 @@ export interface PendingTx {
    *  persisted so the feed re-renders the label as it changes. Optional +
    *  backward-compatible: rows written before this field read as `"pending"`. */
   lifecycle?: PendingLifecycle;
+  /** Inclusion slot stamped from the confirming receipt BEFORE the indexer
+   *  surfaces the canonical row, so the feed renders this row confirmed at chain
+   *  speed; the feed retires it once the indexer row at this slot appears. Both
+   *  optional/additive — absent on an un-bridged (still-pending) row. */
+  confirmedBlockHeight?: number;
+  confirmedTxIndex?: number;
   /** Epoch ms the tx was enqueued. The lifecycle age is measured from here. */
   submittedAt: number;
 }
@@ -111,6 +117,13 @@ export function transitionPending(
   let changed = false;
   const next: PendingTx[] = [];
   for (const tx of txs) {
+    // A bridged row (confirmed via receipt ahead of the indexer) renders
+    // confirmed and is retired by the feed once the canonical row surfaces —
+    // never relabel it or age it out here.
+    if (tx.confirmedBlockHeight !== undefined) {
+      next.push(tx);
+      continue;
+    }
     const lifecycle = classifyStalePending(tx, now);
     const isTerminalVisible = lifecycle === "expired" || lifecycle === "dropped";
     if (isTerminalVisible && now - tx.submittedAt >= PENDING_TERMINAL_RETAIN_MS) {
@@ -153,7 +166,7 @@ export interface ChainProbe {
    *  `"not_found"` means the indexer hasn't surfaced it yet; `"throw"` means
    *  the call failed this round. */
   txStatus:
-    | { kind: "found"; blockNumber: number | null }
+    | { kind: "found"; blockNumber: number | null; txIndex: number | null }
     | { kind: "not_found" }
     | { kind: "throw" };
   /** `eth_getTransactionReceipt` outcome. Present only when consulted (we skip
@@ -161,15 +174,17 @@ export interface ChainProbe {
    *  `1`-success / `0`-revert bit; `null` receipt = not yet mined; `"throw"` =
    *  the call failed. */
   receipt:
-    | { kind: "receipt"; status: number; blockNumber: number | null }
+    | { kind: "receipt"; status: number; blockNumber: number | null; txIndex: number | null }
     | { kind: "null" }
     | { kind: "throw" }
     | { kind: "skipped" };
 }
 
-/** The classifier's verdict for one tracked tx. */
+/** The classifier's verdict for one tracked tx. A `confirmed` verdict carries
+ *  the inclusion slot (`blockNumber`, `txIndex`) used to bridge the row to a
+ *  confirmed render; `failed` is not bridged so it needs no slot. */
 export type PendingVerdict =
-  | { kind: "confirmed"; blockNumber: number | null }
+  | { kind: "confirmed"; blockNumber: number | null; txIndex: number | null }
   | { kind: "failed"; blockNumber: number | null }
   | { kind: "pending" };
 
@@ -190,11 +205,17 @@ export type PendingVerdict =
  *  Pure: the RPC calls happen in `reconcile.ts`; this only maps their results. */
 export function classifyPending(probe: ChainProbe): PendingVerdict {
   if (probe.txStatus.kind === "found") {
-    return { kind: "confirmed", blockNumber: probe.txStatus.blockNumber };
+    return {
+      kind: "confirmed",
+      blockNumber: probe.txStatus.blockNumber,
+      txIndex: probe.txStatus.txIndex,
+    };
   }
   const r = probe.receipt;
   if (r.kind === "receipt") {
-    if (r.status === 1) return { kind: "confirmed", blockNumber: r.blockNumber };
+    if (r.status === 1) {
+      return { kind: "confirmed", blockNumber: r.blockNumber, txIndex: r.txIndex };
+    }
     if (r.status === 0) return { kind: "failed", blockNumber: r.blockNumber };
   }
   return { kind: "pending" };
@@ -233,6 +254,14 @@ export function asPendingTx(raw: unknown): PendingTx | null {
       : undefined;
   const clusterName = typeof r.clusterName === "string" ? r.clusterName : undefined;
   const lifecycle = isPendingLifecycle(r.lifecycle) ? r.lifecycle : undefined;
+  const confirmedBlockHeight =
+    typeof r.confirmedBlockHeight === "number" && Number.isFinite(r.confirmedBlockHeight)
+      ? r.confirmedBlockHeight
+      : undefined;
+  const confirmedTxIndex =
+    typeof r.confirmedTxIndex === "number" && Number.isFinite(r.confirmedTxIndex)
+      ? r.confirmedTxIndex
+      : undefined;
   return {
     txHash: r.txHash,
     chainIdHex: r.chainIdHex,
@@ -243,6 +272,8 @@ export function asPendingTx(raw: unknown): PendingTx | null {
     clusterId,
     clusterName,
     lifecycle,
+    confirmedBlockHeight,
+    confirmedTxIndex,
     submittedAt: r.submittedAt,
   };
 }
