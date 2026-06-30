@@ -18,6 +18,11 @@ import { useEffect, useState } from "react";
 
 import { activityRelativeTime } from "../sdk/activity-rows";
 import { loadLiveTxConfirmations } from "../sdk/live";
+import {
+  formatLythDisplay,
+  isNativeLythTokenId,
+  tokenUnitLabel,
+} from "../sdk/lyth-display";
 import { isZeroAmount, pendingOpLabel, type TxOpKind } from "../sdk/notifications";
 import { txTypeLabelForActivity } from "../sdk/tx-type-label";
 import { CopyableAddress, DRow, MonoscanTxButton, truncMiddle } from "./_detailModalParts";
@@ -185,9 +190,16 @@ function DetailBody({ row, walletAddr }: { row: DetailRow; walletAddr: string })
       {row.amount !== null ? (
         <DRow
           label="Amount"
-          value={`${row.direction === "out" ? "−" : row.direction === "in" ? "+" : ""}${row.amount}${
-            row.tokenId ? ` ${row.tokenId}` : " LYTH"
-          }`}
+          value={`${
+            row.direction === "out" ? "−" : row.direction === "in" ? "+" : ""
+          }${
+            // Native amounts are raw lythoshi → display LYTH; an MRC-20 amount
+            // stays in its base units. The unit is LYTH for native (null or the
+            // zero-address), else the token id.
+            isNativeLythTokenId(row.tokenId)
+              ? formatLythDisplay(row.amount) ?? row.amount
+              : row.amount
+          } ${tokenUnitLabel(row.tokenId)}`}
         />
       ) : null}
       {row.weightBps !== null ? <DRow label="Weight" value={`${row.weightBps} bps`} /> : null}
