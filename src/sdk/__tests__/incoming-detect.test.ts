@@ -16,7 +16,7 @@ function row(over: Partial<LiveAddressActivityRow>): LiveAddressActivityRow {
     direction: "in",
     counterparty: "mono1from",
     tokenId: null,
-    amount: "2",
+    amount: "2000000000000000000", // 2 LYTH in raw lythoshi (indexer wire form)
     cluster: null,
     weightBps: null,
     subKind: null,
@@ -32,15 +32,18 @@ function cand(b: number, t: number, l: number): IncomingCandidate {
 }
 
 describe("incomingCandidatesFromRows", () => {
-  it("keeps inbound native LYTH, ignores outgoing and MRC-20 token rows", () => {
+  it("keeps inbound native LYTH (null OR zero-address id), converts to display LYTH, ignores outgoing + MRC-20", () => {
     const rows = [
       row({ direction: "in", tokenId: null }),
+      row({ direction: "in", tokenId: "0x" + "00".repeat(32) }), // native zero-address — kept
       row({ direction: "out", tokenId: null }),
-      row({ direction: "in", tokenId: "0xtoken" }),
+      row({ direction: "in", tokenId: "0xtoken" }), // MRC-20 — skipped
     ];
     const c = incomingCandidatesFromRows(rows);
-    expect(c).toHaveLength(1);
+    expect(c).toHaveLength(2);
+    // Raw lythoshi converted to display LYTH (not the raw 2e18 integer).
     expect(c[0]!.amountDecimal).toBe("2");
+    expect(c[1]!.amountDecimal).toBe("2");
   });
 
   it("falls back to '0' / '' when amount or counterparty is absent", () => {

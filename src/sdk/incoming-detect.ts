@@ -18,6 +18,7 @@
 
 import type { LiveAddressActivityRow } from "./live";
 import { readIncomingEnabled } from "./feature-flags";
+import { formatLythDisplay, isNativeLythTokenId } from "./lyth-display";
 import {
   anchorAfter,
   type IncomingWatermark,
@@ -38,21 +39,24 @@ export interface IncomingCandidate {
   counterparty: string;
 }
 
-/** Reduce indexed activity rows to inbound NATIVE-LYTH candidates. Outgoing
- *  rows and MRC-20 token transfers (non-null tokenId) are ignored. Pure. */
+/** Reduce indexed activity rows to inbound NATIVE-LYTH candidates. Outgoing rows
+ *  and MRC-20 token transfers are ignored — native is the null OR zero-address
+ *  token id (the indexer's native sentinel), so the check is by
+ *  `isNativeLythTokenId`, not `tokenId === null`. The raw-lythoshi amount is
+ *  converted to display LYTH for the notification. Pure. */
 export function incomingCandidatesFromRows(
   rows: ReadonlyArray<LiveAddressActivityRow>,
 ): IncomingCandidate[] {
   const out: IncomingCandidate[] = [];
   for (const r of rows) {
-    if (r.direction !== "in" || r.tokenId !== null) continue;
+    if (r.direction !== "in" || !isNativeLythTokenId(r.tokenId)) continue;
     out.push({
       anchor: {
         blockHeight: Number(r.blockHeight),
         txIndex: r.txIndex,
         logIndex: r.logIndex,
       },
-      amountDecimal: r.amount ?? "0",
+      amountDecimal: formatLythDisplay(r.amount, 4) ?? "0",
       counterparty: r.counterparty ?? "",
     });
   }
