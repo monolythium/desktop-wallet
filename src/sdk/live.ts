@@ -1,6 +1,5 @@
 import { ApiClient, clusterApyPercent, formatLyth } from "@monolythium/core-sdk";
 import type {
-  AddressActivityEntryEnriched,
   ApiCapabilitiesResponse,
   ApiEnvelope,
   ApiHealthResponse,
@@ -295,9 +294,76 @@ export async function loadLiveTradeStatus(): Promise<LiveTradeStatus> {
 export async function loadLiveAddressActivity(wallet: string): Promise<RpcOutcome<LiveAddressActivityRow[]>> {
   const typedWallet = requireTypedUserAddress(wallet, "wallet");
   return capture(async () => {
-    const entries = await getProvider().rpcClient.enrichAddressActivity(typedWallet, 30);
-    return entries.map(toLiveAddressActivityRow);
+    const client = getProvider().rpcClient;
+    // The node returns a paginated envelope ({ activity, nextCursor, ... }); read
+    // it tolerantly and enrich here. (We do not call the SDK's enrich helper — it
+    // assumes a bare array and throws on the envelope.)
+    const raw = (await client.lythGetAddressActivity(typedWallet, 30)) as unknown;
+    const entries = activityEntriesFrom(raw);
+    if (entries.length === 0) return [];
+    return enrichActivityEntries(client, entries);
   });
+}
+
+/** Normalize the node's address-activity response to the raw entry array. The
+ *  node returns a paginated envelope (`{ activity, nextCursor, schemaVersion }`);
+ *  a bare array or an `{ entries }` envelope are also accepted. Anything
+ *  unrecognized — or an empty result — yields `[]`, so the caller never maps a
+ *  non-array. Pure. */
+export function activityEntriesFrom(raw: unknown): unknown[] {
+  if (Array.isArray(raw)) return raw;
+  if (raw !== null && typeof raw === "object") {
+    const r = raw as Record<string, unknown>;
+    if (Array.isArray(r.activity)) return r.activity;
+    if (Array.isArray(r.entries)) return r.entries;
+  }
+  return [];
+}
+
+/** Coerce a node block height / timestamp (number, decimal or 0x-hex string, or
+ *  bigint) to a bigint; `null` on anything unparseable. Pure. */
+export function toBlockBigInt(v: unknown): bigint | null {
+  try {
+    if (v === null || v === undefined || v === "") return null;
+    if (typeof v === "bigint") return v;
+    if (typeof v === "number") return Number.isFinite(v) ? BigInt(Math.trunc(v)) : null;
+    if (typeof v === "string") return BigInt(v);
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+/** Map one raw node activity entry onto the wallet's row shape (enrichment
+ *  fields null — filled by {@link enrichActivityEntries}). Returns `null` for an
+ *  entry without a usable block height, so a malformed row is dropped rather than
+ *  breaking the feed. Pure. */
+export function toActivityBaseRow(raw: unknown): LiveAddressActivityRow | null {
+  if (raw === null || typeof raw !== "object") return null;
+  const e = raw as Record<string, unknown>;
+  const blockHeight = toBlockBigInt(e.blockHeight);
+  if (blockHeight === null) return null;
+  const int = (v: unknown): number =>
+    typeof v === "number" && Number.isFinite(v) ? v : 0;
+  const intOrNull = (v: unknown): number | null =>
+    typeof v === "number" && Number.isFinite(v) ? v : null;
+  const strOrNull = (v: unknown): string | null => (typeof v === "string" ? v : null);
+  return {
+    blockHeight,
+    txIndex: int(e.txIndex),
+    logIndex: int(e.logIndex),
+    kind: typeof e.kind === "string" ? e.kind : "",
+    direction: strOrNull(e.direction),
+    counterparty: strOrNull(e.counterparty),
+    tokenId: strOrNull(e.tokenId),
+    amount: strOrNull(e.amount),
+    cluster: intOrNull(e.cluster),
+    weightBps: intOrNull(e.weightBps),
+    subKind: strOrNull(e.subKind),
+    blockTimestampSeconds: null,
+    txHash: null,
+    clusterName: null,
+  };
 }
 
 /** Probe the indexer's coverage for an address (`lyth_addressActivityKind`) so an
@@ -318,26 +384,81 @@ export async function loadAddressActivityKind(
   }
 }
 
-/** Map one enriched address-activity entry onto the wallet's row shape. The
- *  three enrichment fields pass through unchanged (each is already null when
- *  the chain couldn't resolve it). */
-function toLiveAddressActivityRow(entry: AddressActivityEntryEnriched): LiveAddressActivityRow {
-  return {
-    blockHeight: entry.blockHeight,
-    txIndex: entry.txIndex,
-    logIndex: entry.logIndex,
-    kind: entry.kind,
-    direction: entry.direction,
-    counterparty: entry.counterparty,
-    tokenId: entry.tokenId,
-    amount: entry.amount,
-    cluster: entry.cluster,
-    weightBps: entry.weightBps,
-    subKind: entry.subKind,
-    blockTimestampSeconds: entry.blockTimestampSeconds,
-    txHash: entry.txHash,
-    clusterName: entry.clusterName,
-  };
+/** Read a block's header timestamp + ordered tx-hash array via the raw
+ *  `eth_getBlockByNumber` (hash-only). Best-effort — any failure degrades to
+ *  `{ null, [] }` so enrichment never breaks the feed. */
+async function blockTimeAndTxHashes(
+  client: ReturnType<typeof getProvider>["rpcClient"],
+  height: bigint,
+): Promise<{ timestampSeconds: bigint | null; txHashes: string[] }> {
+  try {
+    const raw = (await client.call("eth_getBlockByNumber", [
+      `0x${height.toString(16)}`,
+      false,
+    ])) as Record<string, unknown> | null;
+    if (!raw || typeof raw !== "object") return { timestampSeconds: null, txHashes: [] };
+    const txs = raw["transactions"];
+    return {
+      timestampSeconds: toBlockBigInt(raw["timestamp"]),
+      txHashes: Array.isArray(txs)
+        ? txs.filter((t): t is string => typeof t === "string")
+        : [],
+    };
+  } catch {
+    return { timestampSeconds: null, txHashes: [] };
+  }
+}
+
+/** Enrich raw activity entries with each row's block timestamp, canonical tx
+ *  hash (resolved from `(blockHeight, txIndex)`), and resolved cluster name —
+ *  one block read per distinct height, one name read per distinct cluster. Each
+ *  enrichment is best-effort (null on failure); honest absence, never a throw. */
+async function enrichActivityEntries(
+  client: ReturnType<typeof getProvider>["rpcClient"],
+  entries: ReadonlyArray<unknown>,
+): Promise<LiveAddressActivityRow[]> {
+  const base = entries
+    .map(toActivityBaseRow)
+    .filter((r): r is LiveAddressActivityRow => r !== null);
+
+  const heights = [...new Set(base.map((r) => r.blockHeight))];
+  const blockByHeight = new Map<
+    bigint,
+    { timestampSeconds: bigint | null; txHashes: string[] }
+  >();
+  await Promise.all(
+    heights.map(async (h) => {
+      blockByHeight.set(h, await blockTimeAndTxHashes(client, h));
+    }),
+  );
+
+  const clusters = [
+    ...new Set(base.map((r) => r.cluster).filter((c): c is number => c != null)),
+  ];
+  const nameByCluster = new Map<number, string | null>();
+  await Promise.all(
+    clusters.map(async (c) => {
+      try {
+        nameByCluster.set(c, (await client.lythGetClusterName(c)).name ?? null);
+      } catch {
+        nameByCluster.set(c, null);
+      }
+    }),
+  );
+
+  return base.map((r) => {
+    const block = blockByHeight.get(r.blockHeight);
+    const txHash =
+      block && r.txIndex >= 0 && r.txIndex < block.txHashes.length
+        ? block.txHashes[r.txIndex]!
+        : null;
+    return {
+      ...r,
+      blockTimestampSeconds: block?.timestampSeconds ?? null,
+      txHash,
+      clusterName: r.cluster != null ? nameByCluster.get(r.cluster) ?? null : null,
+    };
+  });
 }
 
 export interface LiveSupplyStatus {
