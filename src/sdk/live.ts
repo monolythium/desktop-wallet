@@ -1,4 +1,10 @@
-import { ApiClient, clusterApyPercent, formatLyth } from "@monolythium/core-sdk";
+import {
+  ApiClient,
+  CLAIMED_EVENT_TOPIC0,
+  clusterApyPercent,
+  decodeClaimedEvent,
+  formatLyth,
+} from "@monolythium/core-sdk";
 import type {
   ApiCapabilitiesResponse,
   ApiEnvelope,
@@ -568,6 +574,26 @@ export async function loadLiveClusterNames(
     }),
   );
   return out;
+}
+
+/** Decode the settled reward amount (LYTH decimal) from a confirmed claim tx's
+ *  `Claimed` log via `lyth_decodeTx`. Returns null when no Claimed log is present
+ *  or any read/decode fails — the caller falls back to the claimable amount
+ *  captured at submit (honest absence, never a fabricated number). */
+export async function decodeClaimedAmount(txHash: string): Promise<string | null> {
+  try {
+    const decoded = await getProvider().rpcClient.lythDecodeTx(txHash);
+    const logs = Array.isArray(decoded.logs) ? decoded.logs : [];
+    for (const log of logs) {
+      if (log.topics?.[0] === CLAIMED_EVENT_TOPIC0) {
+        const event = decodeClaimedEvent(log.topics, log.data);
+        return formatLyth(event.amount.toString(), { includeUnit: false });
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 export async function loadAccountPolicy(address: string) {

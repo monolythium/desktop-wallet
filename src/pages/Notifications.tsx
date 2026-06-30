@@ -20,7 +20,7 @@ import { NotificationDetail } from "../components/NotificationDetail";
 import { truncMiddle } from "../components/_detailModalParts";
 import {
   isDelegationKind,
-  isZeroAmount,
+  notificationAmountLabel,
   notificationTitle,
   type NotificationRecord,
   type TxOpKind,
@@ -249,7 +249,8 @@ function NotificationRow({
       (record.clusterId !== undefined ? `Cluster #${record.clusterId}` : null)
     : null;
   const short = clusterDisplay ?? truncMiddle(record.counterparty);
-  const showAmount = !isZeroAmount(record.amountDecimal);
+  // A reward claim shows its decoded settled amount ("+<amt> LYTH"); null ⇒ omit.
+  const amountLabel = notificationAmountLabel(record);
   const ring = badgeRingColor(record.status);
   // Outgoing + confirmed records accent the glyph with the brand colour; the
   // status ring stays green/red. Failed (red) and pending are untouched.
@@ -295,8 +296,8 @@ function NotificationRow({
             {!record.read ? <span style={unreadDot} aria-label="Unread" /> : null}
           </div>
           <div className="row-help mono" style={ellipsis}>
-            {showAmount
-              ? `${typeNoun} · ${record.amountDecimal} LYTH · ${short}`
+            {amountLabel !== null
+              ? `${typeNoun} · ${amountLabel} · ${short}`
               : `${typeNoun} · ${short}`}
           </div>
         </div>

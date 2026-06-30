@@ -23,6 +23,7 @@
 import { MONOLYTHIUM_TESTNET_CHAIN_ID } from "@monolythium/core-sdk";
 import { loadActiveWallet } from "./active-wallet";
 import { getProvider } from "./client";
+import { decodeClaimedAmount } from "./live";
 import { recordNotification } from "./notifications-store";
 import { toastTerminalNotification } from "./os-toast";
 import {
@@ -178,6 +179,14 @@ export async function reconcilePendingOnce(
       const probe = await probeTx(tx.txHash);
       const verdict = classifyPending(probe);
       if (verdict.kind === "pending") continue;
+      // A confirmed reward claim carries its settled amount in the receipt's
+      // Claimed log (the tx value is 0x0); decode it so the record shows the
+      // real "+<amount> LYTH". Best-effort — null falls back to the submit-time
+      // claimable amount. Only for confirmed claims (no log on a failed claim).
+      const claimedAmount =
+        verdict.kind === "confirmed" && tx.opKind === "claim"
+          ? ((await decodeClaimedAmount(tx.txHash)) ?? undefined)
+          : undefined;
       // Terminal — record the genuine status verbatim (once; the store dedupes).
       const { added, record } = await recordNotification({
         addressLower: tx.addressLower,
@@ -190,6 +199,7 @@ export async function reconcilePendingOnce(
         counterparty: tx.counterparty,
         clusterId: tx.clusterId,
         clusterName: tx.clusterName,
+        claimedAmount,
       });
       // Raise an OS toast ONLY for a genuinely-new record (added === true), so
       // the store's `${chainIdHex}:${txHash}` dedupe also dedupes the toast — a

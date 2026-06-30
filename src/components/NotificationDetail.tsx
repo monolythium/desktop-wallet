@@ -19,7 +19,7 @@ import {
 } from "./_detailModalParts";
 import {
   isDelegationKind,
-  isZeroAmount,
+  notificationAmountLabel,
   notificationTitle,
   type NotificationRecord,
 } from "../sdk/notifications";
@@ -35,7 +35,9 @@ function statusLabel(status: "confirmed" | "failed"): string {
 
 export function NotificationDetail({ record, onClose }: NotificationDetailProps) {
   const title = notificationTitle(record.kind, record.status);
-  const showAmount = !isZeroAmount(record.amountDecimal);
+  // A reward claim shows its decoded settled amount ("+<amt> LYTH"); other kinds
+  // show the plain amount. Null ⇒ omit the row (zero/absent — honest absence).
+  const amountLabel = notificationAmountLabel(record);
   const showBlock = record.blockNumber !== null;
   // Delegation records name the target cluster in place of the "To" module
   // address; null when no cluster info was captured (older records) → fall back
@@ -85,8 +87,11 @@ export function NotificationDetail({ record, onClose }: NotificationDetailProps)
         </div>
         <div className="w-card__body">
           <DRow label="Status" value={statusLabel(record.status)} />
-          {showAmount ? (
-            <DRow label="Amount" value={`${record.amountDecimal} LYTH`} />
+          {amountLabel !== null ? (
+            <DRow
+              label={record.kind === "claim" ? "Reward" : "Amount"}
+              value={amountLabel}
+            />
           ) : null}
           {clusterLabel !== null ? (
             <DRow label="Cluster" value={clusterLabel} />

@@ -83,6 +83,12 @@ export interface NotificationRecord {
    *  backward-compatible — records written before this field simply omit it. */
   clusterId?: number;
   clusterName?: string;
+  /** A reward claim's decoded settled amount (LYTH decimal), captured at the
+   *  confirmed terminal from the receipt's `Claimed` log (the tx value is 0x0,
+   *  so the amount lives in the log, not the value). Claim-only; optional +
+   *  legacy-safe — an absent record or an undecodable log falls back to the
+   *  claimable amount shown at submit. */
+  claimedAmount?: string;
   /** Owning scope — the lowercased address this record was recorded under (the
    *  active vault's identity at write time). Optional + backward-compatible:
    *  records written before this field omit it. It lets a merged/global list
@@ -231,6 +237,21 @@ export function delegationClusterLabel(record: NotificationRecord): string | nul
   );
 }
 
+/** Amount to display for a record: a reward claim's decoded settled amount
+ *  ("+<amt> LYTH") when known, else the plain amount ("<amt> LYTH"), else null
+ *  for a zero/absent amount (omitted — honest absence). Centralizes the
+ *  claim-amount rule the toast, the in-app row, and the detail all use. */
+export function notificationAmountLabel(record: NotificationRecord): string | null {
+  if (
+    record.kind === "claim" &&
+    record.claimedAmount &&
+    !isZeroAmount(record.claimedAmount)
+  ) {
+    return `+${record.claimedAmount} LYTH`;
+  }
+  return isZeroAmount(record.amountDecimal) ? null : `${record.amountDecimal} LYTH`;
+}
+
 /** Render the friendly title for a notification. */
 export function notificationTitle(
   kind: TxOpKind,
@@ -271,6 +292,15 @@ export function notificationToast(
   // the action is surfaced on the OS toast. The in-app record keeps full detail.
   if (!includeDetails) return { title: REDACTED_TOAST_TITLE, body: "" };
   const title = notificationTitle(record.kind, record.status);
+  // A reward claim's tx value is 0x0; its settled amount lives in the Claimed
+  // log, decoded into `claimedAmount`. Show "+<amount> LYTH" when known.
+  if (
+    record.kind === "claim" &&
+    record.claimedAmount &&
+    !isZeroAmount(record.claimedAmount)
+  ) {
+    return { title, body: `+${record.claimedAmount} LYTH` };
+  }
   // A delegation tx's counterparty is the bare delegation-module precompile;
   // name the target cluster instead (the same label the in-app row shows),
   // falling back to the truncated address only when no cluster metadata was
@@ -338,6 +368,10 @@ function asNotificationRecord(raw: unknown): NotificationRecord | null {
       ? r.clusterId
       : undefined;
   const clusterName = typeof r.clusterName === "string" ? r.clusterName : undefined;
+  const claimedAmount =
+    typeof r.claimedAmount === "string" && r.claimedAmount.length > 0
+      ? r.claimedAmount
+      : undefined;
   const scope = typeof r.scope === "string" ? r.scope : undefined;
   return {
     id: r.id,
@@ -349,6 +383,7 @@ function asNotificationRecord(raw: unknown): NotificationRecord | null {
     counterparty: r.counterparty,
     clusterId,
     clusterName,
+    claimedAmount,
     scope,
     createdAtMs: r.createdAtMs,
     read: r.read,

@@ -6,6 +6,7 @@ import {
   delegationClusterLabel,
   isTxOpKind,
   isZeroAmount,
+  notificationAmountLabel,
   notificationId,
   notificationTitle,
   notificationToast,
@@ -133,6 +134,35 @@ describe("notificationToast", () => {
     );
     expect(t.body).toBe("mono1qqqqq…qqqqqq");
   });
+
+  it("renders a claim's decoded settled amount as +<amount> LYTH", () => {
+    const t = notificationToast(
+      rec({ kind: "claim", status: "confirmed", amountDecimal: "0", claimedAmount: "12.3456" }),
+    );
+    expect(t.body).toBe("+12.3456 LYTH");
+  });
+
+  it("falls back to the plain claim body when no reward amount was decoded", () => {
+    const t = notificationToast(rec({ kind: "claim", amountDecimal: "5" }));
+    expect(t.body).toContain("5 LYTH");
+  });
+});
+
+describe("notificationAmountLabel", () => {
+  it("renders a claim's decoded reward as +<amt> LYTH", () => {
+    expect(
+      notificationAmountLabel(rec({ kind: "claim", amountDecimal: "0", claimedAmount: "9.1" })),
+    ).toBe("+9.1 LYTH");
+  });
+
+  it("renders a plain amount for non-claims and omits a zero amount", () => {
+    expect(notificationAmountLabel(rec({ kind: "send", amountDecimal: "3.5" }))).toBe("3.5 LYTH");
+    expect(notificationAmountLabel(rec({ kind: "send", amountDecimal: "0" }))).toBeNull();
+  });
+
+  it("falls back to the plain amount for a claim with no decoded reward", () => {
+    expect(notificationAmountLabel(rec({ kind: "claim", amountDecimal: "5" }))).toBe("5 LYTH");
+  });
 });
 
 describe("delegationClusterLabel", () => {
@@ -231,6 +261,16 @@ describe("parseHistoryEnvelope", () => {
     const parsed = parseHistoryEnvelope(env);
     expect(parsed?.entries).toHaveLength(1);
     expect(parsed?.entries[0]!.txHash).toBe("0xabc");
+  });
+
+  it("round-trips claimedAmount and tolerates its absence (legacy records)", () => {
+    const withClaim = parseHistoryEnvelope({
+      schemaVersion: 0,
+      entries: [rec({ kind: "claim", claimedAmount: "7.5" })],
+    });
+    expect(withClaim?.entries[0]!.claimedAmount).toBe("7.5");
+    const without = parseHistoryEnvelope({ schemaVersion: 0, entries: [rec()] });
+    expect(without?.entries[0]!.claimedAmount).toBeUndefined();
   });
 
   it("drops malformed entries but keeps the good ones", () => {
