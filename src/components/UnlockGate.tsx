@@ -5,6 +5,7 @@
 // while locked. Fails closed: a wrong password keeps the gate up.
 
 import { useEffect, useState } from "react";
+import { WalletLockLogo } from "./WalletLockLogo";
 import {
   KeychainCallError,
   fetchAndUnlockVault,
@@ -111,17 +112,7 @@ export function UnlockGate() {
   return (
     <div className="w-onboarding">
       <div className="w-onboarding__card" style={{ textAlign: "center" }}>
-        <div
-          aria-hidden="true"
-          style={{
-            width: 52,
-            height: 52,
-            margin: "0 auto 14px",
-            borderRadius: 13,
-            background: "var(--gold)",
-            boxShadow: "0 0 16px rgba(var(--gold-glow), 0.4)",
-          }}
-        />
+        <WalletLockLogo size={52} badge={forgotOpen ? "key" : "lock"} />
         {forgotOpen ? (
           <>
             <h1 style={{ margin: "0 0 6px" }}>Forgot your password?</h1>
@@ -176,7 +167,7 @@ export function UnlockGate() {
           </>
         ) : (
           <>
-            <h1 style={{ margin: "0 0 6px" }}>Wallet locked</h1>
+            <h1 style={{ margin: "0 0 6px" }}>Unlock Monolythium Wallet</h1>
             <p
               style={{
                 margin: "0 0 20px",
