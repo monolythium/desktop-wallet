@@ -7,10 +7,10 @@
 // app-level interval, so it survives drawer-close and follows a tx to a REAL
 // terminal state (confirmed OR failed) instead of dying when the drawer closes.
 //
-// READ-AND-RECORD ONLY: it reads public tx status / receipts for hashes the
-// wallet already broadcast and writes only the notification store + the
-// tracked-tx store. It never touches signing, broadcast, fees, nonces, or any
-// vault material.
+// READ-AND-RECORD ONLY: it reads public tx status / receipts (and the account's
+// committed nonce, read-only, to detect a dropped tx) for hashes the wallet
+// already broadcast, and writes only the notification store + the tracked-tx
+// store. It never touches signing, broadcast, fees, or any vault material.
 //
 // Status fidelity (the load-bearing invariant) lives in `classifyPending`
 // (`pending-tx.ts`): a notification is recorded ONLY on an explicit on-chain
@@ -24,6 +24,7 @@ import { MONOLYTHIUM_TESTNET_CHAIN_ID } from "@monolythium/core-sdk";
 import { loadActiveWallet } from "./active-wallet";
 import { getProvider } from "./client";
 import { decodeClaimedAmount, decodeTxFeeLythoshi } from "./live";
+import { getNativeTransactionCount } from "./native-rpc";
 import { recordNotification } from "./notifications-store";
 import { toastTerminalNotification } from "./os-toast";
 import {
@@ -62,6 +63,7 @@ function scopeChainIdHex(): string {
 export async function trackOperationTx(
   meta: OperationNotifyMeta,
   txHash: string | undefined,
+  nonce?: number,
 ): Promise<void> {
   if (!txHash) return;
   const addressLower = await scopeAddressLower();
@@ -75,6 +77,9 @@ export async function trackOperationTx(
     counterparty: meta.counterparty,
     clusterId: meta.clusterId,
     clusterName: meta.clusterName,
+    // Captured at submit so the reconciler can detect a dropped tx (a later
+    // nonce confirmed while this one stayed pending). Absent → time-based only.
+    nonce,
     submittedAt: Date.now(),
   };
   await enqueuePendingTx(tx);
@@ -234,11 +239,24 @@ export async function reconcilePendingOnce(
       }
       recorded++;
     }
-    // 2. Recompute the survivors' lifecycle (so the feed relabels pending →
-    //    slow → expired) and silently drop rows visible in a terminal state past
-    //    the retention window. Replaces the old blind 5-min silent expiry — a
-    //    slow/expired tx now stays visible + tracked instead of vanishing.
-    const transition = await applyPendingTransition(now);
+    // 2. Read each tracking address's committed nonce (read-only) so the
+    //    lifecycle can detect a dropped tx — a later nonce confirmed while this
+    //    one is still pending. A failed read maps to null (inert: never drops).
+    const survivors = await listPendingTxs();
+    const client = getProvider().rpcClient;
+    const committedNonces = new Map<string, number | null>();
+    for (const addressLower of new Set(survivors.map((t) => t.addressLower))) {
+      try {
+        committedNonces.set(addressLower, Number(await getNativeTransactionCount(client, addressLower)));
+      } catch {
+        committedNonces.set(addressLower, null);
+      }
+    }
+    // 3. Recompute the survivors' lifecycle (so the feed relabels pending →
+    //    slow → dropped/expired) and silently drop rows visible in a terminal
+    //    state past the retention window. Replaces the old blind 5-min silent
+    //    expiry — a slow/expired/dropped tx now stays visible + tracked.
+    const transition = await applyPendingTransition(now, committedNonces);
     expired = transition.removed;
     remaining = (await listPendingTxs()).length;
   } catch {

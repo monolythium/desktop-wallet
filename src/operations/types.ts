@@ -102,4 +102,7 @@ export interface OperationResult {
    * zero or many txs (or none that resolve a hash) leave it unset.
    */
   txHash?: string;
+  /** Account nonce the single broadcast tx signed with, when known. Captured
+   *  onto the tracked tx so the reconciler can detect a dropped tx. */
+  nonce?: number;
 }

@@ -55,6 +55,8 @@ export interface SubmitStakingTxArgs {
 
 export interface SubmitStakingTxResult {
   txHash: string;
+  /** Account nonce this staking tx signed with (for dropped-tx detection). */
+  nonce: number;
 }
 
 /** `delegate(uint32 clusterId, uint16 weightBps)` calldata. NON-CUSTODIAL:
@@ -179,5 +181,5 @@ export async function submitStakingTx(
     valueLythoshi: 0n,
     executionUnitLimit: args.executionUnitLimit ?? STAKING_EXECUTION_UNIT_LIMIT,
   });
-  return { txHash: result.txHash };
+  return { txHash: result.txHash, nonce: result.nonce };
 }

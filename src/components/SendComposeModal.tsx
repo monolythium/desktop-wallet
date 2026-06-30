@@ -285,6 +285,7 @@ export function SendComposeModal({ fromBech32m, onClose }: Props) {
           headline: `Broadcast ${amountLyth} LYTH`,
           detail: `${result.txHash} · from ${result.from}`,
           txHash: result.txHash,
+          nonce: result.nonce,
         };
       },
     });

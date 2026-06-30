@@ -186,7 +186,7 @@ export function OperationsDrawer({ descriptor, onClose }: Props) {
       // reverted receipt) even after this drawer closes. The Done pane shows
       // the broadcast immediately; the notification comes from the reconciler.
       if (descriptor.notify && resultTxHash && readExperimentalEnabled()) {
-        void trackOperationTx(descriptor.notify, resultTxHash);
+        void trackOperationTx(descriptor.notify, resultTxHash, r.nonce);
       }
     } catch (cause) {
       const message = (cause as Error)?.message ?? String(cause);

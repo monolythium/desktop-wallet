@@ -188,11 +188,12 @@ export async function bridgePendingTx(
  *  Best-effort. */
 export async function applyPendingTransition(
   now: number,
+  committedNonces: ReadonlyMap<string, number | null> = new Map(),
 ): Promise<{ removed: number }> {
   try {
     const env = await loadEnvelope();
     const before = env.txs.length;
-    const { next, changed } = transitionPending(env.txs, now);
+    const { next, changed } = transitionPending(env.txs, committedNonces, now);
     if (changed) await saveEnvelope({ schemaVersion: 0, txs: next });
     return { removed: before - next.length };
   } catch {

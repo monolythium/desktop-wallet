@@ -63,6 +63,15 @@ export interface PendingTx {
    *  optional/additive — absent on an un-bridged (still-pending) row. */
   confirmedBlockHeight?: number;
   confirmedTxIndex?: number;
+  /** Broadcast nonce captured at submit — the account nonce this tx signed with.
+   *  Lets the reconciler detect a dropped tx (a later nonce confirmed while this
+   *  one is still pending). Optional + additive — rows written before this field,
+   *  and ops that don't surface a nonce, read as undefined and fall back to the
+   *  time-based lifecycle. */
+  nonce?: number;
+  /** Epoch ms the committed nonce was first observed to have passed this tx's
+   *  nonce — anchors the drop grace window. Stamped by `transitionPending`. */
+  noncePassedAtMs?: number;
   /** Epoch ms the tx was enqueued. The lifecycle age is measured from here. */
   submittedAt: number;
 }
@@ -73,8 +82,8 @@ export interface PendingTx {
 export const PENDING_TX_STORE_KEY = "mono.pending-tx.v1";
 
 /** In-flight lifecycle of a tracked tx that hasn't reached a terminal receipt.
- *  `dropped` is reserved for a later nonce-aware commit; this module produces
- *  only the time-based `pending`/`slow`/`expired`. */
+ *  `dropped` is the nonce-aware terminal: a later nonce confirmed while this tx
+ *  stayed pending. The others are time-based (`pending`/`slow`/`expired`). */
 export type PendingLifecycle = "pending" | "slow" | "dropped" | "expired";
 
 /** Runtime guard for a persisted lifecycle literal. */
@@ -92,14 +101,37 @@ export const PENDING_ABSOLUTE_CAP_MS = 45 * 60 * 1_000;
  *  than vanishing after a few minutes. */
 export const PENDING_TERMINAL_RETAIN_MS = 60 * 60 * 1_000;
 
-/** Time-based in-flight lifecycle for a tracked tx. Pure — the caller passes
- *  `now`. A tx reads `expired` ("status unknown") only after the absolute cap,
- *  and is NEVER treated as terminal merely for being slow. A nonce-aware
- *  `dropped` transition is added by a later commit. */
+/** Grace after the committed nonce first passes a tx's nonce before the tx is
+ *  marked `dropped` — a momentary read race reads `slow`, not a false `dropped`. */
+export const PENDING_DROP_GRACE_MS = 30 * 1_000;
+
+/** In-flight lifecycle for a tracked tx. Pure — the caller passes the account's
+ *  committed nonce (`null` when unread) and `now`.
+ *
+ *  Nonce-drop path (a real committed-nonce read only): when the account's
+ *  committed nonce has passed this tx's nonce, the slot was filled by another tx
+ *  and this one can never confirm — within the grace window it reads `slow`, past
+ *  it `dropped`. A `null` read is inert: it never advances to `dropped` and never
+ *  un-drops an already-`dropped` row; only a real read that does NOT show the
+ *  nonce passed un-drops (falling through to the time-based path).
+ *
+ *  Time-based path (nonce unknown or not yet passed): `expired` only after the
+ *  absolute cap, `slow` after the slow threshold, else `pending`. */
 export function classifyStalePending(
-  tx: Pick<PendingTx, "submittedAt">,
+  tx: Pick<PendingTx, "submittedAt" | "nonce" | "noncePassedAtMs" | "lifecycle">,
+  committedNonce: number | null,
   now: number,
 ): PendingLifecycle {
+  if (
+    committedNonce !== null &&
+    tx.nonce !== undefined &&
+    committedNonce > tx.nonce
+  ) {
+    const passedAt = tx.noncePassedAtMs ?? now;
+    return now - passedAt < PENDING_DROP_GRACE_MS ? "slow" : "dropped";
+  }
+  // A null read never un-drops a dropped row.
+  if (committedNonce === null && tx.lifecycle === "dropped") return "dropped";
   const age = now - tx.submittedAt;
   if (age >= PENDING_ABSOLUTE_CAP_MS) return "expired";
   if (age >= PENDING_SLOW_MS) return "slow";
@@ -112,6 +144,7 @@ export function classifyStalePending(
  *  next array plus a `changed` flag so the caller persists only on a real diff. */
 export function transitionPending(
   txs: ReadonlyArray<PendingTx>,
+  committedNonces: ReadonlyMap<string, number | null>,
   now: number,
 ): { next: PendingTx[]; changed: boolean } {
   let changed = false;
@@ -124,17 +157,30 @@ export function transitionPending(
       next.push(tx);
       continue;
     }
-    const lifecycle = classifyStalePending(tx, now);
+    const committedNonce = committedNonces.get(tx.addressLower) ?? null;
+    // Stamp the moment the committed nonce is first seen to have passed this tx's
+    // nonce — anchors the drop grace so the transition isn't a momentary race.
+    let cur = tx;
+    if (
+      committedNonce !== null &&
+      tx.nonce !== undefined &&
+      committedNonce > tx.nonce &&
+      tx.noncePassedAtMs === undefined
+    ) {
+      cur = { ...tx, noncePassedAtMs: now };
+      changed = true;
+    }
+    const lifecycle = classifyStalePending(cur, committedNonce, now);
     const isTerminalVisible = lifecycle === "expired" || lifecycle === "dropped";
-    if (isTerminalVisible && now - tx.submittedAt >= PENDING_TERMINAL_RETAIN_MS) {
+    if (isTerminalVisible && now - cur.submittedAt >= PENDING_TERMINAL_RETAIN_MS) {
       changed = true; // bounded removal of a long-visible terminal row
       continue;
     }
-    if (tx.lifecycle !== lifecycle) {
+    if (cur.lifecycle !== lifecycle) {
       changed = true;
-      next.push({ ...tx, lifecycle });
+      next.push({ ...cur, lifecycle });
     } else {
-      next.push(tx);
+      next.push(cur);
     }
   }
   return { next, changed };
@@ -262,6 +308,12 @@ export function asPendingTx(raw: unknown): PendingTx | null {
     typeof r.confirmedTxIndex === "number" && Number.isFinite(r.confirmedTxIndex)
       ? r.confirmedTxIndex
       : undefined;
+  const nonce =
+    typeof r.nonce === "number" && Number.isFinite(r.nonce) ? r.nonce : undefined;
+  const noncePassedAtMs =
+    typeof r.noncePassedAtMs === "number" && Number.isFinite(r.noncePassedAtMs)
+      ? r.noncePassedAtMs
+      : undefined;
   return {
     txHash: r.txHash,
     chainIdHex: r.chainIdHex,
@@ -274,6 +326,8 @@ export function asPendingTx(raw: unknown): PendingTx | null {
     lifecycle,
     confirmedBlockHeight,
     confirmedTxIndex,
+    nonce,
+    noncePassedAtMs,
     submittedAt: r.submittedAt,
   };
 }
