@@ -24,6 +24,7 @@ import {
 } from "./lyth-display";
 import type { NotificationRecord } from "./notifications";
 import type { PendingTx } from "./pending-tx";
+import { bpsToPercentLabel } from "./staking-summary";
 import { txTypeLabelForActivity } from "./tx-type-label";
 
 /** Indexer kind → the `TxRow` icon/category bucket. Conservative: only the
@@ -89,8 +90,9 @@ export function activityCounterparty(row: LiveAddressActivityRow): string {
  * Map one indexed activity row onto a `Tx` for `TxRow`.
  *
  * Per-kind amount/unit resolution:
- *  - stake (delegation) rows carry no LYTH amount — their weight lives in a
- *    separate field surfaced elsewhere — so the amount slot is an em-dash here;
+ *  - stake (delegation) rows carry weight (basis points), not a LYTH amount —
+ *    render it as an unsigned percent with a "weight" unit (matching the staking
+ *    summary), or an em-dash when the row carries no weight;
  *  - native value + reward amounts are raw lythoshi converted to display LYTH;
  *  - an MRC-20 amount stays in its base units with the token id as the unit
  *    (there is no on-chain symbol registry).
@@ -102,8 +104,8 @@ export function activityRowToTx(row: LiveAddressActivityRow): Tx {
   let amountText: string | null;
   let unit: string;
   if (kind === "stake") {
-    amountText = null;
-    unit = "LYTH";
+    amountText = row.weightBps != null ? bpsToPercentLabel(row.weightBps) : null;
+    unit = "weight";
   } else if (isNativeLythTokenId(row.tokenId)) {
     amountText = formatLythDisplay(row.amount);
     unit = "LYTH";

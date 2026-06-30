@@ -143,14 +143,23 @@ describe("activityRowToTx", () => {
     expect(tx.amountText).toBe("1");
   });
 
-  it("leaves amount null for a weight-only delegation row (TxRow shows em-dash)", () => {
+  it("renders a delegation row's weight as an unsigned percent, not LYTH", () => {
     const tx = activityRowToTx(
       row({ kind: "delegation", amount: null, weightBps: 500, cluster: 1, counterparty: null }),
     );
-    expect(tx.amountText).toBeNull();
+    expect(tx.amountText).toBe("5.00%");
+    expect(tx.unit).toBe("weight");
     expect(tx.signed).toBe(false);
     expect(tx.kind).toBe("stake");
     expect(tx.counterparty).toBe("Cluster #1");
+  });
+
+  it("shows an em-dash for a delegation row carrying no weight", () => {
+    const tx = activityRowToTx(
+      row({ kind: "delegation", amount: null, weightBps: null, cluster: 1 }),
+    );
+    expect(tx.amountText).toBeNull();
+    expect(tx.kind).toBe("stake");
   });
 
   it("keeps an MRC-20 amount in base units with the token id as the unit", () => {
