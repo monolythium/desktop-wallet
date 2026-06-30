@@ -37,6 +37,7 @@ import {
   applyCapturedClusterNames,
   mergeConfirmedRows,
 } from "../sdk/activity-cache";
+import { tokenUnitLabel } from "../sdk/lyth-display";
 import {
   readConfirmedCache,
   writeConfirmedCache,
@@ -93,9 +94,12 @@ export function Activity({ experimentalEnabled }: Props) {
 
   const activityRows = confirmedRows;
 
+  // Native rows carry the zero-address token id, so normalize to the display
+  // unit ("LYTH" for native, else the token id) — the filter lists LYTH, never
+  // the bare zero-address.
   const tokenOptions = useMemo(() => {
     const set = new Set<string>();
-    for (const row of activityRows) set.add(row.tokenId ?? "LYTH");
+    for (const row of activityRows) set.add(tokenUnitLabel(row.tokenId));
     return Array.from(set).sort();
   }, [activityRows]);
 
@@ -105,7 +109,7 @@ export function Activity({ experimentalEnabled }: Props) {
         if (dirFilter !== "all" && activityDirection(row.direction) !== dirFilter) {
           return false;
         }
-        if (tokenFilter !== "all" && (row.tokenId ?? "LYTH") !== tokenFilter) {
+        if (tokenFilter !== "all" && tokenUnitLabel(row.tokenId) !== tokenFilter) {
           return false;
         }
         return true;

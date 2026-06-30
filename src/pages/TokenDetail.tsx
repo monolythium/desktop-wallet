@@ -21,6 +21,7 @@ import { fmt } from "../components/format";
 import type { Route } from "../components/types";
 import { useActiveWallet } from "../sdk/active-wallet";
 import { activityRowToTx } from "../sdk/activity-rows";
+import { isNativeLythTokenId } from "../sdk/lyth-display";
 import {
   assessRoute,
   fetchBridgeRoutes,
@@ -265,12 +266,13 @@ function ActivityTab({
   activity: RpcOutcome<LiveAddressActivityRow[]> | null;
   hasAddress: boolean;
 }) {
-  // Filter rows to this token where the indexer exposes a tokenId. Native LYTH
-  // rows carry no tokenId, so for the native view we show the wallet's full
-  // activity with an honest note rather than dropping every row.
+  // Filter rows to this token. Native LYTH rows carry the zero-address (or null)
+  // token id, so the native view (detected by isNativeLythTokenId) shows the
+  // wallet's full activity with an honest note rather than dropping every row; an
+  // MRC-20 view filters to its exact token id.
   const { rows, filtered } = useMemo(() => {
     const all = activity?.ok && activity.value ? activity.value : [];
-    if (facts.tokenId === null) {
+    if (isNativeLythTokenId(facts.tokenId)) {
       return { rows: all, filtered: false };
     }
     return { rows: all.filter((r) => r.tokenId === facts.tokenId), filtered: true };
