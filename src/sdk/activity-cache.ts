@@ -13,6 +13,7 @@
 // The rest of the app works with `LiveAddressActivityRow` throughout.
 
 import type { LiveAddressActivityRow } from "./live";
+import type { PendingTx } from "./pending-tx";
 
 /** Rolling window of confirmed rows kept per (address, chain). Bounds storage;
  *  covers months of normal use. Older rows drop on merge. */
@@ -125,6 +126,51 @@ export function mergeConfirmedRows(
   for (const r of live) byKey.set(confirmedRowKey(r), r);
   const merged = Array.from(byKey.values()).sort(compareConfirmedNewestFirst);
   return merged.length > window ? merged.slice(0, window) : merged;
+}
+
+/** Keep a confirmed delegation row's cluster NAME stable across the
+ *  pending→confirmed flip and across cache rebuilds. The indexer carries only
+ *  the numeric cluster id and resolves the name best-effort (it can lag or
+ *  transiently fail), so a row whose name is missing is filled from — in order —
+ *  a prior cached row at the same inclusion slot + cluster, then a bridged
+ *  pending row at the matching slot + cluster id that captured a name at submit.
+ *  NEVER overwrites a name the row already has (no flicker to a stale value).
+ *  Pure. */
+export function applyCapturedClusterNames(
+  confirmed: ReadonlyArray<LiveAddressActivityRow>,
+  prevConfirmed: ReadonlyArray<LiveAddressActivityRow>,
+  pending: ReadonlyArray<PendingTx>,
+): LiveAddressActivityRow[] {
+  const slotClusterKey = (block: number, txIndex: number, cluster: number): string =>
+    `${block}.${txIndex}.${cluster}`;
+
+  const prevNames = new Map<string, string>();
+  for (const r of prevConfirmed) {
+    if (r.cluster !== null && r.clusterName) {
+      prevNames.set(slotClusterKey(Number(r.blockHeight), r.txIndex, r.cluster), r.clusterName);
+    }
+  }
+  const pendingNames = new Map<string, string>();
+  for (const t of pending) {
+    if (
+      t.clusterName &&
+      t.clusterId !== undefined &&
+      t.confirmedBlockHeight !== undefined &&
+      t.confirmedTxIndex !== undefined
+    ) {
+      pendingNames.set(
+        slotClusterKey(t.confirmedBlockHeight, t.confirmedTxIndex, t.clusterId),
+        t.clusterName,
+      );
+    }
+  }
+
+  return confirmed.map((row) => {
+    if (row.cluster === null || row.clusterName) return row; // not a cluster row, or already named
+    const key = slotClusterKey(Number(row.blockHeight), row.txIndex, row.cluster);
+    const name = prevNames.get(key) ?? pendingNames.get(key) ?? null;
+    return name !== null ? { ...row, clusterName: name } : row;
+  });
 }
 
 /** Tolerant parse of one cached row — required anchor fields gate it; every

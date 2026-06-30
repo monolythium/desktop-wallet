@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   ACTIVITY_ROLLING_WINDOW,
   activityCacheKey,
+  applyCapturedClusterNames,
   compareConfirmedNewestFirst,
   confirmedRowKey,
   fromCachedRow,
@@ -11,6 +12,7 @@ import {
   validateCachedRow,
 } from "../activity-cache";
 import type { LiveAddressActivityRow } from "../live";
+import type { PendingTx } from "../pending-tx";
 
 function row(over: Partial<LiveAddressActivityRow> = {}): LiveAddressActivityRow {
   return {
@@ -127,6 +129,68 @@ describe("validateCachedRow", () => {
     expect(validateCachedRow({ blockHeight: 5, txIndex: 0, logIndex: 0 })).toBeNull(); // no kind
     expect(validateCachedRow(null)).toBeNull();
     expect(validateCachedRow("nope")).toBeNull();
+  });
+});
+
+function pend(over: Partial<PendingTx> = {}): PendingTx {
+  return {
+    txHash: "0xp",
+    chainIdHex: "0x10f2c",
+    addressLower: "mono1self",
+    opKind: "delegate",
+    amountDecimal: "0",
+    counterparty: "mono1module",
+    submittedAt: 1,
+    ...over,
+  };
+}
+
+describe("applyCapturedClusterNames", () => {
+  it("fills a missing name from a prior cached row at the same slot + cluster", () => {
+    const prev = [row({ blockHeight: 5n, txIndex: 0, cluster: 7, clusterName: "atlas" })];
+    const live = [row({ blockHeight: 5n, txIndex: 0, cluster: 7, clusterName: null })];
+    expect(applyCapturedClusterNames(live, prev, [])[0]!.clusterName).toBe("atlas");
+  });
+
+  it("fills from a bridged pending row that captured the name at submit", () => {
+    const live = [row({ blockHeight: 9n, txIndex: 2, cluster: 3, clusterName: null })];
+    const pending = [
+      pend({ clusterId: 3, clusterName: "nova", confirmedBlockHeight: 9, confirmedTxIndex: 2 }),
+    ];
+    expect(applyCapturedClusterNames(live, [], pending)[0]!.clusterName).toBe("nova");
+  });
+
+  it("prefers a prior cached name over a pending one", () => {
+    const live = [row({ blockHeight: 5n, txIndex: 0, cluster: 7, clusterName: null })];
+    const prev = [row({ blockHeight: 5n, txIndex: 0, cluster: 7, clusterName: "fromCache" })];
+    const pending = [
+      pend({ clusterId: 7, clusterName: "fromPending", confirmedBlockHeight: 5, confirmedTxIndex: 0 }),
+    ];
+    expect(applyCapturedClusterNames(live, prev, pending)[0]!.clusterName).toBe("fromCache");
+  });
+
+  it("never overwrites a name the row already has (no flicker to a stale value)", () => {
+    const live = [row({ blockHeight: 5n, txIndex: 0, cluster: 7, clusterName: "real" })];
+    const prev = [row({ blockHeight: 5n, txIndex: 0, cluster: 7, clusterName: "stale" })];
+    expect(applyCapturedClusterNames(live, prev, [])[0]!.clusterName).toBe("real");
+  });
+
+  it("leaves non-cluster rows and unmatched rows untouched", () => {
+    const live = [
+      row({ blockHeight: 5n, txIndex: 0, cluster: null, clusterName: null }),
+      row({ blockHeight: 6n, txIndex: 0, cluster: 9, clusterName: null }),
+    ];
+    const out = applyCapturedClusterNames(live, [], []);
+    expect(out[0]!.clusterName).toBeNull();
+    expect(out[1]!.clusterName).toBeNull();
+  });
+
+  it("does not match a pending row at a different cluster on the same slot", () => {
+    const live = [row({ blockHeight: 9n, txIndex: 0, cluster: 3, clusterName: null })];
+    const pending = [
+      pend({ clusterId: 4, clusterName: "other", confirmedBlockHeight: 9, confirmedTxIndex: 0 }),
+    ];
+    expect(applyCapturedClusterNames(live, [], pending)[0]!.clusterName).toBeNull();
   });
 });
 

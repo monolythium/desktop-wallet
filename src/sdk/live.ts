@@ -540,6 +540,36 @@ export async function loadLiveTxConfirmations(txHash: string): Promise<number | 
   }
 }
 
+/** Best-effort cluster display name (`lyth_getClusterName`). Returns null when
+ *  the cluster has no registered name or the read fails — callers fall back to
+ *  "Cluster #<id>" (honest absence, never a fabricated name). */
+export async function loadClusterName(clusterId: number): Promise<string | null> {
+  try {
+    const res = await getProvider().rpcClient.lythGetClusterName(clusterId);
+    return res.name && res.name.length > 0 ? res.name : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Fan out {@link loadClusterName} over a set of cluster ids. Returns a map of
+ *  clusterId → name (only clusters with a real registered name appear — a
+ *  missing key means "unnamed", so callers render "Cluster #<id>"). Tolerant of
+ *  per-cluster failures. */
+export async function loadLiveClusterNames(
+  clusterIds: number[],
+): Promise<Map<number, string>> {
+  const out = new Map<number, string>();
+  const unique = Array.from(new Set(clusterIds));
+  await Promise.all(
+    unique.map(async (id) => {
+      const name = await loadClusterName(id);
+      if (name !== null) out.set(id, name);
+    }),
+  );
+  return out;
+}
+
 export async function loadAccountPolicy(address: string) {
   return getProvider().rpcClient.lythGetAccountPolicy(requireTypedUserAddress(address, "account policy address"));
 }

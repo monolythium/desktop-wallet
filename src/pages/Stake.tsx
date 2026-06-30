@@ -29,7 +29,12 @@ import {
   hasClaimableRewards,
   submitStakingTx,
 } from "../sdk/staking";
-import { capture, loadLiveClusterApys, type RpcOutcome } from "../sdk/live";
+import {
+  capture,
+  loadLiveClusterApys,
+  loadLiveClusterNames,
+  type RpcOutcome,
+} from "../sdk/live";
 import {
   buildAutovotePlan,
   fetchClusterDiversities,
@@ -83,6 +88,10 @@ export function Stake({ experimentalEnabled }: StakeProps = {}) {
   // clusterId. A missing key means no yield has accrued yet / the read failed,
   // so the directory row shows "—" rather than a misleading 0.00%.
   const [apys, setApys] = useState<Map<number, number>>(new Map());
+  // Live cluster display names (lyth_getClusterName), keyed by clusterId, so a
+  // delegation captures the real cluster name at submit (sticky on its pending
+  // + notification rows). A missing key means "unnamed" → "Cluster #<id>".
+  const [names, setNames] = useState<Map<number, string>>(new Map());
   // Autovote (§25.1): weight budget (cap) to spread across clusters.
   const [autoCapBps, setAutoCapBps] = useState("5000");
   const [autovoteBusy, setAutovoteBusy] = useState(false);
@@ -96,6 +105,7 @@ export function Stake({ experimentalEnabled }: StakeProps = {}) {
       setRewards(null);
       setRedemptions(null);
       setApys(new Map());
+      setNames(new Map());
       return;
     }
     setBusy(true);
@@ -122,6 +132,11 @@ export function Stake({ experimentalEnabled }: StakeProps = {}) {
         loadLiveClusterApys(dir.clusters.map((c) => c.clusterId))
           .then(setApys)
           .catch(() => setApys(new Map()));
+        // Resolve cluster names so a delegation can capture the real name at
+        // submit; tolerant of per-cluster failures (a missing name → #id).
+        loadLiveClusterNames(dir.clusters.map((c) => c.clusterId))
+          .then(setNames)
+          .catch(() => setNames(new Map()));
         // Fan out the per-cluster diversity reads; tolerant of per-cluster
         // failures (a missing score just renders "—"). Only when the
         // experimental surfaces are enabled — the autovote planner and the
@@ -179,6 +194,7 @@ export function Stake({ experimentalEnabled }: StakeProps = {}) {
         amountDecimal: "0",
         counterparty: DELEGATION_PRECOMPILE,
         clusterId,
+        clusterName: names.get(clusterId),
       },
       execute: async (ctx) => {
         if (!ctx?.vaultSeed) {
@@ -226,6 +242,7 @@ export function Stake({ experimentalEnabled }: StakeProps = {}) {
         amountDecimal: "0",
         counterparty: DELEGATION_PRECOMPILE,
         clusterId,
+        clusterName: names.get(clusterId),
       },
       execute: async (ctx) => {
         if (!ctx?.vaultSeed) {
@@ -273,6 +290,7 @@ export function Stake({ experimentalEnabled }: StakeProps = {}) {
         amountDecimal: "0",
         counterparty: DELEGATION_PRECOMPILE,
         clusterId: toCluster,
+        clusterName: names.get(toCluster),
       },
       execute: async (ctx) => {
         if (!ctx?.vaultSeed) {

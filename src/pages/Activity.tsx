@@ -32,7 +32,11 @@ import {
   emptyActivityCopy,
   type ActivityCoverageKind,
 } from "../sdk/activity-coverage";
-import { activityCacheKey, mergeConfirmedRows } from "../sdk/activity-cache";
+import {
+  activityCacheKey,
+  applyCapturedClusterNames,
+  mergeConfirmedRows,
+} from "../sdk/activity-cache";
 import {
   readConfirmedCache,
   writeConfirmedCache,
@@ -151,9 +155,12 @@ export function Activity({ experimentalEnabled }: Props) {
       //    rows visible (the error band still surfaces above).
       let mergedConfirmed = cached?.rows ?? [];
       if (activityOutcome.ok) {
-        mergedConfirmed = mergeConfirmedRows(
+        // Merge live into the cache, then keep captured cluster names sticky
+        // across the flip / rebuild (the indexer's name read can lag or fail).
+        mergedConfirmed = applyCapturedClusterNames(
+          mergeConfirmedRows(cached?.rows ?? [], activityOutcome.value ?? []),
           cached?.rows ?? [],
-          activityOutcome.value ?? [],
+          tracked,
         );
         setConfirmedRows(mergedConfirmed);
         await writeConfirmedCache(scopeKey, mergedConfirmed, Date.now());
@@ -337,11 +344,7 @@ export function Activity({ experimentalEnabled }: Props) {
                         <span className="sep" />
                         <span>{bridged ? "Confirmed" : pendingLifecycleNote(lifecycle)}</span>
                       </div>
-                      <div className="label mono">
-                        {tx.counterparty.length > 0
-                          ? truncCounterparty(tx.counterparty)
-                          : truncCounterparty(tx.txHash)}
-                      </div>
+                      <div className="label mono">{pendingRowLabel(tx)}</div>
                     </div>
                     <div className="w-tx__right">
                       {showAmount ? (
@@ -497,6 +500,23 @@ function indexedRowToDetail(row: LiveAddressActivityRow): DetailRow {
 // row subtitle. Pure slicing — never throws on a malformed value.
 function truncCounterparty(s: string): string {
   return s.length > 17 ? `${s.slice(0, 10)}…${s.slice(-6)}` : s;
+}
+
+// Pending-row label: name the cluster for delegation kinds (captured real name,
+// else "Cluster #<id>") instead of the bare delegation-module precompile,
+// otherwise the truncated counterparty (or tx hash). Never fabricated.
+function pendingRowLabel(tx: PendingTx): string {
+  if (isDelegationKind(tx.opKind)) {
+    return (
+      tx.clusterName ??
+      (tx.clusterId !== undefined
+        ? `Cluster #${tx.clusterId}`
+        : truncCounterparty(tx.counterparty))
+    );
+  }
+  return tx.counterparty.length > 0
+    ? truncCounterparty(tx.counterparty)
+    : truncCounterparty(tx.txHash);
 }
 
 // Failed-row label: name the cluster for delegation kinds (real name, else
