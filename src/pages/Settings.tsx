@@ -5,13 +5,9 @@ import type { ChainInfo } from "@monolythium/core-sdk";
 import { useActiveWallet } from "../sdk/active-wallet";
 import { CopyableAddress } from "../components/_detailModalParts";
 import { MnemonicGrid } from "../components/MnemonicGrid";
-import {
-  deleteAccount,
-  getActiveAccount,
-  revealRecoveryPhrase,
-} from "../sdk/keychain";
+import { getActiveAccount, revealRecoveryPhrase } from "../sdk/keychain";
 import { VaultCallError } from "../sdk/vault";
-import { loadCatalog, removeVaultFromCatalog } from "../sdk/vaultCatalog";
+import { resetConfirmMatches, resetWalletOnThisDevice } from "../sdk/reset";
 import {
   AUTO_LOCK_OPTIONS,
   readAutoLockMinutes,
@@ -420,24 +416,14 @@ function ResetWalletPage({ onBack }: { onBack: () => void }) {
   const [confirmText, setConfirmText] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const canReset = confirmText.trim().toUpperCase() === "RESET" && !busy;
+  const canReset = resetConfirmMatches(confirmText) && !busy;
 
   const doReset = async () => {
     if (!canReset) return;
     setBusy(true);
     setError(null);
     try {
-      const catalog = await loadCatalog().catch(() => null);
-      const slots = catalog ? Object.keys(catalog.vaults) : [];
-      for (const slot of slots) {
-        // Wipe the encrypted blob first, then drop the catalog entry — a
-        // keychain failure aborts before we orphan a row.
-        await deleteAccount(slot);
-        await removeVaultFromCatalog(slot);
-      }
-      // Reload so the boot probe re-runs: with no vault left it routes to
-      // onboarding (the fresh-install state).
-      window.location.reload();
+      await resetWalletOnThisDevice();
     } catch (cause) {
       setError((cause as Error)?.message ?? String(cause));
       setBusy(false);
