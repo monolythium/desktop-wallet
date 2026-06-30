@@ -7,7 +7,6 @@ import {
   activityRelativeTime,
   activityRowToTx,
   activityWhen,
-  parseActivityAmount,
 } from "../activity-rows";
 
 function row(partial: Partial<LiveAddressActivityRow>): LiveAddressActivityRow {
@@ -48,20 +47,6 @@ describe("activityDirection", () => {
     expect(activityDirection("out")).toBe("out");
     expect(activityDirection(null)).toBe("out");
     expect(activityDirection("weird")).toBe("out");
-  });
-});
-
-describe("parseActivityAmount", () => {
-  it("parses decimals and thousands separators", () => {
-    expect(parseActivityAmount("12.5")).toBe(12.5);
-    expect(parseActivityAmount("1,000")).toBe(1000);
-  });
-
-  it("returns null (not 0) for missing / empty / non-numeric amounts", () => {
-    expect(parseActivityAmount(null)).toBeNull();
-    expect(parseActivityAmount("")).toBeNull();
-    expect(parseActivityAmount("   ")).toBeNull();
-    expect(parseActivityAmount("not-a-number")).toBeNull();
   });
 });
 
@@ -124,15 +109,21 @@ describe("activityCounterparty", () => {
 });
 
 describe("activityRowToTx", () => {
-  it("maps a transfer row onto a Tx with parsed amount and empty memo", () => {
+  it("converts a native transfer's raw lythoshi to display LYTH, signed by direction", () => {
     const tx = activityRowToTx(
-      row({ kind: "transfer", direction: "in", amount: "3.25", counterparty: "mono1xyz" }),
+      row({
+        kind: "transfer",
+        direction: "in",
+        amount: "3250000000000000000", // 3.25 LYTH in lythoshi
+        counterparty: "mono1xyz",
+      }),
     );
     expect(tx).toMatchObject({
       id: "1000-2-0",
       when: "block 1000 · tx 2",
-      amount: 3.25,
-      token: "LYTH",
+      amountText: "3.25",
+      unit: "LYTH",
+      signed: true,
       direction: "in",
       counterparty: "mono1xyz",
       memo: "",
@@ -140,17 +131,31 @@ describe("activityRowToTx", () => {
     });
   });
 
+  it("renders a large native amount in LYTH, not raw lythoshi (the lead bug)", () => {
+    const tx = activityRowToTx(row({ kind: "transfer", amount: "185826729675356600000" }));
+    expect(tx.amountText).toBe("185.8267"); // not 185,826,729,675,356,600,000
+    expect(tx.unit).toBe("LYTH");
+  });
+
+  it("maps the native zero-address token id to the LYTH symbol", () => {
+    const tx = activityRowToTx(row({ amount: "1000000000000000000", tokenId: "0x" + "00".repeat(32) }));
+    expect(tx.unit).toBe("LYTH");
+    expect(tx.amountText).toBe("1");
+  });
+
   it("leaves amount null for a weight-only delegation row (TxRow shows em-dash)", () => {
     const tx = activityRowToTx(
       row({ kind: "delegation", amount: null, weightBps: 500, cluster: 1, counterparty: null }),
     );
-    expect(tx.amount).toBeNull();
+    expect(tx.amountText).toBeNull();
+    expect(tx.signed).toBe(false);
     expect(tx.kind).toBe("stake");
     expect(tx.counterparty).toBe("Cluster #1");
   });
 
-  it("uses the indexer token id as the token label when present", () => {
+  it("keeps an MRC-20 amount in base units with the token id as the unit", () => {
     const tx = activityRowToTx(row({ tokenId: "0xdeadbeef", amount: "1" }));
-    expect(tx.token).toBe("0xdeadbeef");
+    expect(tx.unit).toBe("0xdeadbeef");
+    expect(tx.amountText).toBe("1");
   });
 });

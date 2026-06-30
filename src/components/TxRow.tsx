@@ -1,7 +1,6 @@
-// Transaction row — port of designs wallet-pages.jsx TxRow.
+// Transaction row — adapted from the wallet-pages design (TxRow).
 
 import type { Tx } from "../data/types";
-import { fmt } from "./format";
 
 interface Props {
   tx: Tx;
@@ -18,8 +17,11 @@ export function TxRow({ tx, onClick }: Props) {
     ? `From ${tx.counterparty}`
     : `To ${tx.counterparty}`;
   const memo = tx.memo;
-  const tok = tx.token || "LYTH";
-  const fracDigits = (tx.amount ?? 0) >= 100 ? 2 : 3;
+  const tok = tx.unit || "LYTH";
+  // `amountText` is already unit-converted (lythoshi→LYTH) + decimal-capped by
+  // activityRowToTx; the sign is direction-driven for value rows, omitted for
+  // unsigned (e.g. weight) figures.
+  const sign = tx.signed ? (tx.direction === "in" ? "+" : "−") : "";
 
   return (
     <div className="w-tx" onClick={onClick} role={onClick ? "button" : undefined}>
@@ -52,13 +54,13 @@ export function TxRow({ tx, onClick }: Props) {
       </div>
       <div className="w-tx__right">
         <div className={`w-tx__amt ${tx.direction}`}>
-          {tx.amount === null ? (
+          {tx.amountText === null ? (
             // A row with no amount (e.g. a weight-only delegation) has none to
             // show — an em-dash, never a fabricated figure.
             "—"
           ) : (
             <>
-              {tx.direction === "in" ? "+" : "−"}{fmt(tx.amount, fracDigits)}
+              {sign}{tx.amountText}
               <span className="tok">{tok}</span>
             </>
           )}

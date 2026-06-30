@@ -13,8 +13,15 @@ export interface Token {
 export interface Tx {
   id: string;
   when: string;
-  amount: number | null;
-  token: string;
+  /** Pre-formatted amount for display — already unit-converted (lythoshi→LYTH)
+   *  and decimal-capped, or `null` when the row carries no amount (renders as an
+   *  em-dash; never a fabricated 0). */
+  amountText: string | null;
+  /** Unit shown beside the amount: "LYTH", a token id, or "weight". */
+  unit: string;
+  /** Prefix the amount with the +/− direction sign. Value transfers/rewards are
+   *  signed; a weight figure is not. */
+  signed: boolean;
   direction: "in" | "out";
   counterparty: string;
   memo: string;
