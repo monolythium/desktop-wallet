@@ -13,8 +13,11 @@
 // preserved.
 //
 // Honest absence: only inbound NATIVE LYTH rows (no MRC-20 token id) become
-// receive notifications; the synthetic id `in:<block>.<txIndex>.<logIndex>` is
-// never linked out (it is not a real tx hash). The decision logic
+// receive notifications; the synthetic id
+// `in:<block>.<txIndex>.<logIndex>:<cp>:<amount>:<seq>` is never linked out (it
+// is not a real tx hash). The counterparty/amount/seq fold disambiguates two
+// same-block native receives, which share the txIndex 0 + u32::MAX logIndex
+// sentinel and would otherwise collide onto one row. The decision logic
 // (`incomingCandidatesFromRows` + `planIncomingNotifications`) is pure and unit-
 // tested; this module only wires it to the store, the toggle, and the toast.
 
@@ -65,18 +68,60 @@ export function incomingCandidatesFromRows(
   return out;
 }
 
+/** A candidate plus its folded synthetic id. */
+export interface RecordableIncoming extends IncomingCandidate {
+  /** `in:<block>.<txIndex>.<logIndex>:<cp>:<amount>:<seq>` — the dedupe key. */
+  id: string;
+}
+
+/** The folded synthetic id for an incoming native receive. Keeps the `in:`
+ *  prefix (never `0x`) so it stays non-linkable, and folds counterparty + amount
+ *  + an oldest-first seq so two same-block receives don't collide. */
+export function incomingTransferId(
+  anchor: IncomingWatermark,
+  counterparty: string,
+  amountDecimal: string,
+  seq: number,
+): string {
+  return `in:${anchor.blockHeight}.${anchor.txIndex}.${anchor.logIndex}:${counterparty}:${amountDecimal}:${seq}`;
+}
+
+/** Attach a folded id to each candidate. `seq` is assigned oldest-first within
+ *  each `(block, counterparty, amount)` group so a receive's id is stable across
+ *  polls (a same-block block's rows are fixed once indexed). Pure. */
+function assignIncomingIds(
+  candidates: ReadonlyArray<IncomingCandidate>,
+): RecordableIncoming[] {
+  // Stable oldest-first order; equal anchors keep their input order.
+  const ordered = [...candidates].sort((a, b) => {
+    if (a.anchor.blockHeight !== b.anchor.blockHeight) {
+      return a.anchor.blockHeight - b.anchor.blockHeight;
+    }
+    if (a.anchor.txIndex !== b.anchor.txIndex) return a.anchor.txIndex - b.anchor.txIndex;
+    return a.anchor.logIndex - b.anchor.logIndex;
+  });
+  const seqByKey = new Map<string, number>();
+  return ordered.map((c) => {
+    const key = `${c.anchor.blockHeight}:${c.counterparty}:${c.amountDecimal}`;
+    const seq = seqByKey.get(key) ?? 0;
+    seqByKey.set(key, seq + 1);
+    return { ...c, id: incomingTransferId(c.anchor, c.counterparty, c.amountDecimal, seq) };
+  });
+}
+
 /** The plan for one detection pass. Pure — the caller applies it. */
 export interface IncomingPlan {
   /** Non-null on first run with a LARGE receive history: the baseline watermark
-   *  to persist WITHOUT recording (never toast a pre-existing history). A small
-   *  first-run set records + notifies instead — see {@link
+   *  to persist WITHOUT recording (never toast a pre-existing history). Carries
+   *  the top block's accounted ids so a later same-block arrival is still
+   *  detected. A small first-run set records + notifies instead — see {@link
    *  planIncomingNotifications}. */
   baseline: IncomingWatermark | null;
-  /** Candidates strictly newer than the watermark, oldest-first so the history
-   *  append leaves the newest at the top. */
-  toRecord: IncomingCandidate[];
-  /** Watermark to persist after recording (the max anchor seen), or null to
-   *  leave the stored watermark unchanged. */
+  /** Records to write, oldest-first so the history append leaves the newest at
+   *  the top. */
+  toRecord: RecordableIncoming[];
+  /** Watermark to persist after recording (the max anchor + its block's
+   *  accounted ids), or null to leave the stored watermark unchanged. */
   newWatermark: IncomingWatermark | null;
 }
 
@@ -89,11 +134,20 @@ export interface IncomingPlan {
  *  Tunable. */
 const INCOMING_FIRST_RUN_NOTIFY_CAP = 10;
 
-/** Decide what to record + the watermark to advance to. Pure. On first run
- *  (watermark === null) a small receive set is recorded + notified (see
- *  {@link INCOMING_FIRST_RUN_NOTIFY_CAP}); a larger one only establishes a
- *  baseline (the newest anchor) and records nothing, so a wallet with real
- *  history never toasts it. */
+/** Decide what to record + the watermark to advance to. Pure.
+ *
+ *  First run (watermark === null): a SMALL receive set (≤ {@link
+ *  INCOMING_FIRST_RUN_NOTIFY_CAP}) is recorded + notified — a fresh / migrated
+ *  wallet's genuine recent arrivals; a LARGER one only establishes a baseline
+ *  (the newest anchor + its block's accounted ids) and records nothing, so a
+ *  wallet with real history never toasts it.
+ *
+ *  Newness gate (subsequent runs): a candidate is recorded when it is strictly
+ *  after the watermark OR it sits in the watermark's block but its folded id
+ *  isn't yet accounted (`blockIds`). A legacy watermark (no `blockIds`) treats
+ *  its boundary block as history (admits nothing there) — so an upgrade never
+ *  re-toasts. The new watermark's `blockIds` are the top block's ids (merged
+ *  with the prior set when the top block is unchanged, reset when it advances). */
 export function planIncomingNotifications(
   watermark: IncomingWatermark | null,
   candidates: ReadonlyArray<IncomingCandidate>,
@@ -101,31 +155,52 @@ export function planIncomingNotifications(
   if (candidates.length === 0) {
     return { baseline: null, toRecord: [], newWatermark: null };
   }
-  let max = candidates[0]!.anchor;
-  for (const c of candidates) if (anchorAfter(c.anchor, max)) max = c.anchor;
+  const withIds = assignIncomingIds(candidates);
+  let max = withIds[0]!.anchor;
+  for (const c of withIds) if (anchorAfter(c.anchor, max)) max = c.anchor;
+  const topBlockIds = withIds
+    .filter((c) => c.anchor.blockHeight === max.blockHeight)
+    .map((c) => c.id);
 
   if (watermark === null) {
     // A LARGE first-run receive history is an established / imported wallet —
-    // baseline it silently so the whole history never dumps into notifications.
+    // baseline it silently (seeding the top block's accounted ids so a later
+    // same-block arrival is still detected) so the whole history never dumps
+    // into notifications.
     if (candidates.length > INCOMING_FIRST_RUN_NOTIFY_CAP) {
-      return { baseline: max, toRecord: [], newWatermark: null };
+      return {
+        baseline: { ...max, blockIds: topBlockIds },
+        toRecord: [],
+        newWatermark: null,
+      };
     }
     // A SMALL set on a fresh / migrated scope is genuine recent arrivals —
-    // record + notify each (oldest-first so the newest lands on top) and advance
-    // the watermark to the newest as usual.
-    const fresh = [...candidates].sort((a, b) =>
-      anchorAfter(a.anchor, b.anchor) ? 1 : -1,
-    );
-    return { baseline: null, toRecord: fresh, newWatermark: max };
+    // record + notify each (oldest-first from assignIncomingIds) and advance the
+    // watermark to the newest, carrying the top block's ids.
+    return {
+      baseline: null,
+      toRecord: withIds,
+      newWatermark: { ...max, blockIds: topBlockIds },
+    };
   }
 
-  const fresh = candidates.filter((c) => anchorAfter(c.anchor, watermark));
-  fresh.sort((a, b) => (anchorAfter(a.anchor, b.anchor) ? 1 : -1)); // oldest first
-  return {
-    baseline: null,
-    toRecord: fresh,
-    newWatermark: anchorAfter(max, watermark) ? max : null,
-  };
+  const fresh = withIds.filter(
+    (c) =>
+      anchorAfter(c.anchor, watermark) ||
+      (c.anchor.blockHeight === watermark.blockHeight &&
+        watermark.blockIds !== undefined &&
+        !watermark.blockIds.includes(c.id)),
+  ); // already oldest-first from assignIncomingIds
+
+  let newWatermark: IncomingWatermark | null = null;
+  if (anchorAfter(max, watermark) || max.blockHeight === watermark.blockHeight) {
+    const blockIds =
+      max.blockHeight === watermark.blockHeight
+        ? Array.from(new Set([...(watermark.blockIds ?? []), ...topBlockIds]))
+        : topBlockIds;
+    newWatermark = { ...max, blockIds };
+  }
+  return { baseline: null, toRecord: fresh, newWatermark };
 }
 
 /** Detect newly-arrived incoming native LYTH and record/toast each exactly
@@ -153,13 +228,12 @@ export async function detectAndNotifyIncoming(
     const enabled = readIncomingEnabled();
     let recorded = 0;
     for (const c of plan.toRecord) {
-      const { blockHeight, txIndex, logIndex } = c.anchor;
       const { added, record } = await recordNotification({
         addressLower,
         chainIdHex,
-        txHash: `in:${blockHeight}.${txIndex}.${logIndex}`,
+        txHash: c.id,
         status: "confirmed",
-        blockNumber: blockHeight,
+        blockNumber: c.anchor.blockHeight,
         kind: "receive",
         amountDecimal: c.amountDecimal,
         counterparty: c.counterparty,

@@ -115,7 +115,8 @@ export function NotificationDetail({ record, onClose }: NotificationDetailProps)
             <DRow label="Network fee" value={`${feeLabel} LYTH`} />
           ) : null}
           {/* Real on-chain hashes link out; the synthetic incoming id
-              (`in:<block>.<txIndex>.<logIndex>`) is never shown or linked. */}
+              (`in:<block>.<txIndex>.<logIndex>:<cp>:<amount>:<seq>`) starts with
+              `in:`, never `0x`, so it is never shown or linked. */}
           {record.txHash.startsWith("0x") ? (
             <>
               <DRow
