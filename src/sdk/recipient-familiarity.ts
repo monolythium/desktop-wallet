@@ -2,9 +2,10 @@
 //
 // Honest (no fabrication): "known" only when backed by real data — a saved
 // contact, or a prior OUTGOING send to this address from this account (confirmed
-// history or an in-flight pending tx). "new" only when history WAS readable and
-// shows no such prior send. When the recipient isn't a valid address, or no
-// history source could be read, we return "unknown" and assert nothing.
+// history or an in-flight pending tx). "new" only when the CONFIRMED send
+// history was readable and shows no such prior send. When the recipient isn't a
+// valid address, or the confirmed history couldn't be read, we return "unknown"
+// and assert nothing.
 
 export type RecipientFamiliarity = "known" | "new" | "unknown";
 
@@ -65,8 +66,12 @@ export function classifyRecipient(args: ClassifyRecipientArgs): RecipientFamilia
   ) {
     return "known";
   }
-  // No prior interaction found. Only call it "new" if history was actually
-  // readable; if neither source could be read, we genuinely don't know.
-  const historyReadable = args.rows !== null || args.pending !== null;
-  return historyReadable ? "new" : "unknown";
+  // No prior interaction found. "new" asserts "never sent here before", which
+  // only the CONFIRMED send history (cache ∪ live) can establish — an in-flight
+  // `pending` set never holds historical sends, so an empty/readable pending
+  // can't justify "new". Require the confirmed history to have been readable;
+  // otherwise we honestly don't know → "unknown" (the caller shows a neutral
+  // verify caution rather than a fabricated "first-time" claim).
+  const confirmedHistoryReadable = args.rows !== null;
+  return confirmedHistoryReadable ? "new" : "unknown";
 }

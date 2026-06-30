@@ -171,7 +171,10 @@ export function SendComposeModal({ fromBech32m, onClose }: Props) {
       setFamiliarity(
         classifyRecipient({ recipientLower, fromLower, isContact: false, rows, pending }),
       );
-      setHistoryUnreadable(rows === null && pending === null);
+      // The confirmed history (cache ∪ live) is what establishes "never sent
+      // before"; if it was unreadable we show the neutral verify caution, not a
+      // fabricated "first-time" (an empty in-flight `pending` doesn't count).
+      setHistoryUnreadable(rows === null);
     })();
     return () => {
       cancelled = true;
