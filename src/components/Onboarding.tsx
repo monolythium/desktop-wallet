@@ -27,6 +27,7 @@ import { registerVault } from "../sdk/vaultCatalog";
 import { explainImportError } from "../lib/import-error";
 import { MnemonicGrid } from "./MnemonicGrid";
 import { VerifyPhrase } from "./VerifyPhrase";
+import { WalletLogo } from "./WalletLogo";
 import { PasswordStrengthMeter } from "./PasswordStrengthMeter";
 import { isPasswordValid, getPasswordStrength } from "../lib/password-validation";
 
@@ -213,17 +214,9 @@ export function Onboarding({ onDone }: Props) {
         {step === "choose-path" ? (
           <>
             <div style={{ textAlign: "center", marginBottom: 22 }}>
-              <div
-                aria-hidden="true"
-                style={{
-                  width: 52,
-                  height: 52,
-                  margin: "0 auto 14px",
-                  borderRadius: 13,
-                  background: "var(--gold)",
-                  boxShadow: "0 0 16px rgba(var(--gold-glow), 0.4)",
-                }}
-              />
+              <div style={{ display: "flex", justifyContent: "center", marginBottom: 14 }}>
+                <WalletLogo size={52} />
+              </div>
               <h1 style={{ margin: "0 0 6px" }}>Welcome to Monolythium</h1>
               <div
                 style={{
@@ -261,7 +254,7 @@ export function Onboarding({ onDone }: Props) {
                 onClick={beginImport}
                 style={{ width: "100%" }}
               >
-                I already have a recovery phrase
+                Import existing wallet
               </button>
             </div>
           </>
