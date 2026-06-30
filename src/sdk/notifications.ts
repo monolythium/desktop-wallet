@@ -148,6 +148,12 @@ export interface IncomingWatermark {
   blockHeight: number;
   txIndex: number;
   logIndex: number;
+  /** The accounted synthetic ids recorded at the top block. Disambiguates
+   *  multiple same-block native receives (which share the txIndex 0 + u32::MAX
+   *  logIndex sentinel) so a second receive in the watermark's block isn't lost.
+   *  Optional + additive — a legacy watermark without it treats its boundary
+   *  block as history (never re-toasts on upgrade). */
+  blockIds?: string[];
 }
 
 /** Per-(address, chain) incoming-watermark key inside the store. */
@@ -174,7 +180,12 @@ export function parseIncomingWatermark(raw: unknown): IncomingWatermark | null {
   if (typeof r.blockHeight !== "number" || !Number.isFinite(r.blockHeight)) return null;
   if (typeof r.txIndex !== "number" || !Number.isFinite(r.txIndex)) return null;
   if (typeof r.logIndex !== "number" || !Number.isFinite(r.logIndex)) return null;
-  return { blockHeight: r.blockHeight, txIndex: r.txIndex, logIndex: r.logIndex };
+  // Additive + non-rejecting: absence/garbage → undefined (legacy boundary is
+  // history), never a reason to drop the whole watermark.
+  const blockIds = Array.isArray(r.blockIds)
+    ? r.blockIds.filter((s): s is string => typeof s === "string")
+    : undefined;
+  return { blockHeight: r.blockHeight, txIndex: r.txIndex, logIndex: r.logIndex, blockIds };
 }
 
 /** Insert a record newest-first and slice to the cap. Pure. */
