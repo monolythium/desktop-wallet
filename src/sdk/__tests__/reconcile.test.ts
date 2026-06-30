@@ -45,7 +45,11 @@ import {
   enqueuePendingTx,
   listPendingTxs,
 } from "../pending-tx-store";
-import { PENDING_TX_WINDOW_MS, type PendingTx } from "../pending-tx";
+import {
+  PENDING_SLOW_MS,
+  PENDING_TERMINAL_RETAIN_MS,
+  type PendingTx,
+} from "../pending-tx";
 import { reconcilePendingOnce, trackOperationTx } from "../reconcile";
 
 // ── Fake RpcClient ──
@@ -206,14 +210,32 @@ describe("reconcilePendingOnce — never synthesizes; keeps tracking", () => {
   });
 });
 
-describe("reconcilePendingOnce — window expiry (honest absence)", () => {
-  it("drops an expired tx SILENTLY (no notification) and stops tracking", async () => {
-    const old = Date.now() - PENDING_TX_WINDOW_MS - 1_000;
-    await enqueuePendingTx(tx({ txHash: "0xe1", submittedAt: old }));
-    // Even if the chain WOULD confirm it, expiry is checked first.
-    txStatusScript.set("0xe1", { status: "found", blockNumber: 5 });
+describe("reconcilePendingOnce — lifecycle retention (honest absence)", () => {
+  it("does NOT drop a slow tx; still records it when the chain confirms", async () => {
+    const now = Date.now();
+    // Older than the slow threshold but well within the retention window — the
+    // old blind 5-min silent drop is gone, so the tx is followed and recorded.
+    await enqueuePendingTx(
+      tx({ txHash: "0xs1", submittedAt: now - PENDING_SLOW_MS - 1_000 }),
+    );
+    txStatusScript.set("0xs1", { status: "found", blockNumber: 5 });
 
-    const res = await reconcilePendingOnce();
+    const res = await reconcilePendingOnce(now);
+    expect(res.recorded).toBe(1);
+    expect(res.expired).toBe(0);
+    expect(res.remaining).toBe(0);
+    expect(await listAllNotifications()).toHaveLength(1);
+    expect(await listPendingTxs()).toHaveLength(0);
+  });
+
+  it("silently removes a still-pending tx past the retention window (no record)", async () => {
+    const now = Date.now();
+    await enqueuePendingTx(
+      tx({ txHash: "0xe1", submittedAt: now - PENDING_TERMINAL_RETAIN_MS - 1_000 }),
+    );
+    // No terminal answer this round — it ages out of the retention window.
+
+    const res = await reconcilePendingOnce(now);
     expect(res.expired).toBe(1);
     expect(res.recorded).toBe(0);
     expect(res.remaining).toBe(0);
@@ -283,12 +305,13 @@ describe("reconcilePendingOnce — OS toast fires once per new record", () => {
     expect(toastSpy).not.toHaveBeenCalled();
   });
 
-  it("does not toast a silently-expired tx", async () => {
+  it("does not toast a tx silently removed past the retention window", async () => {
+    const now = Date.now();
     await enqueuePendingTx(
-      tx({ txHash: "0xt5", submittedAt: Date.now() - PENDING_TX_WINDOW_MS - 1 }),
+      tx({ txHash: "0xt5", submittedAt: now - PENDING_TERMINAL_RETAIN_MS - 1 }),
     );
-    txStatusScript.set("0xt5", { status: "found", blockNumber: 9 });
-    await reconcilePendingOnce();
+    // No terminal answer — it's removed by retention, never recorded → no toast.
+    await reconcilePendingOnce(now);
     expect(toastSpy).not.toHaveBeenCalled();
   });
 });
@@ -300,7 +323,7 @@ describe("reconcilePendingOnce — mixed batch in one tick", () => {
     await enqueuePendingTx(tx({ txHash: "0xrevert" }));
     await enqueuePendingTx(tx({ txHash: "0xwait" }));
     await enqueuePendingTx(
-      tx({ txHash: "0xold", submittedAt: now - PENDING_TX_WINDOW_MS - 1 }),
+      tx({ txHash: "0xold", submittedAt: now - PENDING_TERMINAL_RETAIN_MS - 1 }),
     );
     txStatusScript.set("0xok", { status: "found", blockNumber: 10 });
     receiptScript.set("0xrevert", { status: 0, block_number: 11n });

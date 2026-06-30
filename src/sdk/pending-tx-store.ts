@@ -32,6 +32,7 @@ import {
   PENDING_TX_STORE_KEY,
   parsePendingTxEnvelope,
   pendingTxIndex,
+  transitionPending,
   type PendingTx,
   type PendingTxEnvelope,
 } from "./pending-tx";
@@ -147,6 +148,24 @@ export async function removePendingTx(
     return { removed: true };
   } catch {
     return { removed: false };
+  }
+}
+
+/** Recompute each tracked tx's lifecycle and drop rows past the terminal-
+ *  retention window, persisting ONLY when something changed (so a no-op tick is
+ *  free and doesn't churn subscribers). Returns the count silently removed.
+ *  Best-effort. */
+export async function applyPendingTransition(
+  now: number,
+): Promise<{ removed: number }> {
+  try {
+    const env = await loadEnvelope();
+    const before = env.txs.length;
+    const { next, changed } = transitionPending(env.txs, now);
+    if (changed) await saveEnvelope({ schemaVersion: 0, txs: next });
+    return { removed: before - next.length };
+  } catch {
+    return { removed: 0 };
   }
 }
 

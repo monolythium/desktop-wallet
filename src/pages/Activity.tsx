@@ -46,7 +46,7 @@ import {
 import { listForScope } from "../sdk/notifications-store";
 import { detectAndNotifyIncoming } from "../sdk/incoming-detect";
 import { txTypeLabelForOpKind } from "../sdk/tx-type-label";
-import type { PendingTx } from "../sdk/pending-tx";
+import { pendingLifecycleNote, type PendingTx } from "../sdk/pending-tx";
 import { usePendingTxs } from "../sdk/use-pending-tx";
 import { useActiveWallet } from "../sdk/active-wallet";
 
@@ -247,6 +247,11 @@ export function Activity({ experimentalEnabled }: Props) {
               if (item.tag === "pending") {
                 const tx = item.tx;
                 const showAmount = !isZeroAmount(tx.amountDecimal);
+                const lifecycle = tx.lifecycle ?? "pending";
+                // A still-trackable tx (pending/slow) keeps the spinner; one that
+                // has aged into a visible terminal state ("status unknown") swaps
+                // it for a muted clock so it no longer reads as actively working.
+                const stalled = lifecycle === "expired" || lifecycle === "dropped";
                 return (
                   <div
                     className="w-tx"
@@ -255,14 +260,34 @@ export function Activity({ experimentalEnabled }: Props) {
                     onClick={() => setSelected(trackedRowToDetail(tx))}
                     style={{ cursor: "pointer" }}
                   >
-                    <div className="w-tx__dir" aria-hidden>
-                      <span className="w-spin" style={{ width: 14, height: 14, margin: 0 }} />
+                    <div
+                      className="w-tx__dir"
+                      aria-hidden
+                      style={stalled ? { color: "var(--w-text-3)" } : undefined}
+                    >
+                      {stalled ? (
+                        <svg
+                          width="14"
+                          height="14"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        >
+                          <circle cx="12" cy="12" r="9" />
+                          <path d="M12 7v5l3 2" />
+                        </svg>
+                      ) : (
+                        <span className="w-spin" style={{ width: 14, height: 14, margin: 0 }} />
+                      )}
                     </div>
                     <div className="w-tx__info">
                       <div className="eyebrow">
                         <span>{pendingOpLabel(tx.opKind)}</span>
                         <span className="sep" />
-                        <span>in flight</span>
+                        <span>{pendingLifecycleNote(lifecycle)}</span>
                       </div>
                       <div className="label mono">
                         {tx.counterparty.length > 0

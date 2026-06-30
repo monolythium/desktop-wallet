@@ -27,11 +27,11 @@ import { recordNotification } from "./notifications-store";
 import { toastTerminalNotification } from "./os-toast";
 import {
   classifyPending,
-  isPendingExpired,
   type ChainProbe,
   type PendingTx,
 } from "./pending-tx";
 import {
+  applyPendingTransition,
   enqueuePendingTx,
   listPendingTxs,
   removePendingTx,
@@ -159,21 +159,14 @@ export async function reconcilePendingOnce(
   let expired = 0;
   let remaining = 0;
   try {
+    // 1. Probe each tracked tx for a terminal verdict FIRST, so a tx that
+    //    reached terminal is always recorded — even an old one — before any
+    //    retention removal in step 2.
     const txs = await listPendingTxs();
     for (const tx of txs) {
-      // 1. Silent TTL eviction — never records.
-      if (isPendingExpired(tx, now)) {
-        await removePendingTx(tx.chainIdHex, tx.txHash);
-        expired++;
-        continue;
-      }
-      // 2. Probe + classify.
       const probe = await probeTx(tx.txHash);
       const verdict = classifyPending(probe);
-      if (verdict.kind === "pending") {
-        remaining++;
-        continue;
-      }
+      if (verdict.kind === "pending") continue;
       // Terminal — record the genuine status verbatim, then stop tracking.
       const { added, record } = await recordNotification({
         addressLower: tx.addressLower,
@@ -195,6 +188,13 @@ export async function reconcilePendingOnce(
       await removePendingTx(tx.chainIdHex, tx.txHash);
       recorded++;
     }
+    // 2. Recompute the survivors' lifecycle (so the feed relabels pending →
+    //    slow → expired) and silently drop rows visible in a terminal state past
+    //    the retention window. Replaces the old blind 5-min silent expiry — a
+    //    slow/expired tx now stays visible + tracked instead of vanishing.
+    const transition = await applyPendingTransition(now);
+    expired = transition.removed;
+    remaining = (await listPendingTxs()).length;
   } catch {
     // Best-effort — a reconcile failure must never escape the poller.
   }

@@ -1,12 +1,16 @@
 import { describe, expect, it } from "vitest";
 import {
+  PENDING_ABSOLUTE_CAP_MS,
+  PENDING_SLOW_MS,
+  PENDING_TERMINAL_RETAIN_MS,
   PENDING_TX_STORE_KEY,
-  PENDING_TX_WINDOW_MS,
   asPendingTx,
   classifyPending,
-  isPendingExpired,
+  classifyStalePending,
   parsePendingTxEnvelope,
+  pendingLifecycleNote,
   pendingTxIndex,
+  transitionPending,
   type ChainProbe,
   type PendingTx,
 } from "../pending-tx";
@@ -112,25 +116,67 @@ describe("classifyPending — never synthesizes a verdict (keeps pending)", () =
   });
 });
 
-describe("isPendingExpired — tracking window", () => {
-  it("is false inside the window", () => {
-    const base = tx({ submittedAt: 1_000 });
-    expect(isPendingExpired(base, 1_000)).toBe(false);
-    expect(isPendingExpired(base, 1_000 + PENDING_TX_WINDOW_MS - 1)).toBe(false);
+describe("classifyStalePending — time-based lifecycle", () => {
+  const base = tx({ submittedAt: 1_000_000 });
+
+  it("is pending inside the slow threshold", () => {
+    expect(classifyStalePending(base, 1_000_000)).toBe("pending");
+    expect(classifyStalePending(base, 1_000_000 + PENDING_SLOW_MS - 1)).toBe("pending");
   });
 
-  it("is true at and past the window edge", () => {
-    const base = tx({ submittedAt: 1_000 });
-    expect(isPendingExpired(base, 1_000 + PENDING_TX_WINDOW_MS)).toBe(true);
-    expect(isPendingExpired(base, 1_000 + PENDING_TX_WINDOW_MS + 10_000)).toBe(
-      true,
+  it("is slow from the slow threshold up to the absolute cap", () => {
+    expect(classifyStalePending(base, 1_000_000 + PENDING_SLOW_MS)).toBe("slow");
+    expect(classifyStalePending(base, 1_000_000 + PENDING_ABSOLUTE_CAP_MS - 1)).toBe("slow");
+  });
+
+  it("is expired at and past the absolute cap", () => {
+    expect(classifyStalePending(base, 1_000_000 + PENDING_ABSOLUTE_CAP_MS)).toBe("expired");
+  });
+});
+
+describe("transitionPending — relabel + bounded terminal removal", () => {
+  it("stamps the lifecycle and flags changed when it moves", () => {
+    const { next, changed } = transitionPending(
+      [tx({ submittedAt: 1_000_000 })],
+      1_000_000 + PENDING_SLOW_MS,
     );
+    expect(changed).toBe(true);
+    expect(next[0]!.lifecycle).toBe("slow");
   });
 
-  it("honors a caller-supplied window override", () => {
-    const base = tx({ submittedAt: 0 });
-    expect(isPendingExpired(base, 50, 100)).toBe(false);
-    expect(isPendingExpired(base, 100, 100)).toBe(true);
+  it("never removes a pending or slow row", () => {
+    const { next } = transitionPending(
+      [tx({ submittedAt: 1_000_000 })],
+      1_000_000 + PENDING_SLOW_MS, // slow, not terminal
+    );
+    expect(next).toHaveLength(1);
+  });
+
+  it("keeps an expired row visible until the retention window, then removes it", () => {
+    const kept = transitionPending([tx({ submittedAt: 0 })], PENDING_ABSOLUTE_CAP_MS);
+    expect(kept.next).toHaveLength(1);
+    expect(kept.next[0]!.lifecycle).toBe("expired");
+
+    const removed = transitionPending(
+      [tx({ submittedAt: 0, lifecycle: "expired" })],
+      PENDING_TERMINAL_RETAIN_MS,
+    );
+    expect(removed.next).toHaveLength(0);
+    expect(removed.changed).toBe(true);
+  });
+
+  it("is a no-op (changed=false) when every lifecycle is already current", () => {
+    const slow = tx({ submittedAt: 1_000_000, lifecycle: "slow" });
+    expect(transitionPending([slow], 1_000_000 + PENDING_SLOW_MS).changed).toBe(false);
+  });
+});
+
+describe("pendingLifecycleNote", () => {
+  it("maps each lifecycle to its eyebrow note", () => {
+    expect(pendingLifecycleNote("pending")).toBe("in flight");
+    expect(pendingLifecycleNote("slow")).toBe("taking longer than usual");
+    expect(pendingLifecycleNote("dropped")).toBe("didn't confirm");
+    expect(pendingLifecycleNote("expired")).toBe("status unknown");
   });
 });
 
