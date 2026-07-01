@@ -10,11 +10,14 @@ import {
   LAYOUT_STORAGE_KEY,
   THEMES,
   THEME_STORAGE_KEY,
+  SIDEBAR_STORAGE_KEY,
   applyLayout,
+  applySidebarCollapsed,
   applyTheme,
   isLayoutId,
   isThemeId,
   readLayout,
+  readSidebarCollapsed,
   readTheme,
 } from "../theme";
 
@@ -22,12 +25,14 @@ beforeEach(() => {
   localStorage.clear();
   document.documentElement.removeAttribute("data-theme");
   document.documentElement.removeAttribute("data-layout");
+  document.documentElement.removeAttribute("data-sidebar");
 });
 
 afterEach(() => {
   localStorage.clear();
   document.documentElement.removeAttribute("data-theme");
   document.documentElement.removeAttribute("data-layout");
+  document.documentElement.removeAttribute("data-sidebar");
 });
 
 describe("theme", () => {
@@ -109,5 +114,33 @@ describe("layout", () => {
     applyLayout("sidebar");
     expect(document.documentElement.getAttribute("data-layout")).toBeNull();
     expect(localStorage.getItem(LAYOUT_STORAGE_KEY)).toBe("sidebar");
+  });
+});
+
+describe("sidebar collapse", () => {
+  it("defaults to OPEN (collapsed=false) when nothing is stored", () => {
+    expect(readSidebarCollapsed()).toBe(false);
+  });
+
+  it("collapses via data-sidebar and persists it", () => {
+    applySidebarCollapsed(true);
+    expect(document.documentElement.getAttribute("data-sidebar")).toBe("collapsed");
+    expect(localStorage.getItem(SIDEBAR_STORAGE_KEY)).toBe("1");
+    expect(readSidebarCollapsed()).toBe(true);
+  });
+
+  it("expands by removing the attribute and round-trips the state", () => {
+    applySidebarCollapsed(true);
+    applySidebarCollapsed(false);
+    expect(document.documentElement.getAttribute("data-sidebar")).toBeNull();
+    expect(localStorage.getItem(SIDEBAR_STORAGE_KEY)).toBe("0");
+    expect(readSidebarCollapsed()).toBe(false);
+  });
+
+  it("treats a stored '0' / garbage as OPEN (only '1' is collapsed)", () => {
+    localStorage.setItem(SIDEBAR_STORAGE_KEY, "0");
+    expect(readSidebarCollapsed()).toBe(false);
+    localStorage.setItem(SIDEBAR_STORAGE_KEY, "yes");
+    expect(readSidebarCollapsed()).toBe(false);
   });
 });

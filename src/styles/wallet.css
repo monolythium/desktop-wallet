@@ -193,6 +193,46 @@ html[data-layout="topbar"] .w-main > * {
 }
 .w-nav__item__icon { display: grid; place-items: center; opacity: 0.75; width: 16px; }
 .w-nav__item.is-active .w-nav__item__icon { opacity: 1; }
+.w-nav__item__label { flex: 1; text-align: left; }
+
+/* Category caption above a nav group; hidden when the rail is collapsed. */
+.w-nav__cat {
+  font-family: var(--f-mono); font-size: 9.5px;
+  color: var(--fg-400); letter-spacing: 0.14em; text-transform: uppercase;
+  padding: 12px 12px 4px;
+}
+
+/* ============ Collapsible rail ============
+   The hamburger toggle collapses the rail to an icons-only strip; the grid
+   column shrinks so the main content reflows. Default is expanded (no
+   attribute). Scoped out of the horizontal `topbar` layout, which reflows the
+   rail differently. */
+.w-side__top {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 8px;
+}
+.w-side__toggle {
+  display: grid; place-items: center;
+  width: 30px; height: 30px; flex: 0 0 auto;
+  border: none; border-radius: 8px;
+  background: transparent; color: var(--fg-300);
+  cursor: pointer; transition: all 160ms var(--e-out);
+}
+.w-side__toggle:hover { color: var(--fg-100); background: rgba(255,255,255,0.05); }
+
+html[data-sidebar="collapsed"]:not([data-layout="topbar"]) .w-app {
+  grid-template-columns: 66px 1fr;
+}
+html[data-sidebar="collapsed"]:not([data-layout="topbar"]) .w-side { padding: 20px 8px; }
+html[data-sidebar="collapsed"]:not([data-layout="topbar"]) .w-side__top { justify-content: center; }
+html[data-sidebar="collapsed"]:not([data-layout="topbar"]) .w-brand__mark,
+html[data-sidebar="collapsed"]:not([data-layout="topbar"]) .w-brand__text,
+html[data-sidebar="collapsed"]:not([data-layout="topbar"]) .w-nav__item__label,
+html[data-sidebar="collapsed"]:not([data-layout="topbar"]) .w-nav__item__badge,
+html[data-sidebar="collapsed"]:not([data-layout="topbar"]) .w-nav__cat,
+html[data-sidebar="collapsed"]:not([data-layout="topbar"]) .w-side__footer { display: none; }
+html[data-sidebar="collapsed"]:not([data-layout="topbar"]) .w-nav__item {
+  justify-content: center; padding: 9px 0; gap: 0;
+}
 
 .w-side__footer {
   margin-top: auto; padding: 14px 10px; border-top: 1px solid var(--fg-700);

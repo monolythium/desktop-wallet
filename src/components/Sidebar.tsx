@@ -1,7 +1,8 @@
 // Sidebar — wallet navigation. Node-ops screens live in Monarch Desktop.
 
-import type { ReactElement } from "react";
+import { useState, type ReactElement } from "react";
 import { useActiveWallet } from "../sdk/active-wallet";
+import { applySidebarCollapsed, readSidebarCollapsed } from "../sdk/theme";
 import type { Route } from "./types";
 
 interface NavItem {
@@ -164,6 +165,14 @@ const NAV_FOOTER: NavItem[] = [
 
 export function Sidebar({ route, setRoute, developerModeEnabled, steleEnabled, experimentalEnabled }: Props) {
   const wallet = useActiveWallet();
+  // Rail collapse — a display preference persisted via the theme/display store
+  // and applied to <html> so the grid column reflows. Default OPEN.
+  const [collapsed, setCollapsed] = useState(readSidebarCollapsed);
+  const toggleCollapsed = () => {
+    const next = !collapsed;
+    setCollapsed(next);
+    applySidebarCollapsed(next);
+  };
   const visible = NAV.filter(
     (n) =>
       (!n.developerOnly || developerModeEnabled) &&
@@ -173,12 +182,26 @@ export function Sidebar({ route, setRoute, developerModeEnabled, steleEnabled, e
 
   return (
     <aside className="w-side">
-      <div className="w-brand">
-        <div className="w-brand__mark" />
-        <div>
-          <b>Monolythium</b>
-          <small>Wallet</small>
+      <div className="w-side__top">
+        <div className="w-brand">
+          <div className="w-brand__mark" />
+          <div className="w-brand__text">
+            <b>Monolythium</b>
+            <small>Wallet</small>
+          </div>
         </div>
+        <button
+          type="button"
+          className="w-side__toggle"
+          onClick={toggleCollapsed}
+          aria-expanded={!collapsed}
+          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M3 6h18M3 12h18M3 18h18" />
+          </svg>
+        </button>
       </div>
 
       <div className="w-nav w-nav--main">
@@ -192,7 +215,7 @@ export function Sidebar({ route, setRoute, developerModeEnabled, steleEnabled, e
               onClick={() => setRoute(n.id)}
             >
               <span className="w-nav__item__icon"><Icon /></span>
-              <span style={{ flex: 1, textAlign: "left" }}>{n.label}</span>
+              <span className="w-nav__item__label">{n.label}</span>
               {n.badge ? <span className="w-nav__item__badge">{n.badge}</span> : null}
             </button>
           );
@@ -210,7 +233,7 @@ export function Sidebar({ route, setRoute, developerModeEnabled, steleEnabled, e
               onClick={() => setRoute(n.id)}
             >
               <span className="w-nav__item__icon"><Icon /></span>
-              <span style={{ flex: 1, textAlign: "left" }}>{n.label}</span>
+              <span className="w-nav__item__label">{n.label}</span>
             </button>
           );
         })}
