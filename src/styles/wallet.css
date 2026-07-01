@@ -125,6 +125,9 @@ html[data-layout="topbar"] .w-nav {
 }
 html[data-layout="topbar"] .w-nav--main { margin-top: 0; }
 html[data-layout="topbar"] .w-nav--footer { margin-top: 0; margin-left: auto; }
+/* The category groups flatten into the horizontal row (captions hidden). */
+html[data-layout="topbar"] .w-nav__group { flex-direction: row; align-items: center; gap: 2px; }
+html[data-layout="topbar"] .w-nav__cat { display: none; }
 html[data-layout="topbar"] .w-nav__item {
   width: auto;
   padding: 6px 12px;
@@ -201,6 +204,11 @@ html[data-layout="topbar"] .w-main > * {
   color: var(--fg-400); letter-spacing: 0.14em; text-transform: uppercase;
   padding: 12px 12px 4px;
 }
+/* One category group (an optional caption + its items). */
+.w-nav__group { display: flex; flex-direction: column; gap: 2px; }
+/* Danger items (Lock / Reset). */
+.w-nav__item--danger { color: var(--err); }
+.w-nav__item--danger:hover { color: var(--err); background: rgba(255,90,90,0.08); }
 
 /* ============ Collapsible rail ============
    The hamburger toggle collapses the rail to an icons-only strip; the grid
