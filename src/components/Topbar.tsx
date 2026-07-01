@@ -1,16 +1,17 @@
-// Topbar — port of designs wallet-app.jsx WTopbar. Trimmed for Stage 2:
+// Topbar — adapted from the wallet-app design (WTopbar). Trimmed for Stage 2:
 // title, sync indicator (driven by the live SDK snapshot), profile pill.
 //
-// The sync chip is a button that opens the peer popover (port of the design's
+// The sync chip is a button that opens the peer popover (the design's
 // `.w-peer-pop`): the user can probe every official RPC endpoint, see each
 // one's region + latency + chain status, switch to any reachable peer, or let
 // the wallet switch to the fastest. See `sdk/peers.ts` + `sdk/client.ts`.
 //
-// When the experimental flag is on it also renders a notifications bell with
-// an unread-count badge that routes to the Notifications center. The count is
-// read from the notifications store and refreshed via the store's write
-// subscription (no polling) so it updates the moment a record is added or
-// marked read.
+// When the experimental flag is on it also renders a notifications bell — a
+// quick-access shortcut with a live unread badge that opens the Notifications
+// center, the same route the sidebar's Notifications item navigates to (both are
+// experimental-gated, so they appear and disappear together). The count is read
+// from the notifications store and refreshed via the store's write subscription
+// (no polling) so it updates the moment a record is added or marked read.
 
 import { useEffect, useRef, useState } from "react";
 import { useActiveWallet } from "../sdk/active-wallet";
