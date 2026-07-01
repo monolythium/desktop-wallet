@@ -54,15 +54,18 @@ interface SettingsProps {
   setSteleEnabled: (enabled: boolean) => void;
   experimentalEnabled: boolean;
   setExperimentalEnabled: (enabled: boolean) => void;
+  /** Open directly on a sub-page (for the sidebar shortcuts — Display &
+   *  Preferences / Recovery phrase / Reset wallet). Defaults to the hub. */
+  initialSubPage?: SettingsSubPage;
 }
 
 type SettingsSubPage = "main" | "notifications" | "appearance" | "reset" | "reveal";
 
-export function Settings({ developerModeEnabled, setDeveloperModeEnabled, steleEnabled, setSteleEnabled, experimentalEnabled, setExperimentalEnabled }: SettingsProps) {
+export function Settings({ developerModeEnabled, setDeveloperModeEnabled, steleEnabled, setSteleEnabled, experimentalEnabled, setExperimentalEnabled, initialSubPage }: SettingsProps) {
   const wallet = useActiveWallet();
   const [devkitChannel, setDevkitChannel] = useState<NativeDevkitChannel>(() => readDevkitChannel());
   const [autoLockMinutes, setAutoLockMinutes] = useState<number>(() => readAutoLockMinutes());
-  const [subPage, setSubPage] = useState<SettingsSubPage>("main");
+  const [subPage, setSubPage] = useState<SettingsSubPage>(initialSubPage ?? "main");
   const { lock } = useAutoLock();
 
   if (subPage === "notifications") {

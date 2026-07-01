@@ -20,7 +20,10 @@ export type Route =
   | "inbox"
   | "provider"
   | "notifications"
-  | "settings";
+  | "settings"
+  | "display"
+  | "recovery"
+  | "reset";
 
 export const ALL_ROUTES: Route[] = [
   "home",
@@ -42,4 +45,7 @@ export const ALL_ROUTES: Route[] = [
   "provider",
   "notifications",
   "settings",
+  "display",
+  "recovery",
+  "reset",
 ];
