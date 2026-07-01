@@ -111,3 +111,34 @@ export function applyLayout(id: string): void {
     // Visual state still applies even if persistence is blocked.
   }
 }
+
+// ── Sidebar rail collapse ─────────────────────────────────────────────────────
+// A display preference (like theme/layout): the left rail can collapse to an
+// icons-only strip. Default is OPEN (expanded) — an absent key reads as open, so
+// existing installs keep the full rail. Persisted so the choice sticks across
+// relaunch and applied before first paint via a `data-sidebar` attribute (no
+// width flash), matching the theme/layout pattern.
+
+export const SIDEBAR_STORAGE_KEY = "wallet.sidebarCollapsed";
+
+export function readSidebarCollapsed(): boolean {
+  try {
+    return localStorage.getItem(SIDEBAR_STORAGE_KEY) === "1";
+  } catch {
+    return false; // default OPEN
+  }
+}
+
+export function applySidebarCollapsed(collapsed: boolean): void {
+  if (collapsed) {
+    document.documentElement.setAttribute("data-sidebar", "collapsed");
+  } else {
+    // Expanded is the native rail — no attribute keeps the default rules.
+    document.documentElement.removeAttribute("data-sidebar");
+  }
+  try {
+    localStorage.setItem(SIDEBAR_STORAGE_KEY, collapsed ? "1" : "0");
+  } catch {
+    // Visual state still applies even if persistence is blocked.
+  }
+}
