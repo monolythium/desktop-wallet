@@ -60,8 +60,16 @@ describe("NAV_CATEGORIES config", () => {
     expect(byId.get("contacts")).toBe("contacts");
     expect(byId.get("riscv")).toBe("riscv");
     expect(byId.get("notifications")).toBe("notifications");
+    expect(byId.get("recovery")).toBe("recovery"); // BIP-39 reveal
+    expect(byId.get("display")).toBe("display"); // appearance sub-page
     expect(byId.get("settings")).toBe("settings");
     expect(byId.get("lock")).toBe("action:lock");
+    expect(byId.get("reset")).toBe("reset");
+  });
+
+  it("labels the recovery item honestly (not 'Emergency recovery')", () => {
+    const recovery = flat.find((i) => i.id === "recovery");
+    expect(recovery?.label).toBe("Recovery phrase");
   });
 
   it("keeps Notifications experimental-gated (the notification pipeline is experimental)", () => {

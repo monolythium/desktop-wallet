@@ -172,6 +172,26 @@ const ICON_LOCK = () => (
     <path d="M8 11V7a4 4 0 0 1 8 0v4" />
   </svg>
 );
+const ICON_KEY = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="7.5" cy="15.5" r="3.5" />
+    <path d="M10 13 20 3M17 6l2 2M14.5 8.5l2 2" />
+  </svg>
+);
+const ICON_PALETTE = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M12 3a9 9 0 1 0 0 18 2 2 0 0 0 2-2 2 2 0 0 1 2-2h1a4 4 0 0 0 4-4 9 9 0 0 0-9-8Z" />
+    <circle cx="7.5" cy="10.5" r="1" />
+    <circle cx="12" cy="7.5" r="1" />
+    <circle cx="16.5" cy="10.5" r="1" />
+  </svg>
+);
+const ICON_TRASH = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
+    <path d="M10 11v6M14 11v6" />
+  </svg>
+);
 
 // ── The categorized rail ─────────────────────────────────────────────────────
 // Phase 1: the collapsible categorized skeleton wiring the EXISTS destinations.
@@ -215,9 +235,19 @@ export const NAV_CATEGORIES: NavCategory[] = [
     ],
   },
   {
+    id: "security",
+    header: "Security",
+    // "Recovery phrase" is the honest label for the BIP-39 reveal — the desktop
+    // has no SLH-DSA emergency-recovery key, so it is not called that.
+    items: [
+      { id: "recovery", label: "Recovery phrase", icon: ICON_KEY, route: "recovery" },
+    ],
+  },
+  {
     id: "settings",
     header: "Settings",
     items: [
+      { id: "display", label: "Display & Preferences", icon: ICON_PALETTE, route: "display" },
       { id: "settings", label: "Settings", icon: ICON_SETTINGS, route: "settings" },
     ],
   },
@@ -226,6 +256,7 @@ export const NAV_CATEGORIES: NavCategory[] = [
     footer: true,
     items: [
       { id: "lock", label: "Lock wallet", icon: ICON_LOCK, action: "lock", danger: true },
+      { id: "reset", label: "Reset wallet", icon: ICON_TRASH, route: "reset", danger: true },
     ],
   },
 ];

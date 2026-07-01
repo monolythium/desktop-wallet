@@ -58,6 +58,9 @@ const TITLES: Record<Route, string> = {
   provider: "Provider",
   notifications: "Notifications",
   settings: "Settings",
+  display: "Display & Preferences",
+  recovery: "Recovery phrase",
+  reset: "Reset wallet",
 };
 
 export function Topbar({ route, setRoute, experimentalEnabled }: Props) {

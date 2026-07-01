@@ -210,6 +210,20 @@ export function App() {
     writeExperimentalEnabled(enabled);
   };
 
+  // Settings hub + its sidebar shortcuts (Display & Preferences / Recovery
+  // phrase / Reset) all render the same page, opened on the right sub-page.
+  const settingsPage = (initialSubPage?: "appearance" | "reveal" | "reset") => (
+    <Settings
+      developerModeEnabled={developerModeEnabled}
+      setDeveloperModeEnabled={setDeveloperModeEnabled}
+      steleEnabled={steleEnabled}
+      setSteleEnabled={setSteleEnabled}
+      experimentalEnabled={experimentalEnabled}
+      setExperimentalEnabled={setExperimentalEnabled}
+      initialSubPage={initialSubPage}
+    />
+  );
+
   if (boot.kind === "probing") {
     return <BootSplash label="Checking keychain…" />;
   }
@@ -257,16 +271,10 @@ export function App() {
           {route === "inbox" && steleEnabled ? <Inbox /> : null}
           {route === "provider" && steleEnabled ? <Provider /> : null}
           {route === "notifications" && experimentalEnabled ? <Notifications /> : null}
-          {route === "settings" ? (
-            <Settings
-              developerModeEnabled={developerModeEnabled}
-              setDeveloperModeEnabled={setDeveloperModeEnabled}
-              steleEnabled={steleEnabled}
-              setSteleEnabled={setSteleEnabled}
-              experimentalEnabled={experimentalEnabled}
-              setExperimentalEnabled={setExperimentalEnabled}
-            />
-          ) : null}
+          {route === "settings" ? settingsPage() : null}
+          {route === "display" ? settingsPage("appearance") : null}
+          {route === "recovery" ? settingsPage("reveal") : null}
+          {route === "reset" ? settingsPage("reset") : null}
         </main>
         {steleEnabled ? <ApprovalOverlay /> : null}
         {experimentalEnabled ? <PendingTxReconciler /> : null}
