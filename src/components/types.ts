@@ -23,7 +23,8 @@ export type Route =
   | "settings"
   | "display"
   | "recovery"
-  | "reset";
+  | "reset"
+  | "resources";
 
 export const ALL_ROUTES: Route[] = [
   "home",
@@ -48,4 +49,5 @@ export const ALL_ROUTES: Route[] = [
   "display",
   "recovery",
   "reset",
+  "resources",
 ];
