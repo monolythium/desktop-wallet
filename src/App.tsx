@@ -29,6 +29,7 @@ import { News } from "./pages/News";
 import { MonoStudio } from "./pages/MonoStudio";
 import { Notifications } from "./pages/Notifications";
 import { Provider } from "./pages/Provider";
+import { Resources } from "./pages/Resources";
 import { RiscvContracts } from "./pages/RiscvContracts";
 import { Settings } from "./pages/Settings";
 import { Stake } from "./pages/Stake";
@@ -271,6 +272,7 @@ export function App() {
           {route === "inbox" && steleEnabled ? <Inbox /> : null}
           {route === "provider" && steleEnabled ? <Provider /> : null}
           {route === "notifications" && experimentalEnabled ? <Notifications /> : null}
+          {route === "resources" ? <Resources /> : null}
           {route === "settings" ? settingsPage() : null}
           {route === "display" ? settingsPage("appearance") : null}
           {route === "recovery" ? settingsPage("reveal") : null}
