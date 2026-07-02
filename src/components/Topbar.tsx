@@ -63,6 +63,7 @@ const TITLES: Record<Route, string> = {
   recovery: "Recovery phrase",
   reset: "Reset wallet",
   resources: "Resources",
+  "why-monolythium": "Why Monolythium",
 };
 
 export function Topbar({ route, setRoute, experimentalEnabled }: Props) {
