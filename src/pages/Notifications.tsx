@@ -20,7 +20,7 @@ import { NotificationDetail } from "../components/NotificationDetail";
 import { truncMiddle } from "../components/_detailModalParts";
 import {
   isDelegationKind,
-  isZeroAmount,
+  notificationAmountLabel,
   notificationTitle,
   type NotificationRecord,
   type TxOpKind,
@@ -81,8 +81,38 @@ const ICON_CONTRACT = (
     <path d="M14 2v6h6M9 13h6M9 17h6" />
   </svg>
 );
+// The cluster releasing its center weight downward — undelegate. The same four
+// satellites as the stake glyph so the pair reads as opposites; the center is a
+// down arrow (weight leaving) instead of the staked node.
+const ICON_UNSTAKE = (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="5" cy="7" r="2" />
+    <circle cx="19" cy="7" r="2" />
+    <circle cx="5" cy="17" r="2" />
+    <circle cx="19" cy="17" r="2" />
+    <path d="M12 7v8M9 13l3 3 3-3" />
+  </svg>
+);
+// Two-way arrows — weight moving between clusters (redelegate / restake).
+const ICON_RESTAKE = (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M7 10h14l-4-4M17 14H3l4 4" />
+  </svg>
+);
+// Gift box (lid + ribbon + bow) — a claimed staking reward. Distinct from the
+// receive glyph (a plain down arrow) so a claim never reads as an inbound send.
+const ICON_REWARD = (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="3" y="8" width="18" height="4" rx="1" />
+    <path d="M5 12v9h14v-9" />
+    <path d="M12 8v13" />
+    <path d="M12 8a3 3 0 1 1 4 0M12 8a3 3 0 1 0-4 0" />
+  </svg>
+);
 
-/** Per-kind glyph for the row's leading badge. */
+/** Per-kind glyph for the row's leading badge — one distinct glyph per kind so
+ *  the row reads at a glance (stake / unstake / restake stay visually apart, and
+ *  a reward claim is a gift box, not the inbound arrow). */
 function iconForKind(kind: TxOpKind): ReactElement {
   switch (kind) {
     case "send":
@@ -90,11 +120,13 @@ function iconForKind(kind: TxOpKind): ReactElement {
     case "receive":
       return ICON_RECEIVE;
     case "delegate":
-    case "undelegate":
-    case "redelegate":
       return ICON_STAKE;
+    case "undelegate":
+      return ICON_UNSTAKE;
+    case "redelegate":
+      return ICON_RESTAKE;
     case "claim":
-      return ICON_RECEIVE;
+      return ICON_REWARD;
     case "emergency-key":
       return ICON_SHIELD;
     case "agent-policy":
@@ -217,7 +249,8 @@ function NotificationRow({
       (record.clusterId !== undefined ? `Cluster #${record.clusterId}` : null)
     : null;
   const short = clusterDisplay ?? truncMiddle(record.counterparty);
-  const showAmount = !isZeroAmount(record.amountDecimal);
+  // A reward claim shows its decoded settled amount ("+<amt> LYTH"); null ⇒ omit.
+  const amountLabel = notificationAmountLabel(record);
   const ring = badgeRingColor(record.status);
   // Outgoing + confirmed records accent the glyph with the brand colour; the
   // status ring stays green/red. Failed (red) and pending are untouched.
@@ -263,8 +296,8 @@ function NotificationRow({
             {!record.read ? <span style={unreadDot} aria-label="Unread" /> : null}
           </div>
           <div className="row-help mono" style={ellipsis}>
-            {showAmount
-              ? `${typeNoun} · ${record.amountDecimal} LYTH · ${short}`
+            {amountLabel !== null
+              ? `${typeNoun} · ${amountLabel} · ${short}`
               : `${typeNoun} · ${short}`}
           </div>
         </div>

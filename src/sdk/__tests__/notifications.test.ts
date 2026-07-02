@@ -3,8 +3,10 @@ import {
   NOTIFICATION_HISTORY_CAP,
   NOTIFICATION_LABELS,
   appendCapped,
+  delegationClusterLabel,
   isTxOpKind,
   isZeroAmount,
+  notificationAmountLabel,
   notificationId,
   notificationTitle,
   notificationToast,
@@ -89,6 +91,90 @@ describe("notificationToast", () => {
     );
     // No contact name, no raw seed/payload — just the public amount + address.
     expect(t.body).toMatch(/^3\.14 LYTH · mono1[a-z0-9]+…[a-z0-9]+$/);
+  });
+
+  it("redacts to a generic title and an empty body when details are off", () => {
+    const t = notificationToast(
+      rec({ kind: "send", status: "confirmed", amountDecimal: "12.50" }),
+      false,
+    );
+    // Generic app-name title — never the action (Sent/Staked/…) — and no body,
+    // so neither the operation nor the amount/address leaks on a shared screen.
+    expect(t.title).toBe("Monolythium Wallet");
+    expect(t.title).not.toBe(notificationTitle("send", "confirmed"));
+    expect(t.body).toBe("");
+  });
+
+  it("names the cluster (not the module address) for a delegation body", () => {
+    // A delegate's counterparty is the bare precompile + amount is zero; the body
+    // should read the cluster, matching the in-app row — never "0x…/mono1module".
+    const t = notificationToast(
+      rec({
+        kind: "delegate",
+        status: "confirmed",
+        amountDecimal: "0",
+        counterparty: "mono1module",
+        clusterId: 5,
+      }),
+    );
+    expect(t.body).toBe("Cluster #5");
+    const named = notificationToast(
+      rec({ kind: "redelegate", amountDecimal: "0", clusterName: "atlas.cluster.mono" }),
+    );
+    expect(named.body).toBe("atlas.cluster.mono");
+  });
+
+  it("falls back to the truncated address when a delegation has no cluster metadata", () => {
+    const t = notificationToast(
+      rec({
+        kind: "undelegate",
+        amountDecimal: "0",
+        counterparty: "mono1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq",
+      }),
+    );
+    expect(t.body).toBe("mono1qqqqq…qqqqqq");
+  });
+
+  it("renders a claim's decoded settled amount as +<amount> LYTH", () => {
+    const t = notificationToast(
+      rec({ kind: "claim", status: "confirmed", amountDecimal: "0", claimedAmount: "12.3456" }),
+    );
+    expect(t.body).toBe("+12.3456 LYTH");
+  });
+
+  it("falls back to the plain claim body when no reward amount was decoded", () => {
+    const t = notificationToast(rec({ kind: "claim", amountDecimal: "5" }));
+    expect(t.body).toContain("5 LYTH");
+  });
+});
+
+describe("notificationAmountLabel", () => {
+  it("renders a claim's decoded reward as +<amt> LYTH", () => {
+    expect(
+      notificationAmountLabel(rec({ kind: "claim", amountDecimal: "0", claimedAmount: "9.1" })),
+    ).toBe("+9.1 LYTH");
+  });
+
+  it("renders a plain amount for non-claims and omits a zero amount", () => {
+    expect(notificationAmountLabel(rec({ kind: "send", amountDecimal: "3.5" }))).toBe("3.5 LYTH");
+    expect(notificationAmountLabel(rec({ kind: "send", amountDecimal: "0" }))).toBeNull();
+  });
+
+  it("falls back to the plain amount for a claim with no decoded reward", () => {
+    expect(notificationAmountLabel(rec({ kind: "claim", amountDecimal: "5" }))).toBe("5 LYTH");
+  });
+});
+
+describe("delegationClusterLabel", () => {
+  it("prefers the captured name, then #id, for delegation kinds", () => {
+    expect(delegationClusterLabel(rec({ kind: "delegate", clusterName: "alpha", clusterId: 2 }))).toBe("alpha");
+    expect(delegationClusterLabel(rec({ kind: "undelegate", clusterId: 9 }))).toBe("Cluster #9");
+  });
+
+  it("is null for a delegation with no cluster metadata and for non-delegation kinds", () => {
+    expect(delegationClusterLabel(rec({ kind: "redelegate" }))).toBeNull();
+    expect(delegationClusterLabel(rec({ kind: "send", clusterId: 3 }))).toBeNull();
+    expect(delegationClusterLabel(rec({ kind: "claim", clusterId: 3 }))).toBeNull();
   });
 });
 
@@ -175,6 +261,16 @@ describe("parseHistoryEnvelope", () => {
     const parsed = parseHistoryEnvelope(env);
     expect(parsed?.entries).toHaveLength(1);
     expect(parsed?.entries[0]!.txHash).toBe("0xabc");
+  });
+
+  it("round-trips claimedAmount and tolerates its absence (legacy records)", () => {
+    const withClaim = parseHistoryEnvelope({
+      schemaVersion: 0,
+      entries: [rec({ kind: "claim", claimedAmount: "7.5" })],
+    });
+    expect(withClaim?.entries[0]!.claimedAmount).toBe("7.5");
+    const without = parseHistoryEnvelope({ schemaVersion: 0, entries: [rec()] });
+    expect(without?.entries[0]!.claimedAmount).toBeUndefined();
   });
 
   it("drops malformed entries but keeps the good ones", () => {

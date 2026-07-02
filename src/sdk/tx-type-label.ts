@@ -44,6 +44,5 @@ export function txTypeLabelForActivity(row: {
   if (k.includes("deleg") || k.includes("stake")) return "Stake";
   if (k.includes("reward") || k.includes("claim")) return "Claim rewards";
   if (k.includes("rebalance")) return "Auto-rebalance";
-  if (k.includes("private") || k.includes("crossing")) return "Private transfer";
   return row.direction === "in" ? "Incoming transfer" : "Outgoing transfer";
 }

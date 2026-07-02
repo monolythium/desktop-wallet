@@ -32,6 +32,7 @@ import {
   PENDING_TX_STORE_KEY,
   parsePendingTxEnvelope,
   pendingTxIndex,
+  transitionPending,
   type PendingTx,
   type PendingTxEnvelope,
 } from "./pending-tx";
@@ -147,6 +148,55 @@ export async function removePendingTx(
     return { removed: true };
   } catch {
     return { removed: false };
+  }
+}
+
+/** Stamp a tracked tx with the inclusion slot from its confirming receipt and
+ *  keep it tracked (rendered confirmed at chain speed) until the indexer
+ *  surfaces the canonical row and the feed retires it. Idempotent — re-stamping
+ *  the same slot is a no-op. Best-effort. */
+export async function bridgePendingTx(
+  chainIdHex: string,
+  txHash: string,
+  confirmedBlockHeight: number,
+  confirmedTxIndex: number,
+): Promise<{ bridged: boolean }> {
+  try {
+    const env = await loadEnvelope();
+    let changed = false;
+    const next = env.txs.map((t) => {
+      if (t.chainIdHex !== chainIdHex || t.txHash !== txHash) return t;
+      if (
+        t.confirmedBlockHeight === confirmedBlockHeight &&
+        t.confirmedTxIndex === confirmedTxIndex
+      ) {
+        return t;
+      }
+      changed = true;
+      return { ...t, confirmedBlockHeight, confirmedTxIndex };
+    });
+    if (changed) await saveEnvelope({ schemaVersion: 0, txs: next });
+    return { bridged: changed };
+  } catch {
+    return { bridged: false };
+  }
+}
+
+/** Recompute each tracked tx's lifecycle and drop rows past the terminal-
+ *  retention window, persisting ONLY when something changed (so a no-op tick is
+ *  free and doesn't churn subscribers). Returns the count silently removed.
+ *  Best-effort. */
+export async function applyPendingTransition(
+  now: number,
+): Promise<{ removed: number }> {
+  try {
+    const env = await loadEnvelope();
+    const before = env.txs.length;
+    const { next, changed } = transitionPending(env.txs, now);
+    if (changed) await saveEnvelope({ schemaVersion: 0, txs: next });
+    return { removed: before - next.length };
+  } catch {
+    return { removed: 0 };
   }
 }
 

@@ -18,7 +18,6 @@ import { ReceiveModal } from "../components/ReceiveModal";
 import { SendComposeModal } from "../components/SendComposeModal";
 import { TxRow } from "../components/TxRow";
 import { fmt } from "../components/format";
-import type { Denom } from "../data/types";
 import type { Route } from "../components/types";
 import { useActiveWallet } from "../sdk/active-wallet";
 import { activityRowToTx } from "../sdk/activity-rows";
@@ -43,13 +42,12 @@ import { isNativeRef, readSelectedToken } from "../sdk/selected-token";
 import { selectTokenDetailFacts } from "../sdk/token-detail";
 
 interface Props {
-  denom: Denom;
   goto: (r: Route) => void;
 }
 
 type DetailTab = "activity" | "info" | "bridges";
 
-export function TokenDetail({ denom, goto }: Props) {
+export function TokenDetail({ goto }: Props) {
   const wallet = useActiveWallet();
   const walletAddress = wallet.status === "ready" ? wallet.address : "";
   // The reference is set when a Tokens-page row is clicked. Read it once on
@@ -242,7 +240,6 @@ export function TokenDetail({ denom, goto }: Props) {
         <ActivityTab
           facts={facts}
           activity={activity}
-          denom={denom}
           hasAddress={Boolean(walletAddress)}
         />
       ) : null}
@@ -262,12 +259,10 @@ export function TokenDetail({ denom, goto }: Props) {
 function ActivityTab({
   facts,
   activity,
-  denom,
   hasAddress,
 }: {
   facts: ReturnType<typeof selectTokenDetailFacts>;
   activity: RpcOutcome<LiveAddressActivityRow[]> | null;
-  denom: Denom;
   hasAddress: boolean;
 }) {
   // Filter rows to this token where the indexer exposes a tokenId. Native LYTH
@@ -307,7 +302,7 @@ function ActivityTab({
               rows.map((row) => (
                 <TxRow
                   key={`${row.blockHeight}-${row.txIndex}-${row.logIndex}`}
-                  tx={activityRowToTx(row, denom)}
+                  tx={activityRowToTx(row)}
                 />
               ))
             )}
@@ -359,7 +354,6 @@ function InfoTab({
     },
     { k: "Policy mode", v: policyString(policy, "mode") },
     { k: "Transparent transfers", v: policyBool(policy, "allowTransparent") },
-    { k: "Shielded transfers", v: policyBool(policy, "allowShielded") },
     { k: "Confidential transfers", v: policyBool(policy, "allowConfidential") },
     { k: "Stealth transfers", v: policyBool(policy, "allowStealth") },
     { k: "Requires KYC", v: policyBool(policy, "requireKyc") },

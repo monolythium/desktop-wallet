@@ -132,11 +132,12 @@ describe("toastTerminalNotification", () => {
     expect(sendNotification).not.toHaveBeenCalled();
   });
 
-  it("redacts the toast to the title only when details are off", async () => {
+  it("redacts the toast to a generic title only when details are off", async () => {
     notificationDetails = false;
     await toastTerminalNotification(rec());
     expect(sendNotification).toHaveBeenCalledTimes(1);
-    expect(sendNotification).toHaveBeenCalledWith({ title: "Sent" });
+    // Title genericized (no action leak) AND no body — only the app name shows.
+    expect(sendNotification).toHaveBeenCalledWith({ title: "Monolythium Wallet" });
   });
 
   it("holds the toast while locked when notify-while-locked is off", async () => {

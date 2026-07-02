@@ -1,12 +1,16 @@
 import { describe, expect, it } from "vitest";
 import {
+  PENDING_ABSOLUTE_CAP_MS,
+  PENDING_SLOW_MS,
+  PENDING_TERMINAL_RETAIN_MS,
   PENDING_TX_STORE_KEY,
-  PENDING_TX_WINDOW_MS,
   asPendingTx,
   classifyPending,
-  isPendingExpired,
+  classifyStalePending,
   parsePendingTxEnvelope,
+  pendingLifecycleNote,
   pendingTxIndex,
+  transitionPending,
   type ChainProbe,
   type PendingTx,
 } from "../pending-tx";
@@ -33,38 +37,41 @@ function probe(over: Partial<ChainProbe> = {}): ChainProbe {
 }
 
 describe("classifyPending — terminal detection (status fidelity)", () => {
-  it("confirms on lyth_txStatus=found, carrying the block number", () => {
+  it("confirms on lyth_txStatus=found, carrying the inclusion slot (block + txIndex)", () => {
     const v = classifyPending(
-      probe({ txStatus: { kind: "found", blockNumber: 4242 } }),
+      probe({ txStatus: { kind: "found", blockNumber: 4242, txIndex: 7 } }),
     );
     expect(v.kind).toBe("confirmed");
     expect(v.kind === "confirmed" && v.blockNumber).toBe(4242);
+    expect(v.kind === "confirmed" && v.txIndex).toBe(7);
   });
 
-  it("confirms on found even when the block number is absent (null)", () => {
+  it("confirms on found even when block/txIndex are absent (null)", () => {
     const v = classifyPending(
-      probe({ txStatus: { kind: "found", blockNumber: null } }),
+      probe({ txStatus: { kind: "found", blockNumber: null, txIndex: null } }),
     );
     expect(v.kind).toBe("confirmed");
     expect(v.kind === "confirmed" && v.blockNumber).toBeNull();
+    expect(v.kind === "confirmed" && v.txIndex).toBeNull();
   });
 
-  it("confirms on a receipt status===1 when txStatus has not surfaced yet", () => {
+  it("confirms on a receipt status===1 (with its slot) when txStatus has not surfaced", () => {
     const v = classifyPending(
       probe({
         txStatus: { kind: "not_found" },
-        receipt: { kind: "receipt", status: 1, blockNumber: 99 },
+        receipt: { kind: "receipt", status: 1, blockNumber: 99, txIndex: 3 },
       }),
     );
     expect(v.kind).toBe("confirmed");
     expect(v.kind === "confirmed" && v.blockNumber).toBe(99);
+    expect(v.kind === "confirmed" && v.txIndex).toBe(3);
   });
 
   it("FAILS on a receipt status===0 (the reverted-tx path the old poll never reached)", () => {
     const v = classifyPending(
       probe({
         txStatus: { kind: "not_found" },
-        receipt: { kind: "receipt", status: 0, blockNumber: 7 },
+        receipt: { kind: "receipt", status: 0, blockNumber: 7, txIndex: 0 },
       }),
     );
     expect(v.kind).toBe("failed");
@@ -72,11 +79,9 @@ describe("classifyPending — terminal detection (status fidelity)", () => {
   });
 
   it("found short-circuits a (hypothetical) reverted receipt — indexer inclusion wins", () => {
-    // The probe never fetches a receipt once txStatus=found (receipt:skipped),
-    // but even if both were present, found must classify as confirmed.
     const v = classifyPending({
-      txStatus: { kind: "found", blockNumber: 5 },
-      receipt: { kind: "receipt", status: 0, blockNumber: 5 },
+      txStatus: { kind: "found", blockNumber: 5, txIndex: 1 },
+      receipt: { kind: "receipt", status: 0, blockNumber: 5, txIndex: 1 },
     });
     expect(v.kind).toBe("confirmed");
   });
@@ -106,31 +111,88 @@ describe("classifyPending — never synthesizes a verdict (keeps pending)", () =
   it("stays pending on an unparseable receipt status bit (neither 0 nor 1)", () => {
     expect(
       classifyPending(
-        probe({ receipt: { kind: "receipt", status: 2, blockNumber: 1 } }),
+        probe({ receipt: { kind: "receipt", status: 2, blockNumber: 1, txIndex: 0 } }),
       ).kind,
     ).toBe("pending");
   });
 });
 
-describe("isPendingExpired — tracking window", () => {
-  it("is false inside the window", () => {
-    const base = tx({ submittedAt: 1_000 });
-    expect(isPendingExpired(base, 1_000)).toBe(false);
-    expect(isPendingExpired(base, 1_000 + PENDING_TX_WINDOW_MS - 1)).toBe(false);
+describe("classifyStalePending — time-based lifecycle", () => {
+  const base = tx({ submittedAt: 1_000_000 });
+
+  it("is pending inside the slow threshold", () => {
+    expect(classifyStalePending(base, 1_000_000)).toBe("pending");
+    expect(classifyStalePending(base, 1_000_000 + PENDING_SLOW_MS - 1)).toBe("pending");
   });
 
-  it("is true at and past the window edge", () => {
-    const base = tx({ submittedAt: 1_000 });
-    expect(isPendingExpired(base, 1_000 + PENDING_TX_WINDOW_MS)).toBe(true);
-    expect(isPendingExpired(base, 1_000 + PENDING_TX_WINDOW_MS + 10_000)).toBe(
-      true,
+  it("is slow from the slow threshold up to the absolute cap", () => {
+    expect(classifyStalePending(base, 1_000_000 + PENDING_SLOW_MS)).toBe("slow");
+    expect(classifyStalePending(base, 1_000_000 + PENDING_ABSOLUTE_CAP_MS - 1)).toBe("slow");
+  });
+
+  it("is expired at and past the absolute cap", () => {
+    expect(classifyStalePending(base, 1_000_000 + PENDING_ABSOLUTE_CAP_MS)).toBe("expired");
+  });
+});
+
+describe("transitionPending — relabel + bounded terminal removal", () => {
+  it("stamps the lifecycle and flags changed when it moves", () => {
+    const { next, changed } = transitionPending(
+      [tx({ submittedAt: 1_000_000 })],
+      1_000_000 + PENDING_SLOW_MS,
     );
+    expect(changed).toBe(true);
+    expect(next[0]!.lifecycle).toBe("slow");
   });
 
-  it("honors a caller-supplied window override", () => {
-    const base = tx({ submittedAt: 0 });
-    expect(isPendingExpired(base, 50, 100)).toBe(false);
-    expect(isPendingExpired(base, 100, 100)).toBe(true);
+  it("never removes a pending or slow row", () => {
+    const { next } = transitionPending(
+      [tx({ submittedAt: 1_000_000 })],
+      1_000_000 + PENDING_SLOW_MS, // slow, not terminal
+    );
+    expect(next).toHaveLength(1);
+  });
+
+  it("keeps an expired row visible until the retention window, then removes it", () => {
+    const kept = transitionPending([tx({ submittedAt: 0 })], PENDING_ABSOLUTE_CAP_MS);
+    expect(kept.next).toHaveLength(1);
+    expect(kept.next[0]!.lifecycle).toBe("expired");
+
+    const removed = transitionPending(
+      [tx({ submittedAt: 0, lifecycle: "expired" })],
+      PENDING_TERMINAL_RETAIN_MS,
+    );
+    expect(removed.next).toHaveLength(0);
+    expect(removed.changed).toBe(true);
+  });
+
+  it("is a no-op (changed=false) when every lifecycle is already current", () => {
+    const slow = tx({ submittedAt: 1_000_000, lifecycle: "slow" });
+    expect(transitionPending([slow], 1_000_000 + PENDING_SLOW_MS).changed).toBe(false);
+  });
+
+  it("passes a BRIDGED row through untouched — never relabels or removes it", () => {
+    // Bridged + far past every time threshold: it must stay exactly as-is (the
+    // feed retires it once the canonical confirmed row surfaces).
+    const bridged = tx({
+      submittedAt: 0,
+      lifecycle: "pending",
+      confirmedBlockHeight: 5,
+      confirmedTxIndex: 0,
+    });
+    const out = transitionPending([bridged], PENDING_TERMINAL_RETAIN_MS * 10);
+    expect(out.next).toHaveLength(1);
+    expect(out.next[0]).toBe(bridged); // same reference — untouched
+    expect(out.changed).toBe(false);
+  });
+});
+
+describe("pendingLifecycleNote", () => {
+  it("maps each lifecycle to its eyebrow note", () => {
+    expect(pendingLifecycleNote("pending")).toBe("in flight");
+    expect(pendingLifecycleNote("slow")).toBe("taking longer than usual");
+    expect(pendingLifecycleNote("dropped")).toBe("didn't confirm");
+    expect(pendingLifecycleNote("expired")).toBe("status unknown");
   });
 });
 
@@ -156,6 +218,13 @@ describe("pendingTxIndex — dedupe key (chainIdHex, txHash)", () => {
 describe("parsers — tolerant of malformed persisted data", () => {
   it("round-trips a valid row", () => {
     expect(asPendingTx(tx())).toEqual(tx());
+  });
+
+  it("round-trips the bridge fields and tolerates their absence", () => {
+    const withBridge = asPendingTx({ ...tx(), confirmedBlockHeight: 5, confirmedTxIndex: 2 });
+    expect(withBridge?.confirmedBlockHeight).toBe(5);
+    expect(withBridge?.confirmedTxIndex).toBe(2);
+    expect(asPendingTx(tx())?.confirmedBlockHeight).toBeUndefined();
   });
 
   it("rejects rows missing required fields", () => {

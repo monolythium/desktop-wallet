@@ -127,7 +127,6 @@ describe("activityRowToTx", () => {
   it("maps a transfer row onto a Tx with parsed amount and empty memo", () => {
     const tx = activityRowToTx(
       row({ kind: "transfer", direction: "in", amount: "3.25", counterparty: "mono1xyz" }),
-      "public",
     );
     expect(tx).toMatchObject({
       id: "1000-2-0",
@@ -138,14 +137,12 @@ describe("activityRowToTx", () => {
       counterparty: "mono1xyz",
       memo: "",
       kind: "transfer",
-      denom: "public",
     });
   });
 
   it("leaves amount null for a weight-only delegation row (TxRow shows em-dash)", () => {
     const tx = activityRowToTx(
       row({ kind: "delegation", amount: null, weightBps: 500, cluster: 1, counterparty: null }),
-      "public",
     );
     expect(tx.amount).toBeNull();
     expect(tx.kind).toBe("stake");
@@ -153,11 +150,7 @@ describe("activityRowToTx", () => {
   });
 
   it("uses the indexer token id as the token label when present", () => {
-    const tx = activityRowToTx(row({ tokenId: "0xdeadbeef", amount: "1" }), "public");
+    const tx = activityRowToTx(row({ tokenId: "0xdeadbeef", amount: "1" }));
     expect(tx.token).toBe("0xdeadbeef");
-  });
-
-  it("threads the page denom through unchanged", () => {
-    expect(activityRowToTx(row({}), "private").denom).toBe("private");
   });
 });

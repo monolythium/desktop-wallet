@@ -1,6 +1,6 @@
 // Auto-lock preference: how long the wallet may sit idle before it locks
 // itself and requires the password again. Persisted with the same lightweight
-// localStorage convention as `wallet.route` / `wallet.denom` in App.tsx. The
+// localStorage convention as `wallet.route` in App.tsx. The
 // lock mechanism that consumes this value lives in sdk/auto-lock.
 
 export const AUTO_LOCK_OPTIONS = [5, 15, 30, 60] as const;

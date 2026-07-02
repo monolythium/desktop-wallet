@@ -155,6 +155,8 @@ export interface RecordNotificationInput {
   /** For delegation kinds: the target cluster (optional). */
   clusterId?: number;
   clusterName?: string;
+  /** For a reward claim: the decoded settled amount (LYTH decimal). Optional. */
+  claimedAmount?: string;
   /** `true` ⇒ store already-read (no badge bump). Defaults to unread. */
   read?: boolean;
 }
@@ -197,6 +199,7 @@ export async function recordNotification(
       counterparty: input.counterparty,
       clusterId: input.clusterId,
       clusterName: input.clusterName,
+      claimedAmount: input.claimedAmount,
       // Stamp the owning scope so a merged/global read can still attribute the
       // record to its vault. `addressLower` is the same address dimension the
       // history key is built from, so this is the single write chokepoint for

@@ -1,7 +1,7 @@
 // Selected-token reference — the small bit of state that lets a Tokens-page
 // row navigate into the token-detail page without a router.
 //
-// We mirror the existing route/denom localStorage convention in App.tsx: the
+// We follow the existing `wallet.route` localStorage convention in App.tsx: the
 // reference is a plain string written when a row is clicked and read when the
 // detail page mounts. Two reference shapes:
 //

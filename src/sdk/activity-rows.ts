@@ -15,7 +15,7 @@
 // public row with no amount). Token labels are the raw indexer token id (no
 // name registry exists); native rows show "LYTH".
 
-import type { Denom, Tx } from "../data/types";
+import type { Tx } from "../data/types";
 import type { LiveAddressActivityRow } from "./live";
 import type { NotificationRecord } from "./notifications";
 import type { PendingTx } from "./pending-tx";
@@ -92,11 +92,9 @@ export function activityCounterparty(row: LiveAddressActivityRow): string {
 }
 
 /**
- * Map one indexed activity row onto a `Tx` for `TxRow`. `denom` is the page's
- * active denomination (public/private), threaded through so TxRow can pick the
- * honest empty-amount label.
+ * Map one indexed activity row onto a `Tx` for `TxRow`.
  */
-export function activityRowToTx(row: LiveAddressActivityRow, denom: Denom): Tx {
+export function activityRowToTx(row: LiveAddressActivityRow): Tx {
   return {
     id: `${row.blockHeight}-${row.txIndex}-${row.logIndex}`,
     when: activityWhen(row),
@@ -108,7 +106,6 @@ export function activityRowToTx(row: LiveAddressActivityRow, denom: Denom): Tx {
     memo: "",
     kind: activityKindToTxKind(row.subKind ? `${row.kind} ${row.subKind}` : row.kind),
     typeLabel: txTypeLabelForActivity(row),
-    denom,
   };
 }
 
@@ -138,9 +135,30 @@ export function mergeActivityNewestFirst(
   confirmed: ReadonlyArray<LiveAddressActivityRow>,
   failed: ReadonlyArray<NotificationRecord>,
 ): MergedActivityItem[] {
+  // Confirmed inclusion slots. A BRIDGED pending row (confirmed via receipt
+  // ahead of the indexer) whose canonical row has now surfaced is SUPPRESSED
+  // here — so a confirmed tx is never shown twice (no duplicate). A bridged row
+  // still ahead of the indexer stays visible, rendered confirmed (no drop).
+  const confirmedAnchors = new Set(
+    confirmed.map((row) => `${Number(row.blockHeight)}.${row.txIndex}`),
+  );
   const ranked: RankedActivityItem[] = [];
   for (const tx of pending) {
-    ranked.push({ item: { tag: "pending", tx }, block: Infinity, ms: tx.submittedAt });
+    const bridged =
+      tx.confirmedBlockHeight !== undefined && tx.confirmedTxIndex !== undefined;
+    if (
+      bridged &&
+      confirmedAnchors.has(`${tx.confirmedBlockHeight}.${tx.confirmedTxIndex}`)
+    ) {
+      continue; // the indexer's canonical row represents it now
+    }
+    ranked.push({
+      item: { tag: "pending", tx },
+      // A bridged row interleaves at its real inclusion block; an un-bridged
+      // (still in-flight) row floats to the top.
+      block: bridged ? tx.confirmedBlockHeight! : Infinity,
+      ms: tx.submittedAt,
+    });
   }
   for (const row of confirmed) {
     ranked.push({

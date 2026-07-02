@@ -62,11 +62,9 @@ import "./styles/wallet.css";
 // Loaded last so the html[data-theme="…"] palette overrides win over the
 // native :root tokens (the default "monolythium" theme uses no attribute).
 import "./styles/themes.css";
-import type { Denom } from "./data/types";
 import { ALL_ROUTES, type Route } from "./components/types";
 
 const ROUTE_KEY = "wallet.route";
-const DENOM_KEY = "wallet.denom";
 
 type BootState =
   | { kind: "probing" }
@@ -84,16 +82,6 @@ function readRoute(): Route {
   return "home";
 }
 
-function readDenom(): Denom {
-  try {
-    const v = localStorage.getItem(DENOM_KEY);
-    if (v === "public" || v === "private") return v;
-  } catch {
-    // localStorage unavailable — fall through.
-  }
-  return "public";
-}
-
 /**
  * True iff we're running inside Tauri. The plain `pnpm dev` browser preview
  * has no `__TAURI_INTERNALS__`; in that case we can't talk to the keychain
@@ -105,7 +93,6 @@ function isTauri(): boolean {
 
 export function App() {
   const [route, setRoute] = useState<Route>(() => readRoute());
-  const [denom, setDenom] = useState<Denom>(() => readDenom());
   const [developerModeEnabled, setDeveloperModeEnabledState] = useState<boolean>(() => readDeveloperMode());
   const [steleEnabled, setSteleEnabledState] = useState<boolean>(() => readSteleEnabled());
   const [experimentalEnabled, setExperimentalEnabledState] = useState<boolean>(() => readExperimentalEnabled());
@@ -188,16 +175,6 @@ export function App() {
   }, [route]);
 
   useEffect(() => {
-    document.body.dataset.denom = denom;
-    try { localStorage.setItem(DENOM_KEY, denom); } catch { /* ignore */ }
-    // Tokens-only route: bounce out if user flipped to private.
-    // Public-only routes bounce out when user flips to private denomination.
-    if (denom === "private" && (route === "tokens" || route === "token-detail" || route === "stake" || route === "agents" || route === "riscv" || route === "studio" || route === "trade" || route === "ai-trade")) {
-      setRoute("home");
-    }
-  }, [denom, route]);
-
-  useEffect(() => {
     writeDeveloperMode(developerModeEnabled);
     if (!developerModeEnabled && route === "studio") {
       setRoute("settings");
@@ -249,8 +226,6 @@ export function App() {
       <OperationsProvider>
       <div className="w-app">
         <Sidebar
-          denom={denom}
-          setDenom={setDenom}
           route={route}
           setRoute={setRoute}
           developerModeEnabled={developerModeEnabled}
@@ -259,15 +234,15 @@ export function App() {
         />
         <Topbar route={route} setRoute={setRoute} experimentalEnabled={experimentalEnabled} />
         <main className="w-main">
-          {route === "home" ? <Home denom={denom} goto={setRoute} /> : null}
-          {route === "activity" ? <Activity denom={denom} experimentalEnabled={experimentalEnabled} /> : null}
+          {route === "home" ? <Home goto={setRoute} /> : null}
+          {route === "activity" ? <Activity experimentalEnabled={experimentalEnabled} /> : null}
           {route === "wallets" ? <Wallets /> : null}
           {route === "tokens" ? <Tokens goto={setRoute} /> : null}
-          {route === "token-detail" ? <TokenDetail denom={denom} goto={setRoute} /> : null}
+          {route === "token-detail" ? <TokenDetail goto={setRoute} /> : null}
           {route === "stake" ? <Stake experimentalEnabled={experimentalEnabled} /> : null}
           {route === "bridges" ? <Bridges experimentalEnabled={experimentalEnabled} /> : null}
           {route === "agents" && experimentalEnabled ? <Agents /> : null}
-          {route === "contacts" ? <Contacts denom={denom} /> : null}
+          {route === "contacts" ? <Contacts /> : null}
           {route === "riscv" ? <RiscvContracts /> : null}
           {route === "studio" ? (
             <MonoStudio

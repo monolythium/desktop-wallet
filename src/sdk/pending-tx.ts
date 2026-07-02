@@ -1,8 +1,8 @@
-// Pure tracked-tx model — types, the store key, the dedupe id, the window-
-// expiry predicate, and the per-tx terminal-state classifier.
+// Pure tracked-tx model — types, the store key, the dedupe id, the in-flight
+// lifecycle classifier, and the per-tx terminal-state classifier.
 //
-// A "tracked tx" is one the wallet broadcast (the node accepted the encrypted
-// envelope and returned a canonical inner-tx hash) and now follows to a real
+// A "tracked tx" is one the wallet broadcast (the node accepted the tx and
+// returned a canonical inner-tx hash) and now follows to a real
 // terminal state. The durable store (`pending-tx-store.ts`) persists the set
 // across drawer-close and app restart; the app-level poller (`reconcile.ts`)
 // drives this classifier on an interval and records ONE notification per
@@ -53,7 +53,17 @@ export interface PendingTx {
    *  absent on non-delegation txs and on rows written before this field. */
   clusterId?: number;
   clusterName?: string;
-  /** Epoch ms the tx was enqueued. The tracking window is measured from here. */
+  /** In-flight lifecycle, recomputed from `submittedAt` each reconcile tick and
+   *  persisted so the feed re-renders the label as it changes. Optional +
+   *  backward-compatible: rows written before this field read as `"pending"`. */
+  lifecycle?: PendingLifecycle;
+  /** Inclusion slot stamped from the confirming receipt BEFORE the indexer
+   *  surfaces the canonical row, so the feed renders this row confirmed at chain
+   *  speed; the feed retires it once the indexer row at this slot appears. Both
+   *  optional/additive — absent on an un-bridged (still-pending) row. */
+  confirmedBlockHeight?: number;
+  confirmedTxIndex?: number;
+  /** Epoch ms the tx was enqueued. The lifecycle age is measured from here. */
   submittedAt: number;
 }
 
@@ -62,21 +72,87 @@ export interface PendingTx {
  *  single-file shape. */
 export const PENDING_TX_STORE_KEY = "mono.pending-tx.v1";
 
-/** Tracking-window ceiling. A tx that hasn't reached a terminal state within
- *  this many ms of `submittedAt` is dropped silently (honest absence — the
- *  user already saw the broadcast in the Done pane; we never fabricate a
- *  verdict). Five minutes comfortably covers testnet anchoring + indexer lag
- *  without following a wedged tx forever. */
-export const PENDING_TX_WINDOW_MS = 5 * 60 * 1_000;
+/** In-flight lifecycle of a tracked tx that hasn't reached a terminal receipt.
+ *  `dropped` is reserved for a later nonce-aware commit; this module produces
+ *  only the time-based `pending`/`slow`/`expired`. */
+export type PendingLifecycle = "pending" | "slow" | "dropped" | "expired";
 
-/** True once a tracked tx has aged past its tracking window. Pure — the caller
- *  passes `now` so this stays deterministic in tests. */
-export function isPendingExpired(
+/** Runtime guard for a persisted lifecycle literal. */
+export function isPendingLifecycle(v: unknown): v is PendingLifecycle {
+  return v === "pending" || v === "slow" || v === "dropped" || v === "expired";
+}
+
+/** Age past which a still-unconfirmed tx reads as "taking longer than usual". */
+export const PENDING_SLOW_MS = 3 * 60 * 1_000;
+/** Age past which a still-unconfirmed tx reads as a VISIBLE "status unknown"
+ *  terminal — never a silent drop. */
+export const PENDING_ABSOLUTE_CAP_MS = 45 * 60 * 1_000;
+/** Age past which a long-visible terminal (expired/dropped) row is finally
+ *  removed. A tx is followed — and stays visible — for up to this long rather
+ *  than vanishing after a few minutes. */
+export const PENDING_TERMINAL_RETAIN_MS = 60 * 60 * 1_000;
+
+/** Time-based in-flight lifecycle for a tracked tx. Pure — the caller passes
+ *  `now`. A tx reads `expired` ("status unknown") only after the absolute cap,
+ *  and is NEVER treated as terminal merely for being slow. A nonce-aware
+ *  `dropped` transition is added by a later commit. */
+export function classifyStalePending(
   tx: Pick<PendingTx, "submittedAt">,
   now: number,
-  windowMs: number = PENDING_TX_WINDOW_MS,
-): boolean {
-  return now - tx.submittedAt >= windowMs;
+): PendingLifecycle {
+  const age = now - tx.submittedAt;
+  if (age >= PENDING_ABSOLUTE_CAP_MS) return "expired";
+  if (age >= PENDING_SLOW_MS) return "slow";
+  return "pending";
+}
+
+/** Recompute every tracked tx's lifecycle and drop the rows that have been
+ *  visible in a terminal state past the retention window. NEVER removes a
+ *  `pending`/`slow` row, so a possibly-live tx never vanishes. Pure; returns the
+ *  next array plus a `changed` flag so the caller persists only on a real diff. */
+export function transitionPending(
+  txs: ReadonlyArray<PendingTx>,
+  now: number,
+): { next: PendingTx[]; changed: boolean } {
+  let changed = false;
+  const next: PendingTx[] = [];
+  for (const tx of txs) {
+    // A bridged row (confirmed via receipt ahead of the indexer) renders
+    // confirmed and is retired by the feed once the canonical row surfaces —
+    // never relabel it or age it out here.
+    if (tx.confirmedBlockHeight !== undefined) {
+      next.push(tx);
+      continue;
+    }
+    const lifecycle = classifyStalePending(tx, now);
+    const isTerminalVisible = lifecycle === "expired" || lifecycle === "dropped";
+    if (isTerminalVisible && now - tx.submittedAt >= PENDING_TERMINAL_RETAIN_MS) {
+      changed = true; // bounded removal of a long-visible terminal row
+      continue;
+    }
+    if (tx.lifecycle !== lifecycle) {
+      changed = true;
+      next.push({ ...tx, lifecycle });
+    } else {
+      next.push(tx);
+    }
+  }
+  return { next, changed };
+}
+
+/** Secondary "eyebrow" note shown beside a pending row's action label. */
+export function pendingLifecycleNote(lifecycle: PendingLifecycle): string {
+  switch (lifecycle) {
+    case "slow":
+      return "taking longer than usual";
+    case "dropped":
+      return "didn't confirm";
+    case "expired":
+      return "status unknown";
+    case "pending":
+    default:
+      return "in flight";
+  }
 }
 
 /** The two raw chain answers the classifier consumes for one tx, already
@@ -90,7 +166,7 @@ export interface ChainProbe {
    *  `"not_found"` means the indexer hasn't surfaced it yet; `"throw"` means
    *  the call failed this round. */
   txStatus:
-    | { kind: "found"; blockNumber: number | null }
+    | { kind: "found"; blockNumber: number | null; txIndex: number | null }
     | { kind: "not_found" }
     | { kind: "throw" };
   /** `eth_getTransactionReceipt` outcome. Present only when consulted (we skip
@@ -98,15 +174,17 @@ export interface ChainProbe {
    *  `1`-success / `0`-revert bit; `null` receipt = not yet mined; `"throw"` =
    *  the call failed. */
   receipt:
-    | { kind: "receipt"; status: number; blockNumber: number | null }
+    | { kind: "receipt"; status: number; blockNumber: number | null; txIndex: number | null }
     | { kind: "null" }
     | { kind: "throw" }
     | { kind: "skipped" };
 }
 
-/** The classifier's verdict for one tracked tx. */
+/** The classifier's verdict for one tracked tx. A `confirmed` verdict carries
+ *  the inclusion slot (`blockNumber`, `txIndex`) used to bridge the row to a
+ *  confirmed render; `failed` is not bridged so it needs no slot. */
 export type PendingVerdict =
-  | { kind: "confirmed"; blockNumber: number | null }
+  | { kind: "confirmed"; blockNumber: number | null; txIndex: number | null }
   | { kind: "failed"; blockNumber: number | null }
   | { kind: "pending" };
 
@@ -127,11 +205,17 @@ export type PendingVerdict =
  *  Pure: the RPC calls happen in `reconcile.ts`; this only maps their results. */
 export function classifyPending(probe: ChainProbe): PendingVerdict {
   if (probe.txStatus.kind === "found") {
-    return { kind: "confirmed", blockNumber: probe.txStatus.blockNumber };
+    return {
+      kind: "confirmed",
+      blockNumber: probe.txStatus.blockNumber,
+      txIndex: probe.txStatus.txIndex,
+    };
   }
   const r = probe.receipt;
   if (r.kind === "receipt") {
-    if (r.status === 1) return { kind: "confirmed", blockNumber: r.blockNumber };
+    if (r.status === 1) {
+      return { kind: "confirmed", blockNumber: r.blockNumber, txIndex: r.txIndex };
+    }
     if (r.status === 0) return { kind: "failed", blockNumber: r.blockNumber };
   }
   return { kind: "pending" };
@@ -169,6 +253,15 @@ export function asPendingTx(raw: unknown): PendingTx | null {
       ? r.clusterId
       : undefined;
   const clusterName = typeof r.clusterName === "string" ? r.clusterName : undefined;
+  const lifecycle = isPendingLifecycle(r.lifecycle) ? r.lifecycle : undefined;
+  const confirmedBlockHeight =
+    typeof r.confirmedBlockHeight === "number" && Number.isFinite(r.confirmedBlockHeight)
+      ? r.confirmedBlockHeight
+      : undefined;
+  const confirmedTxIndex =
+    typeof r.confirmedTxIndex === "number" && Number.isFinite(r.confirmedTxIndex)
+      ? r.confirmedTxIndex
+      : undefined;
   return {
     txHash: r.txHash,
     chainIdHex: r.chainIdHex,
@@ -178,6 +271,9 @@ export function asPendingTx(raw: unknown): PendingTx | null {
     counterparty: r.counterparty,
     clusterId,
     clusterName,
+    lifecycle,
+    confirmedBlockHeight,
+    confirmedTxIndex,
     submittedAt: r.submittedAt,
   };
 }

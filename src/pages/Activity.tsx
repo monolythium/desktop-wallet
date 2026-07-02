@@ -1,4 +1,4 @@
-// Activity page — denom-segregated, single chronological feed.
+// Activity page — single chronological feed.
 //
 // One newest-first feed merges the wallet's three activity sources:
 //   1. durable tracked-pending txs (in-flight, no block yet — float to the top),
@@ -14,7 +14,6 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { MONOLYTHIUM_TESTNET_CHAIN_ID } from "@monolythium/core-sdk";
-import type { Denom } from "../data/types";
 import { ActivityDetail, type DetailRow } from "../components/ActivityDetail";
 import { NotificationDetail } from "../components/NotificationDetail";
 import { TxRow } from "../components/TxRow";
@@ -24,33 +23,57 @@ import {
   mergeActivityNewestFirst,
 } from "../sdk/activity-rows";
 import {
+  loadAddressActivityKind,
   loadLiveAddressActivity,
   type LiveAddressActivityRow,
   type RpcOutcome,
 } from "../sdk/live";
 import {
+  emptyActivityCopy,
+  type ActivityCoverageKind,
+} from "../sdk/activity-coverage";
+import {
+  activityCacheKey,
+  applyCapturedClusterNames,
+  mergeConfirmedRows,
+} from "../sdk/activity-cache";
+import {
+  readConfirmedCache,
+  writeConfirmedCache,
+} from "../sdk/activity-cache-store";
+import {
   isDelegationKind,
   isZeroAmount,
+  notificationTitle,
   pendingOpLabel,
   type NotificationRecord,
 } from "../sdk/notifications";
 import { listForScope } from "../sdk/notifications-store";
+import { removePendingTx } from "../sdk/pending-tx-store";
 import { detectAndNotifyIncoming } from "../sdk/incoming-detect";
 import { txTypeLabelForOpKind } from "../sdk/tx-type-label";
-import type { PendingTx } from "../sdk/pending-tx";
+import { pendingLifecycleNote, type PendingTx } from "../sdk/pending-tx";
 import { usePendingTxs } from "../sdk/use-pending-tx";
 import { useActiveWallet } from "../sdk/active-wallet";
 
 interface Props {
-  denom: Denom;
   experimentalEnabled: boolean;
 }
 
-export function Activity({ denom, experimentalEnabled }: Props) {
+export function Activity({ experimentalEnabled }: Props) {
   const wallet = useActiveWallet();
   const walletAddress = wallet.status === "ready" ? wallet.address : "";
   const [activity, setActivity] = useState<RpcOutcome<LiveAddressActivityRow[]> | null>(null);
+  // The confirmed rows actually rendered: seeded instantly from the persisted
+  // cache, then replaced by the cache⊕live merge. Sourcing the feed from this
+  // (rather than the raw live outcome) gives an instant first paint, keeps the
+  // last-known rows visible through an indexer blip, and is the durable surface
+  // later lifecycle work threads captured fields through.
+  const [confirmedRows, setConfirmedRows] = useState<LiveAddressActivityRow[]>([]);
   const [failed, setFailed] = useState<NotificationRecord[]>([]);
+  // Indexer coverage for the empty-feed message — only probed (and only used)
+  // when the confirmed feed comes back empty, so the user learns WHY it's empty.
+  const [coverage, setCoverage] = useState<ActivityCoverageKind | null>(null);
   const [busy, setBusy] = useState(false);
   // Two detail modals: ActivityDetail for pending/confirmed rows, and the
   // shared NotificationDetail for a failed record (it has the right shape).
@@ -68,7 +91,7 @@ export function Activity({ denom, experimentalEnabled }: Props) {
   const [dirFilter, setDirFilter] = useState<"all" | "in" | "out">("all");
   const [tokenFilter, setTokenFilter] = useState<string>("all");
 
-  const activityRows = activity?.ok ? activity.value ?? [] : [];
+  const activityRows = confirmedRows;
 
   const tokenOptions = useMemo(() => {
     const set = new Set<string>();
@@ -104,26 +127,58 @@ export function Activity({ denom, experimentalEnabled }: Props) {
     if (!walletAddress) {
       setActivity(null);
       setFailed([]);
+      setCoverage(null);
+      setConfirmedRows([]);
       return;
     }
     setBusy(true);
+    const addrLower = walletAddress.toLowerCase();
+    const chainIdHex = `0x${MONOLYTHIUM_TESTNET_CHAIN_ID.toString(16)}`;
+    const scopeKey = activityCacheKey(addrLower, chainIdHex);
     try {
+      // 1. Instant paint from the persisted cache (also replaces a prior wallet's
+      //    rows when switching accounts; null cache ⇒ empty until the live read).
+      const cached = await readConfirmedCache(scopeKey);
+      setConfirmedRows(cached?.rows ?? []);
+      // 2. Live read + scoped failed records.
       const [activityOutcome, scopedNotifications] = await Promise.all([
         loadLiveAddressActivity(walletAddress),
         // Active-vault scope only — another vault's failed rows must never
         // appear here (records are owned by the address they were recorded
         // under, which matches the active wallet's lowercased address).
-        listForScope(walletAddress.toLowerCase()),
+        listForScope(addrLower),
       ]);
       setActivity(activityOutcome);
       setFailed(scopedNotifications.filter((r) => r.status === "failed"));
-      // Announce newly-arrived incoming native LYTH (records + toasts once).
-      // Runs here on the open, focused surface and is gated by the experimental
-      // flag like the rest of the notifications layer; best-effort.
+      // 3. Merge live into the cache (live wins; older cached rows retained),
+      //    render the merged set, and persist. On a live error we keep the cached
+      //    rows visible (the error band still surfaces above).
+      let mergedConfirmed = cached?.rows ?? [];
+      if (activityOutcome.ok) {
+        // Merge live into the cache, then keep captured cluster names sticky
+        // across the flip / rebuild (the indexer's name read can lag or fail).
+        mergedConfirmed = applyCapturedClusterNames(
+          mergeConfirmedRows(cached?.rows ?? [], activityOutcome.value ?? []),
+          cached?.rows ?? [],
+          tracked,
+        );
+        setConfirmedRows(mergedConfirmed);
+        await writeConfirmedCache(scopeKey, mergedConfirmed, Date.now());
+      }
+      // Only when the merged confirmed feed is empty do we probe the indexer's
+      // coverage so the empty state can explain the reason.
+      if (activityOutcome.ok && mergedConfirmed.length === 0) {
+        setCoverage(await loadAddressActivityKind(walletAddress));
+      } else {
+        setCoverage(null);
+      }
+      // Announce newly-arrived incoming native LYTH (records + toasts once) from
+      // the LIVE rows, not the merged cache. Open, focused surface only; gated by
+      // the experimental flag like the rest of the notifications layer.
       if (showExtra && activityOutcome.ok) {
         void detectAndNotifyIncoming(
-          walletAddress.toLowerCase(),
-          `0x${MONOLYTHIUM_TESTNET_CHAIN_ID.toString(16)}`,
+          addrLower,
+          chainIdHex,
           activityOutcome.value ?? [],
         );
       }
@@ -136,20 +191,35 @@ export function Activity({ denom, experimentalEnabled }: Props) {
     void refresh();
   }, [walletAddress]);
 
+  // Retire bridged pending rows whose canonical confirmed row has surfaced (the
+  // merge already suppresses them visually; this drops them from the durable
+  // store so it doesn't accumulate confirmed rows). Runs whenever either side
+  // changes; a removal re-renders and converges.
+  useEffect(() => {
+    const anchors = new Set(
+      confirmedRows.map((r) => `${Number(r.blockHeight)}.${r.txIndex}`),
+    );
+    for (const tx of tracked) {
+      if (
+        tx.confirmedBlockHeight !== undefined &&
+        tx.confirmedTxIndex !== undefined &&
+        anchors.has(`${tx.confirmedBlockHeight}.${tx.confirmedTxIndex}`)
+      ) {
+        void removePendingTx(tx.chainIdHex, tx.txHash);
+      }
+    }
+  }, [confirmedRows, tracked]);
+
   return (
     <div className="w-page">
       <div className="w-page__header">
         <h1>Activity</h1>
-        <div className="sub">
-          {denom === "public"
-            ? "Public-denomination transactions on this wallet."
-            : "Private-denomination envelopes — counterparties and amounts are protocol-hidden."}
-        </div>
+        <div className="sub">Transactions on this wallet.</div>
       </div>
 
       <div className="w-card">
         <div className="w-card__head">
-          <h3>{denom === "public" ? "Recent activity" : "Private envelopes"}</h3>
+          <h3>Recent activity</h3>
           <span className="w-card__head__spacer" />
           {activityRows.length > 0 ? (
             <div className="w-chip-group">
@@ -205,6 +275,15 @@ export function Activity({ denom, experimentalEnabled }: Props) {
               if (item.tag === "pending") {
                 const tx = item.tx;
                 const showAmount = !isZeroAmount(tx.amountDecimal);
+                const lifecycle = tx.lifecycle ?? "pending";
+                // Bridged: a real receipt confirmed it ahead of the indexer, so
+                // render it confirmed (a green check + the terminal title) at
+                // chain speed. Otherwise a still-trackable tx (pending/slow) keeps
+                // the spinner; one aged into a visible terminal state ("status
+                // unknown") swaps it for a muted clock.
+                const bridged = tx.confirmedBlockHeight !== undefined;
+                const stalled =
+                  !bridged && (lifecycle === "expired" || lifecycle === "dropped");
                 return (
                   <div
                     className="w-tx"
@@ -213,20 +292,59 @@ export function Activity({ denom, experimentalEnabled }: Props) {
                     onClick={() => setSelected(trackedRowToDetail(tx))}
                     style={{ cursor: "pointer" }}
                   >
-                    <div className="w-tx__dir" aria-hidden>
-                      <span className="w-spin" style={{ width: 14, height: 14, margin: 0 }} />
+                    <div
+                      className="w-tx__dir"
+                      aria-hidden
+                      style={
+                        bridged
+                          ? { color: "var(--ok)" }
+                          : stalled
+                            ? { color: "var(--w-text-3)" }
+                            : undefined
+                      }
+                    >
+                      {bridged ? (
+                        <svg
+                          width="14"
+                          height="14"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        >
+                          <path d="m5 12 5 5L20 7" />
+                        </svg>
+                      ) : stalled ? (
+                        <svg
+                          width="14"
+                          height="14"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        >
+                          <circle cx="12" cy="12" r="9" />
+                          <path d="M12 7v5l3 2" />
+                        </svg>
+                      ) : (
+                        <span className="w-spin" style={{ width: 14, height: 14, margin: 0 }} />
+                      )}
                     </div>
                     <div className="w-tx__info">
                       <div className="eyebrow">
-                        <span>{pendingOpLabel(tx.opKind)}</span>
+                        <span>
+                          {bridged
+                            ? notificationTitle(tx.opKind, "confirmed")
+                            : pendingOpLabel(tx.opKind)}
+                        </span>
                         <span className="sep" />
-                        <span>in flight</span>
+                        <span>{bridged ? "Confirmed" : pendingLifecycleNote(lifecycle)}</span>
                       </div>
-                      <div className="label mono">
-                        {tx.counterparty.length > 0
-                          ? truncCounterparty(tx.counterparty)
-                          : truncCounterparty(tx.txHash)}
-                      </div>
+                      <div className="label mono">{pendingRowLabel(tx)}</div>
                     </div>
                     <div className="w-tx__right">
                       {showAmount ? (
@@ -287,21 +405,30 @@ export function Activity({ denom, experimentalEnabled }: Props) {
               return (
                 <TxRow
                   key={`c:${row.blockHeight}-${row.txIndex}-${row.logIndex}`}
-                  tx={activityRowToTx(row, denom)}
+                  tx={activityRowToTx(row)}
                   onClick={() => setSelected(indexedRowToDetail(row))}
                 />
               );
             })
           ) : activity?.ok ? (
             <div className="w-empty">
-              <h4>{filtersActive ? "No matching activity" : "No activity yet"}</h4>
-              <p>
-                {filtersActive
-                  ? "No rows match the current filter. Clear it to see every transaction for this address."
-                  : denom === "private"
-                    ? "Private-denomination activity is not exposed as public indexed rows."
-                    : "The indexer has no transactions for this address. Sent and received transfers appear here once they confirm."}
-              </p>
+              {(() => {
+                // Filtered: the rows exist but none match — keep the filter copy.
+                // Unfiltered: the feed is genuinely empty, so explain the reason
+                // from the indexer-coverage probe (falls back to "no activity yet").
+                const copy = filtersActive
+                  ? {
+                      title: "No matching activity",
+                      body: "No rows match the current filter. Clear it to see every transaction for this address.",
+                    }
+                  : emptyActivityCopy(coverage ?? "not_found");
+                return (
+                  <>
+                    <h4>{copy.title}</h4>
+                    <p>{copy.body}</p>
+                  </>
+                );
+              })()}
               {filtersActive ? (
                 <button
                   className="btn btn--sm"
@@ -317,11 +444,7 @@ export function Activity({ denom, experimentalEnabled }: Props) {
             </div>
           ) : (
             <div style={{ padding: "16px 0", color: "var(--w-text-3)", fontSize: 13 }}>
-              {walletAddress
-                ? denom === "private"
-                  ? "Private-denomination activity is not exposed as public indexed rows."
-                  : "Loading indexed activity…"
-                : "No active wallet address."}
+              {walletAddress ? "Loading indexed activity…" : "No active wallet address."}
             </div>
           )}
         </div>
@@ -377,6 +500,23 @@ function indexedRowToDetail(row: LiveAddressActivityRow): DetailRow {
 // row subtitle. Pure slicing — never throws on a malformed value.
 function truncCounterparty(s: string): string {
   return s.length > 17 ? `${s.slice(0, 10)}…${s.slice(-6)}` : s;
+}
+
+// Pending-row label: name the cluster for delegation kinds (captured real name,
+// else "Cluster #<id>") instead of the bare delegation-module precompile,
+// otherwise the truncated counterparty (or tx hash). Never fabricated.
+function pendingRowLabel(tx: PendingTx): string {
+  if (isDelegationKind(tx.opKind)) {
+    return (
+      tx.clusterName ??
+      (tx.clusterId !== undefined
+        ? `Cluster #${tx.clusterId}`
+        : truncCounterparty(tx.counterparty))
+    );
+  }
+  return tx.counterparty.length > 0
+    ? truncCounterparty(tx.counterparty)
+    : truncCounterparty(tx.txHash);
 }
 
 // Failed-row label: name the cluster for delegation kinds (real name, else

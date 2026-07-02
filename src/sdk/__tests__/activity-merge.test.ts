@@ -101,3 +101,59 @@ describe("mergeActivityNewestFirst", () => {
     expect(ms).toEqual([3, 2, 1]);
   });
 });
+
+function bridgedPending(
+  txHash: string,
+  submittedAt: number,
+  block: number,
+  txIndex: number,
+): PendingTx {
+  return {
+    ...pending(txHash, submittedAt),
+    confirmedBlockHeight: block,
+    confirmedTxIndex: txIndex,
+  };
+}
+
+function confirmedAt(blockHeight: bigint, txIndex: number): LiveAddressActivityRow {
+  return { ...confirmed(blockHeight, null), txIndex };
+}
+
+describe("mergeActivityNewestFirst — receipt bridge (no duplicate, no drop)", () => {
+  it("receipt BEFORE the indexer: the bridged row stays visible at its block (no drop)", () => {
+    const merged = mergeActivityNewestFirst(
+      [bridgedPending("0xb", 100, 7, 0)],
+      [confirmedAt(5n, 0)], // no canonical row at (7,0) yet
+      [],
+    );
+    // The bridged row is present (no drop) and interleaves at block 7 (above 5).
+    expect(merged.map((m) => m.tag)).toEqual(["pending", "confirmed"]);
+    const first = merged[0]!;
+    expect(first.tag === "pending" ? first.tx.txHash : null).toBe("0xb");
+  });
+
+  it("receipt AFTER the indexer: the bridged twin is suppressed (no duplicate)", () => {
+    const merged = mergeActivityNewestFirst(
+      [bridgedPending("0xb", 100, 7, 0)],
+      [confirmedAt(7n, 0)], // canonical row at the same slot has surfaced
+      [],
+    );
+    expect(merged.map((m) => m.tag)).toEqual(["confirmed"]); // only one, not two
+  });
+
+  it("a non-bridged pending floats to the top; a bridged one interleaves by block", () => {
+    const merged = mergeActivityNewestFirst(
+      [pending("0xp", 100), bridgedPending("0xb", 200, 6, 0)],
+      [confirmedAt(8n, 0)],
+      [],
+    );
+    const shape = merged.map((m) =>
+      m.tag === "pending"
+        ? m.tx.txHash
+        : m.tag === "confirmed"
+          ? `c${Number(m.row.blockHeight)}`
+          : "f",
+    );
+    expect(shape).toEqual(["0xp", "c8", "0xb"]);
+  });
+});

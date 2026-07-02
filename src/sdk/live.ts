@@ -1,6 +1,11 @@
-import { ApiClient, clusterApyPercent, formatLyth } from "@monolythium/core-sdk";
+import {
+  ApiClient,
+  CLAIMED_EVENT_TOPIC0,
+  clusterApyPercent,
+  decodeClaimedEvent,
+  formatLyth,
+} from "@monolythium/core-sdk";
 import type {
-  AddressActivityEntryEnriched,
   ApiCapabilitiesResponse,
   ApiEnvelope,
   ApiHealthResponse,
@@ -21,6 +26,10 @@ import { getNativeTransactionCount } from "./native-rpc";
 import { requireTypedUserAddress, requireTypedUserAddressHex } from "./address";
 import { selectNativeSpotMarket, type SelectedNativeSpotMarket } from "./market";
 import { walletFetch } from "./http";
+import {
+  normaliseActivityCoverageKind,
+  type ActivityCoverageKind,
+} from "./activity-coverage";
 
 export interface RpcOutcome<T> {
   ok: boolean;
@@ -291,31 +300,171 @@ export async function loadLiveTradeStatus(): Promise<LiveTradeStatus> {
 export async function loadLiveAddressActivity(wallet: string): Promise<RpcOutcome<LiveAddressActivityRow[]>> {
   const typedWallet = requireTypedUserAddress(wallet, "wallet");
   return capture(async () => {
-    const entries = await getProvider().rpcClient.enrichAddressActivity(typedWallet, 30);
-    return entries.map(toLiveAddressActivityRow);
+    const client = getProvider().rpcClient;
+    // The node returns a paginated envelope ({ activity, nextCursor, ... }); read
+    // it tolerantly and enrich here. (We do not call the SDK's enrich helper — it
+    // assumes a bare array and throws on the envelope.)
+    const raw = (await client.lythGetAddressActivity(typedWallet, 30)) as unknown;
+    const entries = activityEntriesFrom(raw);
+    if (entries.length === 0) return [];
+    return enrichActivityEntries(client, entries);
   });
 }
 
-/** Map one enriched address-activity entry onto the wallet's row shape. The
- *  three enrichment fields pass through unchanged (each is already null when
- *  the chain couldn't resolve it). */
-function toLiveAddressActivityRow(entry: AddressActivityEntryEnriched): LiveAddressActivityRow {
+/** Normalize the node's address-activity response to the raw entry array. The
+ *  node returns a paginated envelope (`{ activity, nextCursor, schemaVersion }`);
+ *  a bare array or an `{ entries }` envelope are also accepted. Anything
+ *  unrecognized — or an empty result — yields `[]`, so the caller never maps a
+ *  non-array. Pure. */
+export function activityEntriesFrom(raw: unknown): unknown[] {
+  if (Array.isArray(raw)) return raw;
+  if (raw !== null && typeof raw === "object") {
+    const r = raw as Record<string, unknown>;
+    if (Array.isArray(r.activity)) return r.activity;
+    if (Array.isArray(r.entries)) return r.entries;
+  }
+  return [];
+}
+
+/** Coerce a node block height / timestamp (number, decimal or 0x-hex string, or
+ *  bigint) to a bigint; `null` on anything unparseable. Pure. */
+export function toBlockBigInt(v: unknown): bigint | null {
+  try {
+    if (v === null || v === undefined || v === "") return null;
+    if (typeof v === "bigint") return v;
+    if (typeof v === "number") return Number.isFinite(v) ? BigInt(Math.trunc(v)) : null;
+    if (typeof v === "string") return BigInt(v);
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+/** Map one raw node activity entry onto the wallet's row shape (enrichment
+ *  fields null — filled by {@link enrichActivityEntries}). Returns `null` for an
+ *  entry without a usable block height, so a malformed row is dropped rather than
+ *  breaking the feed. Pure. */
+export function toActivityBaseRow(raw: unknown): LiveAddressActivityRow | null {
+  if (raw === null || typeof raw !== "object") return null;
+  const e = raw as Record<string, unknown>;
+  const blockHeight = toBlockBigInt(e.blockHeight);
+  if (blockHeight === null) return null;
+  const int = (v: unknown): number =>
+    typeof v === "number" && Number.isFinite(v) ? v : 0;
+  const intOrNull = (v: unknown): number | null =>
+    typeof v === "number" && Number.isFinite(v) ? v : null;
+  const strOrNull = (v: unknown): string | null => (typeof v === "string" ? v : null);
   return {
-    blockHeight: entry.blockHeight,
-    txIndex: entry.txIndex,
-    logIndex: entry.logIndex,
-    kind: entry.kind,
-    direction: entry.direction,
-    counterparty: entry.counterparty,
-    tokenId: entry.tokenId,
-    amount: entry.amount,
-    cluster: entry.cluster,
-    weightBps: entry.weightBps,
-    subKind: entry.subKind,
-    blockTimestampSeconds: entry.blockTimestampSeconds,
-    txHash: entry.txHash,
-    clusterName: entry.clusterName,
+    blockHeight,
+    txIndex: int(e.txIndex),
+    logIndex: int(e.logIndex),
+    kind: typeof e.kind === "string" ? e.kind : "",
+    direction: strOrNull(e.direction),
+    counterparty: strOrNull(e.counterparty),
+    tokenId: strOrNull(e.tokenId),
+    amount: strOrNull(e.amount),
+    cluster: intOrNull(e.cluster),
+    weightBps: intOrNull(e.weightBps),
+    subKind: strOrNull(e.subKind),
+    blockTimestampSeconds: null,
+    txHash: null,
+    clusterName: null,
   };
+}
+
+/** Probe the indexer's coverage for an address (`lyth_addressActivityKind`) so an
+ *  empty feed can say WHY it's empty — nothing indexed yet, the indexer off, the
+ *  window pruned — instead of a single generic line. Falls back to "not_found"
+ *  (the historical "no activity yet" copy) on any read failure or a node that
+ *  lacks the method, so a probe failure never alarms the user or regresses the
+ *  empty state. */
+export async function loadAddressActivityKind(
+  wallet: string,
+): Promise<ActivityCoverageKind> {
+  try {
+    const typedWallet = requireTypedUserAddress(wallet, "wallet");
+    const res = await getProvider().rpcClient.lythAddressActivityKind(typedWallet);
+    return normaliseActivityCoverageKind(res.kind);
+  } catch {
+    return "not_found";
+  }
+}
+
+/** Read a block's header timestamp + ordered tx-hash array via the raw
+ *  `eth_getBlockByNumber` (hash-only). Best-effort — any failure degrades to
+ *  `{ null, [] }` so enrichment never breaks the feed. */
+async function blockTimeAndTxHashes(
+  client: ReturnType<typeof getProvider>["rpcClient"],
+  height: bigint,
+): Promise<{ timestampSeconds: bigint | null; txHashes: string[] }> {
+  try {
+    const raw = (await client.call("eth_getBlockByNumber", [
+      `0x${height.toString(16)}`,
+      false,
+    ])) as Record<string, unknown> | null;
+    if (!raw || typeof raw !== "object") return { timestampSeconds: null, txHashes: [] };
+    const txs = raw["transactions"];
+    return {
+      timestampSeconds: toBlockBigInt(raw["timestamp"]),
+      txHashes: Array.isArray(txs)
+        ? txs.filter((t): t is string => typeof t === "string")
+        : [],
+    };
+  } catch {
+    return { timestampSeconds: null, txHashes: [] };
+  }
+}
+
+/** Enrich raw activity entries with each row's block timestamp, canonical tx
+ *  hash (resolved from `(blockHeight, txIndex)`), and resolved cluster name —
+ *  one block read per distinct height, one name read per distinct cluster. Each
+ *  enrichment is best-effort (null on failure); honest absence, never a throw. */
+async function enrichActivityEntries(
+  client: ReturnType<typeof getProvider>["rpcClient"],
+  entries: ReadonlyArray<unknown>,
+): Promise<LiveAddressActivityRow[]> {
+  const base = entries
+    .map(toActivityBaseRow)
+    .filter((r): r is LiveAddressActivityRow => r !== null);
+
+  const heights = [...new Set(base.map((r) => r.blockHeight))];
+  const blockByHeight = new Map<
+    bigint,
+    { timestampSeconds: bigint | null; txHashes: string[] }
+  >();
+  await Promise.all(
+    heights.map(async (h) => {
+      blockByHeight.set(h, await blockTimeAndTxHashes(client, h));
+    }),
+  );
+
+  const clusters = [
+    ...new Set(base.map((r) => r.cluster).filter((c): c is number => c != null)),
+  ];
+  const nameByCluster = new Map<number, string | null>();
+  await Promise.all(
+    clusters.map(async (c) => {
+      try {
+        nameByCluster.set(c, (await client.lythGetClusterName(c)).name ?? null);
+      } catch {
+        nameByCluster.set(c, null);
+      }
+    }),
+  );
+
+  return base.map((r) => {
+    const block = blockByHeight.get(r.blockHeight);
+    const txHash =
+      block && r.txIndex >= 0 && r.txIndex < block.txHashes.length
+        ? block.txHashes[r.txIndex]!
+        : null;
+    return {
+      ...r,
+      blockTimestampSeconds: block?.timestampSeconds ?? null,
+      txHash,
+      clusterName: r.cluster != null ? nameByCluster.get(r.cluster) ?? null : null,
+    };
+  });
 }
 
 export interface LiveSupplyStatus {
@@ -390,6 +539,56 @@ export async function loadLiveTxConfirmations(txHash: string): Promise<number | 
     const result = await getProvider().rpcClient.lythTxConfirmations(txHash);
     if (result.status === "found" && typeof result.confirmations === "number") {
       return result.confirmations;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/** Best-effort cluster display name (`lyth_getClusterName`). Returns null when
+ *  the cluster has no registered name or the read fails — callers fall back to
+ *  "Cluster #<id>" (honest absence, never a fabricated name). */
+export async function loadClusterName(clusterId: number): Promise<string | null> {
+  try {
+    const res = await getProvider().rpcClient.lythGetClusterName(clusterId);
+    return res.name && res.name.length > 0 ? res.name : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Fan out {@link loadClusterName} over a set of cluster ids. Returns a map of
+ *  clusterId → name (only clusters with a real registered name appear — a
+ *  missing key means "unnamed", so callers render "Cluster #<id>"). Tolerant of
+ *  per-cluster failures. */
+export async function loadLiveClusterNames(
+  clusterIds: number[],
+): Promise<Map<number, string>> {
+  const out = new Map<number, string>();
+  const unique = Array.from(new Set(clusterIds));
+  await Promise.all(
+    unique.map(async (id) => {
+      const name = await loadClusterName(id);
+      if (name !== null) out.set(id, name);
+    }),
+  );
+  return out;
+}
+
+/** Decode the settled reward amount (LYTH decimal) from a confirmed claim tx's
+ *  `Claimed` log via `lyth_decodeTx`. Returns null when no Claimed log is present
+ *  or any read/decode fails — the caller falls back to the claimable amount
+ *  captured at submit (honest absence, never a fabricated number). */
+export async function decodeClaimedAmount(txHash: string): Promise<string | null> {
+  try {
+    const decoded = await getProvider().rpcClient.lythDecodeTx(txHash);
+    const logs = Array.isArray(decoded.logs) ? decoded.logs : [];
+    for (const log of logs) {
+      if (log.topics?.[0] === CLAIMED_EVENT_TOPIC0) {
+        const event = decodeClaimedEvent(log.topics, log.data);
+        return formatLyth(event.amount.toString(), { includeUnit: false });
+      }
     }
     return null;
   } catch {
