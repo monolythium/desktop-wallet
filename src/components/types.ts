@@ -25,7 +25,8 @@ export type Route =
   | "recovery"
   | "reset"
   | "resources"
-  | "why-monolythium";
+  | "why-monolythium"
+  | "about";
 
 export const ALL_ROUTES: Route[] = [
   "home",
@@ -52,4 +53,5 @@ export const ALL_ROUTES: Route[] = [
   "reset",
   "resources",
   "why-monolythium",
+  "about",
 ];
