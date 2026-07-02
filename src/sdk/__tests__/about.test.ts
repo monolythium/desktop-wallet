@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   activeFeatureChips,
+  ADDRESS_FORMAT_LABEL,
+  ATOMIC_UNIT_LABEL,
   operatorsSummary,
+  readChainIdentity,
+  runtimeFeatureChips,
   WALLET_TAGLINE,
   WALLET_TITLE,
   type FeatureFlagState,
@@ -66,5 +70,29 @@ describe("operatorsSummary", () => {
     const summary = operatorsSummary([probe(false, false)], 3);
     expect(summary.live).toBe(0);
     expect(summary.label).toContain("0 of 3");
+  });
+});
+
+describe("developer-mode chain rows", () => {
+  it("reads chain identity from the static SDK registry", () => {
+    const chain = readChainIdentity();
+    expect(chain.chainId).toBe(69420);
+    expect(chain.genesisHash).toMatch(/^0x[0-9a-f]+$/i);
+    expect(chain.binarySha.length).toBeGreaterThan(0);
+  });
+
+  it("derives the atomic-unit and address-format labels from SDK constants", () => {
+    // 1 LYTH = 10^18 lythoshi — derived, not hardcoded.
+    expect(ATOMIC_UNIT_LABEL).toBe("lythoshi (10^-18 LYTH)");
+    expect(ADDRESS_FORMAT_LABEL).toBe("bech32m (mono…)");
+  });
+
+  it("splits a runtime feature string into chip tokens", () => {
+    expect(runtimeFeatureChips("native-tokens, clob  risc-v")).toEqual([
+      "native-tokens",
+      "clob",
+      "risc-v",
+    ]);
+    expect(runtimeFeatureChips("")).toEqual([]);
   });
 });
