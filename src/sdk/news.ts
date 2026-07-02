@@ -51,8 +51,13 @@ function text(parent: Element, selector: string): string {
   return parent.querySelector(selector)?.textContent?.trim() ?? "";
 }
 
-function stripHtml(value: string): string {
-  const div = document.createElement("div");
-  div.innerHTML = value;
-  return div.textContent?.trim() ?? "";
+/** Decode an RSS description's HTML entities and strip its tags to plain text.
+ *  Uses an INERT `DOMParser` document (no browsing context) rather than
+ *  assigning `innerHTML` on a live element: an inert document never loads
+ *  resources or runs handlers, so a `<img onerror>` / `<script>` in the
+ *  (first-party) feed can't execute — while the decoded, tag-stripped text
+ *  output is identical for valid content. Exported for unit tests. */
+export function stripHtml(value: string): string {
+  const doc = new DOMParser().parseFromString(value, "text/html");
+  return doc.body.textContent?.trim() ?? "";
 }
