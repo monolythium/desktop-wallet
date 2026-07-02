@@ -3,6 +3,7 @@
 // either a live read or an honest chain-level constant. The page composes these.
 
 import { getVersion } from "@tauri-apps/api/app";
+import { ADDRESS_KIND_HRPS, getChainInfo, LYTHOSHI_PER_LYTH } from "@monolythium/core-sdk";
 import {
   readExperimentalEnabled,
   readIncomingEnabled,
@@ -12,7 +13,11 @@ import {
   readSteleEnabled,
 } from "./feature-flags";
 import { readDeveloperMode } from "./studio-host";
+import { getProvider } from "./client";
 import { TESTNET_CHAIN_ID, type ProbeResult } from "./peers";
+
+/** The registry network slug the wallet is pinned to. */
+export const NETWORK_SLUG = "testnet-69420";
 
 /** Product identity — a plain self-description, no comparison to any other
  *  wallet, no "reference implementation" claim. */
@@ -109,4 +114,93 @@ export function operatorsSummary(
     total,
     label: `${live} of ${total} endpoints live on chain ${TESTNET_CHAIN_ID}`,
   };
+}
+
+// ── Developer-mode technical rows ────────────────────────────────────────────
+// Everything below is gated behind the developer-mode toggle. Values are either
+// a static registry read (chain identity), a chain-level constant, or a live
+// node read (runtime provenance) — never fabricated.
+
+/** Chain identity from the SDK's static chain registry. */
+export interface ChainIdentity {
+  chainId: number;
+  genesisHash: string;
+  binarySha: string;
+}
+
+export function readChainIdentity(): ChainIdentity {
+  const info = getChainInfo(NETWORK_SLUG);
+  return {
+    chainId: info.chain_id,
+    genesisHash: info.genesis_hash,
+    binarySha: info.binary_sha,
+  };
+}
+
+/** The resolved core-sdk version (build-time __SDK_VERSION__ define), or null
+ *  when it isn't available — the SDK exposes no runtime version, so this is the
+ *  only honest source; a missing value renders as "—", never fabricated. */
+export function readSdkVersion(): string | null {
+  const value = typeof __SDK_VERSION__ === "string" ? __SDK_VERSION__ : "";
+  return value.length > 0 ? value : null;
+}
+
+/** 1 LYTH = 10^18 lythoshi — derived from the SDK constant, not hardcoded. */
+export const ATOMIC_UNIT_LABEL = `lythoshi (10^-${LYTHOSHI_PER_LYTH.toString().length - 1} LYTH)`;
+
+/** Address format, tied to the SDK's canonical user HRP (bech32m `mono…`). */
+export const ADDRESS_FORMAT_LABEL = `bech32m (${ADDRESS_KIND_HRPS.user}…)`;
+
+export interface StaticRow {
+  label: string;
+  value: string;
+}
+
+/** Chain-level constants for the developer rows. These describe the chain, not
+ *  a wallet feature, and are stable design facts (not live reads). */
+export const CHAIN_STATIC_ROWS: StaticRow[] = [
+  { label: "Signing", value: "ML-DSA-65 (FIPS 204)" },
+  { label: "Execution", value: "Rust/RISC-V native" },
+  { label: "Address format", value: ADDRESS_FORMAT_LABEL },
+  { label: "Atomic unit", value: ATOMIC_UNIT_LABEL },
+  { label: "EVM compat", value: "read-only RPC · no EVM execution" },
+  { label: "Whitepaper", value: "v5.0 · May 2026" },
+];
+
+/** The connected node's build/runtime block, from `lyth_runtimeProvenance`.
+ *  Describes the RPC node the wallet is talking to — NOT the wallet binary. */
+export interface RuntimeBlock {
+  clientName: string;
+  version: string;
+  gitCommit: string;
+  gitDirty: boolean;
+  p2pProtocolVersion: number | null;
+  latestHeight: number | null;
+  features: string[];
+}
+
+/** Split a comma/space-separated feature string into chip tokens. Pure. */
+export function runtimeFeatureChips(features: string): string[] {
+  return features.split(/[,\s]+/).filter((token) => token.length > 0);
+}
+
+/** Read the connected node's runtime provenance. Returns null on any failure or
+ *  on a node that lacks the method — the caller renders an honest absence. */
+export async function loadRuntimeBlock(): Promise<RuntimeBlock | null> {
+  try {
+    const prov = await getProvider().rpcClient.lythRuntimeProvenance();
+    const rt = prov.runtime;
+    return {
+      clientName: rt.clientName,
+      version: rt.version,
+      gitCommit: rt.gitCommit,
+      gitDirty: rt.gitDirty,
+      p2pProtocolVersion:
+        typeof rt.p2pProtocolVersion === "number" ? rt.p2pProtocolVersion : null,
+      latestHeight: typeof prov.latestHeight === "number" ? prov.latestHeight : null,
+      features: runtimeFeatureChips(rt.features),
+    };
+  } catch {
+    return null;
+  }
 }

@@ -274,7 +274,13 @@ export function App() {
           {route === "inbox" && steleEnabled ? <Inbox /> : null}
           {route === "provider" && steleEnabled ? <Provider /> : null}
           {route === "notifications" && experimentalEnabled ? <Notifications /> : null}
-          {route === "about" ? <About goto={setRoute} /> : null}
+          {route === "about" ? (
+            <About
+              goto={setRoute}
+              developerModeEnabled={developerModeEnabled}
+              setDeveloperModeEnabled={setDeveloperModeEnabled}
+            />
+          ) : null}
           {route === "resources" ? <Resources /> : null}
           {route === "why-monolythium" ? <WhyMonolythium /> : null}
           {route === "settings" ? settingsPage() : null}
