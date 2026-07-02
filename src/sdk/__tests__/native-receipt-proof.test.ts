@@ -8,11 +8,10 @@ import {
   RpcClient,
   computeNoEvmTargetReceiptHash,
   getNoEvmReceiptTrustPolicy,
-  verifyNoEvmFinalityEvidenceThreshold,
   verifyNoEvmReceiptProof,
   verifyNoEvmReceiptProofTrust,
 } from "@monolythium/core-sdk";
-import type { NoEvmFinalityEvidence, NoEvmReceiptProof } from "@monolythium/core-sdk";
+import type { NoEvmReceiptProof } from "@monolythium/core-sdk";
 
 const RECEIPTS = [
   new Uint8Array([0x01, 0x02, 0x03]),
@@ -23,12 +22,6 @@ const RECEIPTS = [
 const COMPACT_INCLUSION_SCHEMA = "mono.no_evm_receipt_compact_inclusion.v1";
 const COMPACT_TREE_ALGORITHM = "binary-keccak-receipt-tree";
 const COMPACT_PROOF_TYPE = "canonicalReceiptInclusion";
-const NO_EVM_FINALITY_EVIDENCE_SCHEMA = "mono.no_evm_receipt_finality.v1";
-const NO_EVM_FINALITY_EVIDENCE_SOURCE = "roundCertificate";
-const VERIFIED_CLUSTER_PUBLIC_KEY =
-  "0xb77f27a88bfe18988cfcf68ba7462d188a0e655bdd68318c706a3b51887a61fa7d7a9c8843e26f91c91446819925db97";
-const VERIFIED_FINALITY_SIGNATURE =
-  "0xb52a7567f736afbda5e09d5af4bd8da36cff89c3e8d09ca4c98f8bffe5fbdca7af2437f1fbf92e4f52df8a54ed1c2de71954d1134637a675734db73acb4c0c545f4b3cd39577b4985e8a26b767a68d825c48f0a90e606d8ccbbd8885ef27fcd7";
 const RECEIPT_ROOT_EMPTY_DOMAIN = new TextEncoder().encode(
   "monolythium/v4.1/receipts_root_empty/1",
 );
@@ -36,19 +29,14 @@ const RECEIPT_LEAF_DOMAIN = new TextEncoder().encode("monolythium/v4.1/receipt_l
 const RECEIPT_NODE_DOMAIN = new TextEncoder().encode("monolythium/v4.1/receipt_node/1");
 const TESTNET_REGISTRY_NETWORK = "testnet-69420";
 
-type DesktopNoEvmReceiptProof = NoEvmReceiptProof & {
-  finalityEvidence?: NoEvmFinalityEvidence | null;
-};
-
 describe("native receipt proof SDK contract", () => {
-  it("preserves round-certificate finality evidence on archive-backed proofs", async () => {
-    const finalityEvidence = blsRoundFinalityEvidence();
-    const proof = compactArchiveProof({ finalityEvidence });
+  it("verifies compact archive-backed receipt proofs", async () => {
+    const proof = compactArchiveProof();
     const { fetch } = mockNativeReceiptFetch(proof);
     const client = new RpcClient("http://test.invalid", { fetch });
 
     const receipt = await client.lythNativeReceipt(proof.txHash);
-    const noEvmProof = receipt.noEvmProof as DesktopNoEvmReceiptProof | null | undefined;
+    const noEvmProof = receipt.noEvmProof as NoEvmReceiptProof | null | undefined;
     const verified = verifyNoEvmReceiptProof(noEvmProof);
 
     expect(noEvmProof).toEqual(proof);
@@ -64,91 +52,49 @@ describe("native receipt proof SDK contract", () => {
       source: "indexerReceiptArchiveContentDigest",
       signatures: [],
     });
-    expect(noEvmProof?.finalityEvidence).toEqual(finalityEvidence);
-    expect(noEvmProof?.finalityEvidence?.source).toBe(NO_EVM_FINALITY_EVIDENCE_SOURCE);
   });
 
-  it("accepts archive-backed proofs while live finality evidence is absent", async () => {
-    const proof = compactArchiveProof({ finalityEvidence: null });
-    const { fetch } = mockNativeReceiptFetch(proof);
-    const client = new RpcClient("http://test.invalid", { fetch });
-
-    const receipt = await client.lythNativeReceipt(proof.txHash);
-    const noEvmProof = receipt.noEvmProof as DesktopNoEvmReceiptProof | null | undefined;
-    const verified = verifyNoEvmReceiptProof(noEvmProof);
-
-    expect(noEvmProof?.finalityEvidence).toBeNull();
-    expect(verified?.proofKind).toBe("compactInclusion");
-  });
-
-  it("verifies finality evidence with a trusted cluster key policy", async () => {
-    const proof = compactArchiveProof({ finalityEvidence: verifiedBlsRoundFinalityEvidence() });
-    const { fetch } = mockNativeReceiptFetch(proof);
-    const client = new RpcClient("http://test.invalid", { fetch });
-
-    const receipt = await client.lythNativeReceipt(proof.txHash);
-    const noEvmProof = receipt.noEvmProof as DesktopNoEvmReceiptProof | null | undefined;
-    const result = verifyNoEvmFinalityEvidenceThreshold(noEvmProof!.finalityEvidence!, {
-      chainId: 69_420,
-      clusterPublicKey: hexToBytes(VERIFIED_CLUSTER_PUBLIC_KEY),
-      committeeSize: 7,
-      threshold: 1,
-    });
-
-    expect(result).toMatchObject({
-      verified: true,
-      signerCountMatches: true,
-      signerBitmapMatchesIndices: true,
-      signerIndicesInRange: true,
-      thresholdMet: true,
-      signatureValid: true,
-      acceptedSignatureCount: 1,
-      requiredSignatureCount: 1,
-    });
-
-    const wrongChain = verifyNoEvmFinalityEvidenceThreshold(noEvmProof!.finalityEvidence!, {
-      chainId: 69_421,
-      clusterPublicKey: hexToBytes(VERIFIED_CLUSTER_PUBLIC_KEY),
-      committeeSize: 7,
-      threshold: 1,
-    });
-    expect(wrongChain.verified).toBe(false);
-    expect(wrongChain.signatureValid).toBe(false);
-  });
-
-  it("keeps registry trust absent by default and accepts explicit combined trust policy", async () => {
+  it("keeps registry trust absent by default and accepts an explicit trust policy", async () => {
     expect(getNoEvmReceiptTrustPolicy(TESTNET_REGISTRY_NETWORK)).toBeNull();
 
-    const proof = compactArchiveProof({ finalityEvidence: verifiedBlsRoundFinalityEvidence() });
+    const proof = compactArchiveProof();
     const { fetch } = mockNativeReceiptFetch(proof);
     const client = new RpcClient("http://test.invalid", { fetch });
     const receipt = await client.lythNativeReceipt(proof.txHash);
-    const noEvmProof = receipt.noEvmProof as DesktopNoEvmReceiptProof | null | undefined;
+    const noEvmProof = receipt.noEvmProof as NoEvmReceiptProof | null | undefined;
 
     const result = verifyNoEvmReceiptProofTrust(noEvmProof, {
       chainId: 69_420,
-      finality: {
-        mode: "cluster",
-        chainId: 69_420,
-        clusterPublicKey: hexToBytes(VERIFIED_CLUSTER_PUBLIC_KEY),
-        committeeSize: 7,
-        threshold: 1,
-      },
     });
 
     expect(result.verified).toBe(true);
     expect(result.receiptProof?.proofKind).toBe("compactInclusion");
-    expect(result.finalityEvidence?.verified).toBe(true);
     expect(result.archiveSignatures).toBeNull();
     expect(result.issues).toEqual([]);
   });
+
+  it("flags an archive trust policy that lacks the required signature material", async () => {
+    const proof = compactArchiveProof();
+    const { fetch } = mockNativeReceiptFetch(proof);
+    const client = new RpcClient("http://test.invalid", { fetch });
+    const receipt = await client.lythNativeReceipt(proof.txHash);
+    const noEvmProof = receipt.noEvmProof as NoEvmReceiptProof | null | undefined;
+
+    const result = verifyNoEvmReceiptProofTrust(noEvmProof, {
+      chainId: 69_420,
+      archive: {
+        trustedSigners: [{ publicKey: hexToBytes(`0x${"ab".repeat(1952)}`) }],
+        threshold: 1,
+      },
+    });
+
+    expect(result.verified).toBe(false);
+    expect(result.receiptProof?.proofKind).toBe("compactInclusion");
+    expect(result.issues.map((issue) => issue.code)).toContain("archive_verification_failed");
+  });
 });
 
-function compactArchiveProof({
-  finalityEvidence,
-}: {
-  finalityEvidence: NoEvmFinalityEvidence | null;
-}): DesktopNoEvmReceiptProof {
+function compactArchiveProof(): NoEvmReceiptProof {
   const material = compactInclusionMaterial(RECEIPTS, 1);
   return {
     schema: NO_EVM_RECEIPT_PROOF_SCHEMA,
@@ -180,41 +126,10 @@ function compactArchiveProof({
     txIndex: 1,
     receiptCount: RECEIPTS.length,
     targetReceiptBytes: bytesToHex(RECEIPTS[1]!),
-    finalityEvidence,
   };
 }
 
-function blsRoundFinalityEvidence(round = 205): NoEvmFinalityEvidence {
-  return {
-    schema: NO_EVM_FINALITY_EVIDENCE_SCHEMA,
-    source: NO_EVM_FINALITY_EVIDENCE_SOURCE,
-    round,
-    certificate: {
-      round,
-      signature: `0x${"ab".repeat(96)}`,
-      signersBitmap: "0x0d",
-      signerIndices: [0, 2, 3],
-      signerCount: 3,
-    },
-  };
-}
-
-function verifiedBlsRoundFinalityEvidence(): NoEvmFinalityEvidence {
-  return {
-    schema: NO_EVM_FINALITY_EVIDENCE_SCHEMA,
-    source: NO_EVM_FINALITY_EVIDENCE_SOURCE,
-    round: 58,
-    certificate: {
-      round: 58,
-      signature: VERIFIED_FINALITY_SIGNATURE,
-      signersBitmap: "0x08",
-      signerIndices: [3],
-      signerCount: 1,
-    },
-  };
-}
-
-function mockNativeReceiptFetch(proof: DesktopNoEvmReceiptProof): { fetch: typeof fetch } {
+function mockNativeReceiptFetch(proof: NoEvmReceiptProof): { fetch: typeof fetch } {
   const fetchStub: typeof fetch = async (_url, init) => {
     if (typeof init?.body !== "string") {
       throw new Error("expected JSON-RPC string body");

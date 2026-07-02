@@ -1,7 +1,7 @@
 {
   "name": "desktop-wallet",
   "private": true,
-  "version": "0.0.15",
+  "version": "0.0.16",
   "type": "module",
   "description": "Monolythium desktop wallet (Tauri 2, React 19)",
   "license": "Apache-2.0",
@@ -16,7 +16,7 @@
     "precargo": "tsc --noEmit && vite build"
   },
   "dependencies": {
-    "@monolythium/core-sdk": "^0.6.0",
+    "@monolythium/core-sdk": "^0.6.2",
     "@noble/ciphers": "2.2.0",
     "@noble/hashes": "2.2.0",
     "@noble/post-quantum": "0.6.1",
