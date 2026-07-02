@@ -18,6 +18,7 @@ import { Sidebar } from "./components/Sidebar";
 import { Topbar } from "./components/Topbar";
 import { UpdateBanner } from "./components/UpdateBanner";
 import { checkForUpdate, type UpdateAvailable } from "./sdk/updater";
+import { About } from "./pages/About";
 import { Activity } from "./pages/Activity";
 import { Agents } from "./pages/Agents";
 import { AiTrading } from "./pages/AiTrading";
@@ -273,6 +274,7 @@ export function App() {
           {route === "inbox" && steleEnabled ? <Inbox /> : null}
           {route === "provider" && steleEnabled ? <Provider /> : null}
           {route === "notifications" && experimentalEnabled ? <Notifications /> : null}
+          {route === "about" ? <About goto={setRoute} /> : null}
           {route === "resources" ? <Resources /> : null}
           {route === "why-monolythium" ? <WhyMonolythium /> : null}
           {route === "settings" ? settingsPage() : null}
