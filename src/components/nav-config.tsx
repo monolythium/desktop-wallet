@@ -192,12 +192,32 @@ const ICON_TRASH = () => (
     <path d="M10 11v6M14 11v6" />
   </svg>
 );
+const ICON_INFO = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="9" />
+    <path d="M12 16v-4" />
+    <path d="M12 8h.01" />
+  </svg>
+);
+const ICON_LINK = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7" />
+    <path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7" />
+  </svg>
+);
+const ICON_BULB = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M9 18h6" />
+    <path d="M10 21h4" />
+    <path d="M12 3a6 6 0 0 0-4 10.5c.7.7 1 1.5 1 2.5h6c0-1 .3-1.8 1-2.5A6 6 0 0 0 12 3Z" />
+  </svg>
+);
 
 // ── The categorized rail ─────────────────────────────────────────────────────
-// Phase 1: the collapsible categorized skeleton wiring the EXISTS destinations.
-// The primary group keeps the existing pages (dropping ones with no other entry
-// point would orphan them). Phase 2/3 append About/Resources/Why (Info) +
-// Features/Operators/Networks (Manage) here.
+// The collapsible categorized rail wiring each destination. The primary group
+// keeps the existing pages (dropping ones with no other entry point would orphan
+// them). The Info group carries the About/Resources/Why content pages; Phase 3
+// appends Features/Operators/Networks (Manage) here.
 export const NAV_CATEGORIES: NavCategory[] = [
   {
     id: "primary",
@@ -249,6 +269,15 @@ export const NAV_CATEGORIES: NavCategory[] = [
     items: [
       { id: "display", label: "Display & Preferences", icon: ICON_PALETTE, route: "display" },
       { id: "settings", label: "Settings", icon: ICON_SETTINGS, route: "settings" },
+    ],
+  },
+  {
+    id: "info",
+    header: "Info",
+    items: [
+      { id: "about", label: "About", icon: ICON_INFO, route: "about" },
+      { id: "resources", label: "Resources", icon: ICON_LINK, route: "resources" },
+      { id: "why", label: "Why Monolythium", icon: ICON_BULB, route: "why-monolythium" },
     ],
   },
   {

@@ -72,6 +72,20 @@ describe("NAV_CATEGORIES config", () => {
     expect(recovery?.label).toBe("Recovery phrase");
   });
 
+  it("wires the Info category (About / Resources / Why Monolythium)", () => {
+    const info = NAV_CATEGORIES.find((c) => c.id === "info");
+    expect(info?.header).toBe("Info");
+    const byId = new Map((info?.items ?? []).map((i) => [i.id, i.route]));
+    expect(byId.get("about")).toBe("about");
+    expect(byId.get("resources")).toBe("resources");
+    expect(byId.get("why")).toBe("why-monolythium");
+  });
+
+  it("renders the Info category with no flags (its items are ungated)", () => {
+    const ids = visibleNav(NAV_CATEGORIES, ALL_OFF).map((c) => c.id);
+    expect(ids).toContain("info");
+  });
+
   it("keeps Notifications experimental-gated (the notification pipeline is experimental)", () => {
     expect(flat.find((i) => i.id === "notifications")?.experimentalOnly).toBe(true);
   });
