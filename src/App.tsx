@@ -37,6 +37,7 @@ import { Stele } from "./pages/Stele";
 import { TokenDetail } from "./pages/TokenDetail";
 import { Tokens } from "./pages/Tokens";
 import { Trade } from "./pages/Trade";
+import { WhyMonolythium } from "./pages/WhyMonolythium";
 import { Wallets } from "./pages/Wallets";
 import { OperationsProvider } from "./operations/context";
 import { LockProvider, LockBoundary } from "./sdk/auto-lock";
@@ -273,6 +274,7 @@ export function App() {
           {route === "provider" && steleEnabled ? <Provider /> : null}
           {route === "notifications" && experimentalEnabled ? <Notifications /> : null}
           {route === "resources" ? <Resources /> : null}
+          {route === "why-monolythium" ? <WhyMonolythium /> : null}
           {route === "settings" ? settingsPage() : null}
           {route === "display" ? settingsPage("appearance") : null}
           {route === "recovery" ? settingsPage("reveal") : null}
