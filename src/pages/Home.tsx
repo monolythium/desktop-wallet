@@ -1,14 +1,12 @@
 // Home wallet overview.
 //
-// Consumer portfolio facts (Available / Staked / APR), a staking summary card,
+// Consumer portfolio facts (Available / Staked), a staking summary card,
 // token + recent-activity previews, and Send / Receive / Stake / Buy hero CTAs.
 //
 // HONESTY:
 //  - "Available" is the live native balance (loadLiveTokenStatus → eth_getBalance).
 //  - "Staked" is total delegated *weight* (basis points) — the SDK exposes no
 //    per-delegation principal LYTH, so we never print a fabricated LYTH stake.
-//  - "APR" is the best live APY across the wallet's delegated clusters
-//    (lyth_clusterApr). It reads "—" until some yield accrues — never 0.00%.
 //  - "Earned" comes from lyth_pendingRewards (real lythoshi), rendered as LYTH.
 //  - Endpoint / chain-height / probe telemetry is dropped from the hero (the
 //    topbar already shows live sync + the peer switcher).
@@ -36,7 +34,6 @@ import {
 import {
   capture,
   loadLiveAddressActivity,
-  loadLiveClusterApys,
   loadLiveStakeStatus,
   loadLiveTokenStatus,
   type LiveAddressActivityRow,
@@ -57,9 +54,6 @@ export function Home({ goto }: Props) {
   const [liveActivity, setLiveActivity] = useState<RpcOutcome<LiveAddressActivityRow[]> | null>(null);
   const [stakeStatus, setStakeStatus] = useState<LiveStakeStatus | null>(null);
   const [rewards, setRewards] = useState<RpcOutcome<PendingRewardsResponse> | null>(null);
-  // Live APY for the wallet's delegated clusters (lyth_clusterApr). Empty until
-  // some yield accrues; the summary card shows "—" while empty.
-  const [delegatedApys, setDelegatedApys] = useState<Map<number, number>>(new Map());
   const [sendOpen, setSendOpen] = useState(false);
   const [receiveOpen, setReceiveOpen] = useState(false);
 
@@ -74,7 +68,6 @@ export function Home({ goto }: Props) {
       setLiveActivity(null);
       setStakeStatus(null);
       setRewards(null);
-      setDelegatedApys(new Map());
       return;
     }
     let cancelled = false;
@@ -89,22 +82,6 @@ export function Home({ goto }: Props) {
       setLiveActivity(activity);
       setStakeStatus(stake);
       setRewards(rew);
-      // Load live APY for the clusters this wallet delegates to (if any) — the
-      // honest input to the summary's APR cell.
-      const delegated = stake.delegations.ok
-        ? stake.delegations.value?.rows.map((r) => r.cluster) ?? []
-        : [];
-      if (delegated.length > 0) {
-        loadLiveClusterApys(delegated)
-          .then((m) => {
-            if (!cancelled) setDelegatedApys(m);
-          })
-          .catch(() => {
-            if (!cancelled) setDelegatedApys(new Map());
-          });
-      } else {
-        setDelegatedApys(new Map());
-      }
     });
     return () => {
       cancelled = true;
@@ -135,12 +112,6 @@ export function Home({ goto }: Props) {
       ? truncateDecimals(formatRewardLyth(rewards.value.totalAmountLythoshi), 2)
       : null;
 
-  // APR label for the hero + summary card: the best live APY across the
-  // wallet's delegated clusters (lyth_clusterApr). "—" when no delegated
-  // cluster has accrued yield yet — never a misleading 0.00%.
-  const bestApy = delegatedApys.size > 0 ? Math.max(...delegatedApys.values()) : null;
-  const aprLabel = bestApy !== null ? `${bestApy.toFixed(2)}%` : "—";
-
   // Token + activity previews via the shared mappers + row components.
   const tokenRows = liveTokens ? liveTokenStatusToRows(liveTokens) : [];
   const activityRows =
@@ -168,9 +139,6 @@ export function Home({ goto }: Props) {
           {/* Staked is delegated *weight* (bps) — no principal LYTH read
               exists, so we never render a fabricated LYTH stake here. */}
           <span>Staked <b>{summary.totalWeightLabel}</b> weight</span>
-          {/* Live APR — best APY across the wallet's delegated clusters
-              (lyth_clusterApr). "—" until some yield accrues. */}
-          <span>APR <b>{aprLabel}</b></span>
         </div>
 
         <div className="w-hero__bar">
@@ -248,7 +216,6 @@ export function Home({ goto }: Props) {
             <StakeSummaryCard
               summary={summary}
               earnedLyth={earnedLyth}
-              aprLabel={aprLabel}
               hasAddress={Boolean(walletAddress)}
               loading={stakeStatus === null}
               goto={goto}
@@ -300,14 +267,12 @@ export function Home({ goto }: Props) {
 function StakeSummaryCard({
   summary,
   earnedLyth,
-  aprLabel,
   hasAddress,
   loading,
   goto,
 }: {
   summary: StakeSummaryFacts;
   earnedLyth: string | null;
-  aprLabel: string;
   hasAddress: boolean;
   loading: boolean;
   goto: (r: Route) => void;
@@ -344,10 +309,6 @@ function StakeSummaryCard({
         <div className="w-live-cell">
           <div className="cap">Earned</div>
           <div>{earnedLyth === null ? "—" : `${earnedLyth} LYTH`}</div>
-        </div>
-        <div className="w-live-cell">
-          <div className="cap">APR</div>
-          <div>{aprLabel}</div>
         </div>
       </div>
       <div className="row-help" style={{ marginTop: 10 }}>
