@@ -75,6 +75,11 @@ export interface LiveStakeStatus {
 export interface LiveTokenStatus {
   endpoint: string;
   nativeBalance: RpcOutcome<string>;
+  /** Raw native balance as an exact lythoshi integer string — the same
+   *  `eth_getBalance` read `nativeBalance` formats, kept un-converted so a
+   *  caller can format it at its own precision via the exact bigint formatter
+   *  (never re-truncating a float-tailed decimal). */
+  nativeBalanceLythoshi: RpcOutcome<string>;
   tokenBalances: RpcOutcome<Array<{ tokenId: string; balance: string; updatedAtBlock: bigint }>>;
   addressLabel: RpcOutcome<{ address: string; category: string; displayName: string | null; updatedAtBlock: bigint } | null>;
   assetPolicy: RpcOutcome<Record<string, unknown>>;
@@ -219,18 +224,24 @@ export async function loadLiveTokenStatus(wallet: string): Promise<LiveTokenStat
   const client = getProvider().rpcClient;
   const typedWallet = requireTypedUserAddress(wallet, "wallet");
   const walletHex = requireTypedUserAddressHex(wallet, "wallet");
-  const [nativeBalance, tokenBalances, addressLabel, assetPolicy] = await Promise.all([
+  const [nativeBalanceLythoshi, tokenBalances, addressLabel, assetPolicy] = await Promise.all([
     capture(async () => {
       const result = await client.ethGetBalance(walletHex);
-      return formatLyth(BigInt(normalizeBalanceHex(result)).toString(), { includeUnit: false });
+      return BigInt(normalizeBalanceHex(result)).toString();
     }),
     capture(() => client.lythGetTokenBalances(typedWallet)),
     capture(() => client.lythGetAddressLabel(typedWallet)),
     capture(() => client.lythGetAssetPolicy("LYTH") as Promise<Record<string, unknown>>),
   ]);
+  // Formatted (full-precision) LYTH for existing consumers, derived from the
+  // raw lythoshi so both share the one `eth_getBalance` read and can't diverge.
+  const nativeBalance: RpcOutcome<string> = nativeBalanceLythoshi.ok
+    ? { ok: true, value: formatLyth(nativeBalanceLythoshi.value ?? "0", { includeUnit: false }) }
+    : nativeBalanceLythoshi;
   return {
     endpoint: client.endpoint,
     nativeBalance,
+    nativeBalanceLythoshi,
     tokenBalances,
     addressLabel,
     assetPolicy,

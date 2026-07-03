@@ -30,6 +30,16 @@ describe("formatLythDisplay — raw lythoshi → display LYTH", () => {
     expect(formatLythDisplay("0")).toBe("0");
   });
 
+  it("caps at the caller's decimals — Home passes 2, other surfaces keep the 4-dp default", () => {
+    // The Home hero leak rendered un-truncated as 965.988269999999999977 LYTH.
+    // From the raw lythoshi the exact bigint formatter yields 965.98 at 2 dp,
+    // while every other surface keeps the 4-dp default (965.9882).
+    const leak = "965988269999999999977";
+    expect(formatLythDisplay(leak, 2)).toBe("965.98");
+    expect(formatLythDisplay(leak, 4)).toBe("965.9882");
+    expect(formatLythDisplay(leak)).toBe("965.9882");
+  });
+
   it("returns null (→ honest em-dash) for an absent/blank/undecodable amount", () => {
     expect(formatLythDisplay(null)).toBeNull();
     expect(formatLythDisplay(undefined)).toBeNull();
