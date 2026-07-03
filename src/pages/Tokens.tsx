@@ -36,6 +36,7 @@ export function Tokens({ goto }: Props) {
       setLive({
         endpoint: "unavailable",
         nativeBalance: { ok: false, error: errorMessage(cause) },
+        nativeBalanceLythoshi: { ok: false, error: errorMessage(cause) },
         tokenBalances: { ok: false, error: errorMessage(cause) },
         addressLabel: { ok: false, error: errorMessage(cause) },
         assetPolicy: { ok: false, error: errorMessage(cause) },

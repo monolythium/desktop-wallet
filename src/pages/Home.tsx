@@ -23,7 +23,7 @@ import type { Route } from "../components/types";
 import { useActiveWallet } from "../sdk/active-wallet";
 import { activityRowToTx } from "../sdk/activity-rows";
 import { liveTokenStatusToRows } from "../sdk/token-rows";
-import { truncateDecimals } from "../sdk/lyth-display";
+import { formatLythDisplay, truncateDecimals } from "../sdk/lyth-display";
 import {
   deriveStakeSummary,
   type StakeSummaryFacts,
@@ -114,21 +114,25 @@ export function Home({ goto }: Props) {
   const openNativeSend = () => setSendOpen(true);
   const openReceive = () => setReceiveOpen(true);
 
-  // Available = live native balance. Prefer the token-status read; fall back
+  // Available = live native balance, formatted from the RAW lythoshi so the
+  // 2-dp Home figure comes out of the exact bigint formatter (never a
+  // re-truncated float-tailed decimal). Prefer the token-status read; fall back
   // to the chain snapshot while it loads; "—" when neither is available.
-  const availableLyth =
-    liveTokens?.nativeBalance.ok
-      ? liveTokens.nativeBalance.value ?? "—"
+  const availableLythoshi =
+    liveTokens?.nativeBalanceLythoshi.ok
+      ? liveTokens.nativeBalanceLythoshi.value ?? null
       : chain.status === "ok"
-        ? chain.snapshot.balanceLyth
-        : "—";
+        ? chain.snapshot.balanceLythoshi
+        : null;
+  const availableLyth = formatLythDisplay(availableLythoshi, 2) ?? "—";
 
   const summary: StakeSummaryFacts = deriveStakeSummary(stakeStatus);
   // Earned is correctly divided to LYTH by formatRewardLyth, but at full 18-dp
-  // precision; cap the on-screen value at 4 dp (truncated, trailing-zero trim).
+  // precision; cap the on-screen value at 2 dp (truncated, trailing-zero trim)
+  // to match the rest of the Home surface.
   const earnedLyth =
     rewards?.ok && rewards.value
-      ? truncateDecimals(formatRewardLyth(rewards.value.totalAmountLythoshi), 4)
+      ? truncateDecimals(formatRewardLyth(rewards.value.totalAmountLythoshi), 2)
       : null;
 
   // APR label for the hero + summary card: the best live APY across the

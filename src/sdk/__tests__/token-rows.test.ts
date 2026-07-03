@@ -6,6 +6,7 @@ function status(partial: Partial<LiveTokenStatus>): LiveTokenStatus {
   return {
     endpoint: "http://node.test:8545",
     nativeBalance: { ok: true, value: "0" },
+    nativeBalanceLythoshi: { ok: true, value: "0" },
     tokenBalances: { ok: true, value: [] },
     addressLabel: { ok: true, value: null },
     assetPolicy: { ok: true, value: {} },
