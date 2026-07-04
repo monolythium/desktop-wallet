@@ -41,6 +41,34 @@ export function formatLythDisplay(
   }
 }
 
+/** Format a raw 1e18-scaled "atom" integer string for display: the conversion
+ *  goes through the same exact `formatLyth` path (bigint, truncate-not-round)
+ *  as every other amount, capped at `decimals`, with the scale hint appended.
+ *  Sub-unit values (< 1e18) show the exact raw integer; 0 → "0";
+ *  undefined/null/undecodable → em-dash. The bridge disclosure surfaces report
+ *  insurance and drain caps in 1e18 atoms of a bridged asset (NOT LYTH), so
+ *  there is no "LYTH" unit here. This replaces a hand-rolled `Number(n) / 1e18`
+ *  that both rounded and lost integer precision above 2^53 — a fund figure could
+ *  render overstated. Pure. */
+export function formatAtomic1e18(
+  value: string | null | undefined,
+  decimals = 2,
+): string {
+  if (value === undefined || value === null) return "—";
+  let n: bigint;
+  try {
+    n = BigInt(value);
+  } catch {
+    return "—";
+  }
+  if (n === 0n) return "0";
+  if (n >= 10n ** 18n) {
+    const display = formatLythDisplay(value, decimals);
+    return display === null ? "—" : `${display} (1e18 atoms)`;
+  }
+  return n.toString();
+}
+
 /** True when a token id denotes native LYTH — `null`, or an all-zero
  *  (zero-address) id the indexer uses as the native sentinel. Real MRC-20 token
  *  ids (any non-zero hex) return false. Pure. */

@@ -20,6 +20,7 @@
 import { useEffect, useState } from "react";
 import type { BridgeRouteDisclosure } from "@monolythium/core-sdk";
 import { getProvider } from "../sdk/client";
+import { formatAtomic1e18 } from "../sdk/lyth-display";
 import { BridgeRiskPanel } from "../components/BridgeRiskPanel";
 import {
   assessRoute,
@@ -60,20 +61,6 @@ interface RouteRow {
   updatedAtBlock?: number;
   lastIncidentDate?: string | null;
   verifier?: { model?: string; participantCount?: number; threshold?: number };
-}
-
-function formatAtomic(value: string | undefined | null): string {
-  if (value === undefined || value === null) return "—";
-  try {
-    const n = BigInt(value);
-    if (n === 0n) return "0";
-    if (n >= 10n ** 18n) {
-      return `${(Number(n) / 1e18).toFixed(2)} (1e18 atoms)`;
-    }
-    return n.toString();
-  } catch {
-    return value;
-  }
 }
 
 function BridgesStableView() {
@@ -132,8 +119,8 @@ function BridgesStableView() {
               </div>
               <div className="w-kv"><span className="k">Route</span><span className="v">{row.sourceChain} → {row.destinationChain}</span></div>
               <div className="w-kv"><span className="k">Fee token</span><span className="v">{row.feeToken ?? "—"}</span></div>
-              <div className="w-kv"><span className="k">Drain cap</span><span className="v">{formatAtomic(row.drainCapAtomic)}</span></div>
-              <div className="w-kv"><span className="k">Insurance pool</span><span className="v">{formatAtomic(row.insuranceAtomic)}</span></div>
+              <div className="w-kv"><span className="k">Drain cap</span><span className="v">{formatAtomic1e18(row.drainCapAtomic)}</span></div>
+              <div className="w-kv"><span className="k">Insurance pool</span><span className="v">{formatAtomic1e18(row.insuranceAtomic)}</span></div>
               <div className="w-kv"><span className="k">Finality</span><span className="v">{row.finalityBlocks ?? "—"} blocks · cooldown {row.cooldownSeconds ?? "—"}s</span></div>
               <div className="w-kv"><span className="k">Verifier</span><span className="v">{row.verifier?.model ?? "—"} ({row.verifier?.threshold ?? "?"}/{row.verifier?.participantCount ?? "?"})</span></div>
               <div className="w-kv"><span className="k">Admin control</span><span className="v">{row.adminControl ?? "—"}</span></div>
