@@ -541,6 +541,106 @@ export async function loadLiveClusterApys(
   return out;
 }
 
+/** Raw baseline APR in basis points for a cluster (`lyth_clusterApr` →
+ *  `aprBps`). `0` is a REAL chain value ("no reward accrued in the window"),
+ *  distinct from `null` (the read failed / is unavailable). Never fabricates. */
+export async function loadLiveClusterAprBps(
+  clusterId: number,
+  windowBlocks?: number,
+): Promise<number | null> {
+  try {
+    const res = await getProvider().rpcClient.lythClusterApr(clusterId, windowBlocks);
+    const n = Number(res.aprBps);
+    return Number.isFinite(n) ? n : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Fan out {@link loadLiveClusterAprBps}. Map of clusterId → raw aprBps; a real
+ *  `0` IS included (renders "0.00%"), only a failed read is omitted (→ "—"). */
+export async function loadLiveClusterAprBpsMap(
+  clusterIds: number[],
+  windowBlocks?: number,
+): Promise<Map<number, number>> {
+  const out = new Map<number, number>();
+  const unique = Array.from(new Set(clusterIds));
+  await Promise.all(
+    unique.map(async (id) => {
+      const bps = await loadLiveClusterAprBps(id, windowBlocks);
+      if (bps !== null) out.set(id, bps);
+    }),
+  );
+  return out;
+}
+
+/** Best-effort cluster operating entity (`lyth_getClusterEntity` → `entity`,
+ *  e.g. "mono-labs" / "independent"). Null when unresolved / the read fails —
+ *  the caller renders an honest "—". */
+export async function loadLiveClusterEntity(clusterId: number): Promise<string | null> {
+  try {
+    const res = await getProvider().rpcClient.lythGetClusterEntity(clusterId);
+    return res.entity && res.entity.length > 0 ? res.entity : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Fan out {@link loadLiveClusterEntity}. Map of clusterId → entity label (only
+ *  resolved clusters appear; a missing key renders "—"). */
+export async function loadLiveClusterEntities(
+  clusterIds: number[],
+): Promise<Map<number, string>> {
+  const out = new Map<number, string>();
+  const unique = Array.from(new Set(clusterIds));
+  await Promise.all(
+    unique.map(async (id) => {
+      const entity = await loadLiveClusterEntity(id);
+      if (entity !== null) out.set(id, entity);
+    }),
+  );
+  return out;
+}
+
+/** Live operator counts for a cluster's detail view (`lyth_clusterStatus`).
+ *  Best-effort — null when the read fails, so the detail shows honest "—". */
+export interface LiveClusterOperatorStatus {
+  live: number;
+  offline: number;
+  lagging: number;
+  maintenance: number;
+}
+
+export async function loadLiveClusterStatus(
+  clusterId: number,
+): Promise<LiveClusterOperatorStatus | null> {
+  try {
+    const res = await getProvider().rpcClient.lythClusterStatus(clusterId);
+    return {
+      live: res.live,
+      offline: res.offline,
+      lagging: res.lagging,
+      maintenance: res.maintenance,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Delegator (demand) count for a cluster (`lyth_getClusterDelegators` →
+ *  `count`). Null when the read fails — the detail renders an honest "—".
+ *  A real `0` (no delegators) is returned as `0`, not null. */
+export async function loadLiveClusterDelegatorCount(
+  clusterId: number,
+): Promise<number | null> {
+  try {
+    const res = await getProvider().rpcClient.lythGetClusterDelegators(clusterId);
+    return typeof res.count === "number" ? res.count : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Best-effort confirmation depth for a tx hash (`lyth_txConfirmations`).
  *  Returns the confirmation count when the chain reports the tx as found, else
  *  null (not found, no depth, or a read error) — the caller falls back to its
