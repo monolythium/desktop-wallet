@@ -70,3 +70,47 @@ jobs:
       - name: Rust tests
         working-directory: src-tauri
         run: cargo test
+
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Hard gate: the JS dependency tree is clean at `high` today (verified at
+      # both high and moderate), so block a PR that introduces a high-severity
+      # advisory. Lower-severity/dev-only advisories don't fail here.
+      - name: pnpm audit (fail on high)
+        run: pnpm audit --audit-level high
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+
+      # Report-first (advisory) during bring-up.
+      #  - The blocking vulnerabilities today are RUSTSEC-2026-0194 and
+      #    RUSTSEC-2026-0195 (quick-xml, high — DoS). These are REAL and
+      #    unaccepted: they are left visible and tracked for a dependency-bump
+      #    follow-up, NOT ignored.
+      #  - RUSTSEC-2024-0429 (glib VariantStrIter unsoundness) is an accepted
+      #    warning — a transitive of the GTK3 stack Tauri needs on Linux, no
+      #    upstream fix, not reachable in the wallet's usage — so it is ignored.
+      #  - RUSTSEC-2026-0190 (anyhow, unsound) is a non-failing warning also worth
+      #    an eventual bump; it stays visible.
+      # Promote this step to a hard gate (drop continue-on-error) once quick-xml
+      # is remediated and the ignore list is confirmed to cover exactly the
+      # accepted set.
+      - name: cargo audit (advisory)
+        continue-on-error: true
+        working-directory: src-tauri
+        run: cargo audit --ignore RUSTSEC-2024-0429
