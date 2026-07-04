@@ -316,7 +316,10 @@ export function Delegate({ experimentalEnabled }: DelegateProps = {}) {
    *  undelegate primitive — this reuses the per-cluster action across all rows,
    *  like the autovote submit). */
   const openUndelegateAll = () => {
-    const rows = delegationRows;
+    // Only rows carrying weight — consistent with the button's `summary.count`
+    // gate (a zero-weight row has no delegation to remove and the chain would
+    // reject its undelegate, aborting the batch).
+    const rows = delegationRows.filter((r) => r.weightBps > 0);
     if (rows.length === 0) return;
     const totalPct = bpsToPercentLabel(totalBps);
     ops.open({
@@ -838,6 +841,20 @@ export function Delegate({ experimentalEnabled }: DelegateProps = {}) {
                                   setDelegateMoreError(
                                     "Weight must be 1–10000 basis points (0.01% – 100%).",
                                   );
+                                  return;
+                                }
+                                // Same dual-cap pre-flight the directory Delegate
+                                // form runs — add-more stacks onto an existing
+                                // delegation, so it is the most cap-prone path.
+                                const verdict = preflightDelegationVerdict({
+                                  action: "delegate",
+                                  dstExistingWeightBps: row.weightBps,
+                                  totalDelegatedBps: totalBps,
+                                  moveBps: bps,
+                                  capBps: aggregateCapBps,
+                                });
+                                if (!verdict.ok) {
+                                  setDelegateMoreError(verdict.message);
                                   return;
                                 }
                                 setDelegateMoreFor(null);
