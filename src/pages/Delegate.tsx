@@ -1,10 +1,13 @@
 // Delegate page — DVT cluster delegation.
 //
-// Top card: live read-only RPC snapshot (clusters / active / healthy /
-// delegations) — unchanged from the scaffold.
-// Lower card: cluster directory rows with an inline Delegate form that
-// routes through the OperationsDrawer (password unlock → vault seed →
-// delegation precompile call → plaintext mesh_submitTx submit).
+// Top: spendable balance + effective weight + non-custodial copy; a
+// rewards/actions block (pending rewards → Claim all; effective weight →
+// Undelegate all); and the wallet's Active delegations, each row carrying the
+// derived LYTH figure (balance × weightBps ÷ 10000, or a bps-only fallback) and
+// the Delegate / Redelegate / Undelegate action flows.
+// Lower cards (cluster directory + Details, autovote) are later passes.
+// Every write routes through the OperationsDrawer (password unlock → vault seed
+// → delegation precompile call → plaintext mesh_submitTx submit).
 
 import { useEffect, useState } from "react";
 import type {
@@ -33,8 +36,15 @@ import {
   capture,
   loadLiveClusterApys,
   loadLiveClusterNames,
+  loadNativeBalanceLythoshi,
   type RpcOutcome,
 } from "../sdk/live";
+import { bpsToPercentLabel } from "../sdk/delegation-summary";
+import {
+  activeDelegationsSummary,
+  effectiveWeightLythDisplay,
+} from "../sdk/delegation-derive";
+import { formatLythDisplay, truncateDecimals } from "../sdk/lyth-display";
 import {
   buildAutovotePlan,
   fetchClusterDiversities,
@@ -42,7 +52,6 @@ import {
   type AutovoteMode,
 } from "../sdk/autovote";
 import {
-  formatOutcome,
   loadLiveDelegationStatus,
   type LiveDelegationStatus,
 } from "../sdk/live";
@@ -62,7 +71,16 @@ export function Delegate({ experimentalEnabled }: DelegateProps = {}) {
   const wallet = useActiveWallet();
   const walletAddress = wallet.status === "ready" ? wallet.address : "";
   const [status, setStatus] = useState<LiveDelegationStatus | null>(null);
+  // Live wallet balance (raw lythoshi) — the basis for every derived LYTH figure
+  // on this page. RpcOutcome so a failed read falls back to a bps-only display
+  // (an honest "—" for LYTH) rather than a fabricated number.
+  const [balance, setBalance] = useState<RpcOutcome<string> | null>(null);
   const [busy, setBusy] = useState(false);
+  // Add-more delegate draft on an active-delegation row (distinct from the
+  // redelegate draft + the directory-card delegate form).
+  const [delegateMoreFor, setDelegateMoreFor] = useState<number | null>(null);
+  const [delegateMoreBps, setDelegateMoreBps] = useState("1000");
+  const [delegateMoreError, setDelegateMoreError] = useState<string | null>(null);
   const [directory, setDirectory] = useState<ClusterDirectoryEntryResponse[]>([]);
   const [directoryError, setDirectoryError] = useState<string | null>(null);
   // Pending delegation rewards (lyth_pendingRewards). RpcOutcome so a node
@@ -105,6 +123,7 @@ export function Delegate({ experimentalEnabled }: DelegateProps = {}) {
   const refresh = async () => {
     if (!walletAddress) {
       setStatus(null);
+      setBalance(null);
       setDirectory([]);
       setDirectoryError(null);
       setRewards(null);
@@ -115,8 +134,9 @@ export function Delegate({ experimentalEnabled }: DelegateProps = {}) {
     }
     setBusy(true);
     try {
-      const [s, dir, rew, red] = await Promise.all([
+      const [s, bal, dir, rew, red] = await Promise.all([
         loadLiveDelegationStatus(walletAddress),
+        capture(() => loadNativeBalanceLythoshi(walletAddress)),
         fetchClusterDirectory(1, 20).catch((cause: unknown) => {
           setDirectoryError((cause as Error)?.message ?? "directory unavailable");
           return null;
@@ -125,6 +145,7 @@ export function Delegate({ experimentalEnabled }: DelegateProps = {}) {
         capture(() => fetchRedemptionQueue(walletAddress)),
       ]);
       setStatus(s);
+      setBalance(bal);
       setRewards(rew);
       setRedemptions(red);
       if (dir) {
@@ -161,9 +182,6 @@ export function Delegate({ experimentalEnabled }: DelegateProps = {}) {
     void refresh();
   }, [walletAddress]);
 
-  const clusters = status?.clusters.ok ? status.clusters.value ?? [] : [];
-  const active = status?.activeClusters.ok ? status.activeClusters.value ?? [] : [];
-  const healthy = status?.healthyClusters.ok ? status.healthyClusters.value ?? [] : [];
   const delegations = status?.delegations.ok ? status.delegations.value : null;
   // Live cluster-aggregate cap, normalized: the u32::MAX disabled sentinel and a
   // failed/absent read both collapse to null (→ the fixed 50% per-cluster floor
@@ -175,11 +193,28 @@ export function Delegate({ experimentalEnabled }: DelegateProps = {}) {
     const raw = v && typeof v.capBps === "number" ? v.capBps : null;
     return normalizeAggregateCapBps(raw);
   })();
-  const delegationHistory = status?.delegationHistory.ok
-    ? status.delegationHistory.value ?? []
-    : [];
 
   const selfBech32m = walletAddress;
+
+  // The live balance (raw lythoshi) or null — the basis for every derived LYTH
+  // figure. When null, callers fall back to the bps-only percent.
+  const balanceLythoshi = balance?.ok ? balance.value ?? null : null;
+  const delegationRows = delegations?.rows ?? [];
+  const totalBps = delegations?.totalBps ?? 0;
+  const summary = activeDelegationsSummary(delegationRows, totalBps);
+  const clusterName = (id: number) => names.get(id) ?? `Cluster #${id}`;
+  /** Effective-weight label: "<LYTH> (<pct>)" when the balance is known, else a
+   *  bps-only "<pct>" — never a fabricated LYTH figure. */
+  const effectiveWeightLabel = (bps: number): string => {
+    const lyth = effectiveWeightLythDisplay(balanceLythoshi, bps, 4);
+    const pct = bpsToPercentLabel(bps);
+    return lyth === null ? pct : `${lyth} LYTH (${pct})`;
+  };
+  /** Per-row effective-weight: derived LYTH, or the bps-only percent fallback. */
+  const rowWeightLabel = (bps: number): string => {
+    const lyth = effectiveWeightLythDisplay(balanceLythoshi, bps, 4);
+    return lyth === null ? bpsToPercentLabel(bps) : `${lyth} LYTH`;
+  };
 
   const openDelegate = (clusterId: number, weightBps: number) => {
     const weightLabel = `${(weightBps / 100).toFixed(2)}%`;
@@ -271,6 +306,61 @@ export function Delegate({ experimentalEnabled }: DelegateProps = {}) {
           detail: result.txHash,
           txHash: result.txHash,
           nonce: result.nonce,
+        };
+      },
+    });
+  };
+
+  /** Undelegate EVERY delegated cluster in one authorized session: a single
+   *  keychain unlock, then N sequential undelegate() calls (there is no bulk
+   *  undelegate primitive — this reuses the per-cluster action across all rows,
+   *  like the autovote submit). */
+  const openUndelegateAll = () => {
+    const rows = delegationRows;
+    if (rows.length === 0) return;
+    const totalPct = bpsToPercentLabel(totalBps);
+    ops.open({
+      title: `Undelegate all · ${rows.length} cluster${rows.length === 1 ? "" : "s"}`,
+      subtitle: `Remove ${totalPct} of wallet weight across every cluster — instant, nothing was locked`,
+      auth: "keychain",
+      diff: [
+        { k: "From", v: selfBech32m },
+        { k: "Clusters", v: String(rows.length) },
+        { k: "Weight removed", v: totalPct },
+        ...rows.map((r) => ({
+          k: clusterName(r.cluster),
+          v: `${(r.weightBps / 100).toFixed(2)}%`,
+        })),
+        { k: "Precompile", v: "0x…100a" },
+      ],
+      effects: [
+        { text: "Unlocks the local vault for this operation only." },
+        { text: `Submits ${rows.length} sequential undelegate(uint32 clusterId) calls via @monolythium/core-sdk — one per delegated cluster.` },
+        { text: "Instant — no redemption queue or cooldown. Your tokens were never escrowed, so the weighting simply drops." },
+        {
+          text: "Each call may be rejected at the precompile gate (delegation gated off, or a cluster row already gone) — verbatim errors surface here.",
+          level: "warn",
+        },
+      ],
+      notify: {
+        kind: "undelegate",
+        amountDecimal: "0",
+        counterparty: DELEGATION_PRECOMPILE,
+      },
+      execute: async (ctx) => {
+        if (!ctx?.vaultSeed) {
+          throw new Error("vault seed unavailable after keychain authorization");
+        }
+        let last = { txHash: "", nonce: 0 };
+        for (const r of rows) {
+          const calldata = buildUndelegateCalldata(r.cluster);
+          last = await submitDelegationTx({ seed: ctx.vaultSeed, data: calldata });
+        }
+        return {
+          headline: `Undelegated all ${rows.length} cluster${rows.length === 1 ? "" : "s"}`,
+          detail: last.txHash,
+          txHash: last.txHash,
+          nonce: last.nonce,
         };
       },
     });
@@ -494,13 +584,18 @@ export function Delegate({ experimentalEnabled }: DelegateProps = {}) {
       <div className="w-page__header">
         <h1>Delegate</h1>
         <div className="sub">
-          DVT clusters · 100 clusters · 7 or 10 operators per cluster.
+          Delegating is non-custodial — your full balance stays liquid and
+          spendable. Effective weight tracks your live balance.
         </div>
       </div>
 
+      {/* Header facts + rewards/actions. Spendable balance is a real read
+          (eth_getBalance); Effective weight LYTH is derived (balance × bps ÷
+          10000) and falls back to a bps-only percent when the balance read is
+          unavailable — never a fabricated LYTH figure. */}
       <div className="w-card">
         <div className="w-card__head">
-          <h3>Live delegation reads</h3>
+          <h3>Delegation</h3>
           <span className="w-live-pill">live</span>
           <span className="w-card__head__spacer" />
           <button className="btn btn--sm" onClick={() => void refresh()} disabled={busy}>
@@ -508,298 +603,334 @@ export function Delegate({ experimentalEnabled }: DelegateProps = {}) {
           </button>
         </div>
         <div className="w-card__body">
-          <div className="w-live-grid">
-            <LiveCell
-              label="Clusters"
-              value={
-                status
-                  ? formatOutcome(status.clusters, (rows) => rows.length.toString())
-                  : "loading"
-              }
-            />
-            <LiveCell
-              label="Active"
-              value={
-                status
-                  ? formatOutcome(status.activeClusters, (rows) => rows.length.toString())
-                  : "loading"
-              }
-            />
-            <LiveCell
-              label="Healthy"
-              value={
-                status
-                  ? formatOutcome(status.healthyClusters, (rows) => rows.length.toString())
-                  : "loading"
-              }
-            />
-            <LiveCell
-              label="My bps"
-              value={
-                delegations
-                  ? delegations.totalBps.toString()
-                  : status?.delegations.error ?? "loading"
-              }
-            />
-          </div>
-          {status ? (
-            <div className="row-help">
-              Endpoint: <span className="mono">{status.endpoint}</span>
-            </div>
-          ) : null}
+          {!walletAddress ? (
+            <div className="row-help">Select or unlock a wallet to delegate.</div>
+          ) : (
+            <>
+              <div className="w-live-grid">
+                <LiveCell
+                  label="Spendable balance"
+                  value={
+                    balance === null
+                      ? "loading"
+                      : balanceLythoshi !== null
+                        ? `${formatLythDisplay(balanceLythoshi, 4) ?? "—"} LYTH`
+                        : "—"
+                  }
+                />
+                <LiveCell label="Effective weight" value={effectiveWeightLabel(totalBps)} />
+              </div>
 
-          {delegations && delegations.rows.length > 0 && (
-            <div className="w-live-list">
-              {delegations.rows.map((row) => {
-                const isRedelegating = redelegateFrom === row.cluster;
-                return (
-                  <div
-                    key={row.cluster}
-                    style={{ display: "flex", flexDirection: "column", gap: 8 }}
-                  >
-                    <div className="w-live-row">
-                      <div>
-                        <div className="row-label">Cluster #{row.cluster}</div>
-                        {/* Weight (basis points), NOT a LYTH principal — the
-                            delegation precompile tracks voting weight; there is
-                            no per-delegation principal LYTH read in the SDK. */}
-                        <div className="row-help">your delegation · weight only</div>
-                      </div>
-                      <div
-                        className="w-live-right"
-                        style={{ display: "flex", alignItems: "center", gap: 8 }}
-                      >
-                        <span className="mono">{(row.weightBps / 100).toFixed(2)}%</span>
-                        <button
-                          className="btn btn--sm btn--ghost"
-                          onClick={() => {
-                            setRedelegateFrom(row.cluster);
-                            setRedelegateTo("");
-                            setRedelegateWeightBps(String(row.weightBps));
-                            setRedelegateError(null);
-                          }}
-                        >
-                          Redelegate
-                        </button>
-                        <button
-                          className="btn btn--sm"
-                          onClick={() => openUndelegate(row.cluster, row.weightBps)}
-                        >
-                          Undelegate
-                        </button>
-                      </div>
-                    </div>
-
-                    {isRedelegating && (
-                      <div
-                        style={{
-                          display: "flex",
-                          flexDirection: "column",
-                          gap: 8,
-                          padding: 12,
-                          background: "rgba(255,255,255,0.03)",
-                          border: "1px solid var(--fg-700)",
-                          borderRadius: 8,
-                        }}
-                      >
-                        <label style={redelegateLabelStyle}>
-                          Destination cluster id
-                        </label>
-                        <input
-                          type="number"
-                          inputMode="numeric"
-                          min={0}
-                          value={redelegateTo}
-                          placeholder="e.g. 2"
-                          onChange={(e) => {
-                            setRedelegateTo(e.target.value);
-                            setRedelegateError(null);
-                          }}
-                          style={autovoteInputStyle}
-                        />
-                        <label style={redelegateLabelStyle}>
-                          Weight to move (basis points · 100 = 1%)
-                        </label>
-                        <input
-                          type="number"
-                          inputMode="numeric"
-                          min={1}
-                          max={row.weightBps}
-                          value={redelegateWeightBps}
-                          onChange={(e) => {
-                            setRedelegateWeightBps(e.target.value);
-                            setRedelegateError(null);
-                          }}
-                          style={autovoteInputStyle}
-                        />
-                        {redelegateError && (
-                          <div className="row-help" style={{ color: "var(--err)" }}>
-                            {redelegateError}
-                          </div>
-                        )}
-                        <div style={{ display: "flex", gap: 6 }}>
-                          <button
-                            className="btn btn--sm"
-                            onClick={() => {
-                              setRedelegateFrom(null);
-                              setRedelegateError(null);
-                            }}
-                            style={{ flex: 1 }}
-                          >
-                            Cancel
-                          </button>
+              <div className="w-live-grid" style={{ marginTop: 12 }}>
+                <div className="w-live-cell">
+                  <div className="cap">Pending rewards</div>
+                  {rewards === null ? (
+                    <div className="row-help">Loading…</div>
+                  ) : rewards.ok === false ? (
+                    <div className="w-live-error">{rewards.error}</div>
+                  ) : rewards.value ? (
+                    (() => {
+                      const r = rewards.value;
+                      const pendingLyth = truncateDecimals(
+                        formatRewardLyth(r.totalAmountLythoshi),
+                        4,
+                      );
+                      const claimable = hasClaimableRewards(r);
+                      return (
+                        <>
+                          <div>{pendingLyth} LYTH</div>
                           <button
                             className="btn btn--sm btn--primary"
-                            onClick={() => {
-                              const to = parseInt(redelegateTo, 10);
-                              if (!Number.isFinite(to) || to < 0) {
-                                setRedelegateError("Enter a valid destination cluster id.");
-                                return;
-                              }
-                              if (to === row.cluster) {
-                                setRedelegateError("Destination must differ from the source cluster.");
-                                return;
-                              }
-                              const bps = parseInt(redelegateWeightBps, 10);
-                              if (!Number.isFinite(bps) || bps <= 0 || bps > row.weightBps) {
-                                setRedelegateError(
-                                  `Weight must be 1–${row.weightBps} basis points (no more than the source delegation).`,
-                                );
-                                return;
-                              }
-                              openRedelegate(row.cluster, to, bps);
-                            }}
-                            style={{ flex: 1 }}
+                            style={{ marginTop: 8 }}
+                            disabled={!claimable}
+                            title={
+                              claimable
+                                ? "Settle and withdraw all pending rewards"
+                                : "Nothing to claim"
+                            }
+                            onClick={() => openClaim(pendingLyth)}
                           >
-                            Review
+                            Claim all
                           </button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-
-          {clusters.length > 0 ? (
-            <div className="w-live-list">
-              {clusters.slice(0, 6).map((cluster) => (
-                <div className="w-live-row" key={cluster.clusterId}>
-                  <div>
-                    <div className="row-label">Cluster #{cluster.clusterId}</div>
-                    <div className="row-help mono">
-                      {cluster.threshold}-of-{cluster.size} · {cluster.aggregateHealth}
-                    </div>
-                  </div>
-                  <div className="w-live-right">
-                    <div className="mono">{cluster.size} operators</div>
-                    <span className={`w-live-pill ${cluster.active ? "" : "is-muted"}`}>
-                      {cluster.active ? "active" : "inactive"}
-                    </span>
-                  </div>
+                        </>
+                      );
+                    })()
+                  ) : (
+                    <div>—</div>
+                  )}
                 </div>
-              ))}
-            </div>
-          ) : null}
 
-          {delegationHistory.length > 0 ? (
-            <div className="w-live-list">
-              {delegationHistory.slice(0, 5).map((row) => (
+                <div className="w-live-cell">
+                  <div className="cap">Effective weight</div>
+                  <div>{effectiveWeightLabel(totalBps)}</div>
+                  <button
+                    className="btn btn--sm"
+                    style={{ marginTop: 8 }}
+                    disabled={summary.count === 0}
+                    title={
+                      summary.count > 0
+                        ? "Undelegate every cluster in one session"
+                        : "No active delegations"
+                    }
+                    onClick={openUndelegateAll}
+                  >
+                    Undelegate all
+                  </button>
+                </div>
+              </div>
+
+              {/* Secondary reward detail + the auto-compound action (a real read
+                  + a real write — preserved, not stubbed). */}
+              {rewards?.ok && rewards.value ? (
                 <div
-                  className="w-live-row"
-                  key={`${row.blockHeight}-${row.txIndex}-${row.logIndex}`}
+                  className="row-help"
+                  style={{
+                    marginTop: 10,
+                    display: "flex",
+                    gap: 12,
+                    flexWrap: "wrap",
+                    alignItems: "center",
+                  }}
                 >
-                  <div>
-                    <div className="row-label">{row.kind}</div>
-                    <div className="row-help">block {row.blockHeight.toString()}</div>
-                  </div>
-                  <div className="w-live-right mono">{row.weightBps} bps</div>
+                  <span>
+                    Settled{" "}
+                    {truncateDecimals(formatRewardLyth(rewards.value.settledPendingLythoshi), 4)} LYTH
+                  </span>
+                  <span>
+                    · Unsettled{" "}
+                    {truncateDecimals(formatRewardLyth(rewards.value.unsettledAmountLythoshi), 4)} LYTH
+                  </span>
+                  <span>· Auto-compound {rewards.value.autoCompound ? "on" : "off"}</span>
+                  <button
+                    className="btn btn--sm btn--ghost"
+                    onClick={() => openAutoCompoundToggle(!rewards.value!.autoCompound)}
+                  >
+                    {rewards.value.autoCompound ? "Disable auto-compound" : "Enable auto-compound"}
+                  </button>
                 </div>
-              ))}
-            </div>
-          ) : null}
+              ) : null}
 
-          {clusters.length === 0 && status?.clusters.ok ? (
-            <div className="row-help">Cluster descriptor set is empty.</div>
-          ) : null}
-          {status?.clusters.ok === false ? (
-            <div className="w-live-error">cluster set: {status.clusters.error}</div>
-          ) : null}
-          {status?.delegations.ok === false ? (
-            <div className="w-live-error">delegations: {status.delegations.error}</div>
-          ) : null}
-          {status?.delegationHistory.ok === false ? (
-            <div className="w-live-error">
-              delegation history: {status.delegationHistory.error}
-            </div>
-          ) : null}
-          {active.length || healthy.length ? null : null}
+              {balance?.ok === false ? (
+                <div className="row-help" style={{ marginTop: 8 }}>
+                  Balance read unavailable — showing weight as a percent only.
+                </div>
+              ) : null}
+            </>
+          )}
         </div>
       </div>
 
-      {/* Rewards — pending delegation rewards (lyth_pendingRewards) with a
-          Claim action + auto-compound toggle. Only mounts once a wallet is
-          selected (rewards is non-null after the first refresh). */}
+      {/* Active delegations — the wallet's per-cluster delegation rows, each
+          with the derived LYTH (or bps-only) figure and the three action flows
+          (Delegate / Redelegate / Undelegate), all reusing the existing
+          precompile actions. */}
       {walletAddress ? (
         <div className="w-card">
           <div className="w-card__head">
-            <h3>Rewards</h3>
-            <span className="w-live-pill">live</span>
+            <h3>Active delegations</h3>
             <span className="w-card__head__spacer" />
+            <span className="row-help mono">
+              {summary.count} cluster{summary.count === 1 ? "" : "s"} · {summary.percentLabel} total
+            </span>
           </div>
           <div className="w-card__body">
-            {rewards === null ? (
-              <div className="row-help">Loading pending rewards…</div>
-            ) : rewards.ok === false ? (
-              <div className="w-live-error">pending rewards: {rewards.error}</div>
-            ) : rewards.value ? (
-              (() => {
-                const r = rewards.value;
-                const totalLyth = formatRewardLyth(r.totalAmountLythoshi);
-                const settledLyth = formatRewardLyth(r.settledPendingLythoshi);
-                const unsettledLyth = formatRewardLyth(r.unsettledAmountLythoshi);
-                const claimable = hasClaimableRewards(r);
-                return (
-                  <>
-                    <div className="w-live-grid">
-                      <LiveCell label="Claimable" value={`${totalLyth} LYTH`} />
-                      <LiveCell label="Settled" value={`${settledLyth} LYTH`} />
-                      <LiveCell label="Unsettled" value={`${unsettledLyth} LYTH`} />
-                      <LiveCell label="Auto-compound" value={r.autoCompound ? "on" : "off"} />
-                    </div>
-                    <div
-                      style={{
-                        display: "flex",
-                        gap: 8,
-                        flexWrap: "wrap",
-                        marginTop: 12,
-                      }}
-                    >
-                      <button
-                        className="btn btn--sm btn--primary"
-                        disabled={!claimable}
-                        title={
-                          claimable
-                            ? "Settle and withdraw your pending rewards"
-                            : "Nothing to claim"
-                        }
-                        onClick={() => openClaim(totalLyth)}
-                      >
-                        Claim {totalLyth} LYTH
-                      </button>
-                      <button
-                        className="btn btn--sm"
-                        onClick={() => openAutoCompoundToggle(!r.autoCompound)}
-                      >
-                        {r.autoCompound ? "Disable auto-compound" : "Enable auto-compound"}
-                      </button>
-                    </div>
-                  </>
-                );
-              })()
+            {status?.delegations.ok === false ? (
+              <div className="w-live-error">delegations: {status.delegations.error}</div>
+            ) : status === null ? (
+              <div className="row-help">Loading delegations…</div>
+            ) : delegationRows.length === 0 ? (
+              <div className="row-help">
+                You are not delegating to any cluster yet. Pick a cluster from the
+                directory below to start.
+              </div>
             ) : (
-              <div className="row-help">No pending rewards for this wallet.</div>
+              <div className="w-live-list">
+                {delegationRows.map((row) => {
+                  const isRedelegating = redelegateFrom === row.cluster;
+                  const isDelegatingMore = delegateMoreFor === row.cluster;
+                  return (
+                    <div
+                      key={row.cluster}
+                      style={{ display: "flex", flexDirection: "column", gap: 8 }}
+                    >
+                      <div className="w-live-row">
+                        <div>
+                          <div className="row-label">{clusterName(row.cluster)}</div>
+                          {/* Percent is a real read (weightBps); the LYTH figure
+                              is derived from the live balance, or bps-only when
+                              the balance is unavailable — never fabricated. */}
+                          <div className="row-help mono">
+                            {(row.weightBps / 100).toFixed(2)}% · {rowWeightLabel(row.weightBps)}
+                          </div>
+                        </div>
+                        <div
+                          className="w-live-right"
+                          style={{ display: "flex", alignItems: "center", gap: 8 }}
+                        >
+                          <button
+                            className="btn btn--sm btn--ghost"
+                            onClick={() => {
+                              setDelegateMoreFor(row.cluster);
+                              setDelegateMoreBps("1000");
+                              setDelegateMoreError(null);
+                            }}
+                          >
+                            Delegate
+                          </button>
+                          <button
+                            className="btn btn--sm btn--ghost"
+                            onClick={() => {
+                              setRedelegateFrom(row.cluster);
+                              setRedelegateTo("");
+                              setRedelegateWeightBps(String(row.weightBps));
+                              setRedelegateError(null);
+                            }}
+                          >
+                            Redelegate
+                          </button>
+                          <button
+                            className="btn btn--sm"
+                            onClick={() => openUndelegate(row.cluster, row.weightBps)}
+                          >
+                            Undelegate
+                          </button>
+                        </div>
+                      </div>
+
+                      {isDelegatingMore && (
+                        <div style={inlineFormStyle}>
+                          <label style={redelegateLabelStyle}>
+                            Additional weight to delegate (basis points · 100 = 1%)
+                          </label>
+                          <input
+                            type="number"
+                            inputMode="numeric"
+                            min={1}
+                            max={10000}
+                            value={delegateMoreBps}
+                            onChange={(e) => {
+                              setDelegateMoreBps(e.target.value);
+                              setDelegateMoreError(null);
+                            }}
+                            style={autovoteInputStyle}
+                          />
+                          {delegateMoreError && (
+                            <div className="row-help" style={{ color: "var(--err)" }}>
+                              {delegateMoreError}
+                            </div>
+                          )}
+                          <div style={{ display: "flex", gap: 6 }}>
+                            <button
+                              className="btn btn--sm"
+                              onClick={() => {
+                                setDelegateMoreFor(null);
+                                setDelegateMoreError(null);
+                              }}
+                              style={{ flex: 1 }}
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              className="btn btn--sm btn--primary"
+                              onClick={() => {
+                                const bps = parseInt(delegateMoreBps, 10);
+                                if (!Number.isFinite(bps) || bps <= 0 || bps > 10000) {
+                                  setDelegateMoreError(
+                                    "Weight must be 1–10000 basis points (0.01% – 100%).",
+                                  );
+                                  return;
+                                }
+                                setDelegateMoreFor(null);
+                                openDelegate(row.cluster, bps);
+                              }}
+                              style={{ flex: 1 }}
+                            >
+                              Review
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {isRedelegating && (
+                        <div style={inlineFormStyle}>
+                          <label style={redelegateLabelStyle}>
+                            Destination cluster id
+                          </label>
+                          <input
+                            type="number"
+                            inputMode="numeric"
+                            min={0}
+                            value={redelegateTo}
+                            placeholder="e.g. 2"
+                            onChange={(e) => {
+                              setRedelegateTo(e.target.value);
+                              setRedelegateError(null);
+                            }}
+                            style={autovoteInputStyle}
+                          />
+                          <label style={redelegateLabelStyle}>
+                            Weight to move (basis points · 100 = 1%)
+                          </label>
+                          <input
+                            type="number"
+                            inputMode="numeric"
+                            min={1}
+                            max={row.weightBps}
+                            value={redelegateWeightBps}
+                            onChange={(e) => {
+                              setRedelegateWeightBps(e.target.value);
+                              setRedelegateError(null);
+                            }}
+                            style={autovoteInputStyle}
+                          />
+                          {redelegateError && (
+                            <div className="row-help" style={{ color: "var(--err)" }}>
+                              {redelegateError}
+                            </div>
+                          )}
+                          <div style={{ display: "flex", gap: 6 }}>
+                            <button
+                              className="btn btn--sm"
+                              onClick={() => {
+                                setRedelegateFrom(null);
+                                setRedelegateError(null);
+                              }}
+                              style={{ flex: 1 }}
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              className="btn btn--sm btn--primary"
+                              onClick={() => {
+                                const to = parseInt(redelegateTo, 10);
+                                if (!Number.isFinite(to) || to < 0) {
+                                  setRedelegateError("Enter a valid destination cluster id.");
+                                  return;
+                                }
+                                if (to === row.cluster) {
+                                  setRedelegateError("Destination must differ from the source cluster.");
+                                  return;
+                                }
+                                const bps = parseInt(redelegateWeightBps, 10);
+                                if (!Number.isFinite(bps) || bps <= 0 || bps > row.weightBps) {
+                                  setRedelegateError(
+                                    `Weight must be 1–${row.weightBps} basis points (no more than the source delegation).`,
+                                  );
+                                  return;
+                                }
+                                openRedelegate(row.cluster, to, bps);
+                              }}
+                              style={{ flex: 1 }}
+                            >
+                              Review
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
             )}
           </div>
         </div>
@@ -1224,4 +1355,16 @@ const redelegateLabelStyle: React.CSSProperties = {
   letterSpacing: "0.06em",
   textTransform: "uppercase",
   color: "var(--fg-400)",
+};
+
+/** The inline draft-form wrapper shared by the per-row Delegate + Redelegate
+ *  forms on an active-delegation row. */
+const inlineFormStyle: React.CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 8,
+  padding: 12,
+  background: "rgba(255,255,255,0.03)",
+  border: "1px solid var(--fg-700)",
+  borderRadius: 8,
 };

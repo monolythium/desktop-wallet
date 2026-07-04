@@ -632,6 +632,17 @@ export async function loadAccountPolicy(address: string) {
   return getProvider().rpcClient.lythGetAccountPolicy(requireTypedUserAddress(address, "account policy address"));
 }
 
+/** Raw native balance as an exact lythoshi integer string via `eth_getBalance`
+ *  (SDK 0.6.0 `AccountProofResponse.value`, normalized). The single balance read
+ *  the Delegate page derives its effective-weight LYTH figures from. Throws on
+ *  RPC failure — wrap in {@link capture}. */
+export async function loadNativeBalanceLythoshi(address: string): Promise<string> {
+  const client = getProvider().rpcClient;
+  const addressHex = requireTypedUserAddressHex(address, "wallet");
+  const balance = await client.ethGetBalance(addressHex);
+  return BigInt(normalizeBalanceHex(balance)).toString();
+}
+
 export async function loadLiveWalletBalance(address: string): Promise<LiveWalletBalance> {
   const client = getProvider().rpcClient;
   const addressHex = requireTypedUserAddressHex(address, "wallet");
