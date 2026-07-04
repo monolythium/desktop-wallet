@@ -8,6 +8,7 @@ import {
   autovoteModeMeta,
   autovoteShuffleBytes,
   buildAutovotePlan,
+  preflightAutovotePlan,
   reorderNearTies,
   seededPermutation,
 } from "../autovote";
@@ -152,6 +153,51 @@ describe("autovote per-user entropy shuffle (SHAKE256)", () => {
       capBps: 8000,
     });
     expect(alice2.allocations).toEqual(alice.allocations);
+  });
+});
+
+describe("preflightAutovotePlan — pre-sign cap guard", () => {
+  const noExisting = new Map<number, number>();
+
+  it("passes a plan within the per-cluster and total caps", () => {
+    const r = preflightAutovotePlan({
+      allocations: [
+        { clusterId: 1, weightBps: 3000 },
+        { clusterId: 2, weightBps: 3000 },
+      ],
+      existingWeightByCluster: noExisting,
+      currentTotalBps: 0,
+      capBps: null, // → the 50% floor
+    });
+    expect(r.ok).toBe(true);
+  });
+
+  it("blocks an allocation that stacks past the 50% per-cluster cap", () => {
+    // Cluster 1 already holds 4000 bps; +2000 = 6000 > 50%.
+    const r = preflightAutovotePlan({
+      allocations: [{ clusterId: 1, weightBps: 2000 }],
+      existingWeightByCluster: new Map([[1, 4000]]),
+      currentTotalBps: 4000,
+      capBps: null,
+    });
+    expect(r.ok).toBe(false);
+    expect(r.clusterId).toBe(1);
+    expect(r.message).toMatch(/50% per-wallet cap/);
+  });
+
+  it("blocks a plan whose running total would exceed 100%", () => {
+    // 6000 existing + 3000 + 2000 = 11000 > 100%.
+    const r = preflightAutovotePlan({
+      allocations: [
+        { clusterId: 1, weightBps: 3000 },
+        { clusterId: 2, weightBps: 2000 },
+      ],
+      existingWeightByCluster: noExisting,
+      currentTotalBps: 6000,
+      capBps: null,
+    });
+    expect(r.ok).toBe(false);
+    expect(r.message).toMatch(/total delegation limit/);
   });
 });
 

@@ -19,6 +19,7 @@ import type {
 import { shake256 } from "@noble/hashes/sha3.js";
 import { getProvider } from "./client";
 import { buildDelegateCalldata, submitDelegationTx } from "./delegation";
+import { preflightDelegationVerdict } from "./delegation-caps";
 
 /** Domain tag mixed into the per-user shuffle seed so autovote entropy can't
  *  collide with any other SHAKE256 use of the same address. */
@@ -343,6 +344,45 @@ export function buildAutovotePlan(input: AutovotePlanInput): AutovotePlan {
   return { mode: input.mode, allocations, totalWeightBps, warnings };
 }
 
+export interface AutovotePreflightResult {
+  ok: boolean;
+  /** The first allocation that would revert, when blocked. */
+  clusterId?: number;
+  message?: string;
+}
+
+/** Pre-sign cap check for a WHOLE plan. Each delegate() stacks onto the wallet's
+ *  existing weight for that cluster and adds to the wallet total, so verify
+ *  every allocation against the per-cluster cap AND the 100% total, accumulating
+ *  as the plan applies. Reuses preflightDelegationVerdict — the exact gate the
+ *  per-row Delegate / Redelegate flows use — so a batch never signs a
+ *  guaranteed 0x0213 / 0x0205 revert. Blocks on the FIRST offending allocation.
+ *  `capBps` is the per-cluster cap (the aggregate cap when present, else null →
+ *  the 50% floor), NOT the autovote weight budget (the planner already bounds
+ *  the budget). Pure. */
+export function preflightAutovotePlan(args: {
+  allocations: readonly AutovoteAllocation[];
+  existingWeightByCluster: Map<number, number>;
+  currentTotalBps: number;
+  capBps: number | null;
+}): AutovotePreflightResult {
+  let runningTotal = args.currentTotalBps;
+  for (const a of args.allocations) {
+    const verdict = preflightDelegationVerdict({
+      action: "delegate",
+      dstExistingWeightBps: args.existingWeightByCluster.get(a.clusterId) ?? 0,
+      totalDelegatedBps: runningTotal,
+      moveBps: a.weightBps,
+      capBps: args.capBps,
+    });
+    if (!verdict.ok) {
+      return { ok: false, clusterId: a.clusterId, message: verdict.message };
+    }
+    runningTotal += a.weightBps;
+  }
+  return { ok: true };
+}
+
 export interface SubmitAutovotePlanResult {
   txHashes: string[];
 }
@@ -356,12 +396,14 @@ export interface SubmitAutovotePlanResult {
 export async function submitAutovotePlan(
   plan: AutovotePlan,
   seed: Uint8Array,
+  onProgress?: (submitted: number, total: number) => void,
 ): Promise<SubmitAutovotePlanResult> {
   const txHashes: string[] = [];
   for (const a of plan.allocations) {
     const calldata = buildDelegateCalldata(a.clusterId, a.weightBps);
     const result = await submitDelegationTx({ seed, data: calldata });
     txHashes.push(result.txHash);
+    onProgress?.(txHashes.length, plan.allocations.length);
   }
   return { txHashes };
 }
