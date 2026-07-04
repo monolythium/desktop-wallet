@@ -20,19 +20,19 @@
 //   bech32m body. No secrets — never a contact name or any encrypted payload.
 //
 // How it's gated:
-//   Behind the `wallet.experimentalEnabled` flag — the same gate as the in-app
-//   notifications center. Flag off ⇒ this returns immediately, so there is no
-//   toast AND no OS permission prompt. (The record paths are themselves only
-//   reached when the flag is on, so this is a belt-and-suspenders re-check that
-//   also keeps the helper safe to call from any future site.)
+//   By the user-facing notification settings — `wallet.notificationsEnabled`
+//   (the master OS-toast switch, default on) and `wallet.notifyWhileLocked`.
+//   Notifications are a default-on wallet feature; there is no separate
+//   experimental gate. A user who turns system notifications off gets no toast
+//   AND no OS permission prompt.
 //
 // Permission:
 //   On first use we check `isPermissionGranted()`; if not yet granted we
-//   `requestPermission()` once. A denied/dismissed permission simply means no
-//   toast — the in-app record is unaffected.
+//   `requestPermission()` once. This fires on the FIRST toast that needs it,
+//   never on launch. A denied/dismissed permission simply means no toast — the
+//   in-app record is unaffected.
 
 import {
-  readExperimentalEnabled,
   readNotificationDetails,
   readNotificationsEnabled,
   readNotifyWhileLocked,
@@ -61,19 +61,16 @@ async function ensurePermission(): Promise<boolean> {
 
 /** Best-effort OS toast for a freshly-recorded terminal notification.
  *
- *  Gated behind `wallet.experimentalEnabled`; a no-op when the flag is off,
- *  outside Tauri, or when notification permission isn't granted. Swallows every
- *  error — a toast failure must never throw back into the recording path that
- *  fired it. Fire-and-forget: callers `void`-call this after a successful
+ *  A no-op when system notifications are off, outside Tauri, or when
+ *  notification permission isn't granted. Swallows every error — a toast
+ *  failure must never throw back into the recording path that fired it.
+ *  Fire-and-forget: callers `void`-call this after a successful
  *  `recordNotification` (i.e. only on `added: true`), so the existing
  *  per-`${chainIdHex}:${txHash}` dedupe also dedupes the toast. */
 export async function toastTerminalNotification(
   record: NotificationRecord,
 ): Promise<void> {
   try {
-    // Notifications-system gate (unchanged relationship — the experimental flag
-    // still gates the notifications surface as a whole).
-    if (!readExperimentalEnabled()) return;
     // User-facing master switch for OS toasts.
     if (!readNotificationsEnabled()) return;
     // Hold toasts that resolve while the wallet is locked when the user opted

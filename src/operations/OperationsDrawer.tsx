@@ -20,7 +20,6 @@ import {
 } from "../sdk/keychain";
 import { VaultCallError, isWrongPasswordFailure } from "../sdk/vault";
 import { captureAddressOnUnlock } from "../sdk/vaultCatalog";
-import { readExperimentalEnabled } from "../sdk/feature-flags";
 import { recordOperationFailure } from "../sdk/notifications-record";
 import { trackOperationTx } from "../sdk/reconcile";
 import { useAutoLock } from "../sdk/auto-lock";
@@ -232,7 +231,7 @@ export function OperationsDrawer({ descriptor, onClose }: Props) {
       // state (recording "confirmed" on an on-chain observation, "failed" on a
       // reverted receipt) even after this drawer closes. The Done pane shows
       // the broadcast immediately; the notification comes from the reconciler.
-      if (descriptor.notify && resultTxHash && readExperimentalEnabled()) {
+      if (descriptor.notify && resultTxHash) {
         void trackOperationTx(descriptor.notify, resultTxHash, r.nonce);
       }
     } catch (cause) {
@@ -242,7 +241,7 @@ export function OperationsDrawer({ descriptor, onClose }: Props) {
       // Terminal transition: the node / precompile / SDK rejected the
       // submission — a genuine failure, recorded immediately (when a canonical
       // hash exists to key it on).
-      if (descriptor.notify && readExperimentalEnabled()) {
+      if (descriptor.notify) {
         void recordOperationFailure(descriptor.notify, resultTxHash);
       }
     } finally {

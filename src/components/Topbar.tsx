@@ -36,7 +36,6 @@ import type { Route } from "./types";
 interface Props {
   route: Route;
   setRoute: (r: Route) => void;
-  experimentalEnabled: boolean;
 }
 
 const TITLES: Record<Route, string> = {
@@ -67,7 +66,7 @@ const TITLES: Record<Route, string> = {
   about: "About",
 };
 
-export function Topbar({ route, setRoute, experimentalEnabled }: Props) {
+export function Topbar({ route, setRoute }: Props) {
   const wallet = useActiveWallet();
   const chain = useChainSnapshot(wallet.status === "ready" ? wallet.address : "");
   const dotClass =
@@ -85,9 +84,7 @@ export function Topbar({ route, setRoute, experimentalEnabled }: Props) {
     <header className="w-top">
       <div className="w-top__title">{TITLES[route]}</div>
       <div className="w-top__spacer" />
-      {experimentalEnabled ? (
-        <NotificationsBell active={route === "notifications"} onOpen={() => setRoute("notifications")} />
-      ) : null}
+      <NotificationsBell active={route === "notifications"} onOpen={() => setRoute("notifications")} />
       <PeerChip dotClass={dotClass} syncLabel={syncLabel} endpoint={chain.snapshot?.endpoint ?? null} />
       <div className="w-top__user">
           <div className="w-top__user__avatar" />

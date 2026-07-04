@@ -13,12 +13,10 @@ vi.mock("@tauri-apps/plugin-notification", () => ({
 }));
 
 // Scriptable feature-flag reads.
-let experimental = true;
 let notificationsEnabled = true;
 let notificationDetails = true;
 let notifyWhileLocked = true;
 vi.mock("../feature-flags", () => ({
-  readExperimentalEnabled: () => experimental,
   readNotificationsEnabled: () => notificationsEnabled,
   readNotificationDetails: () => notificationDetails,
   readNotifyWhileLocked: () => notifyWhileLocked,
@@ -66,7 +64,6 @@ beforeEach(() => {
   isPermissionGranted.mockResolvedValue(true);
   requestPermission.mockClear();
   requestPermission.mockResolvedValue("granted");
-  experimental = true;
   notificationsEnabled = true;
   notificationDetails = true;
   notifyWhileLocked = true;
@@ -104,8 +101,8 @@ describe("toastTerminalNotification", () => {
     expect(sendNotification).not.toHaveBeenCalled();
   });
 
-  it("is a no-op (NO toast, NO permission prompt) when the flag is off", async () => {
-    experimental = false;
+  it("is a no-op (NO toast, NO permission prompt) when system notifications are off", async () => {
+    notificationsEnabled = false;
     await toastTerminalNotification(rec());
     expect(isPermissionGranted).not.toHaveBeenCalled();
     expect(requestPermission).not.toHaveBeenCalled();
@@ -122,13 +119,6 @@ describe("toastTerminalNotification", () => {
   it("swallows errors — never throws back into the caller", async () => {
     isPermissionGranted.mockRejectedValue(new Error("boom"));
     await expect(toastTerminalNotification(rec())).resolves.toBeUndefined();
-    expect(sendNotification).not.toHaveBeenCalled();
-  });
-
-  it("does NOT send when system notifications are off", async () => {
-    notificationsEnabled = false;
-    await toastTerminalNotification(rec());
-    expect(isPermissionGranted).not.toHaveBeenCalled();
     expect(sendNotification).not.toHaveBeenCalled();
   });
 

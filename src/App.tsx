@@ -194,7 +194,7 @@ export function App() {
 
   useEffect(() => {
     writeExperimentalEnabled(experimentalEnabled);
-    if (!experimentalEnabled && (route === "agents" || route === "ai-trade" || route === "notifications")) {
+    if (!experimentalEnabled && (route === "agents" || route === "ai-trade")) {
       setRoute("home");
     }
   }, [experimentalEnabled, route]);
@@ -250,10 +250,10 @@ export function App() {
           steleEnabled={steleEnabled}
           experimentalEnabled={experimentalEnabled}
         />
-        <Topbar route={route} setRoute={setRoute} experimentalEnabled={experimentalEnabled} />
+        <Topbar route={route} setRoute={setRoute} />
         <main className="w-main">
           {route === "home" ? <Home goto={setRoute} /> : null}
-          {route === "activity" ? <Activity experimentalEnabled={experimentalEnabled} /> : null}
+          {route === "activity" ? <Activity /> : null}
           {route === "wallets" ? <Wallets /> : null}
           {route === "tokens" ? <Tokens goto={setRoute} /> : null}
           {route === "token-detail" ? <TokenDetail goto={setRoute} /> : null}
@@ -274,7 +274,7 @@ export function App() {
           {route === "stele" && steleEnabled ? <Stele /> : null}
           {route === "inbox" && steleEnabled ? <Inbox /> : null}
           {route === "provider" && steleEnabled ? <Provider /> : null}
-          {route === "notifications" && experimentalEnabled ? <Notifications /> : null}
+          {route === "notifications" ? <Notifications /> : null}
           {route === "about" ? (
             <About
               goto={setRoute}
@@ -290,7 +290,7 @@ export function App() {
           {route === "reset" ? settingsPage("reset") : null}
         </main>
         {steleEnabled ? <ApprovalOverlay /> : null}
-        {experimentalEnabled ? <PendingTxReconciler /> : null}
+        <PendingTxReconciler />
         {pendingUpdate ? (
           <UpdateBanner
             update={pendingUpdate}
