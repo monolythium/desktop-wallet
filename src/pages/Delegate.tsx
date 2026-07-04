@@ -60,6 +60,7 @@ import {
   fetchClusterDiversities,
   preflightAutovotePlan,
   submitAutovotePlan,
+  type AutovoteAllocation,
   type AutovoteMode,
   type AutovotePlan,
 } from "../sdk/autovote";
@@ -68,6 +69,7 @@ import {
   type LiveDelegationStatus,
 } from "../sdk/live";
 import {
+  bindingPerClusterCapBps,
   delegateCapWarning,
   normalizeAggregateCapBps,
   preflightDelegationVerdict,
@@ -151,6 +153,9 @@ export function Delegate({ experimentalEnabled }: DelegateProps = {}) {
   const [autovotePlan, setAutovotePlan] = useState<AutovotePlan | null>(null);
   const [autovoteDetailsOpen, setAutovoteDetailsOpen] = useState(false);
   const [autovoteProgress, setAutovoteProgress] = useState<{ done: number; total: number } | null>(null);
+  // Custom mode: manual per-cluster weight inputs (bps), keyed by clusterId.
+  const [customOpen, setCustomOpen] = useState(false);
+  const [customBps, setCustomBps] = useState<Map<number, string>>(new Map());
 
   const refresh = async () => {
     if (!walletAddress) {
@@ -581,6 +586,7 @@ export function Delegate({ experimentalEnabled }: DelegateProps = {}) {
   const previewAutovote = (mode: Exclude<AutovoteMode, "custom">) => {
     setAutovoteError(null);
     setAutovoteProgress(null);
+    setCustomOpen(false);
 
     const capBps = parseInt(autoCapBps, 10);
     if (!Number.isFinite(capBps) || capBps <= 0 || capBps > 10_000) {
@@ -609,13 +615,11 @@ export function Delegate({ experimentalEnabled }: DelegateProps = {}) {
     }
   };
 
-  // Step 2 — cap-preflight the WHOLE plan, then one review → one unlock → N
-  // sequential delegate() submits (the openUndelegateAll batch shape).
-  const reviewAutovote = () => {
-    const plan = autovotePlan;
-    const mode = autovoteMode;
-    if (!plan || !mode || plan.allocations.length === 0) return;
-
+  // Shared cap-preflight + one review → one unlock → N sequential delegate()
+  // submits (the openUndelegateAll batch shape). Used by every autovote mode
+  // incl. Custom, so the cap machinery + batch pattern are never forked.
+  const submitAutovoteBatch = (plan: AutovotePlan, label: string, isMaxYield: boolean) => {
+    if (plan.allocations.length === 0) return;
     // Pre-sign cap guard across every allocation (per-cluster + 100% total),
     // reusing the same preflight the per-row Delegate/Redelegate flows use.
     const existing = new Map(delegationRows.map((r) => [r.cluster, r.weightBps]));
@@ -631,17 +635,16 @@ export function Delegate({ experimentalEnabled }: DelegateProps = {}) {
           ? `${clusterName(verdict.clusterId)}: ${verdict.message}`
           : verdict.message ?? "This plan would exceed a delegation cap.",
       );
-      return;
+      return false;
     }
 
-    const meta = autovoteModeMeta(mode);
     ops.open({
-      title: `Autovote · ${meta.label}`,
+      title: `Autovote · ${label}`,
       subtitle: `Spread ${(plan.totalWeightBps / 100).toFixed(2)}% of balance across ${plan.allocations.length} cluster${plan.allocations.length === 1 ? "" : "s"} — non-custodial`,
       auth: "keychain",
       diff: [
         { k: "From", v: selfBech32m },
-        { k: "Mode", v: meta.label },
+        { k: "Mode", v: label },
         { k: "Clusters", v: String(plan.allocations.length) },
         { k: "Total weight", v: `${(plan.totalWeightBps / 100).toFixed(2)}% of balance` },
         ...plan.allocations.map((a) => ({
@@ -654,7 +657,7 @@ export function Delegate({ experimentalEnabled }: DelegateProps = {}) {
         {
           text: `Submits ${plan.allocations.length} sequential delegate(uint32 clusterId, uint16 weightBps) calls via @monolythium/core-sdk — one review, one unlock.`,
         },
-        ...(mode === "maxYield"
+        ...(isMaxYield
           ? [
               {
                 text: "Max Yield ranks by the real per-cluster APR (lyth_clusterApr); when APR is flat/0 it spreads evenly. Past yield is not a guaranteed return.",
@@ -679,7 +682,7 @@ export function Delegate({ experimentalEnabled }: DelegateProps = {}) {
             setAutovoteProgress({ done, total }),
           );
           return {
-            headline: `Autovote ${meta.label} · ${result.txHashes.length} delegation${result.txHashes.length === 1 ? "" : "s"} submitted`,
+            headline: `Autovote ${label} · ${result.txHashes.length} delegation${result.txHashes.length === 1 ? "" : "s"} submitted`,
             detail: result.txHashes.join(", "),
             txHash: result.txHashes[result.txHashes.length - 1],
           };
@@ -688,6 +691,74 @@ export function Delegate({ experimentalEnabled }: DelegateProps = {}) {
         }
       },
     });
+    return true;
+  };
+
+  // Step 2 (computed modes) — cap-preflight + single-batch review.
+  const reviewAutovote = () => {
+    const plan = autovotePlan;
+    const mode = autovoteMode;
+    if (!plan || !mode || plan.allocations.length === 0) return;
+    submitAutovoteBatch(plan, autovoteModeMeta(mode).label, mode === "maxYield");
+  };
+
+  // Custom mode — manual per-cluster allocations → the SAME cap guard + batch.
+  const customAllocationsDraft = (): AutovoteAllocation[] => {
+    const out: AutovoteAllocation[] = [];
+    for (const [clusterId, raw] of customBps.entries()) {
+      const bps = parseInt(raw, 10);
+      if (Number.isFinite(bps) && bps > 0) out.push({ clusterId, weightBps: bps });
+    }
+    return out;
+  };
+  const customTotalBps = customAllocationsDraft().reduce((s, a) => s + a.weightBps, 0);
+  const customBudgetBps = (() => {
+    const b = parseInt(autoCapBps, 10);
+    return Number.isFinite(b) && b > 0 ? Math.min(b, 10_000) : 10_000;
+  })();
+  // Out-of-policy the user is warned about BEFORE review: over the budget, or any
+  // single cluster over the binding per-cluster cap.
+  const customBindingCap = bindingPerClusterCapBps(aggregateCapBps);
+  const customOutOfPolicy =
+    customTotalBps > customBudgetBps ||
+    customAllocationsDraft().some((a) => a.weightBps > customBindingCap);
+
+  const setCustomClusterBps = (clusterId: number, value: string) => {
+    setAutovoteError(null);
+    setCustomBps((prev) => {
+      const next = new Map(prev);
+      if (value.trim() === "") next.delete(clusterId);
+      else next.set(clusterId, value);
+      return next;
+    });
+  };
+
+  const reviewCustomAutovote = () => {
+    setAutovoteError(null);
+    setAutovoteProgress(null);
+    const allocations = customAllocationsDraft();
+    if (allocations.length === 0) {
+      setAutovoteError("Enter a weight (bps) for at least one cluster.");
+      return;
+    }
+    for (const a of allocations) {
+      if (a.weightBps > 10_000) {
+        setAutovoteError(`${clusterName(a.clusterId)}: weight must be 1-10000 bps.`);
+        return;
+      }
+    }
+    // buildAutovotePlan(custom) passes the allocations through and warns if the
+    // total exceeds the budget; the preflight (inside submitAutovoteBatch) is
+    // the hard per-cluster/total cap enforcement.
+    const plan = buildAutovotePlan({
+      mode: "custom",
+      clusters: directory,
+      diversities,
+      aprBpsByCluster: aprBpsMap,
+      capBps: customBudgetBps,
+      customAllocations: allocations,
+    });
+    submitAutovoteBatch(plan, "Custom", false);
   };
 
   return (
@@ -1227,17 +1298,87 @@ export function Delegate({ experimentalEnabled }: DelegateProps = {}) {
               </button>
             ))}
             <button
-              className="btn btn--sm btn--ghost"
-              title="Use the per-cluster Delegate forms below for a manual allocation"
-              disabled
+              className={`btn btn--sm${customOpen ? " btn--primary" : " btn--ghost"}`}
+              disabled={autovoteBusy || directory.length === 0}
+              onClick={() => {
+                setAutovoteError(null);
+                setAutovoteProgress(null);
+                setAutovoteMode(null);
+                setAutovotePlan(null);
+                setCustomOpen((v) => !v);
+              }}
             >
-              Custom (use rows below)
+              Custom
             </button>
           </div>
 
           {autovoteMode && (
             <div className="row-help" style={{ marginTop: 8, lineHeight: 1.5 }}>
               {autovoteModeMeta(autovoteMode).description}
+            </div>
+          )}
+
+          {customOpen && (
+            <div
+              style={{
+                marginTop: 12,
+                padding: 12,
+                borderRadius: 8,
+                background: "var(--surface-2, rgba(255,255,255,0.03))",
+                border: "1px solid var(--border, rgba(255,255,255,0.08))",
+              }}
+            >
+              <div className="row-help" style={{ marginBottom: 8, lineHeight: 1.5 }}>
+                {autovoteModeMeta("custom").description}
+              </div>
+              <div style={{ display: "grid", gap: 6 }}>
+                {directory.map((c) => (
+                  <div key={c.clusterId} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ flex: 1, fontSize: 12.5 }}>{clusterName(c.clusterId)}</span>
+                    <input
+                      type="number"
+                      inputMode="numeric"
+                      min={0}
+                      max={10000}
+                      placeholder="bps"
+                      value={customBps.get(c.clusterId) ?? ""}
+                      onChange={(e) => setCustomClusterBps(c.clusterId, e.target.value)}
+                      style={{ ...autovoteInputStyle, width: 110 }}
+                    />
+                    <span className="row-help mono" style={{ width: 56, textAlign: "right" }}>
+                      {((parseInt(customBps.get(c.clusterId) ?? "0", 10) || 0) / 100).toFixed(2)}%
+                    </span>
+                  </div>
+                ))}
+              </div>
+              <div
+                className="row-help mono"
+                style={{ marginTop: 8, color: customOutOfPolicy ? "var(--warn)" : undefined }}
+              >
+                Total: {customTotalBps} bps ({(customTotalBps / 100).toFixed(2)}%) · budget{" "}
+                {customBudgetBps} bps · per-cluster cap {(customBindingCap / 100).toFixed(0)}%
+              </div>
+              {customOutOfPolicy && (
+                <div className="row-help" style={{ color: "var(--warn)", marginTop: 6, lineHeight: 1.5 }}>
+                  Out-of-policy: the total exceeds your budget, or a cluster exceeds the{" "}
+                  {(customBindingCap / 100).toFixed(0)}% per-cluster cap. Review will block a cap
+                  violation before signing.
+                </div>
+              )}
+              <div style={{ marginTop: 12 }}>
+                <button
+                  className="btn btn--sm btn--primary"
+                  disabled={autovoteBusy || customTotalBps === 0}
+                  onClick={reviewCustomAutovote}
+                >
+                  Review &amp; submit
+                </button>
+                {autovoteProgress && (
+                  <span className="row-help mono" style={{ marginLeft: 10 }}>
+                    {autovoteProgress.done} / {autovoteProgress.total} submitted
+                  </span>
+                )}
+              </div>
             </div>
           )}
 
