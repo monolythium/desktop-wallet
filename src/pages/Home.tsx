@@ -6,7 +6,7 @@
 // HONESTY:
 //  - "Available" is the live native balance (loadLiveTokenStatus → eth_getBalance).
 //  - "Delegated" is total delegated *weight* (basis points) — the SDK exposes
-//    no per-delegation principal LYTH, so we never print a fabricated LYTH stake.
+//    no per-delegation principal LYTH, so we never print a fabricated LYTH figure.
 //  - "Earned" comes from lyth_pendingRewards (real lythoshi), rendered as LYTH.
 //  - Endpoint / chain-height / probe telemetry is dropped from the hero (the
 //    topbar already shows live sync + the peer switcher).
@@ -137,7 +137,7 @@ export function Home({ goto }: Props) {
         <div className="w-hero__meta">
           <span>Available <b>{availableLyth} LYTH</b></span>
           {/* Delegated is delegated *weight* (bps) — no principal LYTH read
-              exists, so we never render a fabricated LYTH stake here. */}
+              exists, so we never render a fabricated LYTH figure here. */}
           <span>Delegated <b>{summary.totalWeightLabel}</b> weight</span>
         </div>
 

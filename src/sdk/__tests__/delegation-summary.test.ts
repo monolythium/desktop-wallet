@@ -44,7 +44,7 @@ describe("deriveDelegationSummary", () => {
     expect(s.delegationsFailed).toBe(false);
   });
 
-  it("renders an em-dash for staked weight when not delegating", () => {
+  it("renders an em-dash for delegated weight when not delegating", () => {
     const s = deriveDelegationSummary(
       status({
         delegations: { ok: true, value: { wallet: "mono1test", rows: [], totalBps: 0, block: null } },

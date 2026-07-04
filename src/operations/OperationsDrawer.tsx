@@ -6,7 +6,7 @@
 //        \-> error  (from any stage)
 //
 // Every chain-touching or keychain-touching action routes through this surface.
-// Reuse the same drawer for swap, stake, send, sign, and any future write path.
+// Reuse the same drawer for swap, delegate, send, sign, and any future write path.
 //
 // The drawer does NOT do the work itself — it owns UI state and calls
 // `descriptor.execute()` once auth completes. That keeps the chain logic

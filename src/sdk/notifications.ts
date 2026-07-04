@@ -215,9 +215,9 @@ export const NOTIFICATION_LABELS: Record<
 > = {
   send: { confirmed: "Sent", failed: "Send failed" },
   receive: { confirmed: "Received", failed: "Received" },
-  delegate: { confirmed: "Staked", failed: "Stake failed" },
-  undelegate: { confirmed: "Unstaked", failed: "Unstake failed" },
-  redelegate: { confirmed: "Restaked", failed: "Restake failed" },
+  delegate: { confirmed: "Delegated", failed: "Delegate failed" },
+  undelegate: { confirmed: "Undelegated", failed: "Undelegate failed" },
+  redelegate: { confirmed: "Redelegated", failed: "Redelegate failed" },
   claim: { confirmed: "Rewards claimed", failed: "Claim failed" },
   "emergency-key": {
     confirmed: "Backup key registered",
@@ -292,7 +292,7 @@ function shortAddress(s: string, head = 10, tail = 6): string {
  *  toast and the in-app record always read identically. */
 /** Generic, content-free title shown on the OS toast when "Show transaction
  *  details" is off — so a glanceable toast leaks neither the amount/address NOR
- *  the action (Sent / Staked / …) on a shared screen. The in-app record always
+ *  the action (Sent / Delegated / …) on a shared screen. The in-app record always
  *  keeps the full friendly title + detail; only the OS toast is redacted. */
 const REDACTED_TOAST_TITLE = "Monolythium Wallet";
 
@@ -335,9 +335,9 @@ export function notificationToast(
 export const PENDING_OP_LABELS: Record<TxOpKind, string> = {
   send: "Sending…",
   receive: "Receiving…",
-  delegate: "Staking…",
-  undelegate: "Unstaking…",
-  redelegate: "Restaking…",
+  delegate: "Delegating…",
+  undelegate: "Undelegating…",
+  redelegate: "Redelegating…",
   claim: "Claiming rewards…",
   "emergency-key": "Registering backup key…",
   "agent-policy": "Updating agent policy…",
