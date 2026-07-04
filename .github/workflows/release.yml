@@ -136,12 +136,14 @@ jobs:
 
   release:
     needs: build
-    # `always()` lets the release land even when one matrix entry
-    # (currently Windows, blocked on Azure Trusted Signing credential
-    # config) fails. download-artifact picks up whatever the successful
-    # matrix builds uploaded; the upload step has
-    # fail_on_unmatched_files=false so a missing platform is non-fatal.
-    if: ${{ always() && (startsWith(github.ref, 'refs/tags/') || github.event.inputs.tag != '') }}
+    # `!cancelled()` (not `always()`) lets the release land when SOME matrix
+    # entries succeed and one fails (e.g. Windows, blocked on Azure Trusted
+    # Signing credential config) — the upload step has
+    # fail_on_unmatched_files=false so a missing platform is non-fatal — while
+    # skipping a cancelled run. A FULLY failed matrix produces no artifacts; the
+    # guard step below then fails the job, so a release is never cut with nothing
+    # in it.
+    if: ${{ !cancelled() && (startsWith(github.ref, 'refs/tags/') || github.event.inputs.tag != '') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -153,6 +155,18 @@ jobs:
 
       - name: List artifacts
         run: ls -la ./artifacts
+
+      # Refuse to cut a release from a fully failed matrix: if every build failed
+      # there are no artifacts, and publishing would create an empty draft.
+      - name: Require at least one artifact
+        run: |
+          set -euo pipefail
+          count=$(find ./artifacts -type f | wc -l)
+          echo "Collected ${count} artifact file(s)."
+          if [ "${count}" -eq 0 ]; then
+            echo "::error::No build artifacts were produced — every matrix build failed. Refusing to cut a release." >&2
+            exit 1
+          fi
 
       # latest.json is the manifest tauri-plugin-updater fetches from
       # the GitHub Releases endpoint configured in tauri.conf.json. It
