@@ -75,13 +75,7 @@ import {
   preflightDelegationVerdict,
 } from "../sdk/delegation-caps";
 
-interface DelegateProps {
-  /** Gate the experimental autovote planner (and the diversity reads that feed
-   *  it). */
-  experimentalEnabled?: boolean;
-}
-
-export function Delegate({ experimentalEnabled }: DelegateProps = {}) {
+export function Delegate() {
   const ops = useOperations();
   const wallet = useActiveWallet();
   const walletAddress = wallet.status === "ready" ? wallet.address : "";
@@ -210,15 +204,12 @@ export function Delegate({ experimentalEnabled }: DelegateProps = {}) {
         loadLiveClusterNames(dir.clusters.map((c) => c.clusterId))
           .then(setNames)
           .catch(() => setNames(new Map()));
-        // Fan out the per-cluster diversity reads; tolerant of per-cluster
-        // failures (a missing score just renders "—"). Only when the
-        // experimental surfaces are enabled — the autovote planner and the
-        // directory diversity column are the only consumers.
-        if (experimentalEnabled) {
-          fetchClusterDiversities(dir.clusters)
-            .then(setDiversities)
-            .catch(() => setDiversities(new Map()));
-        }
+        // Fan out the per-cluster diversity reads for the autovote planner
+        // (Diversity / Decentralization). Tolerant of per-cluster failures (a
+        // missing score just renders "—").
+        fetchClusterDiversities(dir.clusters)
+          .then(setDiversities)
+          .catch(() => setDiversities(new Map()));
       }
     } finally {
       setBusy(false);
@@ -1230,7 +1221,6 @@ export function Delegate({ experimentalEnabled }: DelegateProps = {}) {
             : null
         : null}
 
-      {experimentalEnabled ? (
       <div className="w-card">
         <div className="w-card__head">
           <h3>Autovote</h3>
@@ -1451,7 +1441,6 @@ export function Delegate({ experimentalEnabled }: DelegateProps = {}) {
           )}
         </div>
       </div>
-      ) : null}
 
       <div className="w-card">
         <div className="w-card__head">
