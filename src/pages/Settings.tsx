@@ -277,7 +277,7 @@ export function Settings({ developerModeEnabled, setDeveloperModeEnabled, steleE
             <div>
               <div className="row-label">Enable experimental v5 features</div>
               <div className="row-help">
-                Shows the Agents page (agent sub-accounts and spending policy), the per-route bridge risk panel, and the Stake autovote planner. These surfaces are in preview and off by default; turning this off hides them and leaves the wallet on the stable surface.
+                Shows the Agents page (agent sub-accounts and spending policy), the per-route bridge risk panel, and the Delegate autovote planner. These surfaces are in preview and off by default; turning this off hides them and leaves the wallet on the stable surface.
               </div>
             </div>
             <button

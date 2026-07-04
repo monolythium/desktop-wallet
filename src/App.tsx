@@ -33,7 +33,7 @@ import { Provider } from "./pages/Provider";
 import { Resources } from "./pages/Resources";
 import { RiscvContracts } from "./pages/RiscvContracts";
 import { Settings } from "./pages/Settings";
-import { Stake } from "./pages/Stake";
+import { Delegate } from "./pages/Delegate";
 import { Stele } from "./pages/Stele";
 import { TokenDetail } from "./pages/TokenDetail";
 import { Tokens } from "./pages/Tokens";
@@ -65,7 +65,7 @@ import "./styles/wallet.css";
 // Loaded last so the html[data-theme="…"] palette overrides win over the
 // native :root tokens (the default "monolythium" theme uses no attribute).
 import "./styles/themes.css";
-import { ALL_ROUTES, type Route } from "./components/types";
+import { resolveRoute, type Route } from "./components/types";
 
 const ROUTE_KEY = "wallet.route";
 
@@ -77,12 +77,13 @@ type BootState =
 
 function readRoute(): Route {
   try {
-    const v = localStorage.getItem(ROUTE_KEY);
-    if (v && (ALL_ROUTES as string[]).includes(v)) return v as Route;
+    // resolveRoute degrades an unknown/stale route (e.g. a persisted "stake"
+    // from before the delegate rename) to "home" rather than throwing.
+    return resolveRoute(localStorage.getItem(ROUTE_KEY));
   } catch {
     // localStorage unavailable — fall through.
+    return "home";
   }
-  return "home";
 }
 
 /**
@@ -256,7 +257,7 @@ export function App() {
           {route === "wallets" ? <Wallets /> : null}
           {route === "tokens" ? <Tokens goto={setRoute} /> : null}
           {route === "token-detail" ? <TokenDetail goto={setRoute} /> : null}
-          {route === "stake" ? <Stake experimentalEnabled={experimentalEnabled} /> : null}
+          {route === "delegate" ? <Delegate experimentalEnabled={experimentalEnabled} /> : null}
           {route === "bridges" ? <Bridges experimentalEnabled={experimentalEnabled} /> : null}
           {route === "agents" && experimentalEnabled ? <Agents /> : null}
           {route === "contacts" ? <Contacts /> : null}

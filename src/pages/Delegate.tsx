@@ -1,4 +1,4 @@
-// Stake page — DVT cluster delegation.
+// Delegate page — DVT cluster delegation.
 //
 // Top card: live read-only RPC snapshot (clusters / active / healthy /
 // delegations) — unchanged from the scaffold.
@@ -52,12 +52,12 @@ import {
   preflightDelegationVerdict,
 } from "../sdk/delegation-caps";
 
-interface StakeProps {
+interface DelegateProps {
   /** Gate the autovote planner + per-cluster diversity column (experimental). */
   experimentalEnabled?: boolean;
 }
 
-export function Stake({ experimentalEnabled }: StakeProps = {}) {
+export function Delegate({ experimentalEnabled }: DelegateProps = {}) {
   const ops = useOperations();
   const wallet = useActiveWallet();
   const walletAddress = wallet.status === "ready" ? wallet.address : "";
@@ -235,7 +235,7 @@ export function Stake({ experimentalEnabled }: StakeProps = {}) {
   const openUndelegate = (clusterId: number, weightBps: number) => {
     const weightLabel = `${(weightBps / 100).toFixed(2)}%`;
     ops.open({
-      title: `Unstake from cluster ${clusterId}`,
+      title: `Undelegate from cluster ${clusterId}`,
       subtitle: `Undelegate ${weightLabel} of wallet weight — instant, nothing was locked`,
       auth: "keychain",
       diff: [
@@ -267,7 +267,7 @@ export function Stake({ experimentalEnabled }: StakeProps = {}) {
         const calldata = buildUndelegateCalldata(clusterId);
         const result = await submitDelegationTx({ seed: ctx.vaultSeed, data: calldata });
         return {
-          headline: `Unstaked ${weightLabel} from cluster ${clusterId}`,
+          headline: `Undelegated ${weightLabel} from cluster ${clusterId}`,
           detail: result.txHash,
           txHash: result.txHash,
           nonce: result.nonce,
@@ -329,7 +329,7 @@ export function Stake({ experimentalEnabled }: StakeProps = {}) {
 
   const openClaim = (totalLyth: string) => {
     ops.open({
-      title: "Claim staking rewards",
+      title: "Claim delegation rewards",
       subtitle: `Settle and withdraw ${totalLyth} LYTH of pending delegation rewards`,
       auth: "keychain",
       diff: [
@@ -357,7 +357,7 @@ export function Stake({ experimentalEnabled }: StakeProps = {}) {
         const calldata = buildClaimRewardsCalldata();
         const result = await submitDelegationTx({ seed: ctx.vaultSeed, data: calldata });
         return {
-          headline: `Claimed ${totalLyth} LYTH of staking rewards`,
+          headline: `Claimed ${totalLyth} LYTH of delegation rewards`,
           detail: result.txHash,
           txHash: result.txHash,
           nonce: result.nonce,
@@ -370,8 +370,8 @@ export function Stake({ experimentalEnabled }: StakeProps = {}) {
     ops.open({
       title: next ? "Enable auto-compound" : "Disable auto-compound",
       subtitle: next
-        ? "Restake settled rewards automatically instead of leaving them claimable"
-        : "Leave settled rewards claimable instead of restaking them",
+        ? "Re-delegate settled rewards automatically instead of leaving them claimable"
+        : "Leave settled rewards claimable instead of re-delegating them",
       auth: "keychain",
       diff: [
         { k: "From", v: selfBech32m },
@@ -492,7 +492,7 @@ export function Stake({ experimentalEnabled }: StakeProps = {}) {
   return (
     <div className="w-page">
       <div className="w-page__header">
-        <h1>Stake</h1>
+        <h1>Delegate</h1>
         <div className="sub">
           DVT clusters · 100 clusters · 7 or 10 operators per cluster.
         </div>
@@ -500,7 +500,7 @@ export function Stake({ experimentalEnabled }: StakeProps = {}) {
 
       <div className="w-card">
         <div className="w-card__head">
-          <h3>Live staking reads</h3>
+          <h3>Live delegation reads</h3>
           <span className="w-live-pill">live</span>
           <span className="w-card__head__spacer" />
           <button className="btn btn--sm" onClick={() => void refresh()} disabled={busy}>
@@ -585,7 +585,7 @@ export function Stake({ experimentalEnabled }: StakeProps = {}) {
                           className="btn btn--sm"
                           onClick={() => openUndelegate(row.cluster, row.weightBps)}
                         >
-                          Unstake
+                          Undelegate
                         </button>
                       </div>
                     </div>

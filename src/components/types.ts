@@ -7,7 +7,7 @@ export type Route =
   | "wallets"
   | "tokens"
   | "token-detail"
-  | "stake"
+  | "delegate"
   | "bridges"
   | "agents"
   | "contacts"
@@ -34,7 +34,7 @@ export const ALL_ROUTES: Route[] = [
   "wallets",
   "tokens",
   "token-detail",
-  "stake",
+  "delegate",
   "bridges",
   "agents",
   "contacts",
@@ -55,3 +55,11 @@ export const ALL_ROUTES: Route[] = [
   "why-monolythium",
   "about",
 ];
+
+/** Resolve a persisted/raw route string to a valid `Route`, falling back to
+ *  "home" for an unknown, absent, or since-renamed value (e.g. a stale
+ *  `"stake"` after the delegate rename). Never throws — the guard degrades a
+ *  missing route to the default rather than erroring. Pure. */
+export function resolveRoute(raw: string | null | undefined): Route {
+  return raw && (ALL_ROUTES as string[]).includes(raw) ? (raw as Route) : "home";
+}

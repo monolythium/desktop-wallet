@@ -26,7 +26,7 @@ export function writeSteleEnabled(enabled: boolean): void {
 //
 // Single switch for the not-yet-stable wallet surfaces: the Agents
 // (agent commerce / spending-policy sub-accounts) page, the bridge
-// per-route risk panel, and the Stake autovote planner. When off, every
+// per-route risk panel, and the Delegate autovote planner. When off, every
 // one of those entry points is hidden / not mounted and the wallet's
 // visible behavior matches the pre-preview surface. Absence of the key
 // reads as off, so the default for every install is off.
