@@ -62,7 +62,7 @@ export interface LiveClusterRow {
   active: boolean;
 }
 
-export interface LiveStakeStatus {
+export interface LiveDelegationStatus {
   endpoint: string;
   clusters: RpcOutcome<LiveClusterRow[]>;
   activeClusters: RpcOutcome<LiveClusterRow[]>;
@@ -197,7 +197,7 @@ export async function loadLiveNetworkStatus(): Promise<LiveNetworkStatus> {
   };
 }
 
-export async function loadLiveStakeStatus(wallet: string): Promise<LiveStakeStatus> {
+export async function loadLiveDelegationStatus(wallet: string): Promise<LiveDelegationStatus> {
   const client = getProvider().rpcClient;
   const typedWallet = requireTypedUserAddress(wallet, "wallet");
   const clusterPage = await capture(() => client.lythClusterDirectory(0, 100));

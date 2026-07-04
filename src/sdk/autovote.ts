@@ -4,8 +4,8 @@
 // (lyth_getClusterDiversity → ClusterDiversityView) to turn one of four
 // delegator intents into a concrete {clusterId, weightBps} allocation plan.
 // The plan is then submitted as N sequential delegate calls reusing the
-// staking seam (buildDelegateCalldata + submitStakingTx) — there is no new
-// write path; autovote is a planner on top of delegate.
+// delegation seam (buildDelegateCalldata + submitDelegationTx) — there is no
+// new write path; autovote is a planner on top of delegate.
 //
 // NON-CUSTODIAL: the plan distributes a WEIGHT BUDGET (basis points of the
 // wallet's balance) across clusters. No principal is escrowed — each delegate
@@ -17,7 +17,7 @@ import type {
   ClusterDiversityView,
 } from "@monolythium/core-sdk";
 import { getProvider } from "./client";
-import { buildDelegateCalldata, submitStakingTx } from "./staking";
+import { buildDelegateCalldata, submitDelegationTx } from "./delegation";
 
 export type AutovoteMode =
   | "maxYield"
@@ -202,7 +202,7 @@ export interface SubmitAutovotePlanResult {
 
 /**
  * Submit an autovote plan as N sequential delegate calls. Reuses the
- * staking seam verbatim — NON-CUSTODIAL, each delegate carries no value
+ * delegation seam verbatim — NON-CUSTODIAL, each delegate carries no value
  * (only weightBps). Sequential (not parallel) so each call lands on the
  * previous nonce.
  */
@@ -213,7 +213,7 @@ export async function submitAutovotePlan(
   const txHashes: string[] = [];
   for (const a of plan.allocations) {
     const calldata = buildDelegateCalldata(a.clusterId, a.weightBps);
-    const result = await submitStakingTx({ seed, data: calldata });
+    const result = await submitDelegationTx({ seed, data: calldata });
     txHashes.push(result.txHash);
   }
   return { txHashes };

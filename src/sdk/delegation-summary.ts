@@ -1,12 +1,12 @@
-// Home staking-summary adapter.
+// Home delegation-summary adapter.
 //
-// Folds the live staking reads (delegations + cluster directory + pending
-// rewards) into the small set of facts the Home staking-summary card renders.
+// Folds the live delegation reads (delegations + cluster directory + pending
+// rewards) into the small set of facts the Home delegation-summary card renders.
 // Pure and side-effect-free so it can be unit tested directly.
 //
 // HONEST ABSENCE:
 //  - `lyth_getDelegations` exposes per-cluster *weight* (basis points) only —
-//    there is NO per-delegation principal LYTH read in the SDK. So "Staked" is
+//    there is NO per-delegation principal LYTH read in the SDK. So "Delegated" is
 //    reported as total delegated weight, not a fabricated LYTH figure.
 //  - There is no per-wallet "slot cap" read (`lyth_getDelegationCap` returns a
 //    per-cluster *weight* cap, not a max number of delegations). So the slots
@@ -14,9 +14,9 @@
 //    a fabricated allowance.
 //  - There is no APR/yield oracle, so APR is rendered as an em-dash upstream.
 
-import type { LiveStakeStatus } from "./live";
+import type { LiveDelegationStatus } from "./live";
 
-export interface StakeSummaryFacts {
+export interface DelegationSummaryFacts {
   /** Number of clusters this wallet currently delegates to. */
   delegationCount: number;
   /** Sum of delegated weight across the wallet, in basis points. */
@@ -38,11 +38,11 @@ export function bpsToPercentLabel(bps: number): string {
 }
 
 /**
- * Derive the Home staking-summary facts from a live stake status. Tolerant of
- * a null status (pre-load) and of failed sub-reads — never throws, never
- * fabricates a number.
+ * Derive the Home delegation-summary facts from a live delegation status.
+ * Tolerant of a null status (pre-load) and of failed sub-reads — never throws,
+ * never fabricates a number.
  */
-export function deriveStakeSummary(status: LiveStakeStatus | null): StakeSummaryFacts {
+export function deriveDelegationSummary(status: LiveDelegationStatus | null): DelegationSummaryFacts {
   const delegations = status?.delegations.ok ? status.delegations.value : null;
   const delegationsFailed = status?.delegations.ok === false;
   const delegationsError = delegationsFailed ? status?.delegations.error ?? "unavailable" : null;

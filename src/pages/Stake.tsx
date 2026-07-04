@@ -27,8 +27,8 @@ import {
   fetchRedemptionQueue,
   formatRewardLyth,
   hasClaimableRewards,
-  submitStakingTx,
-} from "../sdk/staking";
+  submitDelegationTx,
+} from "../sdk/delegation";
 import {
   capture,
   loadLiveClusterApys,
@@ -43,14 +43,14 @@ import {
 } from "../sdk/autovote";
 import {
   formatOutcome,
-  loadLiveStakeStatus,
-  type LiveStakeStatus,
+  loadLiveDelegationStatus,
+  type LiveDelegationStatus,
 } from "../sdk/live";
 import {
   delegateCapWarning,
   normalizeAggregateCapBps,
   preflightDelegationVerdict,
-} from "../sdk/staking-caps";
+} from "../sdk/delegation-caps";
 
 interface StakeProps {
   /** Gate the autovote planner + per-cluster diversity column (experimental). */
@@ -61,7 +61,7 @@ export function Stake({ experimentalEnabled }: StakeProps = {}) {
   const ops = useOperations();
   const wallet = useActiveWallet();
   const walletAddress = wallet.status === "ready" ? wallet.address : "";
-  const [status, setStatus] = useState<LiveStakeStatus | null>(null);
+  const [status, setStatus] = useState<LiveDelegationStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const [directory, setDirectory] = useState<ClusterDirectoryEntryResponse[]>([]);
   const [directoryError, setDirectoryError] = useState<string | null>(null);
@@ -116,7 +116,7 @@ export function Stake({ experimentalEnabled }: StakeProps = {}) {
     setBusy(true);
     try {
       const [s, dir, rew, red] = await Promise.all([
-        loadLiveStakeStatus(walletAddress),
+        loadLiveDelegationStatus(walletAddress),
         fetchClusterDirectory(1, 20).catch((cause: unknown) => {
           setDirectoryError((cause as Error)?.message ?? "directory unavailable");
           return null;
@@ -216,7 +216,7 @@ export function Stake({ experimentalEnabled }: StakeProps = {}) {
           throw new Error("vault seed unavailable after keychain authorization");
         }
         const calldata = buildDelegateCalldata(clusterId, weightBps);
-        const result = await submitStakingTx({
+        const result = await submitDelegationTx({
           seed: ctx.vaultSeed,
           data: calldata,
         });
@@ -265,7 +265,7 @@ export function Stake({ experimentalEnabled }: StakeProps = {}) {
           throw new Error("vault seed unavailable after keychain authorization");
         }
         const calldata = buildUndelegateCalldata(clusterId);
-        const result = await submitStakingTx({ seed: ctx.vaultSeed, data: calldata });
+        const result = await submitDelegationTx({ seed: ctx.vaultSeed, data: calldata });
         return {
           headline: `Unstaked ${weightLabel} from cluster ${clusterId}`,
           detail: result.txHash,
@@ -314,7 +314,7 @@ export function Stake({ experimentalEnabled }: StakeProps = {}) {
           throw new Error("vault seed unavailable after keychain authorization");
         }
         const calldata = buildRedelegateCalldata(fromCluster, toCluster, weightBps);
-        const result = await submitStakingTx({ seed: ctx.vaultSeed, data: calldata });
+        const result = await submitDelegationTx({ seed: ctx.vaultSeed, data: calldata });
         return {
           headline: `Redelegated ${weightLabel} from cluster ${fromCluster} to ${toCluster}`,
           detail: result.txHash,
@@ -355,7 +355,7 @@ export function Stake({ experimentalEnabled }: StakeProps = {}) {
           throw new Error("vault seed unavailable after keychain authorization");
         }
         const calldata = buildClaimRewardsCalldata();
-        const result = await submitStakingTx({ seed: ctx.vaultSeed, data: calldata });
+        const result = await submitDelegationTx({ seed: ctx.vaultSeed, data: calldata });
         return {
           headline: `Claimed ${totalLyth} LYTH of staking rewards`,
           detail: result.txHash,
@@ -398,7 +398,7 @@ export function Stake({ experimentalEnabled }: StakeProps = {}) {
           throw new Error("vault seed unavailable after keychain authorization");
         }
         const calldata = buildSetAutoCompoundCalldata(next);
-        const result = await submitStakingTx({ seed: ctx.vaultSeed, data: calldata });
+        const result = await submitDelegationTx({ seed: ctx.vaultSeed, data: calldata });
         return {
           headline: `Auto-compound ${next ? "enabled" : "disabled"}`,
           detail: result.txHash,

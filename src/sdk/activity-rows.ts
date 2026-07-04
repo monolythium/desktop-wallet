@@ -24,7 +24,7 @@ import {
 } from "./lyth-display";
 import type { NotificationRecord } from "./notifications";
 import type { PendingTx } from "./pending-tx";
-import { bpsToPercentLabel } from "./staking-summary";
+import { bpsToPercentLabel } from "./delegation-summary";
 import { txTypeLabelForActivity } from "./tx-type-label";
 
 /** Indexer kind → the `TxRow` icon/category bucket. Conservative: only the

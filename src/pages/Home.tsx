@@ -23,21 +23,21 @@ import { activityRowToTx } from "../sdk/activity-rows";
 import { liveTokenStatusToRows } from "../sdk/token-rows";
 import { formatLythDisplay, truncateDecimals } from "../sdk/lyth-display";
 import {
-  deriveStakeSummary,
-  type StakeSummaryFacts,
-} from "../sdk/staking-summary";
+  deriveDelegationSummary,
+  type DelegationSummaryFacts,
+} from "../sdk/delegation-summary";
 import { MONOSCAN_GET_LYTH_URL } from "../sdk/monoscan";
 import {
   fetchPendingRewards,
   formatRewardLyth,
-} from "../sdk/staking";
+} from "../sdk/delegation";
 import {
   capture,
   loadLiveAddressActivity,
-  loadLiveStakeStatus,
+  loadLiveDelegationStatus,
   loadLiveTokenStatus,
   type LiveAddressActivityRow,
-  type LiveStakeStatus,
+  type LiveDelegationStatus,
   type LiveTokenStatus,
   type RpcOutcome,
 } from "../sdk/live";
@@ -52,7 +52,7 @@ export function Home({ goto }: Props) {
   const walletAddress = wallet.status === "ready" ? wallet.address : "";
   const [liveTokens, setLiveTokens] = useState<LiveTokenStatus | null>(null);
   const [liveActivity, setLiveActivity] = useState<RpcOutcome<LiveAddressActivityRow[]> | null>(null);
-  const [stakeStatus, setStakeStatus] = useState<LiveStakeStatus | null>(null);
+  const [delegationStatus, setDelegationStatus] = useState<LiveDelegationStatus | null>(null);
   const [rewards, setRewards] = useState<RpcOutcome<PendingRewardsResponse> | null>(null);
   const [sendOpen, setSendOpen] = useState(false);
   const [receiveOpen, setReceiveOpen] = useState(false);
@@ -66,7 +66,7 @@ export function Home({ goto }: Props) {
     if (!walletAddress) {
       setLiveTokens(null);
       setLiveActivity(null);
-      setStakeStatus(null);
+      setDelegationStatus(null);
       setRewards(null);
       return;
     }
@@ -74,13 +74,13 @@ export function Home({ goto }: Props) {
     void Promise.all([
       loadLiveTokenStatus(walletAddress),
       loadLiveAddressActivity(walletAddress),
-      loadLiveStakeStatus(walletAddress),
+      loadLiveDelegationStatus(walletAddress),
       capture(() => fetchPendingRewards(walletAddress)),
-    ]).then(([tokens, activity, stake, rew]) => {
+    ]).then(([tokens, activity, delegation, rew]) => {
       if (cancelled) return;
       setLiveTokens(tokens);
       setLiveActivity(activity);
-      setStakeStatus(stake);
+      setDelegationStatus(delegation);
       setRewards(rew);
     });
     return () => {
@@ -103,7 +103,7 @@ export function Home({ goto }: Props) {
         : null;
   const availableLyth = formatLythDisplay(availableLythoshi, 2) ?? "—";
 
-  const summary: StakeSummaryFacts = deriveStakeSummary(stakeStatus);
+  const summary: DelegationSummaryFacts = deriveDelegationSummary(delegationStatus);
   // Earned is correctly divided to LYTH by formatRewardLyth, but at full 18-dp
   // precision; cap the on-screen value at 2 dp (truncated, trailing-zero trim)
   // to match the rest of the Home surface.
@@ -217,7 +217,7 @@ export function Home({ goto }: Props) {
               summary={summary}
               earnedLyth={earnedLyth}
               hasAddress={Boolean(walletAddress)}
-              loading={stakeStatus === null}
+              loading={delegationStatus === null}
               goto={goto}
             />
           </div>
@@ -271,7 +271,7 @@ function StakeSummaryCard({
   loading,
   goto,
 }: {
-  summary: StakeSummaryFacts;
+  summary: DelegationSummaryFacts;
   earnedLyth: string | null;
   hasAddress: boolean;
   loading: boolean;

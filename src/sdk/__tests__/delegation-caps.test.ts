@@ -5,7 +5,7 @@ import {
   delegateCapWarning,
   normalizeAggregateCapBps,
   preflightDelegationVerdict,
-} from "../staking-caps";
+} from "../delegation-caps";
 
 describe("normalizeAggregateCapBps", () => {
   it("maps the u32::MAX disabled sentinel + absent/non-finite to null (no fabricated cap)", () => {
