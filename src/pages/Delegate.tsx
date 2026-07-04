@@ -34,9 +34,13 @@ import {
 } from "../sdk/delegation";
 import {
   capture,
-  loadLiveClusterApys,
+  loadLiveClusterAprBpsMap,
+  loadLiveClusterDelegatorCount,
+  loadLiveClusterEntities,
   loadLiveClusterNames,
+  loadLiveClusterStatus,
   loadNativeBalanceLythoshi,
+  type LiveClusterOperatorStatus,
   type RpcOutcome,
 } from "../sdk/live";
 import { bpsToPercentLabel } from "../sdk/delegation-summary";
@@ -44,6 +48,11 @@ import {
   activeDelegationsSummary,
   effectiveWeightLythDisplay,
 } from "../sdk/delegation-derive";
+import {
+  aprLabelFromBps,
+  clusterActivity,
+  truncateWithMore,
+} from "../sdk/delegation-cards";
 import { formatLythDisplay, truncateDecimals } from "../sdk/lyth-display";
 import {
   buildAutovotePlan,
@@ -107,10 +116,23 @@ export function Delegate({ experimentalEnabled }: DelegateProps = {}) {
   const [diversities, setDiversities] = useState<
     Map<number, ClusterDiversityView>
   >(new Map());
-  // Live per-cluster APY (lyth_clusterApr → clusterApyPercent), keyed by
-  // clusterId. A missing key means no yield has accrued yet / the read failed,
-  // so the directory row shows "—" rather than a misleading 0.00%.
-  const [apys, setApys] = useState<Map<number, number>>(new Map());
+  // Live per-cluster raw APR (lyth_clusterApr → aprBps), keyed by clusterId. A
+  // real 0 IS present (renders "0.00%"); a missing key means the read was
+  // unavailable, so the card renders an honest "—".
+  const [aprBpsMap, setAprBpsMap] = useState<Map<number, number>>(new Map());
+  // Live per-cluster operating entity (lyth_getClusterEntity), keyed by
+  // clusterId. A missing key → "—".
+  const [entities, setEntities] = useState<Map<number, string>>(new Map());
+  // Which cluster's "More details" is expanded, plus the lazily-fetched detail
+  // (lyth_clusterStatus + lyth_getClusterDelegators) cached per cluster. Each
+  // field is null when its read failed → the detail renders an honest "—".
+  const [expandedDetail, setExpandedDetail] = useState<number | null>(null);
+  const [detailByCluster, setDetailByCluster] = useState<
+    Map<
+      number,
+      { loading: boolean; status: LiveClusterOperatorStatus | null; delegators: number | null }
+    >
+  >(new Map());
   // Live cluster display names (lyth_getClusterName), keyed by clusterId, so a
   // delegation captures the real cluster name at submit (sticky on its pending
   // + notification rows). A missing key means "unnamed" → "Cluster #<id>".
@@ -128,11 +150,17 @@ export function Delegate({ experimentalEnabled }: DelegateProps = {}) {
       setDirectoryError(null);
       setRewards(null);
       setRedemptions(null);
-      setApys(new Map());
+      setAprBpsMap(new Map());
+      setEntities(new Map());
+      setExpandedDetail(null);
+      setDetailByCluster(new Map());
       setNames(new Map());
       return;
     }
     setBusy(true);
+    // A fresh load invalidates any expanded cluster detail.
+    setExpandedDetail(null);
+    setDetailByCluster(new Map());
     try {
       const [s, bal, dir, rew, red] = await Promise.all([
         loadLiveDelegationStatus(walletAddress),
@@ -151,13 +179,17 @@ export function Delegate({ experimentalEnabled }: DelegateProps = {}) {
       if (dir) {
         setDirectory(dir.clusters);
         setDirectoryError(null);
-        // Fan out the live per-cluster APY reads; tolerant of per-cluster
-        // failures (a missing entry renders "—"). Currently every cluster
-        // resolves to no-yield-yet, so this becomes a real number automatically
-        // once rewards flow.
-        loadLiveClusterApys(dir.clusters.map((c) => c.clusterId))
-          .then(setApys)
-          .catch(() => setApys(new Map()));
+        // Fan out the live per-cluster raw APR (aprBps) reads for the cards;
+        // tolerant of per-cluster failures (a missing entry renders "—"). A real
+        // 0 is included and renders "0.00%".
+        loadLiveClusterAprBpsMap(dir.clusters.map((c) => c.clusterId))
+          .then(setAprBpsMap)
+          .catch(() => setAprBpsMap(new Map()));
+        // Resolve each cluster's operating entity for the card; tolerant of
+        // per-cluster failures (a missing entity renders "—").
+        loadLiveClusterEntities(dir.clusters.map((c) => c.clusterId))
+          .then(setEntities)
+          .catch(() => setEntities(new Map()));
         // Resolve cluster names so a delegation can capture the real name at
         // submit; tolerant of per-cluster failures (a missing name → #id).
         loadLiveClusterNames(dir.clusters.map((c) => c.clusterId))
@@ -182,7 +214,33 @@ export function Delegate({ experimentalEnabled }: DelegateProps = {}) {
     void refresh();
   }, [walletAddress]);
 
+  // Lazily load a cluster's "More details" (lyth_clusterStatus +
+  // lyth_getClusterDelegators) the first time it is expanded, cached per
+  // cluster. Best-effort — a failed read leaves the field null → an honest "—".
+  useEffect(() => {
+    const id = expandedDetail;
+    if (id === null || detailByCluster.has(id)) return;
+    setDetailByCluster((prev) => {
+      const next = new Map(prev);
+      next.set(id, { loading: true, status: null, delegators: null });
+      return next;
+    });
+    void Promise.all([
+      loadLiveClusterStatus(id),
+      loadLiveClusterDelegatorCount(id),
+    ]).then(([status, delegators]) => {
+      setDetailByCluster((prev) => {
+        const next = new Map(prev);
+        next.set(id, { loading: false, status, delegators });
+        return next;
+      });
+    });
+  }, [expandedDetail, detailByCluster]);
+
   const delegations = status?.delegations.ok ? status.delegations.value : null;
+  const delegationHistory = status?.delegationHistory.ok
+    ? status.delegationHistory.value ?? []
+    : [];
   // Live cluster-aggregate cap, normalized: the u32::MAX disabled sentinel and a
   // failed/absent read both collapse to null (→ the fixed 50% per-cluster floor
   // applies), never a fabricated cap.
@@ -1170,7 +1228,7 @@ export function Delegate({ experimentalEnabled }: DelegateProps = {}) {
                 <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div className="row-label">
-                      Cluster #{c.clusterId}
+                      {clusterName(c.clusterId)}
                       {!c.active && (
                         <span
                           style={{
@@ -1184,53 +1242,41 @@ export function Delegate({ experimentalEnabled }: DelegateProps = {}) {
                         </span>
                       )}
                     </div>
+                    {/* name · entity · id · threshold · APR · rep. Every field is a
+                        real read except rep (no per-cluster reputation read exists
+                        → honest "—"). APR is the real aprBps (a genuine 0 renders
+                        "0.00%"); "—" only when that read is unavailable. */}
                     <div className="row-help mono">
-                      {c.threshold}-of-{c.size} · health {c.aggregateHealth}
+                      {entities.get(c.clusterId) ?? "—"} · id #{c.clusterId} ·{" "}
+                      {c.threshold}-of-{c.size} ·{" "}
+                      {aprLabelFromBps(aprBpsMap.get(c.clusterId))} APR · rep: —
                     </div>
-                    {/* Live APY (lyth_clusterApr). "—" when no yield has
-                        accrued yet — never a misleading 0.00%. */}
-                    <div className="row-help mono">
-                      APY ·{" "}
-                      {apys.has(c.clusterId)
-                        ? `${apys.get(c.clusterId)!.toFixed(2)}%`
-                        : "—"}
-                    </div>
-                    {experimentalEnabled
-                      ? (() => {
-                          const div = diversities.get(c.clusterId);
-                          return (
-                            <div className="row-help mono">
-                              Diversity ·{" "}
-                              {div
-                                ? `${(div.score / 100).toFixed(1)}% (ASN ${(
-                                    div.asnVariance / 100
-                                  ).toFixed(0)} · geo ${(div.geoVariance / 100).toFixed(
-                                    0,
-                                  )} · host ${(div.hostingSpread / 100).toFixed(0)})`
-                                : "—"}
-                            </div>
-                          );
-                        })()
-                      : null}
-                    {c.regionDiversity && c.regionDiversity.length > 0 && (
-                      <div className="row-help">
-                        Regions · {c.regionDiversity.join(", ")}
-                      </div>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <button
+                      className="btn btn--sm btn--ghost"
+                      onClick={() =>
+                        setExpandedDetail((cur) =>
+                          cur === c.clusterId ? null : c.clusterId,
+                        )
+                      }
+                    >
+                      {expandedDetail === c.clusterId ? "Hide details" : "More details"}
+                    </button>
+                    {!isOpen && (
+                      <button
+                        className="btn btn--sm"
+                        onClick={() => {
+                          setOpenForm(c.clusterId);
+                          setDraftWeightBps("1000");
+                          setDraftError(null);
+                        }}
+                        disabled={!c.active}
+                      >
+                        Delegate
+                      </button>
                     )}
                   </div>
-                  {!isOpen && (
-                    <button
-                      className="btn btn--sm"
-                      onClick={() => {
-                        setOpenForm(c.clusterId);
-                        setDraftWeightBps("1000");
-                        setDraftError(null);
-                      }}
-                      disabled={!c.active}
-                    >
-                      Delegate
-                    </button>
-                  )}
                 </div>
 
                 {isOpen && (
@@ -1337,6 +1383,86 @@ export function Delegate({ experimentalEnabled }: DelegateProps = {}) {
                     </div>
                   </div>
                 )}
+
+                {expandedDetail === c.clusterId &&
+                  (() => {
+                    const d = detailByCluster.get(c.clusterId);
+                    const events = clusterActivity(delegationHistory, c.clusterId);
+                    const { shown, more } = truncateWithMore(events, 5);
+                    return (
+                      <div style={inlineFormStyle}>
+                        {/* Identity — name/entity real reads, health/threshold/
+                            active from the directory entry. */}
+                        <div className="cap">Identity</div>
+                        <div className="w-live-grid">
+                          <LiveCell label="Name" value={clusterName(c.clusterId)} />
+                          <LiveCell label="Entity" value={entities.get(c.clusterId) ?? "—"} />
+                          <LiveCell label="Health" value={c.aggregateHealth} />
+                          <LiveCell label="Threshold" value={`${c.threshold} of ${c.size}`} />
+                          <LiveCell label="Active set" value={c.active ? "yes" : "no"} />
+                        </div>
+
+                        {/* Live status (lyth_clusterStatus) + Demand
+                            (lyth_getClusterDelegators). "—" on a failed read. */}
+                        <div className="cap" style={{ marginTop: 10 }}>
+                          Live status · Demand
+                        </div>
+                        {d?.loading ? (
+                          <div className="row-help">Loading cluster status…</div>
+                        ) : (
+                          <div className="w-live-grid">
+                            <LiveCell label="Live" value={d?.status ? String(d.status.live) : "—"} />
+                            <LiveCell label="Offline" value={d?.status ? String(d.status.offline) : "—"} />
+                            <LiveCell
+                              label="Delegators"
+                              value={d && d.delegators !== null ? String(d.delegators) : "—"}
+                            />
+                          </div>
+                        )}
+
+                        {/* Your activity — this wallet's delegation history for
+                            this cluster (lyth_getDelegationHistory: delegated /
+                            undelegated / redelegated), first 5 + "+N more". */}
+                        <div className="cap" style={{ marginTop: 10 }}>
+                          Your activity
+                        </div>
+                        {events.length === 0 ? (
+                          <div className="row-help">
+                            No delegation activity for this cluster yet.
+                          </div>
+                        ) : (
+                          <>
+                            <div className="w-live-list">
+                              {shown.map((e) => (
+                                <div
+                                  className="w-live-row"
+                                  key={`${e.blockHeight}-${e.txIndex}-${e.logIndex}`}
+                                >
+                                  <div>
+                                    <div className="row-label">{e.kind}</div>
+                                    <div className="row-help mono">
+                                      block {e.blockHeight.toString()}
+                                      {e.toCluster !== null && e.toCluster !== c.clusterId
+                                        ? ` → cluster ${e.toCluster}`
+                                        : ""}
+                                    </div>
+                                  </div>
+                                  <div className="w-live-right mono">
+                                    {(e.weightBps / 100).toFixed(2)}%
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                            {more > 0 && (
+                              <div className="row-help">
+                                + {more} more event{more === 1 ? "" : "s"}
+                              </div>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    );
+                  })()}
               </div>
             );
           })}
