@@ -1,4 +1,4 @@
-// Golden-vector + helper coverage for the staking seam.
+// Golden-vector + helper coverage for the delegation seam.
 //
 // Pins the delegation-precompile calldata selectors (a wrong selector would be
 // rejected on-chain — here it fails fast in CI) and the pure reward-formatting
@@ -21,7 +21,7 @@ import {
   fetchRedemptionQueue,
   formatRewardLyth,
   hasClaimableRewards,
-} from "../staking";
+} from "../delegation";
 
 function selectorOf(calldata: string): string {
   return calldata.slice(0, 10);
@@ -35,7 +35,7 @@ describe("delegation precompile target", () => {
   });
 });
 
-describe("staking calldata selectors", () => {
+describe("delegation calldata selectors", () => {
   it("delegate uses the chain-canonical selector", () => {
     expect(selectorOf(buildDelegateCalldata(1, 1000))).toBe(DELEGATION_SELECTORS.delegate);
   });

@@ -1,7 +1,7 @@
-// Staking SDK seam — wraps `lyth_clusterDirectory`, `lyth_getDelegations`,
+// Delegation SDK seam — wraps `lyth_clusterDirectory`, `lyth_getDelegations`,
 // and the delegation-precompile (Law §5.4 / §7.6) calldata encoders.
 //
-// NON-CUSTODIAL ARK staking: delegation is balance-weighted and never
+// NON-CUSTODIAL ARK delegation: delegation is balance-weighted and never
 // escrows tokens. `delegate(cluster, weightBps)` records a `weightBps`
 // fraction of the caller's LIVE balance — the contribution to a cluster is
 // the effective weight `floor(balance × weightBps / 10000)`. Tokens stay
@@ -45,22 +45,22 @@ export const DELEGATION_PRECOMPILE =
 /** A delegate/undelegate/redelegate/claim call carries a small ABI payload;
  *  size the execution-unit budget above the observed cost with headroom (the
  *  SDK transfer default of ~100k would underprovision the precompile work). */
-const STAKING_EXECUTION_UNIT_LIMIT = 150_000n;
+const DELEGATION_EXECUTION_UNIT_LIMIT = 150_000n;
 
-export interface SubmitStakingTxArgs {
+export interface SubmitDelegationTxArgs {
   seed: Uint8Array;
   data: string;
   executionUnitLimit?: bigint;
 }
 
-export interface SubmitStakingTxResult {
+export interface SubmitDelegationTxResult {
   txHash: string;
-  /** Account nonce this staking tx signed with (for dropped-tx detection). */
+  /** Account nonce this delegation tx signed with (for dropped-tx detection). */
   nonce: number;
 }
 
 /** `delegate(uint32 clusterId, uint16 weightBps)` calldata. NON-CUSTODIAL:
- *  submit via `submitStakingTx` (value = 0). `weightBps` is the fraction of
+ *  submit via `submitDelegationTx` (value = 0). `weightBps` is the fraction of
  *  the caller's live balance to contribute; no principal is escrowed. */
 export function buildDelegateCalldata(
   clusterId: number,
@@ -87,8 +87,8 @@ export function buildClaimRewardsCalldata(): string {
 
 /** `setAutoCompound(bool enabled)` calldata (chain-canonical selector
  *  `0x86593454`). Persists whether the caller's pending rewards are
- *  auto-restaked on settlement instead of becoming claimable. Submit via
- *  `submitStakingTx` with `valueLythoshi: 0n`. */
+ *  auto-re-delegated on settlement instead of becoming claimable. Submit via
+ *  `submitDelegationTx` with `valueLythoshi: 0n`. */
 export function buildSetAutoCompoundCalldata(enabled: boolean): string {
   return encodeSetAutoCompoundCalldata(enabled);
 }
@@ -164,22 +164,22 @@ export function hasClaimableRewards(rewards: PendingRewardsResponse | null): boo
  * Submit a delegation-precompile call (delegate / undelegate / redelegate /
  * claim rewards / setAutoCompound). Routes through the shared `submitNativeTx`
  * seam: PLAINTEXT `mesh_submitTx` by default (the path that confirms on the
- * live chain), with `to` = the precompile and the staking execution-unit
+ * live chain), with `to` = the precompile and the delegation execution-unit
  * budget. Caller (OperationsDrawer.execute) supplies the unlocked seed.
  *
- * NON-CUSTODIAL: every staking call (including delegate) is sent with
+ * NON-CUSTODIAL: every delegation call (including delegate) is sent with
  * value = 0. The chain reverts (UnexpectedValue, tag 0x020e) if any native
  * value is attached to a delegate.
  */
-export async function submitStakingTx(
-  args: SubmitStakingTxArgs,
-): Promise<SubmitStakingTxResult> {
+export async function submitDelegationTx(
+  args: SubmitDelegationTxArgs,
+): Promise<SubmitDelegationTxResult> {
   const result = await submitNativeTx({
     seed: args.seed,
     to: DELEGATION_PRECOMPILE,
     input: args.data,
     valueLythoshi: 0n,
-    executionUnitLimit: args.executionUnitLimit ?? STAKING_EXECUTION_UNIT_LIMIT,
+    executionUnitLimit: args.executionUnitLimit ?? DELEGATION_EXECUTION_UNIT_LIMIT,
   });
   return { txHash: result.txHash, nonce: result.nonce };
 }

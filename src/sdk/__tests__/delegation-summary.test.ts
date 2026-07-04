@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { LiveClusterRow, LiveStakeStatus } from "../live";
-import { bpsToPercentLabel, deriveStakeSummary } from "../staking-summary";
+import type { LiveClusterRow, LiveDelegationStatus } from "../live";
+import { bpsToPercentLabel, deriveDelegationSummary } from "../delegation-summary";
 
 function clusterRow(id: number, active = true): LiveClusterRow {
   return {
@@ -13,7 +13,7 @@ function clusterRow(id: number, active = true): LiveClusterRow {
   };
 }
 
-function status(partial: Partial<LiveStakeStatus>): LiveStakeStatus {
+function status(partial: Partial<LiveDelegationStatus>): LiveDelegationStatus {
   return {
     endpoint: "http://node.test:8545",
     clusters: { ok: true, value: [] },
@@ -34,9 +34,9 @@ describe("bpsToPercentLabel", () => {
   });
 });
 
-describe("deriveStakeSummary", () => {
+describe("deriveDelegationSummary", () => {
   it("returns an empty, non-fabricated summary for a null status (pre-load)", () => {
-    const s = deriveStakeSummary(null);
+    const s = deriveDelegationSummary(null);
     expect(s.delegationCount).toBe(0);
     expect(s.totalWeightBps).toBe(0);
     expect(s.totalWeightLabel).toBe("—");
@@ -45,7 +45,7 @@ describe("deriveStakeSummary", () => {
   });
 
   it("renders an em-dash for staked weight when not delegating", () => {
-    const s = deriveStakeSummary(
+    const s = deriveDelegationSummary(
       status({
         delegations: { ok: true, value: { wallet: "mono1test", rows: [], totalBps: 0, block: null } },
         activeClusters: { ok: true, value: [clusterRow(1), clusterRow(2)] },
@@ -57,7 +57,7 @@ describe("deriveStakeSummary", () => {
   });
 
   it("sums delegated weight and counts delegations + active clusters", () => {
-    const s = deriveStakeSummary(
+    const s = deriveDelegationSummary(
       status({
         delegations: {
           ok: true,
@@ -81,7 +81,7 @@ describe("deriveStakeSummary", () => {
   });
 
   it("surfaces the delegations error verbatim when the read failed", () => {
-    const s = deriveStakeSummary(
+    const s = deriveDelegationSummary(
       status({ delegations: { ok: false, error: "rpc down" } }),
     );
     expect(s.delegationsFailed).toBe(true);

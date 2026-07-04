@@ -92,7 +92,7 @@ export function preflightDelegationVerdict(args: {
 /** The always-on cap note + the active dual-cap warning (if any) for a delegate
  *  form, given the cluster's existing weight, the wallet total, the entered move
  *  (null while the input isn't a positive integer), and the aggregate cap.
- *  Pure — drives the Stake delegate-form messaging and is unit-pinnable. */
+ *  Pure — drives the Delegate delegate-form messaging and is unit-pinnable. */
 export function delegateCapWarning(args: {
   existingWeightBps: number;
   totalDelegatedBps: number;
