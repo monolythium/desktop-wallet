@@ -1000,6 +1000,24 @@ export function Delegate({ experimentalEnabled }: DelegateProps = {}) {
                                   );
                                   return;
                                 }
+                                // Same per-cluster cap pre-flight the delegate
+                                // paths run: a redelegate stacks weight onto the
+                                // destination, which can push it over the
+                                // per-wallet cap — block the guaranteed 0x0213
+                                // revert before signing instead of leaving it to
+                                // the chain.
+                                const verdict = preflightDelegationVerdict({
+                                  action: "redelegate",
+                                  dstExistingWeightBps:
+                                    delegationRows.find((r) => r.cluster === to)?.weightBps ?? 0,
+                                  totalDelegatedBps: totalBps,
+                                  moveBps: bps,
+                                  capBps: aggregateCapBps,
+                                });
+                                if (!verdict.ok) {
+                                  setRedelegateError(verdict.message);
+                                  return;
+                                }
                                 openRedelegate(row.cluster, to, bps);
                               }}
                               style={{ flex: 1 }}
