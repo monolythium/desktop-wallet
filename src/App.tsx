@@ -257,7 +257,7 @@ export function App() {
           {route === "wallets" ? <Wallets /> : null}
           {route === "tokens" ? <Tokens goto={setRoute} /> : null}
           {route === "token-detail" ? <TokenDetail goto={setRoute} /> : null}
-          {route === "delegate" ? <Delegate experimentalEnabled={experimentalEnabled} /> : null}
+          {route === "delegate" ? <Delegate /> : null}
           {route === "bridges" ? <Bridges experimentalEnabled={experimentalEnabled} /> : null}
           {route === "agents" && experimentalEnabled ? <Agents /> : null}
           {route === "contacts" ? <Contacts /> : null}
