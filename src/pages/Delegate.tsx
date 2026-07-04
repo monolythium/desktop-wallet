@@ -580,6 +580,8 @@ export function Delegate({ experimentalEnabled }: DelegateProps = {}) {
       mode,
       clusters: directory,
       diversities,
+      aprBpsByCluster: aprBpsMap,
+      shuffleSeed: walletAddress,
       capBps,
     });
 
@@ -618,7 +620,7 @@ export function Delegate({ experimentalEnabled }: DelegateProps = {}) {
         ...(mode === "maxYield"
           ? [
               {
-                text: "Max Yield ranks by cluster health (no per-cluster APR exists on-chain in this SDK), not a guaranteed return.",
+                text: "Max Yield ranks by the real per-cluster APR (lyth_clusterApr); when APR is flat/0 it spreads evenly. Past yield is not a guaranteed return.",
                 level: "warn" as const,
               },
             ]
