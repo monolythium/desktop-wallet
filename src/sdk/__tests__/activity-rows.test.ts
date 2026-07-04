@@ -30,14 +30,26 @@ function row(partial: Partial<LiveAddressActivityRow>): LiveAddressActivityRow {
 }
 
 describe("activityKindToTxKind", () => {
-  it("recognises reward and delegation/stake families, else transfer", () => {
+  it("recognises reward and delegation families, else transfer", () => {
+    // Inputs are the indexer's free-string kinds (kept verbatim); the produced
+    // bucket is delegate-worded after the rename.
     expect(activityKindToTxKind("reward")).toBe("reward");
     expect(activityKindToTxKind("staking-reward")).toBe("reward");
-    expect(activityKindToTxKind("delegation")).toBe("stake");
-    expect(activityKindToTxKind("undelegate")).toBe("stake");
-    expect(activityKindToTxKind("stake")).toBe("stake");
+    expect(activityKindToTxKind("delegation")).toBe("delegate");
+    expect(activityKindToTxKind("undelegate")).toBe("delegate");
+    expect(activityKindToTxKind("stake")).toBe("delegate");
     expect(activityKindToTxKind("transfer")).toBe("transfer");
     expect(activityKindToTxKind("anything-else")).toBe("transfer");
+  });
+
+  it("tolerates an unknown/legacy kind — maps to transfer, never throws", () => {
+    // A stale or unrecognised indexer kind must degrade to a generic transfer
+    // bucket (the eyebrow still shows the precise kind) rather than crashing —
+    // the feed self-heals from a chain re-fetch, no migration shim needed.
+    for (const k of ["", "legacy-op", "stake-v1", "DELEGATE", "🤝"]) {
+      expect(() => activityKindToTxKind(k)).not.toThrow();
+    }
+    expect(activityKindToTxKind("legacy-op")).toBe("transfer");
   });
 });
 
@@ -150,7 +162,7 @@ describe("activityRowToTx", () => {
     expect(tx.amountText).toBe("5.00%");
     expect(tx.unit).toBe("weight");
     expect(tx.signed).toBe(false);
-    expect(tx.kind).toBe("stake");
+    expect(tx.kind).toBe("delegate");
     expect(tx.counterparty).toBe("Cluster #1");
   });
 
@@ -159,7 +171,7 @@ describe("activityRowToTx", () => {
       row({ kind: "delegation", amount: null, weightBps: null, cluster: 1 }),
     );
     expect(tx.amountText).toBeNull();
-    expect(tx.kind).toBe("stake");
+    expect(tx.kind).toBe("delegate");
   });
 
   it("keeps an MRC-20 amount in base units with the token id as the unit", () => {

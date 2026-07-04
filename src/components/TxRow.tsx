@@ -11,7 +11,7 @@ export function TxRow({ tx, onClick }: Props) {
   const typeLabel = tx.typeLabel;
   const label = tx.kind === "reward"
     ? tx.counterparty
-    : tx.kind === "stake"
+    : tx.kind === "delegate"
     ? `To ${tx.counterparty}`
     : tx.direction === "in"
     ? `From ${tx.counterparty}`

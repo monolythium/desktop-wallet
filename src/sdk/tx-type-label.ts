@@ -14,11 +14,11 @@ export function txTypeLabelForOpKind(kind: TxOpKind): string {
     case "receive":
       return "Incoming transfer";
     case "delegate":
-      return "Stake";
+      return "Delegate";
     case "undelegate":
-      return "Unstake";
+      return "Undelegate";
     case "redelegate":
-      return "Restake";
+      return "Redelegate";
     case "claim":
       return "Claim rewards";
     case "emergency-key":
@@ -38,10 +38,12 @@ export function txTypeLabelForActivity(row: {
   subKind?: string | null;
   direction?: string | null;
 }): string {
+  // Operands test the indexer's free-string `kind` (which still emits legacy
+  // "stake" spellings) — keep them; only the returned label is delegate-worded.
   const k = `${row.kind} ${row.subKind ?? ""}`.toLowerCase();
-  if (k.includes("redeleg")) return "Restake";
-  if (k.includes("undeleg")) return "Unstake";
-  if (k.includes("deleg") || k.includes("stake")) return "Stake";
+  if (k.includes("redeleg")) return "Redelegate";
+  if (k.includes("undeleg")) return "Undelegate";
+  if (k.includes("deleg") || k.includes("stake")) return "Delegate";
   if (k.includes("reward") || k.includes("claim")) return "Claim rewards";
   if (k.includes("rebalance")) return "Auto-rebalance";
   return row.direction === "in" ? "Incoming transfer" : "Outgoing transfer";

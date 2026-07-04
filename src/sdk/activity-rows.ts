@@ -28,12 +28,15 @@ import { bpsToPercentLabel } from "./delegation-summary";
 import { txTypeLabelForActivity } from "./tx-type-label";
 
 /** Indexer kind → the `TxRow` icon/category bucket. Conservative: only the
- *  clearly-recognisable families map to reward/stake; everything else is a
- *  generic transfer (the eyebrow still shows the precise indexer kind). */
+ *  clearly-recognisable families map to reward/delegate; everything else is a
+ *  generic transfer (the eyebrow still shows the precise indexer kind). The
+ *  match operands below test the indexer's free-string `kind` (which still
+ *  emits legacy "stake"/"undeleg" spellings) — keep them; only the bucket the
+ *  wallet produces is delegate-worded. */
 export function activityKindToTxKind(kind: string): Tx["kind"] {
   const k = kind.toLowerCase();
   if (k.includes("reward")) return "reward";
-  if (k.includes("delegat") || k.includes("stake") || k.includes("undeleg")) return "stake";
+  if (k.includes("delegat") || k.includes("stake") || k.includes("undeleg")) return "delegate";
   return "transfer";
 }
 
@@ -90,9 +93,9 @@ export function activityCounterparty(row: LiveAddressActivityRow): string {
  * Map one indexed activity row onto a `Tx` for `TxRow`.
  *
  * Per-kind amount/unit resolution:
- *  - stake (delegation) rows carry weight (basis points), not a LYTH amount —
- *    render it as an unsigned percent with a "weight" unit (matching the staking
- *    summary), or an em-dash when the row carries no weight;
+ *  - delegation rows carry weight (basis points), not a LYTH amount —
+ *    render it as an unsigned percent with a "weight" unit (matching the
+ *    delegation summary), or an em-dash when the row carries no weight;
  *  - native value + reward amounts are raw lythoshi converted to display LYTH;
  *  - an MRC-20 amount stays in its base units with the token id as the unit
  *    (there is no on-chain symbol registry).
@@ -103,7 +106,7 @@ export function activityRowToTx(row: LiveAddressActivityRow): Tx {
   );
   let amountText: string | null;
   let unit: string;
-  if (kind === "stake") {
+  if (kind === "delegate") {
     amountText = row.weightBps != null ? bpsToPercentLabel(row.weightBps) : null;
     unit = "weight";
   } else if (isNativeLythTokenId(row.tokenId)) {
@@ -118,7 +121,7 @@ export function activityRowToTx(row: LiveAddressActivityRow): Tx {
     when: activityWhen(row),
     amountText,
     unit,
-    signed: kind !== "stake",
+    signed: kind !== "delegate",
     direction: activityDirection(row.direction),
     counterparty: activityCounterparty(row),
     // The indexer stream carries no memo — left empty so TxRow omits it.

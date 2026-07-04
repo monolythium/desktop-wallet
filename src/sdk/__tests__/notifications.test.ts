@@ -67,7 +67,7 @@ describe("notificationToast", () => {
 
   it("uses the failed title and respects status", () => {
     const t = notificationToast(rec({ kind: "delegate", status: "failed" }));
-    expect(t.title).toBe("Stake failed");
+    expect(t.title).toBe("Delegate failed");
   });
 
   it("omits the amount when it is zero (body = short address only)", () => {
@@ -98,7 +98,7 @@ describe("notificationToast", () => {
       rec({ kind: "send", status: "confirmed", amountDecimal: "12.50" }),
       false,
     );
-    // Generic app-name title — never the action (Sent/Staked/…) — and no body,
+    // Generic app-name title — never the action (Sent/Delegated/…) — and no body,
     // so neither the operation nor the amount/address leaks on a shared screen.
     expect(t.title).toBe("Monolythium Wallet");
     expect(t.title).not.toBe(notificationTitle("send", "confirmed"));
@@ -193,7 +193,7 @@ describe("notificationTitle", () => {
   it("renders friendly titles per kind × status", () => {
     expect(notificationTitle("send", "confirmed")).toBe("Sent");
     expect(notificationTitle("send", "failed")).toBe("Send failed");
-    expect(notificationTitle("delegate", "confirmed")).toBe("Staked");
+    expect(notificationTitle("delegate", "confirmed")).toBe("Delegated");
     expect(notificationTitle("claim", "confirmed")).toBe("Rewards claimed");
     expect(notificationTitle("contract_call", "failed")).toBe("Transaction failed");
   });
@@ -202,8 +202,8 @@ describe("notificationTitle", () => {
 describe("pendingOpLabel", () => {
   it("renders a present-tense, in-flight label per kind", () => {
     expect(pendingOpLabel("send")).toBe("Sending…");
-    expect(pendingOpLabel("delegate")).toBe("Staking…");
-    expect(pendingOpLabel("undelegate")).toBe("Unstaking…");
+    expect(pendingOpLabel("delegate")).toBe("Delegating…");
+    expect(pendingOpLabel("undelegate")).toBe("Undelegating…");
     expect(pendingOpLabel("claim")).toBe("Claiming rewards…");
     expect(pendingOpLabel("contract_call")).toBe("Submitting transaction…");
   });

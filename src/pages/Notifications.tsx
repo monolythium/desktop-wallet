@@ -50,7 +50,7 @@ const ICON_SEND = (
     <path d="M22 2 11 13" />
   </svg>
 );
-const ICON_STAKE = (
+const ICON_DELEGATE = (
   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <circle cx="6" cy="12" r="2.5" />
     <circle cx="18" cy="6" r="2.5" />
@@ -82,9 +82,9 @@ const ICON_CONTRACT = (
   </svg>
 );
 // The cluster releasing its center weight downward — undelegate. The same four
-// satellites as the stake glyph so the pair reads as opposites; the center is a
-// down arrow (weight leaving) instead of the staked node.
-const ICON_UNSTAKE = (
+// satellites as the delegate glyph so the pair reads as opposites; the center
+// is a down arrow (weight leaving) instead of the delegated node.
+const ICON_UNDELEGATE = (
   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <circle cx="5" cy="7" r="2" />
     <circle cx="19" cy="7" r="2" />
@@ -93,13 +93,13 @@ const ICON_UNSTAKE = (
     <path d="M12 7v8M9 13l3 3 3-3" />
   </svg>
 );
-// Two-way arrows — weight moving between clusters (redelegate / restake).
-const ICON_RESTAKE = (
+// Two-way arrows — weight moving between clusters (redelegate).
+const ICON_REDELEGATE = (
   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M7 10h14l-4-4M17 14H3l4 4" />
   </svg>
 );
-// Gift box (lid + ribbon + bow) — a claimed staking reward. Distinct from the
+// Gift box (lid + ribbon + bow) — a claimed delegation reward. Distinct from the
 // receive glyph (a plain down arrow) so a claim never reads as an inbound send.
 const ICON_REWARD = (
   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -111,7 +111,7 @@ const ICON_REWARD = (
 );
 
 /** Per-kind glyph for the row's leading badge — one distinct glyph per kind so
- *  the row reads at a glance (stake / unstake / restake stay visually apart, and
+ *  the row reads at a glance (delegate / undelegate / redelegate stay visually apart, and
  *  a reward claim is a gift box, not the inbound arrow). */
 function iconForKind(kind: TxOpKind): ReactElement {
   switch (kind) {
@@ -120,11 +120,11 @@ function iconForKind(kind: TxOpKind): ReactElement {
     case "receive":
       return ICON_RECEIVE;
     case "delegate":
-      return ICON_STAKE;
+      return ICON_DELEGATE;
     case "undelegate":
-      return ICON_UNSTAKE;
+      return ICON_UNDELEGATE;
     case "redelegate":
-      return ICON_RESTAKE;
+      return ICON_REDELEGATE;
     case "claim":
       return ICON_REWARD;
     case "emergency-key":

@@ -32,7 +32,7 @@ export interface ClassifyRecipientArgs {
 }
 
 /** A confirmed row counts as a prior send only when it is an explicit OUTGOING
- *  row to this exact address — never an incoming or reward/stake row — so the
+ *  row to this exact address — never an incoming or reward/delegate row — so the
  *  warning is never falsely suppressed. */
 function hasPriorConfirmedSend(
   rows: ReadonlyArray<ActivityLike> | null,
