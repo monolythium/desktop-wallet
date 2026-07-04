@@ -3,6 +3,9 @@
 # Local-only development context (NEVER push these)
 LOCAL_NOTES.md
 .local-notes/
+# Working notes/reports belong in the external ..\_dev-notes\ tree, outside every
+# repo; ignore any in-repo copy so an accidental write is never trackable.
+_dev-notes/
 .local-tools/
 plans/
 docs-internal/
