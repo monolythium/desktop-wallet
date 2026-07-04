@@ -71,7 +71,8 @@ import {
 } from "../sdk/delegation-caps";
 
 interface DelegateProps {
-  /** Gate the autovote planner + per-cluster diversity column (experimental). */
+  /** Gate the experimental autovote planner (and the diversity reads that feed
+   *  it). */
   experimentalEnabled?: boolean;
 }
 
@@ -111,8 +112,8 @@ export function Delegate({ experimentalEnabled }: DelegateProps = {}) {
   const [draftWeightBps, setDraftWeightBps] = useState("1000");
   const [draftError, setDraftError] = useState<string | null>(null);
   // Read-only per-cluster diversity scores (lyth_getClusterDiversity, PF-6),
-  // keyed by clusterId. Drives both the directory column and the autovote
-  // Max Diversity / Max Decentralization planners.
+  // keyed by clusterId. Feeds the autovote Max Diversity / Max Decentralization
+  // planners (experimental).
   const [diversities, setDiversities] = useState<
     Map<number, ClusterDiversityView>
   >(new Map());
@@ -241,6 +242,12 @@ export function Delegate({ experimentalEnabled }: DelegateProps = {}) {
   const delegationHistory = status?.delegationHistory.ok
     ? status.delegationHistory.value ?? []
     : [];
+  // A FAILED history read must not read as a confirmed-empty "no activity" — it
+  // is an honest error, distinct from a genuinely empty history.
+  const delegationHistoryError =
+    status?.delegationHistory.ok === false
+      ? status.delegationHistory.error ?? "unavailable"
+      : null;
   // Live cluster-aggregate cap, normalized: the u32::MAX disabled sentinel and a
   // failed/absent read both collapse to null (→ the fixed 50% per-cluster floor
   // applies), never a fabricated cap.
@@ -1426,7 +1433,11 @@ export function Delegate({ experimentalEnabled }: DelegateProps = {}) {
                         <div className="cap" style={{ marginTop: 10 }}>
                           Your activity
                         </div>
-                        {events.length === 0 ? (
+                        {delegationHistoryError ? (
+                          <div className="w-live-error">
+                            delegation history: {delegationHistoryError}
+                          </div>
+                        ) : events.length === 0 ? (
                           <div className="row-help">
                             No delegation activity for this cluster yet.
                           </div>
