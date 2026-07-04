@@ -81,6 +81,21 @@ export interface PendingTx {
  *  single-file shape. */
 export const PENDING_TX_STORE_KEY = "mono.pending-tx.v1";
 
+/** Filter tracked txs to a single wallet scope. The durable store holds every
+ *  vault's in-flight txs in one blob; a tracked tx belongs to the wallet that
+ *  broadcast it (`addressLower`). The Activity feed must show only the ACTIVE
+ *  wallet's pending rows — never another vault's — so it scopes through here
+ *  before merging. `addressLower` is compared case-folded; an empty scope (no
+ *  wallet ready) matches nothing. Pure. */
+export function scopePendingTxs(
+  txs: ReadonlyArray<PendingTx>,
+  addressLower: string,
+): PendingTx[] {
+  const scope = addressLower.toLowerCase();
+  if (scope.length === 0) return [];
+  return txs.filter((t) => t.addressLower.toLowerCase() === scope);
+}
+
 /** In-flight lifecycle of a tracked tx that hasn't reached a terminal receipt.
  *  `dropped` is the nonce-aware terminal: a later nonce confirmed while this tx
  *  stayed pending. The others are time-based (`pending`/`slow`/`expired`). */

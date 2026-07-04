@@ -11,6 +11,7 @@ import {
   parsePendingTxEnvelope,
   pendingLifecycleNote,
   pendingTxIndex,
+  scopePendingTxs,
   transitionPending,
   type ChainProbe,
   type PendingTx,
@@ -320,5 +321,31 @@ describe("parsers — tolerant of malformed persisted data", () => {
 describe("store key", () => {
   it("is the stable single-file key", () => {
     expect(PENDING_TX_STORE_KEY).toBe("mono.pending-tx.v1");
+  });
+});
+
+describe("scopePendingTxs — cross-vault isolation", () => {
+  const a = tx({ txHash: "0xa", addressLower: "mono1aaa" });
+  const b = tx({ txHash: "0xb", addressLower: "mono1bbb" });
+  const a2 = tx({ txHash: "0xa2", addressLower: "mono1aaa" });
+
+  it("returns only the active wallet's tracked txs", () => {
+    const scoped = scopePendingTxs([a, b, a2], "mono1aaa");
+    expect(scoped.map((t) => t.txHash)).toEqual(["0xa", "0xa2"]);
+  });
+
+  it("never leaks another vault's in-flight tx into the active feed", () => {
+    // The exact leak this closes: vault B is active, vault A has an in-flight
+    // tx; A's row must not appear.
+    expect(scopePendingTxs([a, a2], "mono1bbb")).toEqual([]);
+  });
+
+  it("matches address case-insensitively", () => {
+    const upper = tx({ txHash: "0xu", addressLower: "MONO1AAA" });
+    expect(scopePendingTxs([upper], "mono1aaa").map((t) => t.txHash)).toEqual(["0xu"]);
+  });
+
+  it("matches nothing when no wallet is ready (empty scope)", () => {
+    expect(scopePendingTxs([a, b], "")).toEqual([]);
   });
 });
