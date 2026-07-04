@@ -25,6 +25,52 @@ export type AutovoteMode =
   | "maxDecentralization"
   | "custom";
 
+export interface AutovoteModeMeta {
+  mode: AutovoteMode;
+  label: string;
+  /** One-line description shown next to the mode. Honest about the real signals
+   *  each mode uses and about what is NOT used (no reputation weighting — there
+   *  is no cluster-level reputation read). */
+  description: string;
+}
+
+/** The four autovote modes with their user-facing copy. Ordered
+ *  decentralization-first (the network-health objective), then diversity,
+ *  yield, and manual — but the UI may present them in any order. */
+export const AUTOVOTE_MODES: readonly AutovoteModeMeta[] = [
+  {
+    mode: "maxDecentralization",
+    label: "Max Decentralization",
+    description:
+      "Routes weight toward balanced variance across every diversity dimension (ASN, region, hosting), penalising clusters concentrated on a single one. Uses the live lyth_getClusterDiversity read.",
+  },
+  {
+    mode: "maxDiversity",
+    label: "Max Diversity",
+    description:
+      "Spreads across clusters by their live diversity score, favouring the most independent operators. Uses the live lyth_getClusterDiversity read.",
+  },
+  {
+    mode: "maxYield",
+    label: "Max Yield",
+    description:
+      "Weights clusters by their real per-cluster APR (lyth_clusterApr). When APR is flat or zero it spreads evenly and lets the per-user shuffle settle near-ties — no reputation or health guesswork.",
+  },
+  {
+    mode: "custom",
+    label: "Custom",
+    description:
+      "Allocate weight to clusters yourself. The wallet still enforces the per-cluster cap and warns before signing an out-of-policy distribution.",
+  },
+] as const;
+
+/** The metadata for one mode (label + description). */
+export function autovoteModeMeta(mode: AutovoteMode): AutovoteModeMeta {
+  const found = AUTOVOTE_MODES.find((m) => m.mode === mode);
+  // Every AutovoteMode has an entry above; the fallback keeps this total.
+  return found ?? AUTOVOTE_MODES[AUTOVOTE_MODES.length - 1]!;
+}
+
 export interface AutovoteAllocation {
   clusterId: number;
   /** Basis points of total wallet weight assigned to this cluster. */

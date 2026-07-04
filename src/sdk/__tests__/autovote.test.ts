@@ -3,7 +3,11 @@ import type {
   ClusterDirectoryEntryResponse,
   ClusterDiversityView,
 } from "@monolythium/core-sdk";
-import { buildAutovotePlan } from "../autovote";
+import {
+  AUTOVOTE_MODES,
+  autovoteModeMeta,
+  buildAutovotePlan,
+} from "../autovote";
 
 function cluster(
   id: number,
@@ -35,6 +39,32 @@ function diversity(
     hostingSpread: host,
   };
 }
+
+describe("autovote mode metadata", () => {
+  it("covers all four modes with a label + description", () => {
+    const modes = AUTOVOTE_MODES.map((m) => m.mode);
+    expect(new Set(modes)).toEqual(
+      new Set(["maxYield", "maxDiversity", "maxDecentralization", "custom"]),
+    );
+    for (const m of AUTOVOTE_MODES) {
+      expect(m.label.length).toBeGreaterThan(0);
+      expect(m.description.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("never claims a reputation weighting (there is no cluster reputation read)", () => {
+    for (const m of AUTOVOTE_MODES) {
+      expect(m.description.toLowerCase()).not.toContain("reputation weight");
+    }
+    // Max Yield explicitly disclaims reputation/health guesswork.
+    expect(autovoteModeMeta("maxYield").description.toLowerCase()).toContain("no reputation");
+  });
+
+  it("resolves each mode to its own metadata", () => {
+    expect(autovoteModeMeta("custom").label).toBe("Custom");
+    expect(autovoteModeMeta("maxDiversity").mode).toBe("maxDiversity");
+  });
+});
 
 describe("autovote planner", () => {
   const clusters = [cluster(1), cluster(2), cluster(3)];
