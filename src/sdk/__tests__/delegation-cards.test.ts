@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   aprLabelFromBps,
   clusterActivity,
+  pendingRewardForCluster,
   truncateWithMore,
 } from "../delegation-cards";
 
@@ -56,5 +57,21 @@ describe("truncateWithMore — first N + '+N more'", () => {
   it("handles empty + non-positive N honestly", () => {
     expect(truncateWithMore([], 5)).toEqual({ shown: [], more: 0 });
     expect(truncateWithMore(items, 0)).toEqual({ shown: [], more: 7 });
+  });
+});
+
+describe("pendingRewardForCluster — pre-claim per-cluster reward view", () => {
+  const rows = [
+    { cluster: 1, weightBps: 3000, unsettledAmountLythoshi: "0x64" },
+    { cluster: 2, weightBps: 2000, unsettledAmountLythoshi: "0x0" },
+  ];
+
+  it("returns the row for a cluster that has one", () => {
+    expect(pendingRewardForCluster(rows, 1)).toEqual(rows[0]);
+  });
+
+  it("returns undefined for a cluster with no pending row (honest absence)", () => {
+    expect(pendingRewardForCluster(rows, 9)).toBeUndefined();
+    expect(pendingRewardForCluster(undefined, 1)).toBeUndefined();
   });
 });
