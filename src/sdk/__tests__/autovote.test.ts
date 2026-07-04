@@ -6,7 +6,10 @@ import type {
 import {
   AUTOVOTE_MODES,
   autovoteModeMeta,
+  autovoteShuffleBytes,
   buildAutovotePlan,
+  reorderNearTies,
+  seededPermutation,
 } from "../autovote";
 
 function cluster(
@@ -63,6 +66,92 @@ describe("autovote mode metadata", () => {
   it("resolves each mode to its own metadata", () => {
     expect(autovoteModeMeta("custom").label).toBe("Custom");
     expect(autovoteModeMeta("maxDiversity").mode).toBe("maxDiversity");
+  });
+});
+
+describe("autovote per-user entropy shuffle (SHAKE256)", () => {
+  it("is deterministic per seed and generally differs across seeds", () => {
+    const a1 = seededPermutation(8, "mono1alice");
+    const a2 = seededPermutation(8, "mono1alice");
+    const b = seededPermutation(8, "mono1bob");
+    expect(a1).toEqual(a2); // same user → same order
+    expect(a1).not.toEqual(b); // different users → different order (8! space)
+    // A permutation is a bijection of [0..8).
+    expect([...a1].sort((x, y) => x - y)).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
+  });
+
+  it("is case-insensitive on the seed (address casing must not change order)", () => {
+    expect(seededPermutation(6, "MONO1ALICE")).toEqual(seededPermutation(6, "mono1alice"));
+  });
+
+  it("shuffle bytes are deterministic and the requested length", () => {
+    expect(autovoteShuffleBytes("mono1alice", 16)).toEqual(autovoteShuffleBytes("mono1alice", 16));
+    expect(autovoteShuffleBytes("mono1alice", 16).length).toBe(16);
+  });
+
+  it("reorderNearTies keeps strict ranks but permutes ties per user", () => {
+    const scored = [
+      { id: "a", raw: 3 },
+      { id: "b", raw: 1 },
+      { id: "c", raw: 1 },
+      { id: "d", raw: 1 },
+      { id: "e", raw: 1 },
+    ];
+    const alice = reorderNearTies(scored, "mono1alice");
+    const bob = reorderNearTies(scored, "mono1bob");
+    // The strict top rank stays first for everyone.
+    expect(alice[0]!.id).toBe("a");
+    expect(bob[0]!.id).toBe("a");
+    // The tie group {b,c,d,e} is a permutation, generally ordered differently.
+    expect(alice.map((x) => x.id).slice(1).sort()).toEqual(["b", "c", "d", "e"]);
+    expect(alice.map((x) => x.id)).not.toEqual(bob.map((x) => x.id));
+    // Same user → same order.
+    expect(reorderNearTies(scored, "mono1alice")).toEqual(alice);
+  });
+
+  it("no seed → stable score-desc order (no shuffle)", () => {
+    const scored = [
+      { id: "x", raw: 1 },
+      { id: "y", raw: 1 },
+      { id: "z", raw: 5 },
+    ];
+    expect(reorderNearTies(scored, undefined).map((s) => s.id)).toEqual(["z", "x", "y"]);
+  });
+
+  it("plan: different users get different tie orderings, same total + cap held", () => {
+    const many = Array.from({ length: 8 }, (_, i) => cluster(i + 1));
+    const flatApr = new Map<number, number>(); // all tied → shuffle decides
+    const alice = buildAutovotePlan({
+      mode: "maxYield",
+      clusters: many,
+      diversities: new Map(),
+      aprBpsByCluster: flatApr,
+      shuffleSeed: "mono1alice",
+      capBps: 8000,
+    });
+    const bob = buildAutovotePlan({
+      mode: "maxYield",
+      clusters: many,
+      diversities: new Map(),
+      aprBpsByCluster: flatApr,
+      shuffleSeed: "mono1bob",
+      capBps: 8000,
+    });
+    expect(alice.totalWeightBps).toBe(8000);
+    expect(bob.totalWeightBps).toBe(8000);
+    expect(alice.allocations.map((a) => a.clusterId)).not.toEqual(
+      bob.allocations.map((a) => a.clusterId),
+    );
+    // Same user reproduces the same plan order.
+    const alice2 = buildAutovotePlan({
+      mode: "maxYield",
+      clusters: many,
+      diversities: new Map(),
+      aprBpsByCluster: flatApr,
+      shuffleSeed: "mono1alice",
+      capBps: 8000,
+    });
+    expect(alice2.allocations).toEqual(alice.allocations);
   });
 });
 

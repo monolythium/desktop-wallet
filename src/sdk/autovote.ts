@@ -16,8 +16,72 @@ import type {
   ClusterDirectoryEntryResponse,
   ClusterDiversityView,
 } from "@monolythium/core-sdk";
+import { shake256 } from "@noble/hashes/sha3.js";
 import { getProvider } from "./client";
 import { buildDelegateCalldata, submitDelegationTx } from "./delegation";
+
+/** Domain tag mixed into the per-user shuffle seed so autovote entropy can't
+ *  collide with any other SHAKE256 use of the same address. */
+const AUTOVOTE_SHUFFLE_DOMAIN = "monolythium.autovote.v1";
+
+/** Deterministic per-user byte stream for the near-tie shuffle: SHAKE256 over
+ *  the user's own seed (their address/key) with a domain tag, extended to
+ *  `length` bytes. Same user → same bytes; different users → different bytes.
+ *  Pure (no Math.random), so the anti-concentration ordering is reproducible. */
+export function autovoteShuffleBytes(seed: string, length: number): Uint8Array {
+  const input = new TextEncoder().encode(`${AUTOVOTE_SHUFFLE_DOMAIN}:${seed.toLowerCase()}`);
+  return shake256(input, { dkLen: Math.max(1, length) });
+}
+
+/** Deterministic Fisher-Yates permutation of [0..n) driven by the SHAKE256
+ *  stream for `seed`. Same seed → same permutation; different seeds generally
+ *  differ. Consumes 4 seed bytes per swap. Pure. */
+export function seededPermutation(n: number, seed: string): number[] {
+  const idx = Array.from({ length: n }, (_, i) => i);
+  if (n <= 1) return idx;
+  const bytes = autovoteShuffleBytes(seed, n * 4);
+  for (let i = n - 1; i > 0; i--) {
+    const o = i * 4;
+    const r =
+      ((bytes[o]! << 24) | (bytes[o + 1]! << 16) | (bytes[o + 2]! << 8) | bytes[o + 3]!) >>> 0;
+    const j = r % (i + 1);
+    const tmp = idx[i]!;
+    idx[i] = idx[j]!;
+    idx[j] = tmp;
+  }
+  return idx;
+}
+
+/** Reorder a scored list so that near-tied entries (equal raw score) are
+ *  permuted deterministically per user, while strictly-ranked entries keep
+ *  their order. This is the WP §23.9 anti-concentration property: when clusters
+ *  are indistinguishable on the chosen signal (e.g. Max Yield with flat APR),
+ *  different users route weight — and the rounding remainder — to different
+ *  clusters, yet stably for any one user. No seed → input order unchanged. */
+export function reorderNearTies<T extends { raw: number }>(
+  scored: readonly T[],
+  seed: string | undefined,
+): T[] {
+  const sorted = [...scored].sort((a, b) => b.raw - a.raw);
+  if (!seed || sorted.length <= 1) return sorted;
+  const EPS = 1e-9;
+  const out: T[] = [];
+  let i = 0;
+  while (i < sorted.length) {
+    let j = i + 1;
+    while (j < sorted.length && Math.abs(sorted[j]!.raw - sorted[i]!.raw) <= EPS) j++;
+    const group = sorted.slice(i, j);
+    if (group.length > 1) {
+      // A per-group sub-seed so adjacent tie-groups don't share a permutation.
+      const perm = seededPermutation(group.length, `${seed}#${i}`);
+      out.push(...perm.map((k) => group[k]!));
+    } else {
+      out.push(group[0]!);
+    }
+    i = j;
+  }
+  return out;
+}
 
 export type AutovoteMode =
   | "maxYield"
@@ -234,20 +298,24 @@ export function buildAutovotePlan(input: AutovotePlanInput): AutovotePlan {
     }
   };
 
-  const scored = active.map((c) => ({ cluster: c, raw: scoreFor(c) }));
+  let scored = active.map((c) => ({ cluster: c, raw: scoreFor(c) }));
   let totalRaw = scored.reduce((s, x) => s + x.raw, 0);
 
   if (totalRaw <= 0) {
-    // Degenerate (e.g. every diversity read failed) — distribute evenly so
-    // the user still gets a usable, in-policy plan instead of an empty one.
+    // Degenerate (e.g. Max Yield with flat/zero APR, or every diversity read
+    // failed) — distribute evenly so the user still gets a usable, in-policy
+    // plan. Every cluster is now tied, so the per-user shuffle below decides
+    // the order (and which cluster takes the rounding remainder).
     warnings.push(
       "No scoring signal available for the selected mode — falling back to an even split across active clusters.",
     );
-    const even = scored.map((x) => ({ cluster: x.cluster, raw: 1 }));
-    scored.length = 0;
-    scored.push(...even);
+    scored = scored.map((x) => ({ cluster: x.cluster, raw: 1 }));
     totalRaw = scored.length;
   }
+
+  // Order strictly-ranked clusters by score, and permute near-ties per user so
+  // indistinguishable clusters aren't always weighted in the same order.
+  scored = reorderNearTies(scored, input.shuffleSeed);
 
   const allocations: AutovoteAllocation[] = [];
   let assignedBps = 0;
