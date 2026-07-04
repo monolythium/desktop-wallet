@@ -24,12 +24,12 @@ export function writeSteleEnabled(enabled: boolean): void {
 
 // Experimental surfaces preview flag — DEFAULT OFF.
 //
-// Single switch for the not-yet-stable wallet surfaces: the Agents
-// (agent commerce / spending-policy sub-accounts) page, the bridge
-// per-route risk panel, and the Delegate autovote planner. When off, every
-// one of those entry points is hidden / not mounted and the wallet's
-// visible behavior matches the pre-preview surface. Absence of the key
-// reads as off, so the default for every install is off.
+// Single switch for the not-yet-stable wallet surfaces: the Agents (agent
+// commerce / spending-policy sub-accounts) page, AI Trading, and the bridge
+// per-route risk panel. When off, those entry points are hidden / not mounted.
+// (The Delegate autovote planner and the notifications + activity system have
+// graduated to default-on and no longer sit behind this flag.) Absence of the
+// key reads as off, so the default for every install is off.
 export const EXPERIMENTAL_ENABLED_KEY = "wallet.experimentalEnabled";
 
 export function readExperimentalEnabled(): boolean {

@@ -57,11 +57,7 @@ import { pendingLifecycleNote, scopePendingTxs, type PendingTx } from "../sdk/pe
 import { usePendingTxs } from "../sdk/use-pending-tx";
 import { useActiveWallet } from "../sdk/active-wallet";
 
-interface Props {
-  experimentalEnabled: boolean;
-}
-
-export function Activity({ experimentalEnabled }: Props) {
+export function Activity() {
   const wallet = useActiveWallet();
   const walletAddress = wallet.status === "ready" ? wallet.address : "";
   const [activity, setActivity] = useState<RpcOutcome<LiveAddressActivityRow[]> | null>(null);
@@ -90,10 +86,11 @@ export function Activity({ experimentalEnabled }: Props) {
     () => scopePendingTxs(allTracked, walletAddress.toLowerCase()),
     [allTracked, walletAddress],
   );
-  // Tracked-pending + failed are notification-layer features; their backing
-  // stores are only written when the experimental flag is on, so with it off
-  // they're empty and the feed renders exactly the indexed confirmed rows.
-  const showExtra = experimentalEnabled;
+  // Tracked-pending + failed rows are a default-on part of the feed. The stores
+  // are empty until the wallet broadcasts a tx, so a fresh feed is exactly the
+  // indexed confirmed rows and these interleave once there's in-flight/failed
+  // history.
+  const showExtra = true;
 
   // Client-side filters over the indexed (confirmed) rows.
   const [dirFilter, setDirFilter] = useState<"all" | "in" | "out">("all");

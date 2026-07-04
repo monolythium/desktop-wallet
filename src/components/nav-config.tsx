@@ -240,10 +240,10 @@ export const NAV_CATEGORIES: NavCategory[] = [
   },
   {
     id: "notifications",
-    // Notifications keeps its experimental gate — the whole notification
-    // pipeline is experimental, so an ungated page would be empty (no-mock).
+    // Notifications is a default-on wallet feature: the terminal-transition
+    // records + toasts + Activity lifecycle are all live for every user.
     items: [
-      { id: "notifications", label: "Notifications", icon: ICON_BELL, route: "notifications", experimentalOnly: true },
+      { id: "notifications", label: "Notifications", icon: ICON_BELL, route: "notifications" },
     ],
   },
   {

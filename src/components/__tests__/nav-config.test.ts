@@ -86,8 +86,13 @@ describe("NAV_CATEGORIES config", () => {
     expect(ids).toContain("info");
   });
 
-  it("keeps Notifications experimental-gated (the notification pipeline is experimental)", () => {
-    expect(flat.find((i) => i.id === "notifications")?.experimentalOnly).toBe(true);
+  it("shows Notifications by default (graduated — not experimental-gated)", () => {
+    expect(flat.find((i) => i.id === "notifications")?.experimentalOnly).toBeFalsy();
+    // It appears with every gate off (a fresh install).
+    const ids = visibleNav(NAV_CATEGORIES, ALL_OFF).flatMap((c) =>
+      c.items.map((i) => i.id),
+    );
+    expect(ids).toContain("notifications");
   });
 
   it("has no entry for the omitted features (no-mock)", () => {
