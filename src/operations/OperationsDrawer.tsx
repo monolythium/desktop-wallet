@@ -18,12 +18,18 @@ import {
   fetchAndUnlockVault,
   getActiveAccount,
 } from "../sdk/keychain";
-import { VaultCallError } from "../sdk/vault";
+import { VaultCallError, isWrongPasswordFailure } from "../sdk/vault";
 import { captureAddressOnUnlock } from "../sdk/vaultCatalog";
 import { readExperimentalEnabled } from "../sdk/feature-flags";
 import { recordOperationFailure } from "../sdk/notifications-record";
 import { trackOperationTx } from "../sdk/reconcile";
 import { useAutoLock } from "../sdk/auto-lock";
+import {
+  clearUnlockLockout,
+  lockoutRemainingMs,
+  readLockoutState,
+  recordWrongUnlockAttempt,
+} from "../sdk/unlock-lockout";
 import { MlDsa65Backend } from "@monolythium/core-sdk/crypto";
 import type {
   OperationExecutionContext,
@@ -74,6 +80,8 @@ export function OperationsDrawer({ descriptor, onClose }: Props) {
   const [authError, setAuthError] = useState<AuthError | null>(null);
   const [authBusy, setAuthBusy] = useState(false);
   const [password, setPassword] = useState("");
+  const [lockoutUntil, setLockoutUntil] = useState(0);
+  const [now, setNow] = useState(() => Date.now());
   const { pauseTimer, resumeTimer } = useAutoLock();
 
   // Suspend the idle auto-lock timer while this drawer is open so a long
@@ -82,6 +90,30 @@ export function OperationsDrawer({ descriptor, onClose }: Props) {
     pauseTimer();
     return resumeTimer;
   }, [pauseTimer, resumeTimer]);
+
+  // Honor the same brute-force lockout the full-screen lock gate enforces: an
+  // in-progress lockout — from earlier wrong passwords, here or at the gate —
+  // blocks this per-operation password prompt too, so the drawer can't be used
+  // as a lockout-bypass surface. Re-checked against the wall clock on mount.
+  useEffect(() => {
+    setLockoutUntil(readLockoutState().lockoutUntil);
+  }, []);
+
+  // Tick while a lockout window is active so the countdown updates and the
+  // prompt re-enables the instant it elapses.
+  useEffect(() => {
+    if (lockoutUntil <= Date.now()) return;
+    const id = window.setInterval(() => {
+      const t = Date.now();
+      setNow(t);
+      if (t >= lockoutUntil) window.clearInterval(id);
+    }, 500);
+    return () => window.clearInterval(id);
+  }, [lockoutUntil]);
+
+  const remainingMs = lockoutRemainingMs(lockoutUntil, now);
+  const lockedOut = remainingMs > 0;
+  const remainingSec = Math.ceil(remainingMs / 1000);
 
   // Esc closes the drawer except mid-execute (don't let users abandon a tx
   // we may have already broadcast).
@@ -115,6 +147,9 @@ export function OperationsDrawer({ descriptor, onClose }: Props) {
   };
 
   const advanceFromAuth = async () => {
+    // Refuse to attempt a decrypt while a brute-force lockout is in force — the
+    // Authorize button is disabled too, this guards the Enter-key path.
+    if (lockedOut) return;
     // Stage 4 wires the keychain-vault path.
     if (descriptor.auth === "keychain") {
       if (!password) {
@@ -142,6 +177,14 @@ export function OperationsDrawer({ descriptor, onClose }: Props) {
           // Never let an address-backfill failure break the unlock path.
         }
       } catch (cause) {
+        if (isWrongPasswordFailure(cause)) {
+          // Feed the same escalating brute-force lockout the lock gate uses, so
+          // repeated wrong passwords at this prompt throttle identically; the
+          // window (if a threshold is met) then disables the prompt below.
+          const next = recordWrongUnlockAttempt();
+          setLockoutUntil(next.lockoutUntil);
+          setNow(Date.now());
+        }
         if (cause instanceof KeychainCallError) {
           setAuthError({ kind: "keychain", cause });
         } else if (cause instanceof VaultCallError) {
@@ -155,6 +198,10 @@ export function OperationsDrawer({ descriptor, onClose }: Props) {
         setAuthBusy(false);
         return;
       }
+      // A correct password clears the brute-force counter — same reset-on-success
+      // discipline as the lock gate.
+      clearUnlockLockout();
+      setLockoutUntil(0);
       setAuthBusy(false);
       // Clear the password from state immediately on success.
       setPassword("");
@@ -241,6 +288,8 @@ export function OperationsDrawer({ descriptor, onClose }: Props) {
               setPassword={setPassword}
               onSubmit={() => void advanceFromAuth()}
               busy={authBusy}
+              lockedOut={lockedOut}
+              remainingSec={remainingSec}
             />
           ) : null}
           {stage === "executing" ? <ExecutingPane descriptor={descriptor} /> : null}
@@ -273,9 +322,9 @@ export function OperationsDrawer({ descriptor, onClose }: Props) {
                 className="btn btn--primary"
                 style={{ marginLeft: "auto" }}
                 onClick={() => void advanceFromAuth()}
-                disabled={authBusy || descriptor.auth === "passkey" || (descriptor.auth === "keychain" && !password)}
+                disabled={authBusy || lockedOut || descriptor.auth === "passkey" || (descriptor.auth === "keychain" && !password)}
               >
-                {authBusy ? "Unlocking…" : "Authorize"}
+                {lockedOut ? `Locked — ${remainingSec}s` : authBusy ? "Unlocking…" : "Authorize"}
               </button>
             </>
           ) : null}
@@ -376,6 +425,8 @@ interface AuthPaneProps {
   setPassword: (next: string) => void;
   onSubmit: () => void;
   busy: boolean;
+  lockedOut: boolean;
+  remainingSec: number;
 }
 
 function AuthPane({
@@ -385,6 +436,8 @@ function AuthPane({
   setPassword,
   onSubmit,
   busy,
+  lockedOut,
+  remainingSec,
 }: AuthPaneProps) {
   if (descriptor.auth === "passkey") {
     return (
@@ -411,12 +464,21 @@ function AuthPane({
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && !busy && password) onSubmit();
+            if (e.key === "Enter" && !busy && !lockedOut && password) onSubmit();
           }}
-          disabled={busy}
+          disabled={busy || lockedOut}
         />
       </label>
-      {authError ? <AuthErrorBanner error={authError} /> : null}
+      {lockedOut ? (
+        <div className="w-banner error" style={{ marginTop: 12 }}>
+          <div style={{ fontWeight: 600, marginBottom: 4 }}>Too many wrong attempts</div>
+          <div style={{ fontSize: 12, color: "var(--w-text-2)" }}>
+            Locked for {remainingSec}s. This is the same lockout as the unlock screen.
+          </div>
+        </div>
+      ) : authError ? (
+        <AuthErrorBanner error={authError} />
+      ) : null}
     </>
   );
 }

@@ -52,6 +52,15 @@ function normalizeError(raw: unknown): VaultCallError {
   return new VaultCallError({ code: "backend", message });
 }
 
+/** A vault-unlock failure counts toward the brute-force lockout ONLY when it is
+ *  a wrong password — a real guess. Keychain/backend/argument failures are
+ *  operational errors, not guesses, and must never escalate the counter or lock
+ *  the user out. Shared by the lock gate and the per-operation drawer so both
+ *  signing surfaces throttle identically. Pure. */
+export function isWrongPasswordFailure(cause: unknown): boolean {
+  return cause instanceof VaultCallError && cause.cause.code === "wrong_password";
+}
+
 /**
  * Build a fresh vault sealed with `password`. The seed is generated
  * inside Rust via `OsRng` and never returned — the caller stores the

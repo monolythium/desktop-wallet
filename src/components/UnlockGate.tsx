@@ -11,7 +11,7 @@ import {
   fetchAndUnlockVault,
   getActiveAccount,
 } from "../sdk/keychain";
-import { VaultCallError } from "../sdk/vault";
+import { isWrongPasswordFailure } from "../sdk/vault";
 import { useAutoLock } from "../sdk/auto-lock";
 import { resetConfirmMatches, resetWalletOnThisDevice } from "../sdk/reset";
 import {
@@ -68,7 +68,7 @@ export function UnlockGate() {
       setLockoutUntil(0); // unlock() clears the persisted lockout counter
       unlock();
     } catch (cause) {
-      if (cause instanceof VaultCallError && cause.cause.code === "wrong_password") {
+      if (isWrongPasswordFailure(cause)) {
         // Escalating deterrence on top of Argon2id: bump the count and impose
         // the next window if a threshold is met. Reset happens only on success.
         const next = recordWrongUnlockAttempt();
