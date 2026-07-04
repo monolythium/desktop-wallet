@@ -55,10 +55,13 @@ import {
 } from "../sdk/delegation-cards";
 import { formatLythDisplay, truncateDecimals } from "../sdk/lyth-display";
 import {
+  autovoteModeMeta,
   buildAutovotePlan,
   fetchClusterDiversities,
+  preflightAutovotePlan,
   submitAutovotePlan,
   type AutovoteMode,
+  type AutovotePlan,
 } from "../sdk/autovote";
 import {
   loadLiveDelegationStatus,
@@ -138,10 +141,16 @@ export function Delegate({ experimentalEnabled }: DelegateProps = {}) {
   // delegation captures the real cluster name at submit (sticky on its pending
   // + notification rows). A missing key means "unnamed" → "Cluster #<id>".
   const [names, setNames] = useState<Map<number, string>>(new Map());
-  // Autovote (§25.1): weight budget (cap) to spread across clusters.
+  // Autovote (§25.1): weight budget (cap) to spread across clusters, the
+  // selected mode + its previewed plan, the Details toggle, and the live
+  // per-step submit progress.
   const [autoCapBps, setAutoCapBps] = useState("5000");
   const [autovoteBusy, setAutovoteBusy] = useState(false);
   const [autovoteError, setAutovoteError] = useState<string | null>(null);
+  const [autovoteMode, setAutovoteMode] = useState<Exclude<AutovoteMode, "custom"> | null>(null);
+  const [autovotePlan, setAutovotePlan] = useState<AutovotePlan | null>(null);
+  const [autovoteDetailsOpen, setAutovoteDetailsOpen] = useState(false);
+  const [autovoteProgress, setAutovoteProgress] = useState<{ done: number; total: number } | null>(null);
 
   const refresh = async () => {
     if (!walletAddress) {
@@ -567,12 +576,17 @@ export function Delegate({ experimentalEnabled }: DelegateProps = {}) {
     });
   };
 
-  const runAutovote = (mode: Exclude<AutovoteMode, "custom">) => {
+  // Step 1 — compute a plan on real signals and PREVIEW it inline (no drawer
+  // yet). The user sees the spread + Details, then explicitly reviews to sign.
+  const previewAutovote = (mode: Exclude<AutovoteMode, "custom">) => {
     setAutovoteError(null);
+    setAutovoteProgress(null);
 
     const capBps = parseInt(autoCapBps, 10);
     if (!Number.isFinite(capBps) || capBps <= 0 || capBps > 10_000) {
       setAutovoteError("Weight budget must be 1-10000 basis points (0.01% – 100%).");
+      setAutovoteMode(null);
+      setAutovotePlan(null);
       return;
     }
 
@@ -585,37 +599,60 @@ export function Delegate({ experimentalEnabled }: DelegateProps = {}) {
       capBps,
     });
 
+    setAutovoteMode(mode);
+    setAutovotePlan(plan);
+    setAutovoteDetailsOpen(false);
     if (plan.allocations.length === 0) {
       setAutovoteError(
         plan.warnings[0] ?? "No active clusters available for an autovote plan.",
       );
+    }
+  };
+
+  // Step 2 — cap-preflight the WHOLE plan, then one review → one unlock → N
+  // sequential delegate() submits (the openUndelegateAll batch shape).
+  const reviewAutovote = () => {
+    const plan = autovotePlan;
+    const mode = autovoteMode;
+    if (!plan || !mode || plan.allocations.length === 0) return;
+
+    // Pre-sign cap guard across every allocation (per-cluster + 100% total),
+    // reusing the same preflight the per-row Delegate/Redelegate flows use.
+    const existing = new Map(delegationRows.map((r) => [r.cluster, r.weightBps]));
+    const verdict = preflightAutovotePlan({
+      allocations: plan.allocations,
+      existingWeightByCluster: existing,
+      currentTotalBps: totalBps,
+      capBps: aggregateCapBps,
+    });
+    if (!verdict.ok) {
+      setAutovoteError(
+        verdict.clusterId !== undefined
+          ? `${clusterName(verdict.clusterId)}: ${verdict.message}`
+          : verdict.message ?? "This plan would exceed a delegation cap.",
+      );
       return;
     }
 
-    const modeLabel: Record<Exclude<AutovoteMode, "custom">, string> = {
-      maxYield: "Max Yield",
-      maxDiversity: "Max Diversity",
-      maxDecentralization: "Max Decentralization",
-    };
-
+    const meta = autovoteModeMeta(mode);
     ops.open({
-      title: `Autovote · ${modeLabel[mode]}`,
-      subtitle: `Spread a ${(plan.totalWeightBps / 100).toFixed(2)}% weight budget across ${plan.allocations.length} clusters — non-custodial`,
+      title: `Autovote · ${meta.label}`,
+      subtitle: `Spread ${(plan.totalWeightBps / 100).toFixed(2)}% of balance across ${plan.allocations.length} cluster${plan.allocations.length === 1 ? "" : "s"} — non-custodial`,
       auth: "keychain",
       diff: [
         { k: "From", v: selfBech32m },
-        { k: "Mode", v: modeLabel[mode] },
+        { k: "Mode", v: meta.label },
         { k: "Clusters", v: String(plan.allocations.length) },
         { k: "Total weight", v: `${(plan.totalWeightBps / 100).toFixed(2)}% of balance` },
         ...plan.allocations.map((a) => ({
-          k: `Cluster ${a.clusterId}`,
+          k: clusterName(a.clusterId),
           v: `${(a.weightBps / 100).toFixed(2)}%`,
         })),
       ],
       effects: [
         { text: "Unlocks the local vault for this operation only." },
         {
-          text: `Submits ${plan.allocations.length} sequential delegate(uint32 clusterId, uint16 weightBps) calls via @monolythium/core-sdk.`,
+          text: `Submits ${plan.allocations.length} sequential delegate(uint32 clusterId, uint16 weightBps) calls via @monolythium/core-sdk — one review, one unlock.`,
         },
         ...(mode === "maxYield"
           ? [
@@ -627,7 +664,7 @@ export function Delegate({ experimentalEnabled }: DelegateProps = {}) {
           : []),
         ...plan.warnings.map((w) => ({ text: w, level: "warn" as const })),
         {
-          text: "Each call may be rejected at the precompile gate if delegation is gated off, a cluster is inactive, or a per-cluster cap would be exceeded — verbatim errors surface here.",
+          text: "Every allocation was cap-checked before this review; the chain still rejects at the precompile gate if a cluster is inactive or a cap is exceeded — verbatim errors surface here.",
           level: "warn",
         },
       ],
@@ -636,11 +673,15 @@ export function Delegate({ experimentalEnabled }: DelegateProps = {}) {
           throw new Error("vault seed unavailable after keychain authorization");
         }
         setAutovoteBusy(true);
+        setAutovoteProgress({ done: 0, total: plan.allocations.length });
         try {
-          const result = await submitAutovotePlan(plan, ctx.vaultSeed);
+          const result = await submitAutovotePlan(plan, ctx.vaultSeed, (done, total) =>
+            setAutovoteProgress({ done, total }),
+          );
           return {
-            headline: `Autovote ${modeLabel[mode]} · ${result.txHashes.length} delegations submitted`,
+            headline: `Autovote ${meta.label} · ${result.txHashes.length} delegation${result.txHashes.length === 1 ? "" : "s"} submitted`,
             detail: result.txHashes.join(", "),
+            txHash: result.txHashes[result.txHashes.length - 1],
           };
         } finally {
           setAutovoteBusy(false);
@@ -1166,33 +1207,25 @@ export function Delegate({ experimentalEnabled }: DelegateProps = {}) {
                 onChange={(e) => {
                   setAutoCapBps(e.target.value);
                   setAutovoteError(null);
+                  // A budget change invalidates any previewed plan.
+                  setAutovotePlan(null);
+                  setAutovoteMode(null);
                 }}
                 style={autovoteInputStyle}
               />
             </div>
           </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <button
-              className="btn btn--sm"
-              disabled={autovoteBusy || directory.length === 0}
-              onClick={() => runAutovote("maxYield")}
-            >
-              Max Yield
-            </button>
-            <button
-              className="btn btn--sm"
-              disabled={autovoteBusy || directory.length === 0}
-              onClick={() => runAutovote("maxDiversity")}
-            >
-              Max Diversity
-            </button>
-            <button
-              className="btn btn--sm"
-              disabled={autovoteBusy || directory.length === 0}
-              onClick={() => runAutovote("maxDecentralization")}
-            >
-              Max Decentralization
-            </button>
+            {(["maxDecentralization", "maxDiversity", "maxYield"] as const).map((m) => (
+              <button
+                key={m}
+                className={`btn btn--sm${autovoteMode === m ? " btn--primary" : ""}`}
+                disabled={autovoteBusy || directory.length === 0}
+                onClick={() => previewAutovote(m)}
+              >
+                {autovoteModeMeta(m).label}
+              </button>
+            ))}
             <button
               className="btn btn--sm btn--ghost"
               title="Use the per-cluster Delegate forms below for a manual allocation"
@@ -1201,6 +1234,75 @@ export function Delegate({ experimentalEnabled }: DelegateProps = {}) {
               Custom (use rows below)
             </button>
           </div>
+
+          {autovoteMode && (
+            <div className="row-help" style={{ marginTop: 8, lineHeight: 1.5 }}>
+              {autovoteModeMeta(autovoteMode).description}
+            </div>
+          )}
+
+          {/* Proposed-plan preview — computed on real signals, cap-checked only
+              at Review so the user sees the spread before committing. */}
+          {autovotePlan && autovoteMode && autovotePlan.allocations.length > 0 && (
+            <div
+              style={{
+                marginTop: 12,
+                padding: 12,
+                borderRadius: 8,
+                background: "var(--surface-2, rgba(255,255,255,0.03))",
+                border: "1px solid var(--border, rgba(255,255,255,0.08))",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+                <strong style={{ fontSize: 13 }}>
+                  Spread {autovotePlan.totalWeightBps} bps (
+                  {(autovotePlan.totalWeightBps / 100).toFixed(2)}%) across{" "}
+                  {autovotePlan.allocations.length} cluster
+                  {autovotePlan.allocations.length === 1 ? "" : "s"} — {autovoteModeMeta(autovoteMode).label}
+                </strong>
+                <button
+                  className="btn btn--xs btn--ghost"
+                  style={{ marginLeft: "auto" }}
+                  onClick={() => setAutovoteDetailsOpen((v) => !v)}
+                >
+                  {autovoteDetailsOpen ? "Hide details" : "Details"}
+                </button>
+              </div>
+
+              {autovoteDetailsOpen && (
+                <div style={{ marginTop: 8, display: "grid", gap: 4 }}>
+                  {autovotePlan.allocations.map((a) => (
+                    <div key={a.clusterId} className="w-kv" style={{ fontSize: 12.5 }}>
+                      <span className="k">{clusterName(a.clusterId)}</span>
+                      <span className="v mono">{(a.weightBps / 100).toFixed(2)}%</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {autovotePlan.warnings.map((w, i) => (
+                <div key={i} className="row-help" style={{ color: "var(--warn)", marginTop: 8 }}>
+                  {w}
+                </div>
+              ))}
+
+              <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+                <button
+                  className="btn btn--sm btn--primary"
+                  disabled={autovoteBusy}
+                  onClick={reviewAutovote}
+                >
+                  Review &amp; submit
+                </button>
+                {autovoteProgress && (
+                  <span className="row-help mono" style={{ alignSelf: "center" }}>
+                    {autovoteProgress.done} / {autovoteProgress.total} submitted
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
+
           {autovoteError && (
             <div className="row-help" style={{ color: "var(--err)", marginTop: 10 }}>
               {autovoteError}
