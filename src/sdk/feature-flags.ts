@@ -115,16 +115,18 @@ export function writeNotificationDetails(enabled: boolean): void {
   }
 }
 
-// Notify-while-locked — DEFAULT ON, fail-open. When off, OS toasts for txs that
+// Notify-while-locked — DEFAULT OFF (opt-in). Now that notifications are a
+// default-on wallet feature, the conservative default is to NOT surface tx
+// toasts on a locked/unattended screen: when off, OS toasts for txs that
 // resolve while the wallet is locked are suppressed; the in-app record is still
-// written and surfaces on the next unlock.
+// written and surfaces on the next unlock. A user can turn it on in Settings.
 export const NOTIFY_WHILE_LOCKED_KEY = "wallet.notifyWhileLocked";
 
 export function readNotifyWhileLocked(): boolean {
   try {
-    return localStorage.getItem(NOTIFY_WHILE_LOCKED_KEY) !== "false";
+    return localStorage.getItem(NOTIFY_WHILE_LOCKED_KEY) === "true";
   } catch {
-    return true; // fail-open
+    return false; // default off — don't toast on a locked screen unless opted in
   }
 }
 
