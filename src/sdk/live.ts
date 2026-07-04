@@ -1,7 +1,6 @@
 import {
   ApiClient,
   CLAIMED_EVENT_TOPIC0,
-  clusterApyPercent,
   decodeClaimedEvent,
   formatLyth,
 } from "@monolythium/core-sdk";
@@ -499,46 +498,6 @@ export async function loadLiveSupplyStatus(): Promise<LiveSupplyStatus> {
     circulatingSupply,
     totalBurned,
   };
-}
-
-/** Live per-cluster APY (percent). Wraps `lyth_clusterApr` + the SDK's
- *  `clusterApyPercent` helper. Returns `null` — not a misleading "0.00%" —
- *  when no reward has accrued in the window (the reward-index delta is 0, which
- *  is the current testnet reality) or when the read fails. Becomes a real
- *  number automatically once rewards flow. */
-export async function loadLiveClusterApy(
-  clusterId: number,
-  windowBlocks?: number,
-): Promise<number | null> {
-  try {
-    const apr = await getProvider().rpcClient.lythClusterApr(clusterId, windowBlocks);
-    const apy = clusterApyPercent(apr);
-    // No yield accrued in the window → aprBps/delta is zero → APY collapses to
-    // 0; surface null so the UI shows an honest "—" rather than "0.00%".
-    if (!Number.isFinite(apy) || apy <= 0) return null;
-    return apy;
-  } catch {
-    return null;
-  }
-}
-
-/** Fan out `loadLiveClusterApy` over a set of cluster ids. Returns a map of
- *  clusterId → APY percent (only entries that resolved to a real, non-zero
- *  number are included — a missing key means "no yield yet / unavailable", so
- *  callers render "—"). Tolerant of per-cluster failures. */
-export async function loadLiveClusterApys(
-  clusterIds: number[],
-  windowBlocks?: number,
-): Promise<Map<number, number>> {
-  const out = new Map<number, number>();
-  const unique = Array.from(new Set(clusterIds));
-  await Promise.all(
-    unique.map(async (id) => {
-      const apy = await loadLiveClusterApy(id, windowBlocks);
-      if (apy !== null) out.set(id, apy);
-    }),
-  );
-  return out;
 }
 
 /** Raw baseline APR in basis points for a cluster (`lyth_clusterApr` →
