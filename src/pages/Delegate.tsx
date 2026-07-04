@@ -51,6 +51,7 @@ import {
 import {
   aprLabelFromBps,
   clusterActivity,
+  pendingRewardForCluster,
   truncateWithMore,
 } from "../sdk/delegation-cards";
 import { formatLythDisplay, truncateDecimals } from "../sdk/lyth-display";
@@ -1678,6 +1679,37 @@ export function Delegate() {
                             />
                           </div>
                         )}
+
+                        {/* Pending rewards for THIS cluster (pre-claim). The
+                            Claimed event is cluster-less so post-claim
+                            attribution is impossible; lyth_pendingRewards.rows
+                            is the honest per-cluster reward view. */}
+                        <div className="cap" style={{ marginTop: 10 }}>
+                          Pending rewards
+                        </div>
+                        {rewards?.ok === false ? (
+                          <div className="w-live-error">
+                            pending rewards: {rewards.error}
+                          </div>
+                        ) : (() => {
+                          const rewardRow =
+                            rewards?.ok && rewards.value
+                              ? pendingRewardForCluster(rewards.value.rows, c.clusterId)
+                              : undefined;
+                          return rewardRow ? (
+                            <div className="row-help mono">
+                              {truncateDecimals(
+                                formatRewardLyth(rewardRow.unsettledAmountLythoshi),
+                                4,
+                              )}{" "}
+                              LYTH unsettled · weight {(rewardRow.weightBps / 100).toFixed(2)}%
+                            </div>
+                          ) : (
+                            <div className="row-help">
+                              No pending rewards accrued for this cluster.
+                            </div>
+                          );
+                        })()}
 
                         {/* Your activity — this wallet's delegation history for
                             this cluster (lyth_getDelegationHistory: delegated /

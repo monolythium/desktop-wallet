@@ -33,3 +33,23 @@ export function truncateWithMore<T>(
   const shown = items.slice(0, Math.max(0, n));
   return { shown, more: Math.max(0, items.length - shown.length) };
 }
+
+/** One cluster's pre-claim pending-reward row (structurally the SDK
+ *  `PendingRewardsRow`). `unsettledAmountLythoshi` is a hex quantity. */
+export interface PendingRewardClusterRow {
+  cluster: number;
+  weightBps: number;
+  unsettledAmountLythoshi: string;
+}
+
+/** The pre-claim per-cluster pending-reward row for one cluster, or undefined.
+ *  claim() settles wallet-wide and its `Claimed` event is cluster-less, so
+ *  post-claim per-cluster attribution is impossible — this pre-claim view
+ *  (lyth_pendingRewards.rows, which IS per-cluster) is the honest per-cluster
+ *  reward context to show. Pure. */
+export function pendingRewardForCluster(
+  rows: ReadonlyArray<PendingRewardClusterRow> | undefined,
+  clusterId: number,
+): PendingRewardClusterRow | undefined {
+  return rows?.find((r) => r.cluster === clusterId);
+}
