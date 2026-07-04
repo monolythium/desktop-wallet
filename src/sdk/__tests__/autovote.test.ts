@@ -185,6 +185,27 @@ describe("preflightAutovotePlan — pre-sign cap guard", () => {
     expect(r.message).toMatch(/50% per-wallet cap/);
   });
 
+  it("blocks a fresh Custom allocation that puts one cluster over 50%", () => {
+    // The Custom path builds a passthrough plan then runs this same guard.
+    const custom = buildAutovotePlan({
+      mode: "custom",
+      clusters: [],
+      diversities: new Map(),
+      aprBpsByCluster: new Map(),
+      capBps: 10_000,
+      customAllocations: [{ clusterId: 1, weightBps: 6000 }],
+    });
+    const r = preflightAutovotePlan({
+      allocations: custom.allocations,
+      existingWeightByCluster: noExisting,
+      currentTotalBps: 0,
+      capBps: null,
+    });
+    expect(r.ok).toBe(false);
+    expect(r.clusterId).toBe(1);
+    expect(r.message).toMatch(/50% per-wallet cap/);
+  });
+
   it("blocks a plan whose running total would exceed 100%", () => {
     // 6000 existing + 3000 + 2000 = 11000 > 100%.
     const r = preflightAutovotePlan({
