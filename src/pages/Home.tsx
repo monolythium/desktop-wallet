@@ -1,12 +1,12 @@
 // Home wallet overview.
 //
-// Consumer portfolio facts (Available / Staked), a staking summary card,
-// token + recent-activity previews, and Send / Receive / Stake / Buy hero CTAs.
+// Consumer portfolio facts (Available / Delegated), a delegation summary card,
+// token + recent-activity previews, and Send / Receive / Delegate / Buy hero CTAs.
 //
 // HONESTY:
 //  - "Available" is the live native balance (loadLiveTokenStatus → eth_getBalance).
-//  - "Staked" is total delegated *weight* (basis points) — the SDK exposes no
-//    per-delegation principal LYTH, so we never print a fabricated LYTH stake.
+//  - "Delegated" is total delegated *weight* (basis points) — the SDK exposes
+//    no per-delegation principal LYTH, so we never print a fabricated LYTH stake.
 //  - "Earned" comes from lyth_pendingRewards (real lythoshi), rendered as LYTH.
 //  - Endpoint / chain-height / probe telemetry is dropped from the hero (the
 //    topbar already shows live sync + the peer switcher).
@@ -136,9 +136,9 @@ export function Home({ goto }: Props) {
 
         <div className="w-hero__meta">
           <span>Available <b>{availableLyth} LYTH</b></span>
-          {/* Staked is delegated *weight* (bps) — no principal LYTH read
+          {/* Delegated is delegated *weight* (bps) — no principal LYTH read
               exists, so we never render a fabricated LYTH stake here. */}
-          <span>Staked <b>{summary.totalWeightLabel}</b> weight</span>
+          <span>Delegated <b>{summary.totalWeightLabel}</b> weight</span>
         </div>
 
         <div className="w-hero__bar">
@@ -155,7 +155,7 @@ export function Home({ goto }: Props) {
             </svg>
             <span>Receive</span>
           </button>
-          <button className="w-hbtn" onClick={() => goto("stake")}>
+          <button className="w-hbtn" onClick={() => goto("delegate")}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <circle cx="12" cy="12" r="3" />
               <circle cx="5" cy="7" r="2" />
@@ -163,7 +163,7 @@ export function Home({ goto }: Props) {
               <circle cx="5" cy="17" r="2" />
               <circle cx="19" cy="17" r="2" />
             </svg>
-            <span>Stake</span>
+            <span>Delegate</span>
           </button>
           {/* No on-ramp primitive exists in the wallet — Buy opens the
               canonical monoscan sale page externally (honest external link,
@@ -208,12 +208,12 @@ export function Home({ goto }: Props) {
 
         <div className="w-card">
           <div className="w-card__head">
-            <h3>Staking</h3>
+            <h3>Delegation</h3>
             <div className="w-card__head__spacer" />
-            <button className="btn btn--sm btn--ghost" onClick={() => goto("stake")}>Manage</button>
+            <button className="btn btn--sm btn--ghost" onClick={() => goto("delegate")}>Manage</button>
           </div>
           <div className="w-card__body">
-            <StakeSummaryCard
+            <DelegationSummaryCard
               summary={summary}
               earnedLyth={earnedLyth}
               hasAddress={Boolean(walletAddress)}
@@ -264,7 +264,7 @@ export function Home({ goto }: Props) {
   );
 }
 
-function StakeSummaryCard({
+function DelegationSummaryCard({
   summary,
   earnedLyth,
   hasAddress,
@@ -278,10 +278,10 @@ function StakeSummaryCard({
   goto: (r: Route) => void;
 }) {
   if (!hasAddress) {
-    return <div className="row-help">Select or unlock a wallet to load staking.</div>;
+    return <div className="row-help">Select or unlock a wallet to load delegation.</div>;
   }
   if (loading) {
-    return <div className="row-help">Loading staking…</div>;
+    return <div className="row-help">Loading delegation…</div>;
   }
   if (summary.delegationsFailed) {
     return <div className="w-live-error">delegations: {summary.delegationsError}</div>;
@@ -292,8 +292,8 @@ function StakeSummaryCard({
         <div className="row-help" style={{ marginBottom: 10 }}>
           You are not delegating to any cluster yet.
         </div>
-        <button className="btn btn--sm btn--primary" onClick={() => goto("stake")}>
-          Start staking
+        <button className="btn btn--sm btn--primary" onClick={() => goto("delegate")}>
+          Start delegating
         </button>
       </div>
     );
@@ -303,7 +303,7 @@ function StakeSummaryCard({
       <div className="w-live-grid">
         {/* Total delegated *weight* — not a LYTH principal (no such read). */}
         <div className="w-live-cell">
-          <div className="cap">Staked weight</div>
+          <div className="cap">Delegated weight</div>
           <div>{summary.totalWeightLabel}</div>
         </div>
         <div className="w-live-cell">

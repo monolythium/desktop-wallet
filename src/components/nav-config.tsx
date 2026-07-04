@@ -66,7 +66,7 @@ const ICON_TOKENS = () => (
     <path d="M2 10h20" />
   </svg>
 );
-const ICON_STAKE = () => (
+const ICON_DELEGATE = () => (
   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <circle cx="6" cy="12" r="2.5" />
     <circle cx="18" cy="6" r="2.5" />
@@ -226,7 +226,7 @@ export const NAV_CATEGORIES: NavCategory[] = [
       { id: "activity", label: "Activity", icon: ICON_ACTIVITY, route: "activity" },
       { id: "wallets", label: "Wallets", icon: ICON_WALLETS, route: "wallets" },
       { id: "tokens", label: "Tokens", icon: ICON_TOKENS, route: "tokens" },
-      { id: "stake", label: "Stake", icon: ICON_STAKE, route: "stake" },
+      { id: "delegate", label: "Delegate", icon: ICON_DELEGATE, route: "delegate" },
       { id: "bridges", label: "Bridges", icon: ICON_BRIDGES, route: "bridges" },
       { id: "trade", label: "Trade", icon: ICON_TRADE, route: "trade" },
       { id: "agents", label: "Agents", icon: ICON_AGENTS, route: "agents", experimentalOnly: true, badge: "preview" },
