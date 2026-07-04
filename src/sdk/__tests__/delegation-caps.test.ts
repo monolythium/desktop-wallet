@@ -113,4 +113,30 @@ describe("preflightDelegationVerdict", () => {
       }).ok,
     ).toBe(true);
   });
+
+  it("blocks a redelegate that pushes the destination over the per-cluster cap", () => {
+    // Destination already holds 4500 bps; moving 1000 more onto it → 5500 > 50%.
+    const v = preflightDelegationVerdict({
+      action: "redelegate",
+      dstExistingWeightBps: 4500,
+      totalDelegatedBps: 8000,
+      moveBps: 1000,
+      capBps: null,
+    });
+    expect(v.ok).toBe(false);
+    if (!v.ok) expect(v.message).toMatch(/50% per-wallet cap/);
+  });
+
+  it("allows a within-cap redelegate and ignores the global total (weight only moves)", () => {
+    // Total is already at 100%; a redelegate doesn't add to it, so only the
+    // destination per-cluster cap applies — 0 + 5000 == the 50% cap is fine.
+    const v = preflightDelegationVerdict({
+      action: "redelegate",
+      dstExistingWeightBps: 0,
+      totalDelegatedBps: 10000,
+      moveBps: 5000,
+      capBps: null,
+    });
+    expect(v.ok).toBe(true);
+  });
 });
