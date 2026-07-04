@@ -53,7 +53,7 @@ import { listForScope } from "../sdk/notifications-store";
 import { removePendingTx } from "../sdk/pending-tx-store";
 import { detectAndNotifyIncoming } from "../sdk/incoming-detect";
 import { txTypeLabelForOpKind } from "../sdk/tx-type-label";
-import { pendingLifecycleNote, type PendingTx } from "../sdk/pending-tx";
+import { pendingLifecycleNote, scopePendingTxs, type PendingTx } from "../sdk/pending-tx";
 import { usePendingTxs } from "../sdk/use-pending-tx";
 import { useActiveWallet } from "../sdk/active-wallet";
 
@@ -81,8 +81,15 @@ export function Activity({ experimentalEnabled }: Props) {
   const [selected, setSelected] = useState<DetailRow | null>(null);
   const [selectedFailed, setSelectedFailed] = useState<NotificationRecord | null>(null);
 
-  // Durable tracked-tx store — the wallet's own in-flight broadcasts.
-  const tracked = usePendingTxs();
+  // Durable tracked-tx store — the wallet's own in-flight broadcasts. The store
+  // is shared across every vault, so scope it to the active wallet before it
+  // touches the feed: another vault's in-flight tx must never render, seed a
+  // sticky cluster name, or be retired against this wallet's confirmed rows.
+  const allTracked = usePendingTxs();
+  const tracked = useMemo(
+    () => scopePendingTxs(allTracked, walletAddress.toLowerCase()),
+    [allTracked, walletAddress],
+  );
   // Tracked-pending + failed are notification-layer features; their backing
   // stores are only written when the experimental flag is on, so with it off
   // they're empty and the feed renders exactly the indexed confirmed rows.
