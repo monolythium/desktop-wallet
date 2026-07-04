@@ -207,10 +207,11 @@ export function SendComposeModal({ fromBech32m, onClose }: Props) {
     [recipient, amount, fromBech32m],
   );
 
-  // §25.2 item 6 — best-effort, local-only recipient-name resolution. There
-  // is no live on-chain reverse-name RPC exposed to the wallet yet, so this
-  // only consults the local address book (and, when the recipient was typed as
-  // a `.mono` name, the client-side name validator). Never blocks the send.
+  // §25.2 item 6 — best-effort, local-only recipient-name resolution. The
+  // chain does expose name RPCs (lyth_resolveName / lyth_nameOf), but wiring
+  // live resolution into the send flow is deferred, so for now this only
+  // consults the local address book (and, when the recipient was typed as a
+  // `.mono` name, the client-side name validator). Never blocks the send.
   const resolveRecipientName = async (toBech32m: string): Promise<string | null> => {
     if (resolvedContactName) return resolvedContactName;
     try {
