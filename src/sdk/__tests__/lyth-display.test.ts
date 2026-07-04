@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  formatAtomic1e18,
   formatLythDisplay,
   isNativeLythTokenId,
   tokenUnitLabel,
@@ -67,5 +68,35 @@ describe("tokenUnitLabel", () => {
     expect(tokenUnitLabel(null)).toBe("LYTH");
     expect(tokenUnitLabel("0x" + "00".repeat(32))).toBe("LYTH");
     expect(tokenUnitLabel("0xdeadbeef")).toBe("0xdeadbeef");
+  });
+});
+
+describe("formatAtomic1e18 — exact, truncated, never float-rounded", () => {
+  it("truncates rather than rounds (the fund-safety fix)", () => {
+    // 1.999999999999999999 units. The old Number(n)/1e18 float path rounded the
+    // integer UP to 2e18 and rendered '2.00' — overstating the figure. The exact
+    // bigint path truncates to '1.99'.
+    expect(formatAtomic1e18("1999999999999999999")).toBe("1.99 (1e18 atoms)");
+  });
+
+  it("stays exact for values above 2^53 (no float precision loss)", () => {
+    // 12.345678901234567890 units; > 2^53, where Number() drops integer digits.
+    expect(formatAtomic1e18("12345678901234567890")).toBe("12.34 (1e18 atoms)");
+  });
+
+  it("respects the requested precision and trims trailing zeros", () => {
+    expect(formatAtomic1e18("5000000000000000000")).toBe("5 (1e18 atoms)");
+    expect(formatAtomic1e18("2500000000000000000", 4)).toBe("2.5 (1e18 atoms)");
+  });
+
+  it("shows sub-unit values as the exact raw integer", () => {
+    expect(formatAtomic1e18("500")).toBe("500");
+    expect(formatAtomic1e18("0")).toBe("0");
+  });
+
+  it("is an honest em-dash for absent or undecodable input", () => {
+    expect(formatAtomic1e18(undefined)).toBe("—");
+    expect(formatAtomic1e18(null)).toBe("—");
+    expect(formatAtomic1e18("not-a-number")).toBe("—");
   });
 });

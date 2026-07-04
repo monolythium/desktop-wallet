@@ -22,6 +22,7 @@ import type {
   BridgeRouteAssessment,
   BridgeRouteDisclosure,
 } from "@monolythium/core-sdk";
+import { formatAtomic1e18 } from "../sdk/lyth-display";
 
 interface Props {
   route: BridgeRouteDisclosure;
@@ -39,20 +40,6 @@ const TIER_GLOW: Record<string, string> = {
   high: "var(--alert)",
   blocked: "var(--err)",
 };
-
-function formatAtomic(value: string | undefined | null): string {
-  if (value === undefined || value === null) return "—";
-  try {
-    const n = BigInt(value);
-    if (n === 0n) return "0";
-    if (n >= 10n ** 18n) {
-      return `${(Number(n) / 1e18).toFixed(2)} (1e18 atoms)`;
-    }
-    return n.toString();
-  } catch {
-    return value;
-  }
-}
 
 export function BridgeRiskPanel({
   route,
@@ -113,13 +100,13 @@ export function BridgeRiskPanel({
       </div>
       <div className="w-kv">
         <span className="k">Drain cap</span>
-        <span className="v">{formatAtomic(route.drainCapAtomic)}</span>
+        <span className="v">{formatAtomic1e18(route.drainCapAtomic)}</span>
       </div>
       <div className="w-kv">
         <span className="k">Drain remaining</span>
         <span className="v">
           {drainRemaining !== null
-            ? formatAtomic(drainRemaining)
+            ? formatAtomic1e18(drainRemaining)
             : "no per-asset cap / not loaded"}
         </span>
       </div>
@@ -129,7 +116,7 @@ export function BridgeRiskPanel({
       </div>
       <div className="w-kv">
         <span className="k">Insurance pool</span>
-        <span className="v">{formatAtomic(route.insuranceAtomic)}</span>
+        <span className="v">{formatAtomic1e18(route.insuranceAtomic)}</span>
       </div>
       <div className="w-kv">
         <span className="k">Last incident</span>
