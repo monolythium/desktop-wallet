@@ -44,11 +44,14 @@ describe("autovote planner", () => {
     [3, diversity(3, 3000)],
   ]);
 
+  const noApr = new Map<number, number>();
+
   it("respects the weight cap (sum of weightBps <= cap)", () => {
     const plan = buildAutovotePlan({
       mode: "maxDiversity",
       clusters,
       diversities,
+      aprBpsByCluster: noApr,
       capBps: 5000,
     });
     expect(plan.allocations.length).toBeGreaterThan(0);
@@ -65,6 +68,7 @@ describe("autovote planner", () => {
       mode: "maxDiversity",
       clusters,
       diversities,
+      aprBpsByCluster: noApr,
       capBps: 6000,
     });
     // Weight-only: the plan spreads the whole budget, no principal involved.
@@ -79,6 +83,7 @@ describe("autovote planner", () => {
       mode: "maxDiversity",
       clusters,
       diversities,
+      aprBpsByCluster: noApr,
       capBps: 9000,
     });
     const byCluster = new Map(
@@ -88,23 +93,58 @@ describe("autovote planner", () => {
     expect((byCluster.get(1) ?? 0)).toBeGreaterThan(byCluster.get(3) ?? 0);
   });
 
-  it("Max Yield falls back to a health proxy (no APR source) and stays in-policy", () => {
-    const mixed = [
-      cluster(1, true, "healthy"),
-      cluster(2, true, "degraded"),
-    ];
+  it("Max Yield ranks by real aprBps and stays in-policy", () => {
     const plan = buildAutovotePlan({
       mode: "maxYield",
-      clusters: mixed,
+      clusters: [cluster(1), cluster(2)],
       diversities: new Map(),
+      // Real APR: cluster 1 pays more than cluster 2.
+      aprBpsByCluster: new Map([
+        [1, 800],
+        [2, 200],
+      ]),
       capBps: 4000,
     });
     expect(plan.totalWeightBps).toBeLessThanOrEqual(4000);
     const byCluster = new Map(
       plan.allocations.map((a) => [a.clusterId, a.weightBps]),
     );
-    // Healthy cluster outranks the degraded one under the health proxy.
-    expect((byCluster.get(1) ?? 0)).toBeGreaterThanOrEqual(byCluster.get(2) ?? 0);
+    // Higher real APR → more weight.
+    expect((byCluster.get(1) ?? 0)).toBeGreaterThan(byCluster.get(2) ?? 0);
+  });
+
+  it("Max Yield with no APR signal (all 0/absent) falls back to an even, in-policy split — no fabrication", () => {
+    const plan = buildAutovotePlan({
+      mode: "maxYield",
+      clusters: [cluster(1), cluster(2)],
+      diversities: new Map(),
+      aprBpsByCluster: new Map(), // testnet reality: no yield signal
+      capBps: 4000,
+    });
+    expect(plan.totalWeightBps).toBe(4000);
+    expect(plan.warnings.some((w) => w.toLowerCase().includes("even split"))).toBe(true);
+  });
+
+  it("Max Yield applies a real liveness discount when present (never fabricated)", () => {
+    const plan = buildAutovotePlan({
+      mode: "maxYield",
+      clusters: [cluster(1), cluster(2)],
+      diversities: new Map(),
+      aprBpsByCluster: new Map([
+        [1, 500],
+        [2, 500],
+      ]),
+      // Equal APR, but cluster 2 is barely live — it should get less weight.
+      livenessByCluster: new Map([
+        [1, 10000],
+        [2, 0],
+      ]),
+      capBps: 4000,
+    });
+    const byCluster = new Map(
+      plan.allocations.map((a) => [a.clusterId, a.weightBps]),
+    );
+    expect((byCluster.get(1) ?? 0)).toBeGreaterThan(byCluster.get(2) ?? 0);
   });
 
   it("skips inactive clusters", () => {
@@ -116,6 +156,7 @@ describe("autovote planner", () => {
         [1, diversity(1, 8000)],
         [2, diversity(2, 8000)],
       ]),
+      aprBpsByCluster: noApr,
       capBps: 5000,
     });
     expect(plan.allocations.every((a) => a.clusterId !== 2)).toBe(true);
@@ -126,6 +167,7 @@ describe("autovote planner", () => {
       mode: "custom",
       clusters,
       diversities,
+      aprBpsByCluster: noApr,
       capBps: 2000,
       customAllocations: [
         { clusterId: 1, weightBps: 1500 },

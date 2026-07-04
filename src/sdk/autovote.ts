@@ -36,8 +36,32 @@ export interface AutovotePlanInput {
   clusters: ClusterDirectoryEntryResponse[];
   /** Per-cluster diversity reads keyed by clusterId (maxDiversity / maxDecentralization). */
   diversities: Map<number, ClusterDiversityView>;
+  /**
+   * Real per-cluster APR in basis points (lyth_clusterApr → aprBps), keyed by
+   * clusterId — the ONLY Max-Yield signal. A missing key means the read was
+   * unavailable (treated as 0, no fabricated fallback); a real 0 is honest too.
+   * When every cluster is 0/absent (the current testnet reality) Max-Yield has
+   * no yield signal and falls back to an even split — the near-tie shuffle then
+   * spreads it deterministically per user.
+   */
+  aprBpsByCluster: Map<number, number>;
+  /**
+   * Optional real per-cluster liveness in basis points (lyth_clusterStatus →
+   * livenessScore) keyed by clusterId. Used ONLY when present as a mild
+   * Max-Yield multiplier; absent → no effect (never fabricated). livenessScore
+   * is null on the current testnet, so in practice this is empty and Max-Yield
+   * ranks on aprBps alone.
+   */
+  livenessByCluster?: Map<number, number>;
   /** Total weight budget (cap) the plan distributes + must not exceed, in basis points. */
   capBps: number;
+  /**
+   * Per-user shuffle seed (the wallet's own address/key, hex or bech32m). Seeds
+   * the deterministic near-tie shuffle so equally-ranked clusters are ordered
+   * differently per user (WP §23.9 anti-concentration) yet stably for one user.
+   * Absent → no shuffle (stable input order).
+   */
+  shuffleSeed?: string;
   /**
    * Pre-built per-cluster allocation for `custom` mode (passthrough).
    * Ignored for the three computed modes.
@@ -79,15 +103,26 @@ export async function fetchClusterDiversities(
   return out;
 }
 
-// `aggregateHealth` is a free-form chain label (e.g. "healthy", "degraded").
-// Map it to a coarse 0..1 proxy weight for the Max-Yield mode, which has
-// NO real APR source on-chain.
-function healthProxyWeight(label: string): number {
-  const l = label.toLowerCase();
-  if (l.includes("healthy") || l.includes("optimal")) return 1;
-  if (l.includes("degraded") || l.includes("warn")) return 0.5;
-  if (l.includes("offline") || l.includes("critical")) return 0.1;
-  return 0.7; // unknown — neutral-positive
+// Max-Yield score = the REAL per-cluster APR (aprBps), optionally discounted by
+// REAL liveness when a livenessScore is present. No mock APR fallback, no
+// health-label proxy, no reputation term — a missing/zero APR contributes 0 and
+// (if every cluster is 0) the caller's even-split fallback + near-tie shuffle
+// take over. `DIVERSITY_SCORE_MAX` (10000 bps) is also the bps scale for these.
+function yieldWeight(
+  clusterId: number,
+  aprBpsByCluster: Map<number, number>,
+  livenessByCluster: Map<number, number> | undefined,
+): number {
+  const apr = aprBpsByCluster.get(clusterId);
+  const base = typeof apr === "number" && apr > 0 ? apr / DIVERSITY_SCORE_MAX : 0;
+  const liveness = livenessByCluster?.get(clusterId);
+  // Real liveness, when present, gently discounts a less-live cluster (fully
+  // live keeps full weight); absent liveness leaves the APR weight untouched.
+  const mult =
+    typeof liveness === "number"
+      ? 0.5 + 0.5 * Math.max(0, Math.min(1, liveness / DIVERSITY_SCORE_MAX))
+      : 1;
+  return base * mult;
 }
 
 function diversityWeight(view: ClusterDiversityView | undefined): number {
@@ -145,10 +180,8 @@ export function buildAutovotePlan(input: AutovotePlanInput): AutovotePlan {
       case "maxDecentralization":
         return decentralizationWeight(view);
       case "maxYield":
-        // Live per-cluster APR/yield is not exposed to the wallet yet.
-        // Max Yield ranks by the aggregateHealth (+ reputation, via
-        // lythClusterStatus, when the page supplies it) liveness proxy.
-        return healthProxyWeight(c.aggregateHealth);
+        // Real APR only (+ real liveness where present). No proxy, no mock.
+        return yieldWeight(c.clusterId, input.aprBpsByCluster, input.livenessByCluster);
       default:
         // `custom` is handled by the early return above; never reached.
         return 0;
