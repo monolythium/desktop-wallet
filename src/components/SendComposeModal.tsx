@@ -14,6 +14,7 @@ import {
 } from "@monolythium/core-sdk";
 import { useOperations } from "../operations/context";
 import { sendNativeLyth } from "../sdk/native-send";
+import { classifyRecipientInput, resolveNameQuorum } from "../sdk/name-resolve";
 import { addressbookLookup } from "../sdk/addressbook";
 import { fetchFinalityPosture } from "../sdk/finality";
 import { errorMessage, loadLiveAddressActivity, loadLiveWalletBalance } from "../sdk/live";
@@ -183,15 +184,20 @@ export function SendComposeModal({ fromBech32m, onClose }: Props) {
 
   const validate = useMemo(
     () => () => {
-      const trimmedTo = recipient.trim();
-      if (!trimmedTo) return "Recipient address is required.";
-      if (!trimmedTo.toLowerCase().startsWith(`${USER_HRP}1`)) {
-        return `Recipient must be a typed ${USER_HRP}1… address.`;
-      }
-      try {
-        typedBech32ToAddress(trimmedTo, "user");
-      } catch (cause) {
-        return cause instanceof Error ? cause.message : String(cause);
+      // A recipient is either a typed bech32m address or a `.mono` name. A name
+      // is only structurally accepted here — it is resolved (fail-closed) in
+      // onReview before anything is signed.
+      const input = classifyRecipientInput(recipient, USER_HRP);
+      if (input.kind === "invalid") return input.reason;
+      if (input.kind === "address") {
+        try {
+          typedBech32ToAddress(input.address, "user");
+        } catch (cause) {
+          return cause instanceof Error ? cause.message : String(cause);
+        }
+        if (input.address.toLowerCase() === fromBech32m.toLowerCase()) {
+          return "Recipient cannot be the wallet's own address.";
+        }
       }
       const trimmedAmt = amount.trim();
       if (!trimmedAmt) return "Amount is required.";
@@ -199,9 +205,6 @@ export function SendComposeModal({ fromBech32m, onClose }: Props) {
         return `Amount must have at most ${NATIVE_LYTH_DECIMALS} decimal places.`;
       }
       if (Number(trimmedAmt) === 0) return "Amount must be greater than 0.";
-      if (trimmedTo.toLowerCase() === fromBech32m.toLowerCase()) {
-        return "Recipient cannot be the wallet's own address.";
-      }
       return null;
     },
     [recipient, amount, fromBech32m],
@@ -232,10 +235,44 @@ export function SendComposeModal({ fromBech32m, onClose }: Props) {
     setError(err);
     if (err) return;
 
-    const toBech32m = recipient.trim();
+    const input = classifyRecipientInput(recipient, USER_HRP);
     const amountLyth = amount.trim();
 
     setReviewing(true);
+
+    // Resolve a `.mono` name to its owner address, fail-closed: a name that
+    // doesn't cleanly resolve across a quorum of operators BLOCKS the send. The
+    // resolved address is what we display AND what we sign — no hidden redirect.
+    let toBech32m: string;
+    let resolvedName: string | null = null;
+    if (input.kind === "name") {
+      const verdict = await resolveNameQuorum(input.name);
+      if (!verdict.ok) {
+        setReviewing(false);
+        setError(verdict.message);
+        return;
+      }
+      // The resolved address must itself be a valid typed user address.
+      try {
+        typedBech32ToAddress(verdict.address, "user");
+      } catch {
+        setReviewing(false);
+        setError("The name resolved to a malformed address — not sending.");
+        return;
+      }
+      toBech32m = verdict.address;
+      resolvedName = input.name;
+    } else {
+      toBech32m = recipient.trim();
+    }
+
+    // Self-send guard on the RESOLVED address (a name could resolve to self).
+    if (toBech32m.toLowerCase() === fromBech32m.toLowerCase()) {
+      setReviewing(false);
+      setError("Recipient cannot be the wallet's own address.");
+      return;
+    }
+
     // Best-effort disclosures — neither read gates the send; both fall
     // back to a safe default on any failure.
     const [recipientName, finality] = await Promise.all([
@@ -244,8 +281,11 @@ export function SendComposeModal({ fromBech32m, onClose }: Props) {
     ]);
     setReviewing(false);
 
-    const toLine = recipientName
-      ? `${recipientName} · ${toBech32m}`
+    // A resolved `.mono` name is the authoritative label; else the address-book
+    // name. Either way the address is shown and is exactly what gets signed.
+    const displayName = resolvedName ?? recipientName;
+    const toLine = displayName
+      ? `${displayName} · ${toBech32m}`
       : toBech32m;
 
     ops.open({
@@ -396,7 +436,7 @@ export function SendComposeModal({ fromBech32m, onClose }: Props) {
             // stale name never travels with a fresh address.
             if (resolvedContactName !== null) setResolvedContactName(null);
           }}
-          placeholder={`${USER_HRP}1…`}
+          placeholder={`${USER_HRP}1… or alice.mono`}
           aria-label="Recipient typed bech32m address"
           style={inputStyle}
         />
