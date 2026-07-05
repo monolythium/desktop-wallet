@@ -15,6 +15,7 @@ import {
 import { useOperations } from "../operations/context";
 import { sendNativeLyth } from "../sdk/native-send";
 import { classifyRecipientInput, resolveNameQuorum } from "../sdk/name-resolve";
+import { loadReverseName } from "../sdk/reverse-name";
 import { addressbookLookup } from "../sdk/addressbook";
 import { fetchFinalityPosture } from "../sdk/finality";
 import { errorMessage, loadLiveAddressActivity, loadLiveWalletBalance } from "../sdk/live";
@@ -216,6 +217,10 @@ export function SendComposeModal({ fromBech32m, onClose }: Props) {
   // consults the local address book (and, when the recipient was typed as a
   // `.mono` name, the client-side name validator). Never blocks the send.
   const resolveRecipientName = async (toBech32m: string): Promise<string | null> => {
+    // The registry reverse name (lyth_nameOf) is the public on-chain identity —
+    // prefer it at confirm; fall back to the local contact label, then nothing.
+    const registryName = await loadReverseName(toBech32m);
+    if (registryName) return registryName;
     if (resolvedContactName) return resolvedContactName;
     try {
       const entries = await addressbookLookup(toBech32m);
