@@ -14,7 +14,7 @@ import {
   type ConvertQuoteView,
 } from "../sdk/convert";
 import { flightSearch, FlightCallError, type FlightSearchInput } from "../sdk/flights";
-import { checkName, type NameCheckResult } from "../sdk/name-registry";
+import { checkName, loadNameQuote, type NameCheckResult, type NameQuote } from "../sdk/name-registry";
 import {
   spendCoinsbeeGuide,
   spendCoinsbeeInvoice,
@@ -628,6 +628,9 @@ function HitRow({ hit }: { hit: ListingHit }) {
 function NameChecker() {
   const [name, setName] = useState("");
   const [result, setResult] = useState<NameCheckResult | null>(null);
+  // The real registration quote (SDK quoteNameRegistration). null = not loaded /
+  // unavailable → the UI shows an honest "—", never the old placeholder.
+  const [quote, setQuote] = useState<NameQuote | null>(null);
   const debounceRef = useRef<number | null>(null);
 
   // Debounce the check by 200ms so the user isn't hammering the Tauri
@@ -636,13 +639,21 @@ function NameChecker() {
     const trimmed = name.trim().toLowerCase();
     if (!trimmed) {
       setResult(null);
+      setQuote(null);
       return;
     }
     if (debounceRef.current !== null) {
       window.clearTimeout(debounceRef.current);
     }
+    setQuote(null);
     debounceRef.current = window.setTimeout(() => {
-      checkName(trimmed).then(setResult);
+      void checkName(trimmed).then((r) => {
+        setResult(r);
+        // Fetch the real chain-exact price only for a structurally-valid name.
+        if (r.kind === "ok") {
+          void loadNameQuote(trimmed).then(setQuote);
+        }
+      });
     }, 200);
     return () => {
       if (debounceRef.current !== null) {
@@ -677,7 +688,7 @@ function NameChecker() {
           <div style={{ flex: 1 }}>
             <div className="row-label">Name</div>
             <div className="row-help">
-              Local syntax check only. Live availability, registration, and pricing are not enabled in this build.
+              Syntax check + the real registration price (live chain quote). Live availability and registration land in a later build.
             </div>
           </div>
           <input
@@ -700,13 +711,21 @@ function NameChecker() {
             }}
           />
         </div>
-        <NameDetail name={name} result={result} />
+        <NameDetail name={name} result={result} quote={quote} />
       </div>
     </div>
   );
 }
 
-function NameDetail({ name, result }: { name: string; result: NameCheckResult | null }) {
+function NameDetail({
+  name,
+  result,
+  quote,
+}: {
+  name: string;
+  result: NameCheckResult | null;
+  quote: NameQuote | null;
+}) {
   if (!name.trim() || !result) return null;
   switch (result.kind) {
     case "not_tauri":
@@ -731,7 +750,7 @@ function NameDetail({ name, result }: { name: string; result: NameCheckResult | 
           <Stat label="Primary label" value={`${a.primary_label} · ${a.primary_label_len}ch`} />
           <Stat label="Length ×" value={String(a.length_multiplier)} />
           <Stat label="Category ×" value={String(a.category_multiplier)} />
-          <Stat label="Pricing" value="live quote unavailable" />
+          <Stat label="Price" value={quote ? `${quote.costLyth} LYTH` : "—"} />
         </div>
       );
     }

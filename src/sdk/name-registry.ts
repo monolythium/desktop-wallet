@@ -1,10 +1,13 @@
-// `.mono` name validation + U-curve price estimation.
-// Wraps the Rust `name_check_availability` Tauri command. Pure client-side
-// check — does NOT touch the chain (live availability needs the RPC client
-// wired). Use this for Onboarding name picker, Send recipient autocomplete,
-// and Stele provider lookup.
+// `.mono` name validation + the REAL registration quote.
+// `checkName` wraps the Rust `name_check_availability` Tauri command for the
+// offline structural check (category, labels, multipliers). The registration
+// PRICE comes from the SDK's `quoteNameRegistration` (`loadNameQuote` below) —
+// the byte-exact chain U-curve over the live block base fee — NOT the Rust
+// module's fabricated placeholder (which is no longer read anywhere in TS).
 
 import { invoke } from "@tauri-apps/api/core";
+import { formatLyth } from "@monolythium/core-sdk";
+import { getProvider } from "./client";
 
 export type NameCategory = "human" | "agent" | "cluster" | "contract" | "system";
 
@@ -14,10 +17,30 @@ export interface NameAvailability {
   primary_label: string;
   primary_label_len: number;
   whole_len: number;
-  price_lyth: number;
   length_multiplier: number;
   category_multiplier: number;
   on_chain_check_performed: boolean;
+}
+
+/** The real, chain-exact registration quote for a name, in LYTH (full
+ *  precision — the cost is tiny at the current base fee). */
+export interface NameQuote {
+  /** Registration cost formatted as a LYTH decimal string (no unit). */
+  costLyth: string;
+}
+
+/** Load the REAL registration price via the SDK's `quoteNameRegistration`
+ *  (`base × lengthModX10 × feeUnit / 10`, `feeUnit` = the live block base fee) —
+ *  the exact value a `register` tx must carry. Returns null on any failure
+ *  (malformed name, RPC error) so the UI shows an honest "—", never the old
+ *  placeholder and never a fabricated number. */
+export async function loadNameQuote(name: string): Promise<NameQuote | null> {
+  try {
+    const quote = await getProvider().rpcClient.quoteNameRegistration(name.trim().toLowerCase());
+    return { costLyth: formatLyth(quote.costLythoshi.toString(), { includeUnit: false }) };
+  } catch {
+    return null;
+  }
 }
 
 export type NameErrorCode =
