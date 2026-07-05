@@ -29,6 +29,13 @@ import {
 } from "../sdk/name-registry";
 import { useOperations } from "../operations/context";
 import { useActiveWallet } from "../sdk/active-wallet";
+import { loadReverseName } from "../sdk/reverse-name";
+import {
+  mergeMyNames,
+  readRegisteredNames,
+  recordRegisteredName,
+  type MyNameEntry,
+} from "../sdk/my-names";
 import {
   spendCoinsbeeGuide,
   spendCoinsbeeInvoice,
@@ -68,7 +75,7 @@ export function Stele() {
         </div>
       </div>
 
-      <NameChecker />
+      <NamesSection />
 
       <BrowseCard />
 
@@ -639,7 +646,7 @@ function HitRow({ hit }: { hit: ListingHit }) {
   );
 }
 
-function NameChecker() {
+function NameChecker({ onRegistered }: { onRegistered?: () => void }) {
   const ops = useOperations();
   const wallet = useActiveWallet();
   const ownerAddress = wallet.status === "ready" ? wallet.address : "";
@@ -740,6 +747,11 @@ function NameChecker() {
           name: trimmed,
           costLythoshi: reviewedCost,
         });
+        // Record this device's registration so "My names" can show it (the
+        // chain has no enumerate RPC). Best-effort; the reverse read stays
+        // authoritative.
+        recordRegisteredName(ownerAddress, trimmed);
+        onRegistered?.();
         return { headline: `Registered ${trimmed}`, detail: r.txHash, txHash: r.txHash, nonce: r.nonce };
       },
     });
@@ -850,6 +862,78 @@ function NameChecker() {
             )}
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+/** The name checker + the honest "my names" view, sharing a refresh key so a
+ *  fresh registration shows up immediately. */
+function NamesSection() {
+  const [refreshKey, setRefreshKey] = useState(0);
+  return (
+    <>
+      <NameChecker onRegistered={() => setRefreshKey((k) => k + 1)} />
+      <MyNames refreshKey={refreshKey} />
+    </>
+  );
+}
+
+/** My names — HONEST within the chain's limits. Shows the chain's reverse-latest
+ *  name (`lyth_nameOf`, authoritative) plus names registered from THIS device,
+ *  and states plainly that the chain can't enumerate every name an address owns.
+ *  Never a fabricated complete list. */
+function MyNames({ refreshKey }: { refreshKey: number }) {
+  const wallet = useActiveWallet();
+  const ownerAddress = wallet.status === "ready" ? wallet.address : "";
+  const [entries, setEntries] = useState<MyNameEntry[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!ownerAddress) {
+      setEntries([]);
+      return;
+    }
+    const local = readRegisteredNames(ownerAddress);
+    // Seed with the local record immediately; refine with the chain reverse read.
+    setEntries(mergeMyNames(null, local));
+    void loadReverseName(ownerAddress).then((reverse) => {
+      if (!cancelled) setEntries(mergeMyNames(reverse, local));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [ownerAddress, refreshKey]);
+
+  if (!ownerAddress) return null;
+
+  return (
+    <div className="w-card">
+      <div className="w-card__head">
+        <h3>My names</h3>
+        <span className="w-todo__pill">{entries.length}</span>
+      </div>
+      <div className="w-card__body">
+        {entries.length === 0 ? (
+          <div className="row-help">No .mono names for this account yet.</div>
+        ) : (
+          <div style={{ display: "grid", gap: 6 }}>
+            {entries.map((e) => (
+              <div key={e.name} className="w-kv" style={{ fontSize: 13 }}>
+                <span className="k mono">{e.name}</span>
+                <span className="v row-help">
+                  {e.reverseLatest ? "latest (on-chain)" : "registered from this device"}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="row-help" style={{ marginTop: 10, lineHeight: 1.5 }}>
+          The chain exposes only your <strong>most recent</strong> name
+          (lyth_nameOf); other names you own aren't enumerable on-chain, so this
+          also lists names registered from this device. It may not reflect names
+          registered elsewhere or transferred away.
+        </div>
       </div>
     </div>
   );
