@@ -51,10 +51,24 @@ describe("incomingCandidatesFromRows", () => {
 });
 
 describe("planIncomingNotifications", () => {
-  it("first run baselines to the newest anchor and records nothing", () => {
-    const plan = planIncomingNotifications(null, [cand(5, 0, 0), cand(7, 1, 0)]);
+  it("first run with a SMALL receive set notifies them all (fresh-wallet fix)", () => {
+    // A fresh / newly-migrated wallet's genuine recent arrivals — record +
+    // notify (oldest-first) and advance the watermark to the newest, instead of
+    // silently baselining and swallowing the first incoming as history.
+    const plan = planIncomingNotifications(null, [cand(7, 1, 0), cand(5, 0, 0)]);
+    expect(plan.baseline).toBeNull();
+    expect(plan.toRecord.map((c) => c.anchor.blockHeight)).toEqual([5, 7]);
+    expect(plan.newWatermark).toEqual({ blockHeight: 7, txIndex: 1, logIndex: 0 });
+  });
+
+  it("first run with a LARGE receive history only baselines — no toast-storm", () => {
+    // > INCOMING_FIRST_RUN_NOTIFY_CAP (10): an established / imported wallet —
+    // baseline to the newest anchor silently so the whole history never dumps
+    // into notifications on first use.
+    const history = Array.from({ length: 11 }, (_, i) => cand(200 - i, 0, 0));
+    const plan = planIncomingNotifications(null, history);
     expect(plan.toRecord).toHaveLength(0);
-    expect(plan.baseline).toEqual({ blockHeight: 7, txIndex: 1, logIndex: 0 });
+    expect(plan.baseline).toEqual({ blockHeight: 200, txIndex: 0, logIndex: 0 });
     expect(plan.newWatermark).toBeNull();
   });
 

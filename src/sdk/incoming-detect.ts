@@ -3,7 +3,9 @@
 // The wallet records + toasts a notification when native LYTH arrives. The
 // indexer already surfaces inbound rows in the activity feed; this driver turns
 // the *newly-seen* ones into notifications exactly once, using a per-(address,
-// chain) watermark so a fresh/returning wallet never toasts its whole history.
+// chain) watermark. On first run a small receive set (a fresh / migrated wallet)
+// is notified, while a large imported history is baselined silently so it never
+// toasts its whole history.
 //
 // Open-surface / unlocked only: it runs after the Activity page loads its
 // indexed rows (a focused window IS the open, unlocked surface), so there is no
@@ -61,8 +63,10 @@ export function incomingCandidatesFromRows(
 
 /** The plan for one detection pass. Pure — the caller applies it. */
 export interface IncomingPlan {
-  /** Non-null on first run: the baseline watermark to persist WITHOUT
-   *  recording (never toast pre-existing history). */
+  /** Non-null on first run with a LARGE receive history: the baseline watermark
+   *  to persist WITHOUT recording (never toast a pre-existing history). A small
+   *  first-run set records + notifies instead — see {@link
+   *  planIncomingNotifications}. */
   baseline: IncomingWatermark | null;
   /** Candidates strictly newer than the watermark, oldest-first so the history
    *  append leaves the newest at the top. */
@@ -72,8 +76,20 @@ export interface IncomingPlan {
   newWatermark: IncomingWatermark | null;
 }
 
-/** Decide what to record + the watermark to advance to. Pure. First run
- *  (watermark === null) baselines to the newest anchor and records nothing. */
+/** First run for an (address, chain) scope with THIS many inbound receives (or
+ *  fewer) in view notifies them all instead of silently baselining: a fresh /
+ *  newly migrated wallet's receives are genuine recent arrivals the user wants
+ *  recorded (the "in-app record is always kept" promise), not history to hide. A
+ *  LARGER set is an established / imported wallet — baseline it silently so a
+ *  whole receive history is never dumped into notifications on first use.
+ *  Tunable. */
+const INCOMING_FIRST_RUN_NOTIFY_CAP = 10;
+
+/** Decide what to record + the watermark to advance to. Pure. On first run
+ *  (watermark === null) a small receive set is recorded + notified (see
+ *  {@link INCOMING_FIRST_RUN_NOTIFY_CAP}); a larger one only establishes a
+ *  baseline (the newest anchor) and records nothing, so a wallet with real
+ *  history never toasts it. */
 export function planIncomingNotifications(
   watermark: IncomingWatermark | null,
   candidates: ReadonlyArray<IncomingCandidate>,
@@ -85,7 +101,18 @@ export function planIncomingNotifications(
   for (const c of candidates) if (anchorAfter(c.anchor, max)) max = c.anchor;
 
   if (watermark === null) {
-    return { baseline: max, toRecord: [], newWatermark: null };
+    // A LARGE first-run receive history is an established / imported wallet —
+    // baseline it silently so the whole history never dumps into notifications.
+    if (candidates.length > INCOMING_FIRST_RUN_NOTIFY_CAP) {
+      return { baseline: max, toRecord: [], newWatermark: null };
+    }
+    // A SMALL set on a fresh / migrated scope is genuine recent arrivals —
+    // record + notify each (oldest-first so the newest lands on top) and advance
+    // the watermark to the newest as usual.
+    const fresh = [...candidates].sort((a, b) =>
+      anchorAfter(a.anchor, b.anchor) ? 1 : -1,
+    );
+    return { baseline: null, toRecord: fresh, newWatermark: max };
   }
 
   const fresh = candidates.filter((c) => anchorAfter(c.anchor, watermark));
@@ -98,7 +125,8 @@ export function planIncomingNotifications(
 }
 
 /** Detect newly-arrived incoming native LYTH and record/toast each exactly
- *  once. Baselines silently on first run; advances the watermark after. The
+ *  once. On first run a small receive set is recorded + notified while a large
+ *  imported history is baselined silently; advances the watermark after. The
  *  in-app record is always written; the OS toast is gated by the incoming
  *  toggle. Best-effort — never throws back into the caller. */
 export async function detectAndNotifyIncoming(
