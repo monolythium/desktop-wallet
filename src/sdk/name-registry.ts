@@ -6,8 +6,13 @@
 // module's fabricated placeholder (which is no longer read anywhere in TS).
 
 import { invoke } from "@tauri-apps/api/core";
-import { formatLyth } from "@monolythium/core-sdk";
+import {
+  encodeNameRegisterCall,
+  formatLyth,
+  nameRegistryAddressHex,
+} from "@monolythium/core-sdk";
 import { getProvider } from "./client";
+import { submitNativeTx, type SubmitNativeTxResult } from "./submit";
 
 export type NameCategory = "human" | "agent" | "cluster" | "contract" | "system";
 
@@ -22,10 +27,13 @@ export interface NameAvailability {
   on_chain_check_performed: boolean;
 }
 
-/** The real, chain-exact registration quote for a name, in LYTH (full
- *  precision — the cost is tiny at the current base fee). */
+/** The real, chain-exact registration quote for a name. */
 export interface NameQuote {
-  /** Registration cost formatted as a LYTH decimal string (no unit). */
+  /** Exact registration cost in lythoshi — the value a register tx MUST carry
+   *  (the precompile reverts IncorrectFee on any mismatch). */
+  costLythoshi: bigint;
+  /** The same cost formatted as a LYTH decimal string (no unit) for display —
+   *  full precision, the cost is tiny at the current base fee. */
   costLyth: string;
 }
 
@@ -37,10 +45,72 @@ export interface NameQuote {
 export async function loadNameQuote(name: string): Promise<NameQuote | null> {
   try {
     const quote = await getProvider().rpcClient.quoteNameRegistration(name.trim().toLowerCase());
-    return { costLyth: formatLyth(quote.costLythoshi.toString(), { includeUnit: false }) };
+    return {
+      costLythoshi: quote.costLythoshi,
+      costLyth: formatLyth(quote.costLythoshi.toString(), { includeUnit: false }),
+    };
   } catch {
     return null;
   }
+}
+
+/** Live availability of a name, via `lyth_resolveName` (available ⇔ no owner).
+ *  A convenience for the UI — the chain is authoritative at submit (a race
+ *  reverts NameTaken). `error` on a malformed name / failed read (honest). */
+export type NameAvailabilityStatus = "available" | "taken" | "error";
+
+export async function loadNameAvailability(name: string): Promise<NameAvailabilityStatus> {
+  try {
+    const available = await getProvider().rpcClient.lythIsNameAvailable(name.trim().toLowerCase());
+    return available ? "available" : "taken";
+  } catch {
+    return "error";
+  }
+}
+
+/** The exact `register(name, owner)` submit inputs: to = the 0x110E registry,
+ *  the SDK register calldata, and value = the EXACT quoted cost. `owner`
+ *  defaults to the zero address so the CALLER (the signing wallet) becomes the
+ *  owner (human/agent names). Pure. */
+export interface NameRegisterTx {
+  to: string;
+  input: string;
+  valueLythoshi: bigint;
+  feeClass: "registry";
+}
+
+export function nameRegisterTx(name: string, costLythoshi: bigint): NameRegisterTx {
+  return {
+    to: nameRegistryAddressHex(),
+    input: encodeNameRegisterCall(name.trim().toLowerCase()),
+    valueLythoshi: costLythoshi,
+    feeClass: "registry",
+  };
+}
+
+export interface RegisterNameArgs {
+  /** Wallet ML-DSA-65 seed, unlocked by the OperationsDrawer. */
+  seed: Uint8Array;
+  name: string;
+  /** Exact registration cost in lythoshi (must equal the chain U-curve cost). */
+  costLythoshi: bigint;
+}
+
+/** Submit a `register` tx through the shared plaintext seam with value = the
+ *  exact cost. The caller becomes the owner. */
+export async function submitNameRegistration(
+  args: RegisterNameArgs,
+): Promise<SubmitNativeTxResult> {
+  const tx = nameRegisterTx(args.name, args.costLythoshi);
+  return submitNativeTx({ seed: args.seed, ...tx });
+}
+
+/** True when the fresh submit-time quote exactly matches the reviewed one. A
+ *  base-fee move between review and submit would make the reviewed value stale →
+ *  the precompile reverts IncorrectFee, so we submit ONLY when they are equal
+ *  (shown == submitted); a mismatch blocks with a "price changed" message. Pure. */
+export function quoteUnchanged(shownCostLythoshi: bigint, freshCostLythoshi: bigint): boolean {
+  return shownCostLythoshi === freshCostLythoshi;
 }
 
 export type NameErrorCode =

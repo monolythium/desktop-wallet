@@ -14,7 +14,19 @@ import {
   type ConvertQuoteView,
 } from "../sdk/convert";
 import { flightSearch, FlightCallError, type FlightSearchInput } from "../sdk/flights";
-import { checkName, loadNameQuote, type NameCheckResult, type NameQuote } from "../sdk/name-registry";
+import { nameRegistryAddressHex } from "@monolythium/core-sdk";
+import {
+  checkName,
+  loadNameAvailability,
+  loadNameQuote,
+  quoteUnchanged,
+  submitNameRegistration,
+  type NameAvailabilityStatus,
+  type NameCheckResult,
+  type NameQuote,
+} from "../sdk/name-registry";
+import { useOperations } from "../operations/context";
+import { useActiveWallet } from "../sdk/active-wallet";
 import {
   spendCoinsbeeGuide,
   spendCoinsbeeInvoice,
@@ -626,11 +638,16 @@ function HitRow({ hit }: { hit: ListingHit }) {
 }
 
 function NameChecker() {
+  const ops = useOperations();
+  const wallet = useActiveWallet();
+  const ownerAddress = wallet.status === "ready" ? wallet.address : "";
   const [name, setName] = useState("");
   const [result, setResult] = useState<NameCheckResult | null>(null);
   // The real registration quote (SDK quoteNameRegistration). null = not loaded /
   // unavailable → the UI shows an honest "—", never the old placeholder.
   const [quote, setQuote] = useState<NameQuote | null>(null);
+  // Live availability (lyth_resolveName): null = not loaded yet.
+  const [availability, setAvailability] = useState<NameAvailabilityStatus | null>(null);
   const debounceRef = useRef<number | null>(null);
 
   // Debounce the check by 200ms so the user isn't hammering the Tauri
@@ -640,18 +657,21 @@ function NameChecker() {
     if (!trimmed) {
       setResult(null);
       setQuote(null);
+      setAvailability(null);
       return;
     }
     if (debounceRef.current !== null) {
       window.clearTimeout(debounceRef.current);
     }
     setQuote(null);
+    setAvailability(null);
     debounceRef.current = window.setTimeout(() => {
       void checkName(trimmed).then((r) => {
         setResult(r);
-        // Fetch the real chain-exact price only for a structurally-valid name.
+        // Real chain-exact price + live availability for a structurally-valid name.
         if (r.kind === "ok") {
           void loadNameQuote(trimmed).then(setQuote);
+          void loadNameAvailability(trimmed).then(setAvailability);
         }
       });
     }, 200);
@@ -661,6 +681,59 @@ function NameChecker() {
       }
     };
   }, [name]);
+
+  // Register a human name: re-read the quote at submit (so a base-fee move can't
+  // cause a silent IncorrectFee) and submit value = the EXACT reviewed cost.
+  const openRegister = () => {
+    if (result?.kind !== "ok" || !quote || !ownerAddress) return;
+    const trimmed = name.trim().toLowerCase();
+    const category = result.availability.category;
+    const reviewedCost = quote.costLythoshi;
+    ops.open({
+      title: `Register ${trimmed}`,
+      subtitle: "Acquire this .mono name — one-time, permanent",
+      auth: "keychain",
+      diff: [
+        { k: "Name", v: trimmed },
+        { k: "Category", v: category },
+        { k: "Registration fee", v: `${quote.costLyth} LYTH`, kind: "fee" as const },
+        { k: "Owner", v: ownerAddress },
+        { k: "Precompile", v: "0x…110E" },
+      ],
+      effects: [
+        { text: "Unlocks the local vault for this operation only." },
+        { text: "Encodes register(string,address) via @monolythium/core-sdk — the signing wallet becomes the owner." },
+        { text: "Names are permanent: no expiry, no renewal. This is a one-time fee." },
+        {
+          text: "The fee is re-read at submit; if it changed you'll be asked to re-check. The chain reverts IncorrectFee on any fee mismatch and NameTaken if it was claimed first — verbatim errors surface here.",
+          level: "warn" as const,
+        },
+      ],
+      notify: {
+        kind: "contract_call" as const,
+        amountDecimal: "0",
+        counterparty: nameRegistryAddressHex(),
+      },
+      execute: async (ctx) => {
+        if (!ctx?.vaultSeed) {
+          throw new Error("vault seed unavailable after keychain authorization");
+        }
+        const fresh = await loadNameQuote(trimmed);
+        if (!fresh) {
+          throw new Error("Couldn't read the registration price — not submitting.");
+        }
+        if (!quoteUnchanged(reviewedCost, fresh.costLythoshi)) {
+          throw new Error("The registration price changed since review. Re-check and try again.");
+        }
+        const r = await submitNameRegistration({
+          seed: ctx.vaultSeed,
+          name: trimmed,
+          costLythoshi: reviewedCost,
+        });
+        return { headline: `Registered ${trimmed}`, detail: r.txHash, txHash: r.txHash, nonce: r.nonce };
+      },
+    });
+  };
 
   const placeholder = "alice.mono";
 
@@ -688,7 +761,7 @@ function NameChecker() {
           <div style={{ flex: 1 }}>
             <div className="row-label">Name</div>
             <div className="row-help">
-              Syntax check + the real registration price (live chain quote). Live availability and registration land in a later build.
+              Syntax check, live availability, and the real chain registration price. Register a human name below.
             </div>
           </div>
           <input
@@ -712,6 +785,42 @@ function NameChecker() {
           />
         </div>
         <NameDetail name={name} result={result} quote={quote} />
+        {result?.kind === "ok" && (
+          <div
+            style={{
+              marginTop: 12,
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+              flexWrap: "wrap",
+            }}
+          >
+            <span className="row-help">
+              {availability === null
+                ? "Checking availability…"
+                : availability === "available"
+                  ? "Available on-chain"
+                  : availability === "taken"
+                    ? "Already registered"
+                    : "Availability check unavailable"}
+            </span>
+            {result.availability.category === "human" ? (
+              <button
+                className="btn btn--sm btn--primary"
+                disabled={availability !== "available" || !quote || !ownerAddress}
+                onClick={openRegister}
+              >
+                Register{quote ? ` · ${quote.costLyth} LYTH` : ""}
+              </button>
+            ) : (
+              <span className="row-help">
+                {result.availability.category === "agent"
+                  ? "Agent names register under a human name you own (see below)."
+                  : `${result.availability.category} names aren't user-registerable here.`}
+              </span>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
