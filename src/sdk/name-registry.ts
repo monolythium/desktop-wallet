@@ -113,6 +113,50 @@ export function quoteUnchanged(shownCostLythoshi: bigint, freshCostLythoshi: big
   return shownCostLythoshi === freshCostLythoshi;
 }
 
+/** For an agent name `<x>.agent.<parent>.mono`, the parent human name
+ *  `<parent>.mono` the caller must own; null for any non-agent form. Pure. */
+export function agentParentName(name: string): string | null {
+  const parts = name.trim().toLowerCase().split(".");
+  if (parts.length === 4 && parts[1] === "agent" && parts[3] === "mono" && parts[2]) {
+    return `${parts[2]}.mono`;
+  }
+  return null;
+}
+
+/** Whether the caller may register an agent under its parent. `owned` only when
+ *  the parent resolves to THIS wallet; the chain also enforces this and reverts
+ *  otherwise, so this is the pre-sign guard + honest messaging. */
+export type AgentParentVerdict = "owned" | "not_owned" | "parent_unregistered" | "error";
+
+/** Pure verdict from the parent's resolved owner vs. the active address. */
+export function agentParentVerdictFrom(
+  resolvedParentAddress: string | null | undefined,
+  ownerAddress: string,
+): AgentParentVerdict {
+  if (resolvedParentAddress === null || resolvedParentAddress === undefined) {
+    return "parent_unregistered";
+  }
+  return resolvedParentAddress.toLowerCase() === ownerAddress.trim().toLowerCase()
+    ? "owned"
+    : "not_owned";
+}
+
+/** Resolve an agent name's parent and check the active wallet owns it. `error`
+ *  for a non-agent name or a failed read (honest). */
+export async function checkAgentParentOwnership(
+  agentName: string,
+  ownerAddress: string,
+): Promise<AgentParentVerdict> {
+  const parent = agentParentName(agentName);
+  if (!parent || ownerAddress.trim() === "") return "error";
+  try {
+    const res = await getProvider().rpcClient.lythResolveName(parent);
+    return agentParentVerdictFrom(res.address, ownerAddress);
+  } catch {
+    return "error";
+  }
+}
+
 export type NameErrorCode =
   | "empty"
   | "whole_too_long"

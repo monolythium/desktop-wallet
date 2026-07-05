@@ -16,11 +16,13 @@ import {
 import { flightSearch, FlightCallError, type FlightSearchInput } from "../sdk/flights";
 import { nameRegistryAddressHex } from "@monolythium/core-sdk";
 import {
+  checkAgentParentOwnership,
   checkName,
   loadNameAvailability,
   loadNameQuote,
   quoteUnchanged,
   submitNameRegistration,
+  type AgentParentVerdict,
   type NameAvailabilityStatus,
   type NameCheckResult,
   type NameQuote,
@@ -648,6 +650,8 @@ function NameChecker() {
   const [quote, setQuote] = useState<NameQuote | null>(null);
   // Live availability (lyth_resolveName): null = not loaded yet.
   const [availability, setAvailability] = useState<NameAvailabilityStatus | null>(null);
+  // For an agent name: whether the active wallet owns the parent human name.
+  const [parentVerdict, setParentVerdict] = useState<AgentParentVerdict | null>(null);
   const debounceRef = useRef<number | null>(null);
 
   // Debounce the check by 200ms so the user isn't hammering the Tauri
@@ -658,6 +662,7 @@ function NameChecker() {
       setResult(null);
       setQuote(null);
       setAvailability(null);
+      setParentVerdict(null);
       return;
     }
     if (debounceRef.current !== null) {
@@ -665,6 +670,7 @@ function NameChecker() {
     }
     setQuote(null);
     setAvailability(null);
+    setParentVerdict(null);
     debounceRef.current = window.setTimeout(() => {
       void checkName(trimmed).then((r) => {
         setResult(r);
@@ -672,6 +678,10 @@ function NameChecker() {
         if (r.kind === "ok") {
           void loadNameQuote(trimmed).then(setQuote);
           void loadNameAvailability(trimmed).then(setAvailability);
+          // Agent names also need the parent-ownership check (chain-enforced).
+          if (r.availability.category === "agent" && ownerAddress) {
+            void checkAgentParentOwnership(trimmed, ownerAddress).then(setParentVerdict);
+          }
         }
       });
     }, 200);
@@ -680,7 +690,7 @@ function NameChecker() {
         window.clearTimeout(debounceRef.current);
       }
     };
-  }, [name]);
+  }, [name, ownerAddress]);
 
   // Register a human name: re-read the quote at submit (so a base-fee move can't
   // cause a silent IncorrectFee) and submit value = the EXACT reviewed cost.
@@ -804,19 +814,38 @@ function NameChecker() {
                     ? "Already registered"
                     : "Availability check unavailable"}
             </span>
-            {result.availability.category === "human" ? (
-              <button
-                className="btn btn--sm btn--primary"
-                disabled={availability !== "available" || !quote || !ownerAddress}
-                onClick={openRegister}
-              >
-                Register{quote ? ` · ${quote.costLyth} LYTH` : ""}
-              </button>
+            {result.availability.category === "human" ||
+            result.availability.category === "agent" ? (
+              <>
+                {result.availability.category === "agent" && (
+                  <span className="row-help">
+                    {parentVerdict === null
+                      ? "Checking parent ownership…"
+                      : parentVerdict === "owned"
+                        ? "You own the parent name"
+                        : parentVerdict === "not_owned"
+                          ? "You don't own the parent name"
+                          : parentVerdict === "parent_unregistered"
+                            ? "The parent name isn't registered yet"
+                            : "Parent-ownership check unavailable"}
+                  </span>
+                )}
+                <button
+                  className="btn btn--sm btn--primary"
+                  disabled={
+                    availability !== "available" ||
+                    !quote ||
+                    !ownerAddress ||
+                    (result.availability.category === "agent" && parentVerdict !== "owned")
+                  }
+                  onClick={openRegister}
+                >
+                  Register{quote ? ` · ${quote.costLyth} LYTH` : ""}
+                </button>
+              </>
             ) : (
               <span className="row-help">
-                {result.availability.category === "agent"
-                  ? "Agent names register under a human name you own (see below)."
-                  : `${result.availability.category} names aren't user-registerable here.`}
+                {result.availability.category} names aren't user-registerable here.
               </span>
             )}
           </div>
