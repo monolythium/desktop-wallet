@@ -6,10 +6,11 @@
 // The leading underscore in the filename follows the convention for shared
 // internal building blocks that are not a page in their own right.
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 
 import { monoscanAddressUrl, monoscanTxUrl } from "../sdk/monoscan";
+import { loadReverseName } from "../sdk/reverse-name";
 
 /** Middle-truncate any string (bech32m address or hash) for compact
  *  display. Pure — never throws. */
@@ -150,4 +151,31 @@ export function CopyableAddress({
       </span>
     </div>
   );
+}
+
+/** Subscribe a component to an address's registry reverse name (`lyth_nameOf`,
+ *  cached). Returns null until resolved / when absent — the caller shows the
+ *  bare address. Re-resolves when the address changes. */
+export function useReverseName(address: string | null | undefined): string | null {
+  const [name, setName] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    setName(null);
+    if (!address) return;
+    void loadReverseName(address).then((n) => {
+      if (!cancelled) setName(n);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [address]);
+  return name;
+}
+
+/** A {@link CopyableAddress} that also shows the address's registry name when it
+ *  has one (honest fallback to the bare address otherwise). Use anywhere a bare
+ *  counterparty/owner address is displayed. */
+export function NamedAddress({ addr }: { addr: string }) {
+  const name = useReverseName(addr);
+  return <CopyableAddress addr={addr} name={name} />;
 }

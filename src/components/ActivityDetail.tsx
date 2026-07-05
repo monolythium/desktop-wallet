@@ -25,7 +25,7 @@ import {
 } from "../sdk/lyth-display";
 import { isZeroAmount, pendingOpLabel, type TxOpKind } from "../sdk/notifications";
 import { txTypeLabelForActivity } from "../sdk/tx-type-label";
-import { CopyableAddress, DRow, MonoscanTxButton, truncMiddle } from "./_detailModalParts";
+import { CopyableAddress, DRow, MonoscanTxButton, NamedAddress, truncMiddle } from "./_detailModalParts";
 
 /** Pending-mempool row — carries the canonical tx hash, so it links out. */
 export interface PendingDetailRow {
@@ -154,7 +154,7 @@ function DetailBody({ row, walletAddr }: { row: DetailRow; walletAddr: string })
         ) : null}
         <DRow label="From" value={<CopyableAddress addr={walletAddr} />} />
         {showCp ? (
-          <DRow label="To" value={<CopyableAddress addr={row.counterparty} />} />
+          <DRow label="To" value={<NamedAddress addr={row.counterparty} />} />
         ) : null}
         <DRow
           label="Tx hash"
@@ -209,13 +209,13 @@ function DetailBody({ row, walletAddr }: { row: DetailRow; walletAddr: string })
       {cp ? (
         isIn ? (
           <>
-            <DRow label="From" value={<CopyableAddress addr={cp} />} />
+            <DRow label="From" value={<NamedAddress addr={cp} />} />
             <DRow label="To" value={<CopyableAddress addr={walletAddr} />} />
           </>
         ) : (
           <>
             <DRow label="From" value={<CopyableAddress addr={walletAddr} />} />
-            <DRow label="To" value={<CopyableAddress addr={cp} />} />
+            <DRow label="To" value={<NamedAddress addr={cp} />} />
           </>
         )
       ) : null}
