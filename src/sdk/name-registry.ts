@@ -7,10 +7,13 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import {
+  encodeNameAcceptTransferCall,
+  encodeNameProposeTransferCall,
   encodeNameRegisterCall,
   formatLyth,
   nameRegistryAddressHex,
 } from "@monolythium/core-sdk";
+import { requireTypedUserAddressHex } from "./address";
 import { getProvider } from "./client";
 import { submitNativeTx, type SubmitNativeTxResult } from "./submit";
 
@@ -155,6 +158,85 @@ export async function checkAgentParentOwnership(
   } catch {
     return "error";
   }
+}
+
+// ── Transfer (propose / accept) ──────────────────────────────────────────────
+
+/** A human name is a bare `<x>.mono` (2 labels). Only human-name transfers
+ *  cascade-delete their agent children on accept. Pure. */
+export function isHumanName(name: string): boolean {
+  const parts = name.trim().toLowerCase().split(".");
+  return parts.length === 2 && parts[1] === "mono" && parts[0] !== "";
+}
+
+/** The agent sub-names KNOWN to this wallet (from `names`, its own registrations)
+ *  whose parent is `parentName`. NOT authoritative — the chain exposes no way to
+ *  enumerate a name's agent children — so this may be incomplete; the cascade
+ *  warning must say ALL children are deleted, not just these. Pure. */
+export function knownAgentChildren(names: readonly string[], parentName: string): string[] {
+  const parent = parentName.trim().toLowerCase();
+  return names.filter((n) => agentParentName(n) === parent);
+}
+
+export interface NameTransferTx {
+  to: string;
+  input: string;
+  valueLythoshi: bigint;
+  feeClass: "registry";
+}
+
+/** `proposeTransfer(name, recipient)` submit inputs. FREE (value 0) — the fee is
+ *  paid by the recipient on accept. `recipientHex` is a 0x-hex 20-byte address.
+ *  Pure. */
+export function nameProposeTransferTx(name: string, recipientHex: string): NameTransferTx {
+  return {
+    to: nameRegistryAddressHex(),
+    input: encodeNameProposeTransferCall(name.trim().toLowerCase(), recipientHex),
+    valueLythoshi: 0n,
+    feeClass: "registry",
+  };
+}
+
+/** `acceptTransfer(name)` submit inputs. The recipient pays value = the EXACT
+ *  U-curve cost (same as a fresh registration; reverts IncorrectFee otherwise).
+ *  Pure. */
+export function nameAcceptTransferTx(name: string, costLythoshi: bigint): NameTransferTx {
+  return {
+    to: nameRegistryAddressHex(),
+    input: encodeNameAcceptTransferCall(name.trim().toLowerCase()),
+    valueLythoshi: costLythoshi,
+    feeClass: "registry",
+  };
+}
+
+export interface ProposeTransferArgs {
+  seed: Uint8Array;
+  name: string;
+  /** Typed `mono1…` recipient (resolved address for a `.mono` name recipient). */
+  recipient: string;
+}
+
+/** Submit a propose-transfer. The recipient is converted to its 20-byte hex here
+ *  (throws for a malformed / raw-0x recipient). */
+export async function submitNameProposeTransfer(
+  args: ProposeTransferArgs,
+): Promise<SubmitNativeTxResult> {
+  const recipientHex = requireTypedUserAddressHex(args.recipient, "recipient");
+  return submitNativeTx({ seed: args.seed, ...nameProposeTransferTx(args.name, recipientHex) });
+}
+
+export interface AcceptTransferArgs {
+  seed: Uint8Array;
+  name: string;
+  /** Exact accept fee in lythoshi (from the fresh quote; must equal the chain's). */
+  costLythoshi: bigint;
+}
+
+/** Submit an accept-transfer with value = the exact cost (recipient pays). */
+export async function submitNameAcceptTransfer(
+  args: AcceptTransferArgs,
+): Promise<SubmitNativeTxResult> {
+  return submitNativeTx({ seed: args.seed, ...nameAcceptTransferTx(args.name, args.costLythoshi) });
 }
 
 export type NameErrorCode =

@@ -14,19 +14,23 @@ import {
   type ConvertQuoteView,
 } from "../sdk/convert";
 import { flightSearch, FlightCallError, type FlightSearchInput } from "../sdk/flights";
-import { nameRegistryAddressHex } from "@monolythium/core-sdk";
+import { ADDRESS_KIND_HRPS, nameRegistryAddressHex, typedBech32ToAddress } from "@monolythium/core-sdk";
 import {
   checkAgentParentOwnership,
   checkName,
+  isHumanName,
+  knownAgentChildren,
   loadNameAvailability,
   loadNameQuote,
   quoteUnchanged,
+  submitNameProposeTransfer,
   submitNameRegistration,
   type AgentParentVerdict,
   type NameAvailabilityStatus,
   type NameCheckResult,
   type NameQuote,
 } from "../sdk/name-registry";
+import { classifyRecipientInput, resolveNameQuorum } from "../sdk/name-resolve";
 import { useOperations } from "../operations/context";
 import { useActiveWallet } from "../sdk/active-wallet";
 import { loadReverseName } from "../sdk/reverse-name";
@@ -884,9 +888,18 @@ function NamesSection() {
  *  and states plainly that the chain can't enumerate every name an address owns.
  *  Never a fabricated complete list. */
 function MyNames({ refreshKey }: { refreshKey: number }) {
+  const ops = useOperations();
   const wallet = useActiveWallet();
   const ownerAddress = wallet.status === "ready" ? wallet.address : "";
   const [entries, setEntries] = useState<MyNameEntry[]>([]);
+  // Per-name transfer form: which name's form is open, the recipient, and the
+  // deliberate cascade-delete acknowledgement (required for human names).
+  const [transferFor, setTransferFor] = useState<string | null>(null);
+  const [transferTo, setTransferTo] = useState("");
+  const [cascadeConfirmed, setCascadeConfirmed] = useState(false);
+  const [transferError, setTransferError] = useState<string | null>(null);
+  const [transferBusy, setTransferBusy] = useState(false);
+  const localNames = ownerAddress ? readRegisteredNames(ownerAddress) : [];
 
   useEffect(() => {
     let cancelled = false;
@@ -905,6 +918,94 @@ function MyNames({ refreshKey }: { refreshKey: number }) {
     };
   }, [ownerAddress, refreshKey]);
 
+  const openTransferFor = (name: string) => {
+    setTransferFor(transferFor === name ? null : name);
+    setTransferTo("");
+    setCascadeConfirmed(false);
+    setTransferError(null);
+  };
+
+  // Propose a transfer: resolve the recipient fail-closed, require the cascade
+  // acknowledgement for a human name, then submit proposeTransfer (free — the
+  // recipient pays on accept).
+  const proposeTransfer = async (name: string) => {
+    setTransferError(null);
+    const input = classifyRecipientInput(transferTo, ADDRESS_KIND_HRPS.user);
+    if (input.kind === "invalid") {
+      setTransferError(input.reason);
+      return;
+    }
+    if (isHumanName(name) && !cascadeConfirmed) {
+      setTransferError("Acknowledge the agent-sub-name deletion before transferring this human name.");
+      return;
+    }
+    setTransferBusy(true);
+    let recipient: string;
+    if (input.kind === "name") {
+      const verdict = await resolveNameQuorum(input.name);
+      if (!verdict.ok) {
+        setTransferBusy(false);
+        setTransferError(verdict.message);
+        return;
+      }
+      recipient = verdict.address;
+    } else {
+      recipient = input.address;
+    }
+    try {
+      typedBech32ToAddress(recipient, "user");
+    } catch {
+      setTransferBusy(false);
+      setTransferError("Recipient address is malformed — not proposing.");
+      return;
+    }
+    setTransferBusy(false);
+
+    const children = knownAgentChildren(localNames, name);
+    const human = isHumanName(name);
+    ops.open({
+      title: `Transfer ${name}`,
+      subtitle: "Propose a name transfer — the recipient accepts within 24h",
+      auth: "keychain",
+      diff: [
+        { k: "Name", v: name },
+        { k: "To", v: recipient },
+        { k: "Acceptance window", v: "24 hours" },
+        { k: "Precompile", v: "0x…110E" },
+      ],
+      effects: [
+        { text: "Unlocks the local vault for this operation only." },
+        { text: "Encodes proposeTransfer(string,address) via @monolythium/core-sdk. Proposing is free — the recipient pays the registration fee when they accept." },
+        { text: "The recipient must accept within 24 hours (21,600 blocks) or the proposal lapses. Re-proposing replaces a pending proposal." },
+        ...(human
+          ? [
+              {
+                text: `Transferring this human name PERMANENTLY DELETES all its agent sub-names when accepted${children.length ? ` (known here: ${children.join(", ")})` : ""}. The chain can't enumerate them, so any not listed are deleted too.`,
+                level: "warn" as const,
+              },
+            ]
+          : []),
+        {
+          text: "Chain rejects if you no longer own the name or the recipient is invalid — verbatim errors surface here.",
+          level: "warn" as const,
+        },
+      ],
+      notify: {
+        kind: "contract_call" as const,
+        amountDecimal: "0",
+        counterparty: nameRegistryAddressHex(),
+      },
+      execute: async (ctx) => {
+        if (!ctx?.vaultSeed) {
+          throw new Error("vault seed unavailable after keychain authorization");
+        }
+        const r = await submitNameProposeTransfer({ seed: ctx.vaultSeed, name, recipient });
+        return { headline: `Proposed transfer of ${name}`, detail: r.txHash, txHash: r.txHash, nonce: r.nonce };
+      },
+    });
+    setTransferFor(null);
+  };
+
   if (!ownerAddress) return null;
 
   return (
@@ -919,11 +1020,92 @@ function MyNames({ refreshKey }: { refreshKey: number }) {
         ) : (
           <div style={{ display: "grid", gap: 6 }}>
             {entries.map((e) => (
-              <div key={e.name} className="w-kv" style={{ fontSize: 13 }}>
-                <span className="k mono">{e.name}</span>
-                <span className="v row-help">
-                  {e.reverseLatest ? "latest (on-chain)" : "registered from this device"}
-                </span>
+              <div key={e.name} style={{ display: "grid", gap: 6 }}>
+                <div className="w-kv" style={{ fontSize: 13 }}>
+                  <span className="k mono">{e.name}</span>
+                  <span className="v" style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    <span className="row-help">
+                      {e.reverseLatest ? "latest (on-chain)" : "registered from this device"}
+                    </span>
+                    <button
+                      className={`btn btn--xs${transferFor === e.name ? " btn--primary" : " btn--ghost"}`}
+                      onClick={() => openTransferFor(e.name)}
+                    >
+                      Transfer
+                    </button>
+                  </span>
+                </div>
+                {transferFor === e.name && (
+                  <div
+                    style={{
+                      padding: 10,
+                      borderRadius: 8,
+                      background: "var(--surface-2, rgba(255,255,255,0.03))",
+                      border: "1px solid var(--border, rgba(255,255,255,0.08))",
+                      display: "grid",
+                      gap: 8,
+                    }}
+                  >
+                    <input
+                      type="text"
+                      placeholder={`recipient ${ADDRESS_KIND_HRPS.user}1… or alice.mono`}
+                      value={transferTo}
+                      onChange={(ev) => {
+                        setTransferTo(ev.target.value);
+                        setTransferError(null);
+                      }}
+                      spellCheck={false}
+                      autoCapitalize="off"
+                      autoCorrect="off"
+                      style={{
+                        padding: "8px 10px",
+                        borderRadius: 6,
+                        border: "1px solid var(--w-border, #2a2a2a)",
+                        background: "var(--w-bg-2, #161616)",
+                        color: "var(--w-text, #e6e6e6)",
+                        fontFamily: "var(--w-font-mono, ui-monospace, monospace)",
+                        fontSize: 13,
+                      }}
+                    />
+                    {isHumanName(e.name) && (
+                      <div className="w-banner error" style={{ lineHeight: 1.5 }}>
+                        <strong>Transferring deletes agent sub-names.</strong> When the recipient
+                        accepts, <strong>every</strong> agent sub-name of {e.name} is permanently
+                        deleted.
+                        {knownAgentChildren(localNames, e.name).length > 0
+                          ? ` Known here: ${knownAgentChildren(localNames, e.name).join(", ")}.`
+                          : ""}{" "}
+                        The chain can't enumerate them, so any not listed are deleted too.
+                        <label style={{ display: "block", marginTop: 8 }}>
+                          <input
+                            type="checkbox"
+                            checked={cascadeConfirmed}
+                            onChange={(ev) => setCascadeConfirmed(ev.target.checked)}
+                          />{" "}
+                          I understand this permanently deletes all agent sub-names.
+                        </label>
+                      </div>
+                    )}
+                    {transferError && (
+                      <div className="row-help" style={{ color: "var(--err)" }}>
+                        {transferError}
+                      </div>
+                    )}
+                    <div>
+                      <button
+                        className="btn btn--sm btn--primary"
+                        disabled={
+                          transferBusy ||
+                          !transferTo.trim() ||
+                          (isHumanName(e.name) && !cascadeConfirmed)
+                        }
+                        onClick={() => void proposeTransfer(e.name)}
+                      >
+                        {transferBusy ? "Resolving…" : "Propose transfer"}
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             ))}
           </div>
