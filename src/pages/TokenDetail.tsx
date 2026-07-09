@@ -259,6 +259,7 @@ export function TokenDetail({ goto }: Props) {
           facts={facts}
           activity={activity}
           hasAddress={Boolean(walletAddress)}
+          tokenMeta={tokenMeta}
         />
       ) : null}
       {tab === "info" ? <InfoTab facts={facts} endpoint={live?.endpoint ?? "—"} supply={supply} /> : null}
@@ -278,10 +279,12 @@ function ActivityTab({
   facts,
   activity,
   hasAddress,
+  tokenMeta,
 }: {
   facts: ReturnType<typeof selectTokenDetailFacts>;
   activity: RpcOutcome<LiveAddressActivityRow[]> | null;
   hasAddress: boolean;
+  tokenMeta: Map<string, TokenMeta>;
 }) {
   // Filter rows to this token. Native LYTH rows carry the zero-address (or null)
   // token id, so the native view (detected by isNativeLythTokenId) shows the
@@ -321,7 +324,7 @@ function ActivityTab({
               rows.map((row) => (
                 <TxRow
                   key={`${row.blockHeight}-${row.txIndex}-${row.logIndex}`}
-                  tx={activityRowToTx(row)}
+                  tx={activityRowToTx(row, tokenMeta)}
                 />
               ))
             )}

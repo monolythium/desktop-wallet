@@ -37,7 +37,8 @@ import {
   applyCapturedClusterNames,
   mergeConfirmedRows,
 } from "../sdk/activity-cache";
-import { tokenUnitLabel } from "../sdk/lyth-display";
+import { isNativeLythTokenId, tokenUnitLabel } from "../sdk/lyth-display";
+import { loadTokenMetaMap, type TokenMeta } from "../sdk/token-metadata";
 import {
   readConfirmedCache,
   writeConfirmedCache,
@@ -76,6 +77,9 @@ export function Activity() {
   // shared NotificationDetail for a failed record (it has the right shape).
   const [selected, setSelected] = useState<DetailRow | null>(null);
   const [selectedFailed, setSelectedFailed] = useState<NotificationRecord | null>(null);
+  // Cached MRC metadata (decimals/symbol) for the MRC-20 tokens in the feed, so
+  // token amounts render at their real decimals rather than raw base units.
+  const [tokenMeta, setTokenMeta] = useState<Map<string, TokenMeta>>(new Map());
 
   // Durable tracked-tx store — the wallet's own in-flight broadcasts. The store
   // is shared across every vault, so scope it to the active wallet before it
@@ -122,6 +126,23 @@ export function Activity() {
   );
 
   const filtersActive = dirFilter !== "all" || tokenFilter !== "all";
+
+  // Fetch cached MRC metadata for the distinct MRC-20 tokens in the feed so
+  // their amounts render at real decimals. Keyed on the id set (content-stable),
+  // so it refetches only when a new token appears — not on every render.
+  const tokenIdKey = [
+    ...new Set(confirmedRows.filter((r) => !isNativeLythTokenId(r.tokenId)).map((r) => r.tokenId!)),
+  ].join(",");
+  useEffect(() => {
+    if (!tokenIdKey) return;
+    let cancelled = false;
+    void loadTokenMetaMap(tokenIdKey.split(",")).then((m) => {
+      if (!cancelled) setTokenMeta(m);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [tokenIdKey]);
 
   // The single feed. A filter narrows to the confirmed rows only; unfiltered,
   // the wallet's own pending + failed rows interleave by recency.
@@ -413,7 +434,7 @@ export function Activity() {
               return (
                 <TxRow
                   key={`c:${row.blockHeight}-${row.txIndex}-${row.logIndex}`}
-                  tx={activityRowToTx(row)}
+                  tx={activityRowToTx(row, tokenMeta)}
                   onClick={() => setSelected(indexedRowToDetail(row))}
                 />
               );
@@ -459,7 +480,12 @@ export function Activity() {
       </div>
 
       {selected ? (
-        <ActivityDetail row={selected} walletAddr={walletAddress} onClose={() => setSelected(null)} />
+        <ActivityDetail
+          row={selected}
+          walletAddr={walletAddress}
+          tokenMeta={tokenMeta}
+          onClose={() => setSelected(null)}
+        />
       ) : null}
       {selectedFailed ? (
         <NotificationDetail record={selectedFailed} onClose={() => setSelectedFailed(null)} />

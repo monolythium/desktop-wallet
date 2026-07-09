@@ -8,6 +8,7 @@ import {
   activityRowToTx,
   activityWhen,
 } from "../activity-rows";
+import type { TokenMeta } from "../token-metadata";
 
 function row(partial: Partial<LiveAddressActivityRow>): LiveAddressActivityRow {
   return {
@@ -174,9 +175,27 @@ describe("activityRowToTx", () => {
     expect(tx.kind).toBe("delegate");
   });
 
-  it("keeps an MRC-20 amount in base units with the token id as the unit", () => {
-    const tx = activityRowToTx(row({ tokenId: "0xdeadbeef", amount: "1" }));
-    expect(tx.unit).toBe("0xdeadbeef");
-    expect(tx.amountText).toBe("1");
+  it("shows an honest em-dash for an MRC-20 amount when no metadata is loaded (never raw base units)", () => {
+    const tx = activityRowToTx(row({ tokenId: "0xdeadbeef", amount: "1500000" }));
+    expect(tx.amountText).toBeNull(); // decimals unknown → "—", NOT "1500000"
+    expect(tx.unit).toBe("0xdeadbeef"); // honest token-id label
+  });
+
+  it("scales an MRC-20 amount to real decimals and uses the real symbol when metadata is present", () => {
+    const meta = new Map<string, TokenMeta>([
+      ["0xdeadbeef", { decimals: 6, symbol: "USDC", name: "USD Coin" }],
+    ]);
+    const tx = activityRowToTx(row({ tokenId: "0xdeadbeef", amount: "1500000" }), meta);
+    expect(tx.amountText).toBe("1.5"); // 1500000 / 10^6
+    expect(tx.unit).toBe("USDC");
+  });
+
+  it("shows an em-dash (not raw) when metadata carries no decimals", () => {
+    const meta = new Map<string, TokenMeta>([
+      ["0xdeadbeef", { decimals: null, symbol: "MYST", name: null }],
+    ]);
+    const tx = activityRowToTx(row({ tokenId: "0xdeadbeef", amount: "1500000" }), meta);
+    expect(tx.amountText).toBeNull();
+    expect(tx.unit).toBe("MYST"); // symbol still shown as the unit
   });
 });

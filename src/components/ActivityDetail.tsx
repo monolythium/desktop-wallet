@@ -25,6 +25,7 @@ import {
 } from "../sdk/lyth-display";
 import { isZeroAmount, pendingOpLabel, type TxOpKind } from "../sdk/notifications";
 import { txTypeLabelForActivity } from "../sdk/tx-type-label";
+import { tokenAmountDisplay, type TokenMeta } from "../sdk/token-metadata";
 import { CopyableAddress, DRow, MonoscanTxButton, NamedAddress, truncMiddle } from "./_detailModalParts";
 
 /** Pending-mempool row — carries the canonical tx hash, so it links out. */
@@ -79,6 +80,10 @@ export interface ActivityDetailProps {
   row: DetailRow;
   /** The active wallet's own bech32m address (the From of sends). */
   walletAddr: string;
+  /** Cached per-token MRC metadata (decimals/symbol), keyed by token id, so an
+   *  MRC-20 amount renders at its real decimals. Absent → the amount shows an
+   *  honest "—" rather than raw base units. */
+  tokenMeta?: Map<string, TokenMeta>;
   onClose: () => void;
 }
 
@@ -121,7 +126,37 @@ function IndexedTxConfirmations({ txHash }: { txHash: string }) {
   );
 }
 
-function DetailBody({ row, walletAddr }: { row: DetailRow; walletAddr: string }) {
+/** The Amount row for an indexed activity entry. Native amounts are raw lythoshi
+ *  → display LYTH (unchanged); an MRC-20 amount is scaled by the token's real
+ *  decimals when its metadata is loaded, else an honest "—" — never the raw
+ *  base-units integer. The unit is LYTH for native, the token's real symbol when
+ *  known, else the raw token id. */
+function IndexedAmountRow({
+  row,
+  tokenMeta,
+}: {
+  row: IndexedDetailRow;
+  tokenMeta?: Map<string, TokenMeta>;
+}) {
+  const sign = row.direction === "out" ? "−" : row.direction === "in" ? "+" : "";
+  const native = isNativeLythTokenId(row.tokenId);
+  const meta = native ? undefined : tokenMeta?.get(row.tokenId ?? "");
+  const amount = native
+    ? formatLythDisplay(row.amount) ?? row.amount ?? "—"
+    : tokenAmountDisplay(row.amount, meta) ?? "—";
+  const unit = native ? "LYTH" : meta?.symbol?.trim() || tokenUnitLabel(row.tokenId);
+  return <DRow label="Amount" value={`${sign}${amount} ${unit}`} />;
+}
+
+function DetailBody({
+  row,
+  walletAddr,
+  tokenMeta,
+}: {
+  row: DetailRow;
+  walletAddr: string;
+  tokenMeta?: Map<string, TokenMeta>;
+}) {
   if (row.kind === "pending") {
     return (
       <div>
@@ -188,19 +223,7 @@ function DetailBody({ row, walletAddr }: { row: DetailRow; walletAddr: string })
       <DRow label="Type" value={row.subKind ? `${row.activityKind} · ${row.subKind}` : row.activityKind} />
       {relativeTime !== null ? <DRow label="Time" value={relativeTime} /> : null}
       {row.amount !== null ? (
-        <DRow
-          label="Amount"
-          value={`${
-            row.direction === "out" ? "−" : row.direction === "in" ? "+" : ""
-          }${
-            // Native amounts are raw lythoshi → display LYTH; an MRC-20 amount
-            // stays in its base units. The unit is LYTH for native (null or the
-            // zero-address), else the token id.
-            isNativeLythTokenId(row.tokenId)
-              ? formatLythDisplay(row.amount) ?? row.amount
-              : row.amount
-          } ${tokenUnitLabel(row.tokenId)}`}
-        />
+        <IndexedAmountRow row={row} tokenMeta={tokenMeta} />
       ) : null}
       {row.weightBps !== null ? <DRow label="Weight" value={`${row.weightBps} bps`} /> : null}
       {clusterLabel !== null ? (
@@ -244,7 +267,7 @@ function DetailBody({ row, walletAddr }: { row: DetailRow; walletAddr: string })
   );
 }
 
-export function ActivityDetail({ row, walletAddr, onClose }: ActivityDetailProps) {
+export function ActivityDetail({ row, walletAddr, tokenMeta, onClose }: ActivityDetailProps) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -284,7 +307,7 @@ export function ActivityDetail({ row, walletAddr, onClose }: ActivityDetailProps
           </button>
         </div>
         <div className="w-card__body">
-          <DetailBody row={row} walletAddr={walletAddr} />
+          <DetailBody row={row} walletAddr={walletAddr} tokenMeta={tokenMeta} />
         </div>
       </div>
     </div>

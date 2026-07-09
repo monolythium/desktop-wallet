@@ -245,7 +245,7 @@ export function Home({ goto }: Props) {
             activityRows.slice(0, 5).map((row) => (
               <TxRow
                 key={`${row.blockHeight}-${row.txIndex}-${row.logIndex}`}
-                tx={activityRowToTx(row)}
+                tx={activityRowToTx(row, tokenMeta)}
               />
             ))
           ) : liveActivity?.ok === false ? (

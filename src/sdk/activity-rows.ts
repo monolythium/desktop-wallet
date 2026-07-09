@@ -26,6 +26,7 @@ import type { NotificationRecord } from "./notifications";
 import type { PendingTx } from "./pending-tx";
 import { bpsToPercentLabel } from "./delegation-summary";
 import { txTypeLabelForActivity } from "./tx-type-label";
+import { tokenAmountDisplay, type TokenMeta } from "./token-metadata";
 
 /** Indexer kind → the `TxRow` icon/category bucket. Conservative: only the
  *  clearly-recognisable families map to reward/delegate; everything else is a
@@ -100,7 +101,10 @@ export function activityCounterparty(row: LiveAddressActivityRow): string {
  *  - an MRC-20 amount stays in its base units with the token id as the unit
  *    (there is no on-chain symbol registry).
  */
-export function activityRowToTx(row: LiveAddressActivityRow): Tx {
+export function activityRowToTx(
+  row: LiveAddressActivityRow,
+  tokenMeta?: Map<string, TokenMeta>,
+): Tx {
   const kind = activityKindToTxKind(
     row.subKind ? `${row.kind} ${row.subKind}` : row.kind,
   );
@@ -113,8 +117,12 @@ export function activityRowToTx(row: LiveAddressActivityRow): Tx {
     amountText = formatLythDisplay(row.amount);
     unit = "LYTH";
   } else {
-    amountText = row.amount ?? null;
-    unit = tokenUnitLabel(row.tokenId);
+    // MRC-20: scale the base-units amount by the token's real decimals when its
+    // metadata is loaded; unknown scale → null (TxRow shows "—"), never the raw
+    // base-units integer as a human figure. Prefer the real symbol as the unit.
+    const meta = tokenMeta?.get(row.tokenId!);
+    amountText = tokenAmountDisplay(row.amount, meta);
+    unit = meta?.symbol?.trim() || tokenUnitLabel(row.tokenId);
   }
   return {
     id: `${row.blockHeight}-${row.txIndex}-${row.logIndex}`,
