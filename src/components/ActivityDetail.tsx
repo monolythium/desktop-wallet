@@ -138,14 +138,17 @@ function IndexedAmountRow({
   row: IndexedDetailRow;
   tokenMeta?: Map<string, TokenMeta>;
 }) {
-  const sign = row.direction === "out" ? "−" : row.direction === "in" ? "+" : "";
   const native = isNativeLythTokenId(row.tokenId);
   const meta = native ? undefined : tokenMeta?.get(row.tokenId ?? "");
-  const amount = native
-    ? formatLythDisplay(row.amount) ?? row.amount ?? "—"
-    : tokenAmountDisplay(row.amount, meta) ?? "—";
+  const display = native
+    ? formatLythDisplay(row.amount) ?? row.amount
+    : tokenAmountDisplay(row.amount, meta);
   const unit = native ? "LYTH" : meta?.symbol?.trim() || tokenUnitLabel(row.tokenId);
-  return <DRow label="Amount" value={`${sign}${amount} ${unit}`} />;
+  // Sign only when there's a real figure — an unknown MRC-20 scale shows a bare
+  // "—" (never "+—").
+  const sign =
+    display === null ? "" : row.direction === "out" ? "−" : row.direction === "in" ? "+" : "";
+  return <DRow label="Amount" value={`${sign}${display ?? "—"} ${unit}`} />;
 }
 
 function DetailBody({
