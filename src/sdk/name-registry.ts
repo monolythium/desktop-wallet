@@ -239,6 +239,20 @@ export async function submitNameAcceptTransfer(
   return submitNativeTx({ seed: args.seed, ...nameAcceptTransferTx(args.name, args.costLythoshi) });
 }
 
+/** The current owner of a name (`lyth_resolveName`), or null when unregistered
+ *  / the read fails. Confirms the name exists + who is transferring it — the
+ *  wallet CANNOT read whether a pending transfer is addressed to it (the chain
+ *  exposes no such read), so this is context only; the chain enforces the
+ *  pending/recipient/window checks at accept. */
+export async function loadNameOwner(name: string): Promise<string | null> {
+  try {
+    const res = await getProvider().rpcClient.lythResolveName(name.trim().toLowerCase());
+    return res.address ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export type NameErrorCode =
   | "empty"
   | "whole_too_long"
