@@ -21,8 +21,10 @@ import {
   isHumanName,
   knownAgentChildren,
   loadNameAvailability,
+  loadNameOwner,
   loadNameQuote,
   quoteUnchanged,
+  submitNameAcceptTransfer,
   submitNameProposeTransfer,
   submitNameRegistration,
   type AgentParentVerdict,
@@ -879,7 +881,149 @@ function NamesSection() {
     <>
       <NameChecker onRegistered={() => setRefreshKey((k) => k + 1)} />
       <MyNames refreshKey={refreshKey} />
+      <AcceptTransfer onAccepted={() => setRefreshKey((k) => k + 1)} />
     </>
+  );
+}
+
+/** Accept a name transfer proposed to this wallet. The chain exposes no read to
+ *  enumerate pending transfers to an address (or to pre-confirm one), so the
+ *  recipient enters the name they were told is being transferred; the wallet
+ *  shows the current owner + the accept fee, and the chain enforces the
+ *  pending/recipient/24h checks on submit. The recipient PAYS the fee — same
+ *  exact-fee + confirm-time re-read discipline as registration. */
+function AcceptTransfer({ onAccepted }: { onAccepted?: () => void }) {
+  const ops = useOperations();
+  const [name, setName] = useState("");
+  // undefined = not looked up / loading; null = unregistered; string = owner.
+  const [owner, setOwner] = useState<string | null | undefined>(undefined);
+  const [quote, setQuote] = useState<NameQuote | null>(null);
+  const debounceRef = useRef<number | null>(null);
+
+  const trimmed = name.trim().toLowerCase();
+  const looksLikeName = trimmed.endsWith(".mono") && trimmed.length > ".mono".length;
+
+  useEffect(() => {
+    if (!looksLikeName) {
+      setOwner(undefined);
+      setQuote(null);
+      return;
+    }
+    if (debounceRef.current !== null) window.clearTimeout(debounceRef.current);
+    setOwner(undefined);
+    setQuote(null);
+    debounceRef.current = window.setTimeout(() => {
+      void loadNameOwner(trimmed).then(setOwner);
+      void loadNameQuote(trimmed).then(setQuote);
+    }, 200);
+    return () => {
+      if (debounceRef.current !== null) window.clearTimeout(debounceRef.current);
+    };
+  }, [trimmed, looksLikeName]);
+
+  const openAccept = () => {
+    if (!quote || !looksLikeName) return;
+    const reviewedCost = quote.costLythoshi;
+    ops.open({
+      title: `Accept ${trimmed}`,
+      subtitle: "Accept a name transfer proposed to you — you pay the fee",
+      auth: "keychain",
+      diff: [
+        { k: "Name", v: trimmed },
+        { k: "Current owner", v: owner ?? "—" },
+        { k: "Accept fee", v: `${quote.costLyth} LYTH`, kind: "fee" as const },
+        { k: "Precompile", v: "0x…110E" },
+      ],
+      effects: [
+        { text: "Unlocks the local vault for this operation only." },
+        { text: "Encodes acceptTransfer(string) via @monolythium/core-sdk. You pay the registration fee to receive the name." },
+        {
+          text: "The fee is re-read at submit; if it changed you'll be asked to re-check. The chain reverts if there's no pending transfer to you, it lapsed (over 24h), you're not the proposed recipient, or the fee mismatches — verbatim errors surface here.",
+          level: "warn" as const,
+        },
+      ],
+      notify: {
+        kind: "contract_call" as const,
+        amountDecimal: "0",
+        counterparty: nameRegistryAddressHex(),
+      },
+      execute: async (ctx) => {
+        if (!ctx?.vaultSeed) {
+          throw new Error("vault seed unavailable after keychain authorization");
+        }
+        const fresh = await loadNameQuote(trimmed);
+        if (!fresh) {
+          throw new Error("Couldn't read the accept fee — not submitting.");
+        }
+        if (!quoteUnchanged(reviewedCost, fresh.costLythoshi)) {
+          throw new Error("The accept fee changed since review. Re-check and try again.");
+        }
+        const r = await submitNameAcceptTransfer({
+          seed: ctx.vaultSeed,
+          name: trimmed,
+          costLythoshi: reviewedCost,
+        });
+        onAccepted?.();
+        return { headline: `Accepted ${trimmed}`, detail: r.txHash, txHash: r.txHash, nonce: r.nonce };
+      },
+    });
+  };
+
+  return (
+    <div className="w-card">
+      <div className="w-card__head">
+        <h3>Accept a name transfer</h3>
+      </div>
+      <div className="w-card__body">
+        <div className="row-help" style={{ marginBottom: 8, lineHeight: 1.5 }}>
+          Enter a name someone proposed transferring to you. You pay the
+          registration fee to accept, within 24h of the proposal.
+        </div>
+        <input
+          type="text"
+          placeholder="alice.mono"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          spellCheck={false}
+          autoCapitalize="off"
+          autoCorrect="off"
+          style={{
+            minWidth: 220,
+            padding: "8px 10px",
+            borderRadius: 6,
+            border: "1px solid var(--w-border, #2a2a2a)",
+            background: "var(--w-bg-2, #161616)",
+            color: "var(--w-text, #e6e6e6)",
+            fontFamily: "var(--w-font-mono, ui-monospace, monospace)",
+            fontSize: 13,
+          }}
+        />
+        {looksLikeName && (
+          <div style={{ marginTop: 10, display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+            <span className="row-help">
+              {owner === undefined
+                ? "Checking…"
+                : owner === null
+                  ? "Not registered"
+                  : `Current owner: ${owner}`}
+            </span>
+            <span className="row-help mono">Fee: {quote ? `${quote.costLyth} LYTH` : "—"}</span>
+            <button
+              className="btn btn--sm btn--primary"
+              disabled={!quote}
+              onClick={openAccept}
+            >
+              Accept{quote ? ` · ${quote.costLyth} LYTH` : ""}
+            </button>
+          </div>
+        )}
+        <div className="row-help" style={{ marginTop: 10, lineHeight: 1.5 }}>
+          The chain doesn't let the wallet list pending transfers to you or
+          pre-confirm one, so a wrong name or no live proposal is rejected on
+          submit. (A pending-transfers read would be a nice-to-have.)
+        </div>
+      </div>
+    </div>
   );
 }
 
