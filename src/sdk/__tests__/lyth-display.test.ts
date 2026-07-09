@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   formatAtomic1e18,
   formatLythDisplay,
+  formatTokenAmountDisplay,
   isNativeLythTokenId,
   tokenUnitLabel,
   truncateDecimals,
@@ -47,6 +48,48 @@ describe("formatLythDisplay — raw lythoshi → display LYTH", () => {
     expect(formatLythDisplay("")).toBeNull();
     expect(formatLythDisplay("   ")).toBeNull();
     expect(formatLythDisplay("not-a-number")).toBeNull();
+  });
+});
+
+describe("formatTokenAmountDisplay — raw base units → display at token decimals", () => {
+  it("scales by 10^decimals for a 6-dp token (the raw-units bug fix)", () => {
+    // 1.5 of a 6-dp token is raw "1500000"; the old Number(raw) path showed
+    // 1,500,000. The decimals-aware path shows 1.5.
+    expect(formatTokenAmountDisplay("1500000", 6)).toBe("1.5");
+    expect(formatTokenAmountDisplay("1234567", 6)).toBe("1.2345"); // truncated at 4dp
+    expect(formatTokenAmountDisplay("1000000", 6)).toBe("1");
+    expect(formatTokenAmountDisplay("0", 6)).toBe("0");
+  });
+
+  it("handles 18-dp tokens exactly above 2^53 (no float precision loss)", () => {
+    // 12.345678901234567890 of an 18-dp token; > 2^53 where Number() drops digits.
+    expect(formatTokenAmountDisplay("12345678901234567890", 18)).toBe("12.3456");
+    expect(formatTokenAmountDisplay("1000000000000000000", 18)).toBe("1");
+  });
+
+  it("shows a 0-decimal token as a whole integer", () => {
+    expect(formatTokenAmountDisplay("42", 0)).toBe("42");
+  });
+
+  it("handles more than 18 decimals by truncating onto the 18-atom grid", () => {
+    // 1.5 of a 20-dp token is raw "150000000000000000000".
+    expect(formatTokenAmountDisplay("150000000000000000000", 20)).toBe("1.5");
+  });
+
+  it("respects the caller's display cap and trims trailing zeros", () => {
+    expect(formatTokenAmountDisplay("1234567", 6, 2)).toBe("1.23");
+    expect(formatTokenAmountDisplay("1500000", 6, 2)).toBe("1.5");
+  });
+
+  it("returns null (→ honest em-dash) for absent/undecodable input or bad decimals", () => {
+    expect(formatTokenAmountDisplay(null, 6)).toBeNull();
+    expect(formatTokenAmountDisplay(undefined, 6)).toBeNull();
+    expect(formatTokenAmountDisplay("", 6)).toBeNull();
+    expect(formatTokenAmountDisplay("   ", 6)).toBeNull();
+    expect(formatTokenAmountDisplay("not-a-number", 6)).toBeNull();
+    expect(formatTokenAmountDisplay("1500000", -1)).toBeNull();
+    expect(formatTokenAmountDisplay("1500000", 6.5)).toBeNull();
+    expect(formatTokenAmountDisplay("1500000", 256)).toBeNull();
   });
 });
 

@@ -41,6 +41,43 @@ export function formatLythDisplay(
   }
 }
 
+/** Raw base-units integer string (a token's on-chain balance) + the token's
+ *  `decimals` → exact display amount, capped at `displayCap` fractional digits.
+ *  Bigint-exact — never a float: the same truncate-not-round contract as
+ *  {@link formatLythDisplay}, generalised from the native 18 to an arbitrary
+ *  token `decimals`. The conversion still runs through the one exact `formatLyth`
+ *  converter by first bridging the balance to native 18-decimal atoms
+ *  (`raw · 10^(18−decimals)`) — no second converter is hand-rolled. A token with
+ *  more than 18 decimals divides down onto the 18-atom grid first (precision
+ *  below the display cap, which never exceeds 18, cannot be shown anyway).
+ *  Returns null for an absent/blank/undecodable balance or an out-of-range
+ *  `decimals`, so the caller renders an honest em-dash — never a fabricated 0 or
+ *  a wrong scale. Native LYTH keeps its own {@link formatLythDisplay} path; this
+ *  is the MRC-20 (arbitrary-decimals) variant. */
+export function formatTokenAmountDisplay(
+  rawBaseUnits: string | null | undefined,
+  decimals: number,
+  displayCap = 4,
+): string | null {
+  if (rawBaseUnits === null || rawBaseUnits === undefined || rawBaseUnits.trim() === "") {
+    return null;
+  }
+  // `decimals` is the token's u8 metadata field — reject anything outside 0..255
+  // (and non-integers) rather than fabricate a scale.
+  if (!Number.isInteger(decimals) || decimals < 0 || decimals > 255) return null;
+  let raw: bigint;
+  try {
+    raw = BigInt(rawBaseUnits.trim());
+  } catch {
+    return null;
+  }
+  const atoms18 =
+    decimals <= 18
+      ? raw * 10n ** BigInt(18 - decimals)
+      : raw / 10n ** BigInt(decimals - 18); // truncate below the 18-atom grid
+  return formatLythDisplay(atoms18.toString(), displayCap);
+}
+
 /** Format a raw 1e18-scaled "atom" integer string for display: the conversion
  *  goes through the same exact `formatLyth` path (bigint, truncate-not-round)
  *  as every other amount, capped at `decimals`, with the scale hint appended.
