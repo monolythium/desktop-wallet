@@ -13,6 +13,7 @@ import { errorMessage, loadLiveTokenStatus, type LiveTokenStatus } from "../sdk/
 import { MONOSCAN_GET_LYTH_URL } from "../sdk/monoscan";
 import { NATIVE_TOKEN_REF, writeSelectedToken } from "../sdk/selected-token";
 import { liveTokenStatusToRows } from "../sdk/token-rows";
+import { loadTokenMetaMap, type TokenMeta } from "../sdk/token-metadata";
 
 interface Props {
   goto: (r: Route) => void;
@@ -22,6 +23,7 @@ export function Tokens({ goto }: Props) {
   const wallet = useActiveWallet();
   const walletAddress = wallet.status === "ready" ? wallet.address : "";
   const [live, setLive] = useState<LiveTokenStatus | null>(null);
+  const [tokenMeta, setTokenMeta] = useState<Map<string, TokenMeta>>(new Map());
   const [busy, setBusy] = useState(false);
 
   const refresh = async () => {
@@ -31,7 +33,14 @@ export function Tokens({ goto }: Props) {
     }
     setBusy(true);
     try {
-      setLive(await loadLiveTokenStatus(walletAddress));
+      const status = await loadLiveTokenStatus(walletAddress);
+      setLive(status);
+      // Fetch each listed token's metadata (cached) so amounts render at their
+      // real decimals; until it resolves, MRC-20 amounts show an honest "—".
+      if (status.tokenBalances.ok && status.tokenBalances.value) {
+        const ids = status.tokenBalances.value.map((r) => r.mrc?.assetId ?? r.tokenId);
+        setTokenMeta(await loadTokenMetaMap(ids));
+      }
     } catch (cause) {
       setLive({
         endpoint: "unavailable",
@@ -50,7 +59,7 @@ export function Tokens({ goto }: Props) {
     void refresh();
   }, [walletAddress]);
 
-  const rows = liveTokenStatusToRows(live);
+  const rows = liveTokenStatusToRows(live, tokenMeta);
   // Token references aligned to `rows`: row 0 is native; the rest are the raw
   // MRC-20 token ids in the same indexer order `liveTokenStatusToRows` used.
   // Clicking a row stores its ref and opens the token-detail page.

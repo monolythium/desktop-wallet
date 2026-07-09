@@ -8,8 +8,10 @@
 // no source, so they are never part of these facts — the page renders an
 // em-dash for each.
 
+import { NATIVE_LYTH_DECIMALS } from "@monolythium/core-sdk";
 import type { LiveTokenStatus } from "./live";
 import { parseDecimalAmount, shortTokenId } from "./token-rows";
+import { tokenAmountDisplay, type TokenMeta } from "./token-metadata";
 import { isNativeRef, NATIVE_TOKEN_REF, type TokenRef } from "./selected-token";
 
 export interface TokenDetailFacts {
@@ -25,6 +27,13 @@ export interface TokenDetailFacts {
   balanceDisplay: string | null;
   /** Numeric balance for fraction-digit selection; 0 on a failed read. */
   balanceAmount: number;
+  /** Decimals-correct human balance for an MRC-20 row (via the token's
+   *  metadata), or null when the scale is unknown → the page shows "—". Native
+   *  uses its own `balanceAmount` path, so this is null for native. */
+  balanceText: string | null;
+  /** The token's decimals (native = 18; MRC-20 = metadata decimals, or null
+   *  when unknown). */
+  decimals: number | null;
   /** Raw 32-byte token id for an MRC-20 row; null for native. */
   tokenId: string | null;
   /** Block height the MRC-20 balance was last observed at; null otherwise. */
@@ -45,6 +54,7 @@ export interface TokenDetailFacts {
 export function selectTokenDetailFacts(
   live: LiveTokenStatus | null,
   ref: TokenRef,
+  tokenMeta?: Map<string, TokenMeta>,
 ): TokenDetailFacts {
   if (isNativeRef(ref)) {
     const ok = live?.nativeBalance.ok === true;
@@ -55,6 +65,8 @@ export function selectTokenDetailFacts(
       ticker: "LYTH",
       balanceDisplay: ok ? live!.nativeBalance.value ?? null : null,
       balanceAmount: ok ? parseDecimalAmount(live!.nativeBalance.value) : 0,
+      balanceText: null, // native renders via balanceAmount (unchanged path)
+      decimals: NATIVE_LYTH_DECIMALS,
       tokenId: null,
       updatedAtBlock: null,
       assetPolicy: live?.assetPolicy.ok ? live.assetPolicy.value ?? null : null,
@@ -67,14 +79,20 @@ export function selectTokenDetailFacts(
       ? live.tokenBalances.value.find((r) => r.tokenId === ref)
       : undefined;
 
-  const label = shortTokenId(ref);
+  const assetId = row?.mrc?.assetId ?? ref;
+  const meta = tokenMeta?.get(assetId);
+  const symbol = meta?.symbol?.trim() || shortTokenId(ref);
   return {
     ref,
     isNative: false,
-    name: label,
-    ticker: label,
+    name: meta?.name?.trim() || symbol,
+    ticker: symbol,
     balanceDisplay: row ? row.balance : null,
     balanceAmount: row ? parseDecimalAmount(row.balance) : 0,
+    // Decimals-correct human amount when the metadata carries a scale, else
+    // null → the page shows an honest "—" (never raw base units as a figure).
+    balanceText: row ? tokenAmountDisplay(row.balance, meta) : null,
+    decimals: meta?.decimals ?? null,
     tokenId: ref,
     updatedAtBlock: row ? row.updatedAtBlock : null,
     // No per-MRC asset-policy read is wired (loadLiveTokenStatus queries the

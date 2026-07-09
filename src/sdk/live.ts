@@ -79,7 +79,17 @@ export interface LiveTokenStatus {
    *  caller can format it at its own precision via the exact bigint formatter
    *  (never re-truncating a float-tailed decimal). */
   nativeBalanceLythoshi: RpcOutcome<string>;
-  tokenBalances: RpcOutcome<Array<{ tokenId: string; balance: string; updatedAtBlock: bigint }>>;
+  tokenBalances: RpcOutcome<
+    Array<{
+      tokenId: string;
+      balance: string;
+      updatedAtBlock: bigint;
+      /** Native MRC identity when the row came from a native MRC event — the
+       *  `assetId` keys the per-token `lyth_mrcMetadata` (decimals/symbol) read.
+       *  For factory-origin MRC-20 the assetId equals the tokenId. */
+      mrc?: { standard: string; assetId: string; tokenId?: string | null } | null;
+    }>
+  >;
   addressLabel: RpcOutcome<{ address: string; category: string; displayName: string | null; updatedAtBlock: bigint } | null>;
   assetPolicy: RpcOutcome<Record<string, unknown>>;
 }

@@ -56,7 +56,10 @@ export function TokenRow({ token, onClick }: Props) {
         </div>
       </div>
       <div className="w-asset__amt">
-        <div className="primary">{fmt(t.amount, fracDigits)}</div>
+        {/* MRC-20 rows carry a preformatted, decimals-correct `displayAmount`
+            (authoritative); native LYTH has none and formats its numeric
+            `amount` at the magnitude-picked precision. */}
+        <div className="primary">{t.displayAmount ?? fmt(t.amount, fracDigits)}</div>
         <div className="usd">{usdLabel}</div>
       </div>
     </div>

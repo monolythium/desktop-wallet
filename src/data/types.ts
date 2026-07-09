@@ -2,6 +2,11 @@ export interface Token {
   sym: string;
   name: string;
   amount: number;
+  // Preformatted, decimals-correct amount string for MRC-20 rows: the exact
+  // human figure at the token's real decimals, or "—" when the scale is
+  // unknown. When set it is authoritative for display — the raw `amount` number
+  // is only rendered for native LYTH, which carries no `displayAmount`.
+  displayAmount?: string;
   // No price oracle / token-name registry exists on-chain, so these are
   // nullable. `null` renders as an em-dash ("—") — never a fabricated value.
   priceUsd: number | null;

@@ -41,6 +41,7 @@ import { NATIVE_LYTH_DECIMALS, formatLyth } from "@monolythium/core-sdk";
 import { MONOSCAN_GET_LYTH_URL } from "../sdk/monoscan";
 import { isNativeRef, readSelectedToken } from "../sdk/selected-token";
 import { selectTokenDetailFacts } from "../sdk/token-detail";
+import { loadTokenMetaMap, type TokenMeta } from "../sdk/token-metadata";
 
 interface Props {
   goto: (r: Route) => void;
@@ -58,6 +59,7 @@ export function TokenDetail({ goto }: Props) {
   const [tab, setTab] = useState<DetailTab>("activity");
 
   const [live, setLive] = useState<LiveTokenStatus | null>(null);
+  const [tokenMeta, setTokenMeta] = useState<Map<string, TokenMeta>>(new Map());
   const [activity, setActivity] = useState<RpcOutcome<LiveAddressActivityRow[]> | null>(null);
   // Native LYTH supply stats (circulating + burned). Only loaded/shown for the
   // native row — MRC-20 has no such read. Null until the first load resolves.
@@ -87,6 +89,12 @@ export function TokenDetail({ goto }: Props) {
       setLive(tokens);
       setActivity(act);
       setSupply(sup);
+      // Fetch the selected MRC-20's metadata (cached) so the balance renders at
+      // its real decimals. Native LYTH needs none (fixed 18-decimal path).
+      if (!isNativeRef(ref) && tokens.tokenBalances.ok && tokens.tokenBalances.value) {
+        const found = tokens.tokenBalances.value.find((r) => r.tokenId === ref);
+        setTokenMeta(await loadTokenMetaMap([found?.mrc?.assetId ?? ref]));
+      }
     } catch (cause) {
       setLive(null);
       setActivity({ ok: false, error: errorMessage(cause) });
@@ -101,8 +109,17 @@ export function TokenDetail({ goto }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [walletAddress]);
 
-  const facts = selectTokenDetailFacts(live, ref);
+  const facts = selectTokenDetailFacts(live, ref, tokenMeta);
   const fracDigits = facts.balanceAmount >= 100 ? 2 : facts.balanceAmount >= 1 ? 3 : 4;
+  // Native LYTH formats its numeric balance at the magnitude-picked precision;
+  // an MRC-20 row uses its decimals-correct `balanceText` (or "—" when the scale
+  // is unknown), never the raw base-units figure.
+  const balanceLabel =
+    facts.balanceDisplay === null
+      ? "—"
+      : facts.isNative
+        ? fmt(facts.balanceAmount, fracDigits)
+        : facts.balanceText ?? "—";
 
   return (
     <div className="w-page w-token-detail">
@@ -142,7 +159,7 @@ export function TokenDetail({ goto }: Props) {
           <div className="w-tok-bal__cell">
             <div className="w-tok-bal__lbl">Your balance</div>
             <div className="w-tok-bal__val">
-              {facts.balanceDisplay === null ? "—" : fmt(facts.balanceAmount, fracDigits)}
+              {balanceLabel}
               <span className="tok">{facts.ticker}</span>
             </div>
             {/* No USD price feed — value can't be shown honestly. */}
@@ -343,7 +360,14 @@ function InfoTab({
         : "—";
   const rows: Array<{ k: string; v: string; mono?: boolean }> = [
     { k: "Token id", v: facts.isNative ? "native (LYTH)" : facts.tokenId ?? "—", mono: !facts.isNative },
-    { k: "Decimals", v: facts.isNative ? String(NATIVE_LYTH_DECIMALS) : "—" },
+    {
+      k: "Decimals",
+      v: facts.isNative
+        ? String(NATIVE_LYTH_DECIMALS)
+        : facts.decimals !== null
+          ? String(facts.decimals)
+          : "—",
+    },
     ...(facts.isNative
       ? [
           { k: "Circulating supply", v: circulating },

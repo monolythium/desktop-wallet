@@ -21,6 +21,7 @@ import type { Route } from "../components/types";
 import { useActiveWallet } from "../sdk/active-wallet";
 import { activityRowToTx } from "../sdk/activity-rows";
 import { liveTokenStatusToRows } from "../sdk/token-rows";
+import { loadTokenMetaMap, type TokenMeta } from "../sdk/token-metadata";
 import { formatLythDisplay, truncateDecimals } from "../sdk/lyth-display";
 import {
   deriveDelegationSummary,
@@ -51,6 +52,7 @@ export function Home({ goto }: Props) {
   const wallet = useActiveWallet();
   const walletAddress = wallet.status === "ready" ? wallet.address : "";
   const [liveTokens, setLiveTokens] = useState<LiveTokenStatus | null>(null);
+  const [tokenMeta, setTokenMeta] = useState<Map<string, TokenMeta>>(new Map());
   const [liveActivity, setLiveActivity] = useState<RpcOutcome<LiveAddressActivityRow[]> | null>(null);
   const [delegationStatus, setDelegationStatus] = useState<LiveDelegationStatus | null>(null);
   const [rewards, setRewards] = useState<RpcOutcome<PendingRewardsResponse> | null>(null);
@@ -82,6 +84,14 @@ export function Home({ goto }: Props) {
       setLiveActivity(activity);
       setDelegationStatus(delegation);
       setRewards(rew);
+      // Token metadata (cached) so the "Your tokens" card shows MRC-20 amounts
+      // at their real decimals; an honest "—" until it resolves.
+      if (tokens.tokenBalances.ok && tokens.tokenBalances.value) {
+        const ids = tokens.tokenBalances.value.map((r) => r.mrc?.assetId ?? r.tokenId);
+        void loadTokenMetaMap(ids).then((m) => {
+          if (!cancelled) setTokenMeta(m);
+        });
+      }
     });
     return () => {
       cancelled = true;
@@ -113,7 +123,7 @@ export function Home({ goto }: Props) {
       : null;
 
   // Token + activity previews via the shared mappers + row components.
-  const tokenRows = liveTokens ? liveTokenStatusToRows(liveTokens) : [];
+  const tokenRows = liveTokens ? liveTokenStatusToRows(liveTokens, tokenMeta) : [];
   const activityRows =
     liveActivity?.ok && liveActivity.value ? liveActivity.value : [];
 
