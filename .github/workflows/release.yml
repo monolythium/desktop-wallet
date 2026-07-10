@@ -92,8 +92,37 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: pnpm tauri build --target ${{ matrix.target }}
 
-      - name: Sign Windows binaries (Azure Trusted Signing)
+      # Windows installer signing (Azure Trusted Signing) needs four secrets. If
+      # any are absent (e.g. the signing account isn't provisioned yet) the
+      # signing action would hard-fail, and because fail-fast is off and the
+      # release tolerates a missing platform, the whole Windows leg would drop
+      # SILENTLY. Instead, detect the secrets up front: sign when all present,
+      # otherwise emit a loud ::warning:: and continue with an UNSIGNED installer.
+      # The build above still produced the minisign updater .sig, so auto-update
+      # keeps working — only the first-install SmartScreen prompt is affected —
+      # and the draft-review gate lets the maintainer decide whether to publish
+      # an unsigned Windows build. Signed vs skipped is now explicit in the run.
+      - name: Check Windows signing secrets
+        id: winsign
         if: matrix.os == 'windows-latest'
+        shell: bash
+        env:
+          AZ_TENANT: ${{ secrets.AZURE_TENANT_ID }}
+          AZ_CLIENT: ${{ secrets.AZURE_CLIENT_ID }}
+          AZ_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZ_PROFILE: ${{ secrets.AZURE_CERT_PROFILE }}
+        run: |
+          set -euo pipefail
+          if [ -n "$AZ_TENANT" ] && [ -n "$AZ_CLIENT" ] && [ -n "$AZ_SECRET" ] && [ -n "$AZ_PROFILE" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+            echo "Azure Trusted Signing secrets present — Windows installers will be signed."
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::warning title=Windows installer signing skipped::AZURE_* Trusted Signing secrets are not configured; the Windows .msi/.exe will be UNSIGNED (SmartScreen warns on first install). The minisign updater signature is still produced, so auto-update works. Set AZURE_TENANT_ID / AZURE_CLIENT_ID / AZURE_CLIENT_SECRET / AZURE_CERT_PROFILE to enable installer signing."
+          fi
+
+      - name: Sign Windows binaries (Azure Trusted Signing)
+        if: matrix.os == 'windows-latest' && steps.winsign.outputs.available == 'true'
         uses: azure/trusted-signing-action@v0.5.1
         with:
           azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
