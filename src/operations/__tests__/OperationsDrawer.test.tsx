@@ -66,7 +66,7 @@ describe("OperationsDrawer — auth + lockout gating", () => {
   });
 
   it("routes a wrong password through the shared lockout counter (parity with the lock gate)", async () => {
-    kc.fetchAndUnlockVault.mockRejectedValue(new VaultCallError({ code: "wrong_password", message: "bad" }));
+    kc.fetchAndUnlockVault.mockRejectedValue(new VaultCallError({ code: "wrong_password" }));
     const { user } = renderWithProviders(<OperationsDrawer descriptor={keychainOp(vi.fn())} onClose={vi.fn()} />);
 
     await user.click(screen.getByRole("button", { name: "Continue" }));
