@@ -60,6 +60,8 @@ export default defineConfig(({ mode }) => ({
       "src/**/__tests__/**/*.test.tsx",
       "src/**/*.test.ts",
       "src/**/*.test.tsx",
+      // Build-tooling tests (the CSP connect-src generator) live in scripts/.
+      "scripts/**/*.test.mjs",
     ],
     // jest-dom matchers + per-test DOM cleanup for the RTL harness.
     setupFiles: ["src/test/setup.ts"],
