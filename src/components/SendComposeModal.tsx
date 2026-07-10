@@ -380,6 +380,12 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
         effects: [
           { text: "Transactions are irreversible. Confirm the recipient and amount carefully." },
           { text: `The network fee is paid in LYTH, not ${token.symbol}.` },
+          {
+            // Honest disclosure: the wallet reads only the native LYTH asset
+            // policy, so a token's transfer rules can't be pre-verified.
+            text: `This token may enforce on-chain transfer rules (a pause, an allowlist, or a per-transfer fee) the wallet can't preview; a fee-on-transfer token can deliver less than the amount shown.`,
+            level: "warn",
+          },
           { text: "Unlocks the local vault for this operation only." },
           {
             text: "Submits the signed transaction over the plaintext mesh_submitTx path — the inclusion path that confirms on this chain.",
