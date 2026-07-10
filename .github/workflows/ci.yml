@@ -97,20 +97,19 @@ jobs:
       - name: Install cargo-audit
         run: cargo install cargo-audit --locked
 
-      # Report-first (advisory) during bring-up.
-      #  - The blocking vulnerabilities today are RUSTSEC-2026-0194 and
-      #    RUSTSEC-2026-0195 (quick-xml, high — DoS). These are REAL and
-      #    unaccepted: they are left visible and tracked for a dependency-bump
-      #    follow-up, NOT ignored.
-      #  - RUSTSEC-2024-0429 (glib VariantStrIter unsoundness) is an accepted
-      #    warning — a transitive of the GTK3 stack Tauri needs on Linux, no
-      #    upstream fix, not reachable in the wallet's usage — so it is ignored.
-      #  - RUSTSEC-2026-0190 (anyhow, unsound) is a non-failing warning also worth
-      #    an eventual bump; it stays visible.
-      # Promote this step to a hard gate (drop continue-on-error) once quick-xml
-      # is remediated and the ignore list is confirmed to cover exactly the
-      # accepted set.
-      - name: cargo audit (advisory)
-        continue-on-error: true
+      # Hard gate: fail a PR that introduces a Rust vulnerability. The two real
+      # advisories are remediated by dependency bumps (committed Cargo.lock), so
+      # nothing real is ignored to force green:
+      #  - quick-xml RUSTSEC-2026-0194/0195 (high, DoS) — fixed by bumping plist
+      #    (-> 0.41.0) and tauri-winrt-notification; no longer present.
+      #  - anyhow RUSTSEC-2026-0190 (unsound) — fixed by bumping anyhow to 1.0.103.
+      # Ignore list = exactly the accepted set:
+      #  - RUSTSEC-2024-0429 (glib VariantStrIter unsoundness): a transitive of
+      #    the GTK3 stack Tauri needs on Linux, no upstream fix, not reachable in
+      #    the wallet's usage. It is a non-failing warning; kept ignored so the
+      #    accepted decision is explicit and survives an advisory re-classification.
+      # The remaining gtk-rs "unmaintained" notices are warnings that do not fail
+      # `cargo audit` (no `--deny warnings`), so they need no ignore entry.
+      - name: cargo audit (fail on vulnerabilities)
         working-directory: src-tauri
         run: cargo audit --ignore RUSTSEC-2024-0429
