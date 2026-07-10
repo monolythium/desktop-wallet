@@ -39,7 +39,7 @@
     ],
     "category": "Finance",
     "shortDescription": "Monolythium desktop wallet",
-    "longDescription": "Monolythium desktop wallet (macOS, Windows, Linux). Hold and move MNLX, manage keys via the OS keychain, and route every destructive action through a typed Operations drawer."
+    "longDescription": "Monolythium desktop wallet (macOS, Windows, Linux). Hold and move LYTH, manage keys via the OS keychain, and route every destructive action through a typed Operations drawer."
   },
   "plugins": {
     "updater": {
