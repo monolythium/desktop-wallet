@@ -14,6 +14,12 @@ import {
 } from "@monolythium/core-sdk";
 import { useOperations } from "../operations/context";
 import { sendNativeLyth } from "../sdk/native-send";
+import { sendMrc20Token, TOKEN_TRANSFER_EXECUTION_UNIT_LIMIT } from "../sdk/token-send";
+import {
+  evaluateTokenSendAmount,
+  maxTokenAmount,
+  type TokenSendBlockReason,
+} from "../sdk/token-send-compose";
 import { classifyRecipientInput, resolveNameQuorum } from "../sdk/name-resolve";
 import { loadReverseName } from "../sdk/reverse-name";
 import { addressbookLookup } from "../sdk/addressbook";
@@ -34,17 +40,52 @@ import {
 } from "../sdk/fee-preview";
 import { ContactsPickerModal } from "./ContactsPickerModal";
 
+/** When present, the modal sends this MRC-20 token instead of native LYTH. The
+ *  fee is still native LYTH (shown separately); the amount is in token units and
+ *  encoded at the token's real decimals. */
+export interface SendTokenContext {
+  /** 32-byte token id (`0x`-hex) — the factory-origin MRC-20 asset. */
+  tokenId: string;
+  /** Display symbol (metadata symbol, or a short id fallback from upstream). */
+  symbol: string;
+  /** Real decimals from `lyth_mrcMetadata`; null → the send is blocked (the
+   *  scale is unknown and must never be guessed). */
+  decimals: number | null;
+  /** Raw base-units held balance (the indexer's integer string). */
+  balanceBaseUnits: string;
+}
+
 interface Props {
   /** Typed `mono1…` address shown in the From line. Use the same
    *  identity the wallet displays everywhere else. */
   fromBech32m: string;
+  /** Present ⇒ send this MRC-20 token; absent ⇒ native LYTH (unchanged). */
+  token?: SendTokenContext;
   onClose: () => void;
 }
 
 const USER_HRP = ADDRESS_KIND_HRPS.user;
 
-export function SendComposeModal({ fromBech32m, onClose }: Props) {
+/** Inline message for a blocked token amount — honest and specific. */
+function tokenBlockMessage(reason: TokenSendBlockReason, symbol: string): string {
+  switch (reason) {
+    case "unknown-decimals":
+      return `${symbol} decimals are unavailable — can't send safely. Try again once the token loads.`;
+    case "empty":
+      return "Amount is required.";
+    case "invalid":
+      return `Amount isn't a valid ${symbol} figure at this token's decimals.`;
+    case "zero":
+      return "Amount must be greater than 0.";
+    case "insufficient":
+      return `Amount exceeds your ${symbol} balance.`;
+  }
+}
+
+export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
   const ops = useOperations();
+  const isToken = token != null;
+  const assetLabel = token ? token.symbol : "LYTH";
   const [recipient, setRecipient] = useState("");
   const [amount, setAmount] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -107,7 +148,9 @@ export function SendComposeModal({ fromBech32m, onClose }: Props) {
     let cancelled = false;
     setFeePreview(null);
     setFeeError(null);
-    void previewTransferFee()
+    // A token-factory transfer reserves more execution units than a bare native
+    // transfer, so the shown worst-case max fee must reflect that limit.
+    void previewTransferFee(undefined, isToken ? TOKEN_TRANSFER_EXECUTION_UNIT_LIMIT : undefined)
       .then((preview) => {
         if (!cancelled) setFeePreview(preview);
       })
@@ -117,7 +160,7 @@ export function SendComposeModal({ fromBech32m, onClose }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [fromBech32m]);
+  }, [fromBech32m, isToken]);
 
   // Sync recipient-only validity: a typed user address that parses and isn't
   // our own. Gates the familiarity read (and which caution, if any, to show).
@@ -202,13 +245,22 @@ export function SendComposeModal({ fromBech32m, onClose }: Props) {
       }
       const trimmedAmt = amount.trim();
       if (!trimmedAmt) return "Amount is required.";
+      if (token) {
+        // Token: validate + balance-check at the token's REAL decimals. Blocks
+        // an unavailable scale, an over-precise/zero amount, and an over-balance
+        // send before anything is signed (never a chain revert). The encoded
+        // base units are checked here too.
+        const verdict = evaluateTokenSendAmount(trimmedAmt, token.decimals, token.balanceBaseUnits);
+        if (!verdict.ok) return tokenBlockMessage(verdict.reason, token.symbol);
+        return null;
+      }
       if (!new RegExp(`^\\d+(\\.\\d{1,${NATIVE_LYTH_DECIMALS}})?$`).test(trimmedAmt)) {
         return `Amount must have at most ${NATIVE_LYTH_DECIMALS} decimal places.`;
       }
       if (Number(trimmedAmt) === 0) return "Amount must be greater than 0.";
       return null;
     },
-    [recipient, amount, fromBech32m],
+    [recipient, amount, fromBech32m, token],
   );
 
   // §25.2 item 6 — best-effort, local-only recipient-name resolution. The
@@ -239,6 +291,11 @@ export function SendComposeModal({ fromBech32m, onClose }: Props) {
     const err = validate();
     setError(err);
     if (err) return;
+    // Block a token send the sender can't pay the LYTH fee for (honest pre-send).
+    if (feeCoverageError) {
+      setError(feeCoverageError);
+      return;
+    }
 
     const input = classifyRecipientInput(recipient, USER_HRP);
     const amountLyth = amount.trim();
@@ -292,6 +349,65 @@ export function SendComposeModal({ fromBech32m, onClose }: Props) {
     const toLine = displayName
       ? `${displayName} · ${toBech32m}`
       : toBech32m;
+
+    if (token) {
+      // Re-evaluate at the token's real decimals (defense-in-depth over
+      // validate()): an unavailable scale or over-balance amount blocks here too.
+      const verdict = evaluateTokenSendAmount(amountLyth, token.decimals, token.balanceBaseUnits);
+      if (!verdict.ok) {
+        setError(tokenBlockMessage(verdict.reason, token.symbol));
+        return;
+      }
+      // The shown amount is the EXACT inverse of the encoded base units — what
+      // the review displays is precisely what will be signed and sent.
+      const shown = verdict.displayAmount;
+      ops.open({
+        title: `Send ${token.symbol}`,
+        subtitle: "MRC-20 transfer · plaintext",
+        auth: "keychain",
+        diff: [
+          { k: "From", v: fromBech32m },
+          { k: "To", v: toLine },
+          { k: "Token", v: token.symbol },
+          { k: "Amount", v: `${shown} ${token.symbol}` },
+          {
+            k: "Network fee (max)",
+            v: feePreview ? `${feePreview.maxFeeLyth} LYTH` : "resolved at submit",
+            kind: "fee" as const,
+          },
+          { k: "Finality", v: finality.label, kind: "value" },
+        ],
+        effects: [
+          { text: "Transactions are irreversible. Confirm the recipient and amount carefully." },
+          { text: `The network fee is paid in LYTH, not ${token.symbol}.` },
+          { text: "Unlocks the local vault for this operation only." },
+          {
+            text: "Submits the signed transaction over the plaintext mesh_submitTx path — the inclusion path that confirms on this chain.",
+          },
+        ],
+        notify: { kind: "send", amountDecimal: shown, unit: token.symbol, counterparty: toBech32m },
+        execute: async (ctx) => {
+          if (!ctx?.vaultSeed) {
+            throw new Error("vault seed unavailable after keychain authorization");
+          }
+          const result = await sendMrc20Token({
+            seed: ctx.vaultSeed,
+            tokenId: token.tokenId,
+            to: toBech32m,
+            amount: amountLyth,
+            decimals: token.decimals,
+          });
+          return {
+            headline: `Broadcast ${result.amountDisplay} ${token.symbol}`,
+            detail: `${result.txHash} · from ${result.from}`,
+            txHash: result.txHash,
+            nonce: result.nonce,
+          };
+        },
+      });
+      onClose();
+      return;
+    }
 
     ops.open({
       title: `Send ${amountLyth} LYTH`,
@@ -353,23 +469,43 @@ export function SendComposeModal({ fromBech32m, onClose }: Props) {
 
   const maxFeeLythoshi = feePreview ? maxFeeLythoshiFrom(feePreview.fee) : null;
 
-  // "Max" sends the whole spendable balance minus the worst-case max fee, so
-  // the send + fee never exceeds the balance. Disabled until both the live
-  // balance and the live fee are known (we never guess the fee headroom).
+  // The sender needs native LYTH for the fee even when sending a token. Block a
+  // token send when the known LYTH balance can't cover the shown worst-case fee
+  // (an honest pre-send block instead of an opaque submit failure). Only asserts
+  // when both figures are known.
+  const feeCoverageError =
+    isToken && balanceLythoshi !== null && maxFeeLythoshi !== null && balanceLythoshi < maxFeeLythoshi
+      ? "Not enough LYTH to cover the network fee for this token transfer."
+      : null;
+
+  // Token "Max" fills the FULL token holding (the fee is paid in LYTH, so it's
+  // not netted out). Native "Max" fills the balance MINUS the worst-case fee so
+  // the send + fee never exceeds the balance.
+  const tokenMaxAmount = token ? maxTokenAmount(token.balanceBaseUnits, token.decimals) : null;
   const maxSpendableLythoshi =
-    balanceLythoshi !== null && maxFeeLythoshi !== null
+    !isToken && balanceLythoshi !== null && maxFeeLythoshi !== null
       ? balanceLythoshi - maxFeeLythoshi
       : null;
-  const canFillMax = maxSpendableLythoshi !== null && maxSpendableLythoshi > 0n;
+  const canFillMax = isToken
+    ? tokenMaxAmount !== null && tokenMaxAmount !== "0"
+    : maxSpendableLythoshi !== null && maxSpendableLythoshi > 0n;
 
   const onMax = () => {
+    if (isToken) {
+      if (tokenMaxAmount === null || tokenMaxAmount === "0") return;
+      setAmount(tokenMaxAmount);
+      setError(null);
+      return;
+    }
     if (maxSpendableLythoshi === null || maxSpendableLythoshi <= 0n) return;
     setAmount(formatLyth(maxSpendableLythoshi.toString(), { includeUnit: false }));
     setError(null);
   };
 
+  // Native only: amount + fee reservation (both LYTH). A token amount and the
+  // LYTH fee are different units, so no combined total is shown for a token.
   const totalReserved =
-    amountLythoshi !== null && maxFeeLythoshi !== null
+    !isToken && amountLythoshi !== null && maxFeeLythoshi !== null
       ? totalReservedLyth(amountLythoshi, maxFeeLythoshi)
       : null;
 
@@ -391,13 +527,13 @@ export function SendComposeModal({ fromBech32m, onClose }: Props) {
       <div
         role="dialog"
         aria-modal="true"
-        aria-label="Send LYTH"
+        aria-label={`Send ${assetLabel}`}
         onClick={(e) => e.stopPropagation()}
         className="w-card"
         style={{ maxWidth: 460, width: "100%" }}
       >
         <div className="w-card__head">
-          <h3>Send LYTH</h3>
+          <h3>Send {assetLabel}</h3>
         </div>
 
         <p
@@ -482,16 +618,20 @@ export function SendComposeModal({ fromBech32m, onClose }: Props) {
             marginBottom: 6,
           }}
         >
-          <label style={{ ...fieldLabel, marginBottom: 0 }}>Amount (LYTH)</label>
+          <label style={{ ...fieldLabel, marginBottom: 0 }}>Amount ({assetLabel})</label>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <span style={{ fontSize: 11, color: "var(--fg-400)" }}>
               Available{" "}
               <span style={{ fontFamily: "var(--f-mono)", color: "var(--fg-200)" }}>
-                {balanceError
-                  ? "—"
-                  : balanceLyth === null
-                    ? "…"
-                    : `${balanceLyth} LYTH`}
+                {token
+                  ? tokenMaxAmount === null
+                    ? "—"
+                    : `${tokenMaxAmount} ${token.symbol}`
+                  : balanceError
+                    ? "—"
+                    : balanceLyth === null
+                      ? "…"
+                      : `${balanceLyth} LYTH`}
               </span>
             </span>
             <button
@@ -500,9 +640,13 @@ export function SendComposeModal({ fromBech32m, onClose }: Props) {
               onClick={onMax}
               disabled={!canFillMax}
               title={
-                canFillMax
-                  ? "Send the full balance minus the max network fee"
-                  : "Live balance and fee required"
+                isToken
+                  ? canFillMax
+                    ? `Send your full ${assetLabel} balance`
+                    : "Token balance required"
+                  : canFillMax
+                    ? "Send the full balance minus the max network fee"
+                    : "Live balance and fee required"
               }
               style={{ padding: "4px 10px", fontSize: 11 }}
             >
@@ -518,7 +662,7 @@ export function SendComposeModal({ fromBech32m, onClose }: Props) {
           value={amount}
           onChange={(e) => setAmount(e.target.value)}
           placeholder="0.0"
-          aria-label="Amount in LYTH"
+          aria-label={`Amount in ${assetLabel}`}
           style={inputStyle}
         />
 
@@ -542,20 +686,35 @@ export function SendComposeModal({ fromBech32m, onClose }: Props) {
               {feeError ? "unavailable" : feePreview === null ? "…" : `${feePreview.maxFeeLyth} LYTH`}
             </span>
           </div>
-          <div style={feeRow}>
-            <span style={feeKey}>Total (amount + fee)</span>
-            <span style={feeVal}>
-              {feeError
-                ? "—"
-                : totalReserved === null
+          {/* Native: amount + fee are both LYTH, so a combined total is shown.
+              Token: the amount is in the token and the fee in LYTH — different
+              units — so no combined total; instead surface the LYTH-fee note. */}
+          {!isToken ? (
+            <div style={feeRow}>
+              <span style={feeKey}>Total (amount + fee)</span>
+              <span style={feeVal}>
+                {feeError
                   ? "—"
-                  : `${totalReserved} LYTH`}
-            </span>
-          </div>
+                  : totalReserved === null
+                    ? "—"
+                    : `${totalReserved} LYTH`}
+              </span>
+            </div>
+          ) : (
+            <div style={feeRow}>
+              <span style={feeKey}>Fee paid in</span>
+              <span style={feeVal}>LYTH (not {assetLabel})</span>
+            </div>
+          )}
           <div style={{ fontSize: 10.5, color: "var(--fg-400)", lineHeight: 1.5 }}>
             Fee is the maximum the chain reserves; the actual charge is
             {" "}(base + tip) × units used and may be lower.
           </div>
+          {feeCoverageError && (
+            <div style={{ fontSize: 11, color: "var(--err)", lineHeight: 1.5 }}>
+              {feeCoverageError}
+            </div>
+          )}
         </div>
 
         {error && (
@@ -572,7 +731,7 @@ export function SendComposeModal({ fromBech32m, onClose }: Props) {
             className="btn btn--primary"
             onClick={() => void onReview()}
             style={{ flex: 1 }}
-            disabled={!recipient.trim() || !amount.trim() || reviewing}
+            disabled={!recipient.trim() || !amount.trim() || reviewing || Boolean(feeCoverageError)}
           >
             {reviewing ? "Checking…" : "Review"}
           </button>
