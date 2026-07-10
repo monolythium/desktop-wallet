@@ -16,11 +16,31 @@
 
 import { atomsToDecimal, decimalToAtoms, isValidDecimal } from "./clob-units";
 
+/** True for a decimals value the send path will TRUST — a u8 (integer 0..255),
+ *  the same bound the display formatter enforces (`formatTokenAmountDisplay`).
+ *  Malformed metadata (null, negative, fractional, or > 255) is not trusted and
+ *  blocks the send rather than encoding at a bad scale (or throwing out of a
+ *  regex quantifier). Doubles as a type guard so callers narrow to `number`. */
+export function isSupportedTokenDecimals(
+  decimals: number | null | undefined,
+): decimals is number {
+  return (
+    decimals !== null &&
+    decimals !== undefined &&
+    Number.isInteger(decimals) &&
+    decimals >= 0 &&
+    decimals <= 255
+  );
+}
+
 /** True iff `value` is a non-negative decimal with at most `decimals` places.
- *  Handles `decimals === 0` (integer-only), which `isValidDecimal` cannot — its
- *  `\d{1,0}` quantifier is an invalid regex — so a 0-decimal token never throws
- *  and correctly rejects a fractional amount. */
+ *  Rejects an unsupported `decimals` (never builds an invalid `\d{1,N}`
+ *  quantifier, which would throw). Handles `decimals === 0` (integer-only),
+ *  which `isValidDecimal` cannot — its `\d{1,0}` quantifier is an invalid regex
+ *  — so a 0-decimal token never throws and correctly rejects a fractional
+ *  amount. */
 export function isTokenAmountValid(value: string, decimals: number): boolean {
+  if (!isSupportedTokenDecimals(decimals)) return false;
   const t = value.trim();
   if (t === "") return false;
   if (decimals === 0) return /^\d+$/.test(t);
@@ -31,6 +51,9 @@ export function isTokenAmountValid(value: string, decimals: number): boolean {
  *  malformed value (callers validate first). `decimals === 0` is handled without
  *  touching the throwing `isValidDecimal(_, 0)` path. */
 export function tokenAmountToBase(value: string, decimals: number): bigint {
+  if (!isSupportedTokenDecimals(decimals)) {
+    throw new Error(`unsupported token decimals: ${decimals}`);
+  }
   if (!isTokenAmountValid(value, decimals)) {
     throw new Error(`amount must be a decimal with at most ${decimals} places`);
   }
@@ -54,7 +77,7 @@ export function maxTokenAmount(
   balanceBaseUnits: string,
   decimals: number | null | undefined,
 ): string | null {
-  if (decimals === null || decimals === undefined) return null;
+  if (!isSupportedTokenDecimals(decimals)) return null;
   let balance: bigint;
   try {
     balance = BigInt(balanceBaseUnits.trim());
@@ -90,7 +113,9 @@ export function evaluateTokenSendAmount(
   decimals: number | null | undefined,
   balanceBaseUnits: string,
 ): TokenSendAmountVerdict {
-  if (decimals === null || decimals === undefined) {
+  // Unknown (null/undefined) OR untrusted (non-integer / out of u8 range) scale
+  // → block. Never encode at a scale the display path itself would refuse.
+  if (!isSupportedTokenDecimals(decimals)) {
     return { ok: false, reason: "unknown-decimals" };
   }
   const t = (value ?? "").trim();

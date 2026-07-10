@@ -81,6 +81,16 @@ describe("sendMrc20Token", () => {
     expect(submitNativeTxSpy).not.toHaveBeenCalled();
   });
 
+  it("BLOCKS (throws, no submit) on an out-of-range / non-integer decimals (malformed metadata)", async () => {
+    await expect(
+      sendMrc20Token({ seed: SEED, tokenId: TOKEN_ID, to: TO, amount: "1", decimals: 256 }),
+    ).rejects.toThrow();
+    await expect(
+      sendMrc20Token({ seed: SEED, tokenId: TOKEN_ID, to: TO, amount: "1", decimals: 6.5 }),
+    ).rejects.toThrow();
+    expect(submitNativeTxSpy).not.toHaveBeenCalled();
+  });
+
   it("throws (no submit) on a zero or over-precise amount", async () => {
     await expect(
       sendMrc20Token({ seed: SEED, tokenId: TOKEN_ID, to: TO, amount: "0", decimals: 6 }),

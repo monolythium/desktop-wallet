@@ -1,11 +1,49 @@
 import { describe, expect, it } from "vitest";
 import {
   evaluateTokenSendAmount,
+  isSupportedTokenDecimals,
   isTokenAmountValid,
   maxTokenAmount,
   tokenAmountBaseToDisplay,
   tokenAmountToBase,
 } from "../token-send-compose";
+
+describe("isSupportedTokenDecimals — u8 bound matching the display formatter", () => {
+  it("accepts an integer 0..255, rejects out-of-range / non-integer / absent", () => {
+    expect(isSupportedTokenDecimals(0)).toBe(true);
+    expect(isSupportedTokenDecimals(6)).toBe(true);
+    expect(isSupportedTokenDecimals(255)).toBe(true);
+    expect(isSupportedTokenDecimals(256)).toBe(false);
+    expect(isSupportedTokenDecimals(-1)).toBe(false);
+    expect(isSupportedTokenDecimals(6.5)).toBe(false);
+    expect(isSupportedTokenDecimals(null)).toBe(false);
+    expect(isSupportedTokenDecimals(undefined)).toBe(false);
+  });
+});
+
+describe("out-of-range decimals never throw and always block (malformed metadata)", () => {
+  it("isTokenAmountValid returns false (no regex throw) for bad decimals", () => {
+    expect(isTokenAmountValid("1", 6.5)).toBe(false);
+    expect(isTokenAmountValid("1", -1)).toBe(false);
+    expect(isTokenAmountValid("1", 256)).toBe(false);
+  });
+
+  it("evaluateTokenSendAmount blocks a bad scale as unknown-decimals (clean, not a throw)", () => {
+    expect(evaluateTokenSendAmount("1", 6.5, "1000000")).toEqual({ ok: false, reason: "unknown-decimals" });
+    expect(evaluateTokenSendAmount("1", -1, "1000000")).toEqual({ ok: false, reason: "unknown-decimals" });
+    expect(evaluateTokenSendAmount("1", 256, "1000000")).toEqual({ ok: false, reason: "unknown-decimals" });
+  });
+
+  it("tokenAmountToBase throws an explicit unsupported-decimals error (no regex crash)", () => {
+    expect(() => tokenAmountToBase("1", 256)).toThrow(/unsupported token decimals/);
+    expect(() => tokenAmountToBase("1", -1)).toThrow(/unsupported token decimals/);
+  });
+
+  it("maxTokenAmount returns null for a bad scale (no fabricated max)", () => {
+    expect(maxTokenAmount("1000000", 256)).toBeNull();
+    expect(maxTokenAmount("1000000", 6.5)).toBeNull();
+  });
+});
 
 describe("isTokenAmountValid", () => {
   it("accepts a decimal within the token's places, rejects over-precise", () => {

@@ -18,7 +18,11 @@ import {
 } from "@monolythium/core-sdk";
 import { requireTypedUserAddressHex } from "./address";
 import { submitNativeTx } from "./submit";
-import { tokenAmountBaseToDisplay, tokenAmountToBase } from "./token-send-compose";
+import {
+  isSupportedTokenDecimals,
+  tokenAmountBaseToDisplay,
+  tokenAmountToBase,
+} from "./token-send-compose";
 
 /** Conservative execution-unit reserve for a token-factory transfer — a
  *  precompile call heavier than a bare native transfer (~100k). Mirrors the
@@ -56,9 +60,11 @@ export interface SendMrc20Result {
  * plaintext submit seam. `to = tokenFactoryAddressHex()` (0x…1000), `value` 0.
  */
 export async function sendMrc20Token(args: SendMrc20Args): Promise<SendMrc20Result> {
-  if (args.decimals === null || args.decimals === undefined) {
+  // Block an unavailable OR out-of-range (non-u8) scale — never encode an amount
+  // at a decimals the display path itself would refuse.
+  if (!isSupportedTokenDecimals(args.decimals)) {
     throw new Error(
-      "token decimals unavailable — refusing to encode a token amount at a guessed scale",
+      "token decimals unavailable or out of range — refusing to encode at a guessed/bad scale",
     );
   }
   const decimals = args.decimals;

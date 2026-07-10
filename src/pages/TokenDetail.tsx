@@ -16,6 +16,7 @@ import { useEffect, useMemo, useState } from "react";
 import { BridgeRiskPanel } from "../components/BridgeRiskPanel";
 import { ReceiveModal } from "../components/ReceiveModal";
 import { SendComposeModal, type SendTokenContext } from "../components/SendComposeModal";
+import { isSupportedTokenDecimals } from "../sdk/token-send-compose";
 import { TxRow } from "../components/TxRow";
 import { fmt } from "../components/format";
 import type { Route } from "../components/types";
@@ -127,7 +128,7 @@ export function TokenDetail({ goto }: Props) {
   const sendableToken: SendTokenContext | null =
     !facts.isNative &&
     facts.standard === "mrc20" &&
-    facts.decimals !== null &&
+    isSupportedTokenDecimals(facts.decimals) &&
     facts.tokenId !== null &&
     facts.balanceDisplay !== null
       ? {
@@ -143,7 +144,7 @@ export function TokenDetail({ goto }: Props) {
       ? undefined
       : facts.standard !== null && facts.standard !== "mrc20"
         ? "Only fungible MRC-20 tokens can be sent from the wallet."
-        : facts.decimals === null
+        : !isSupportedTokenDecimals(facts.decimals)
           ? "This token's decimals aren't available yet — can't send safely."
           : "This token can't be sent right now.";
 
