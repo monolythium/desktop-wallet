@@ -49,10 +49,19 @@ export default defineConfig(({ mode }) => ({
     outDir: "dist",
   },
   test: {
-    // jsdom keeps DOM globals (`window`, `document`) available for any
-    // future component test; the SDK-only tests under src/sdk/__tests__/
+    // jsdom keeps DOM globals (`window`, `document`) available for the
+    // component-render tests; the SDK-only tests under src/sdk/__tests__/
     // don't need it but the cost is negligible.
     environment: "jsdom",
-    include: ["src/**/__tests__/**/*.test.ts", "src/**/*.test.ts"],
+    // Match `.test.tsx` too — component render tests live in `.tsx`; the old
+    // `.test.ts`-only glob would silently drop them.
+    include: [
+      "src/**/__tests__/**/*.test.ts",
+      "src/**/__tests__/**/*.test.tsx",
+      "src/**/*.test.ts",
+      "src/**/*.test.tsx",
+    ],
+    // jest-dom matchers + per-test DOM cleanup for the RTL harness.
+    setupFiles: ["src/test/setup.ts"],
   },
 }));
