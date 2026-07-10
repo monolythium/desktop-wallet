@@ -158,9 +158,14 @@ The full set of in-scope vulnerability categories is enumerated in [`SECURITY.md
 
 - **macOS arm64 / x64**: Tauri build + Apple Developer ID signing + App Store Connect notarization (uses `secrets.APPLE_*` references).
 - **Linux x64**: Tauri build → `.deb` + `.AppImage` (unsigned today).
-- **Windows x64**: Tauri build + [Azure Trusted Signing](https://azure.microsoft.com/en-us/products/trusted-signing) for the `.exe` and `.msi` (uses `secrets.AZURE_*` references).
+- **Windows x64**: Tauri build + [Azure Trusted Signing](https://azure.microsoft.com/en-us/products/trusted-signing) for the `.exe` and `.msi` (uses `secrets.AZURE_*` references); when those secrets are absent the installer is built unsigned with a loud warning rather than dropped silently.
 
-The shape is in place; no tagged release has run it end-to-end yet.
+Signed updater bundles + the `latest.json` manifest are produced and published as a
+draft; publishing the draft activates self-update. The shape is in place and the
+config is release-correct; no tagged release has run it end-to-end yet.
+
+See [`docs/RELEASING.md`](./docs/RELEASING.md) for the full cut → review → publish →
+verify runbook (including the version-bump steps and the N→N+1 auto-update check).
 
 ## Related projects
 
