@@ -239,6 +239,33 @@ jobs:
           echo "=== latest.json ==="
           cat latest.json
 
+          # An empty platforms map means NO signed updater bundle was collected
+          # for ANY OS — the app would fetch this manifest and silently find
+          # nothing to install. That happens if createUpdaterArtifacts is off
+          # (tauri.conf.json) or TAURI_SIGNING_PRIVATE_KEY is unset, so the .sig
+          # files were never produced. Fail loudly rather than publish a dead
+          # updater manifest.
+          platform_count=$(jq '.platforms | length' latest.json)
+          echo "latest.json describes ${platform_count} platform(s)."
+          if [ "${platform_count}" -eq 0 ]; then
+            echo "::error::latest.json has an empty platforms map — no signed updater bundle was collected. Refusing to publish a dead updater manifest. Check bundle.createUpdaterArtifacts and TAURI_SIGNING_PRIVATE_KEY." >&2
+            exit 1
+          fi
+
+      # The release is created as a DRAFT on purpose. The maintainer reviews the
+      # collected artifacts + the generated latest.json, then manually PUBLISHES
+      # the draft as the latest (non-draft, non-prerelease) release. That manual
+      # publish is BOTH the human quality gate AND the step that activates
+      # auto-update: tauri.conf.json polls
+      #   https://github.com/monolythium/desktop-wallet/releases/latest/download/latest.json
+      # and GitHub's `releases/latest/download/...` path resolves ONLY to a
+      # published, non-prerelease release — a draft (and its assets) is not
+      # publicly reachable. So the updater endpoint stays a 404 (surfaced in-app
+      # as "up to date") until the draft is published, at which point it resolves
+      # the same latest.json filename this job uploaded. Endpoint and publish path
+      # therefore agree by construction. To auto-publish on every tag instead
+      # (dropping the artifact-review gate — the tag push becomes the only gate),
+      # set `draft: false`. See docs/RELEASING.md for the full cut→verify runbook.
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
