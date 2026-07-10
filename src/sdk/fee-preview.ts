@@ -34,11 +34,19 @@ export function maxFeeLythoshiFrom(fee: ResolvedExecutionFee): bigint {
  * Resolve the transfer-class execution fee from the live node quote and shape
  * it for the compose preview. Throws on a failed quote — the caller renders an
  * honest "fee unavailable" line rather than a fabricated number.
+ *
+ * `executionUnitLimit` overrides the SDK's transfer default so the shown worst-
+ * case max fee matches what a heavier call (e.g. a token-factory transfer)
+ * reserves at submit time — the preview stays honest instead of under-quoting.
  */
 export async function previewTransferFee(
   client: RpcClient = new RpcClient(getProvider().rpcClient.endpoint, rpcClientOptions()),
+  executionUnitLimit?: bigint,
 ): Promise<NativeFeePreview> {
-  const fee = await resolveExecutionFee(client);
+  const fee = await resolveExecutionFee(
+    client,
+    executionUnitLimit === undefined ? undefined : { executionUnitLimit },
+  );
   const maxFeeLythoshi = maxFeeLythoshiFrom(fee);
   return {
     fee,
