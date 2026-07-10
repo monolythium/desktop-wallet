@@ -151,6 +151,8 @@ export interface RecordNotificationInput {
   blockNumber: number | null;
   kind: TxOpKind;
   amountDecimal: string;
+  /** Amount unit — the token symbol for an MRC-20 send; absent ⇒ LYTH. */
+  unit?: string;
   counterparty: string;
   /** For delegation kinds: the target cluster (optional). */
   clusterId?: number;
@@ -199,6 +201,7 @@ export async function recordNotification(
       blockNumber: input.blockNumber,
       kind: input.kind,
       amountDecimal: input.amountDecimal,
+      unit: input.unit,
       counterparty: input.counterparty,
       clusterId: input.clusterId,
       clusterName: input.clusterName,

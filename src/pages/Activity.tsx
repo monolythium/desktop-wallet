@@ -44,6 +44,7 @@ import {
   writeConfirmedCache,
 } from "../sdk/activity-cache-store";
 import {
+  amountUnitLabel,
   isDelegationKind,
   isZeroAmount,
   notificationTitle,
@@ -379,7 +380,7 @@ export function Activity() {
                       {showAmount ? (
                         <div className="w-tx__amt">
                           {tx.amountDecimal}
-                          <span className="tok">LYTH</span>
+                          <span className="tok">{amountUnitLabel(tx.unit)}</span>
                         </div>
                       ) : null}
                     </div>
@@ -423,7 +424,7 @@ export function Activity() {
                       {showAmount ? (
                         <div className="w-tx__amt" style={{ color: "var(--err)" }}>
                           {rec.amountDecimal}
-                          <span className="tok">LYTH</span>
+                          <span className="tok">{amountUnitLabel(rec.unit)}</span>
                         </div>
                       ) : null}
                     </div>
@@ -506,6 +507,7 @@ function trackedRowToDetail(tx: PendingTx): DetailRow {
     txHash: tx.txHash,
     opKind: tx.opKind,
     amountDecimal: tx.amountDecimal,
+    unit: tx.unit,
     counterparty: tx.counterparty,
   };
 }

@@ -43,9 +43,12 @@ export interface PendingTx {
   /** Operation classification — copied straight onto the notification record
    *  so the friendly title matches the originating action. */
   opKind: TxOpKind;
-  /** Already-formatted LYTH decimal string (e.g. "12.50"), or "0". NEVER a
+  /** Already-formatted decimal amount string (e.g. "12.50"), or "0". NEVER a
    *  BigInt — the store serializes JSON only. */
   amountDecimal: string;
+  /** Amount unit — the token symbol for an MRC-20 send; absent ⇒ LYTH. Optional
+   *  + backward-compatible: rows written before this field read as LYTH. */
+  unit?: string;
   /** Typed bech32m counterparty (recipient or precompile target). */
   counterparty: string;
   /** For delegation kinds: the target cluster, so a recorded notification can
@@ -314,6 +317,7 @@ export function asPendingTx(raw: unknown): PendingTx | null {
       ? r.clusterId
       : undefined;
   const clusterName = typeof r.clusterName === "string" ? r.clusterName : undefined;
+  const unit = typeof r.unit === "string" && r.unit.length > 0 ? r.unit : undefined;
   const lifecycle = isPendingLifecycle(r.lifecycle) ? r.lifecycle : undefined;
   const confirmedBlockHeight =
     typeof r.confirmedBlockHeight === "number" && Number.isFinite(r.confirmedBlockHeight)
@@ -335,6 +339,7 @@ export function asPendingTx(raw: unknown): PendingTx | null {
     addressLower: r.addressLower,
     opKind: r.opKind as TxOpKind,
     amountDecimal: r.amountDecimal,
+    unit,
     counterparty: r.counterparty,
     clusterId,
     clusterName,

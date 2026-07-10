@@ -73,8 +73,11 @@ export interface OperationDescriptor {
  */
 export interface OperationNotifyMeta {
   kind: TxOpKind;
-  /** Already-formatted LYTH decimal string (e.g. "12.50"), or "0". */
+  /** Already-formatted decimal amount string (e.g. "12.50"), or "0". */
   amountDecimal: string;
+  /** Amount unit — the token symbol for an MRC-20 send, omitted for native
+   *  LYTH (renders as "LYTH"). Keeps a token send from being mislabeled LYTH. */
+  unit?: string;
   /** Typed bech32m counterparty (recipient or precompile target). */
   counterparty: string;
   /** For delegation kinds: the target cluster, so the recorded notification can

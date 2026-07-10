@@ -72,9 +72,13 @@ export interface NotificationRecord {
   blockNumber: number | null;
   /** Operation classification used to render the friendly title. */
   kind: TxOpKind;
-  /** Canonical LYTH amount string (already formatted decimal). NEVER a
-   *  BigInt — the store serializes JSON only. */
+  /** Canonical amount string (already formatted decimal). NEVER a BigInt — the
+   *  store serializes JSON only. */
   amountDecimal: string;
+  /** Amount unit — the token symbol for an MRC-20 send; absent for native LYTH
+   *  (renders "LYTH"). Optional + backward-compatible: records written before
+   *  this field read as LYTH. */
+  unit?: string;
   /** Typed bech32m counterparty — the recipient the user intended to send to,
    *  or the precompile target for contract calls. */
   counterparty: string;
@@ -262,9 +266,19 @@ export function notificationAmountLabel(record: NotificationRecord): string | nu
     record.claimedAmount &&
     !isZeroAmount(record.claimedAmount)
   ) {
+    // Reward claims settle in native LYTH.
     return `+${record.claimedAmount} LYTH`;
   }
-  return isZeroAmount(record.amountDecimal) ? null : `${record.amountDecimal} LYTH`;
+  return isZeroAmount(record.amountDecimal)
+    ? null
+    : `${record.amountDecimal} ${amountUnitLabel(record.unit)}`;
+}
+
+/** The unit shown next to a recorded amount — the token symbol when present,
+ *  else native LYTH. Pure; the single default so a token send is never
+ *  mislabeled and a legacy (unit-less) record still reads "LYTH". */
+export function amountUnitLabel(unit: string | undefined): string {
+  return unit && unit.length > 0 ? unit : "LYTH";
 }
 
 /** Render the friendly title for a notification. */
@@ -323,7 +337,7 @@ export function notificationToast(
   const short = delegationClusterLabel(record) ?? shortAddress(record.counterparty);
   const body = isZeroAmount(record.amountDecimal)
     ? short
-    : `${record.amountDecimal} LYTH · ${short}`;
+    : `${record.amountDecimal} ${amountUnitLabel(record.unit)} · ${short}`;
   return { title, body };
 }
 
@@ -392,6 +406,7 @@ function asNotificationRecord(raw: unknown): NotificationRecord | null {
       ? r.feeLythoshi
       : undefined;
   const scope = typeof r.scope === "string" ? r.scope : undefined;
+  const unit = typeof r.unit === "string" && r.unit.length > 0 ? r.unit : undefined;
   return {
     id: r.id,
     txHash: r.txHash,
@@ -399,6 +414,7 @@ function asNotificationRecord(raw: unknown): NotificationRecord | null {
     blockNumber,
     kind,
     amountDecimal: r.amountDecimal,
+    unit,
     counterparty: r.counterparty,
     clusterId,
     clusterName,

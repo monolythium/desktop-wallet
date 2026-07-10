@@ -394,4 +394,22 @@ describe("trackOperationTx — enqueue-on-submit", () => {
     await trackOperationTx(meta, "0xdup");
     expect(await listPendingTxs()).toHaveLength(1);
   });
+
+  it("threads a token unit onto the tracked tx (so it isn't mislabeled LYTH)", async () => {
+    await trackOperationTx(
+      { kind: "send", amountDecimal: "1.5", unit: "USDC", counterparty: "mono1to" },
+      "0xtok",
+    );
+    const tracked = await listPendingTxs();
+    expect(tracked[0]!.unit).toBe("USDC");
+  });
+
+  it("leaves the unit absent for a native LYTH send (renders LYTH)", async () => {
+    await trackOperationTx(
+      { kind: "send", amountDecimal: "1", counterparty: "mono1to" },
+      "0xnat",
+    );
+    const tracked = await listPendingTxs();
+    expect(tracked[0]!.unit).toBeUndefined();
+  });
 });

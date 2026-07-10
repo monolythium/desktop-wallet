@@ -23,7 +23,7 @@ import {
   isNativeLythTokenId,
   tokenUnitLabel,
 } from "../sdk/lyth-display";
-import { isZeroAmount, pendingOpLabel, type TxOpKind } from "../sdk/notifications";
+import { amountUnitLabel, isZeroAmount, pendingOpLabel, type TxOpKind } from "../sdk/notifications";
 import { txTypeLabelForActivity } from "../sdk/tx-type-label";
 import { tokenAmountDisplay, type TokenMeta } from "../sdk/token-metadata";
 import { CopyableAddress, DRow, MonoscanTxButton, NamedAddress, truncMiddle } from "./_detailModalParts";
@@ -47,6 +47,8 @@ export interface TrackedDetailRow {
   txHash: string;
   opKind: TxOpKind;
   amountDecimal: string;
+  /** Amount unit — the token symbol for an MRC-20 send; absent ⇒ LYTH. */
+  unit?: string;
   counterparty: string;
 }
 
@@ -188,7 +190,7 @@ function DetailBody({
       <div>
         <DRow label="Status" value="Awaiting confirmation" />
         {showAmount ? (
-          <DRow label="Amount" value={`${row.amountDecimal} LYTH`} />
+          <DRow label="Amount" value={`${row.amountDecimal} ${amountUnitLabel(row.unit)}`} />
         ) : null}
         <DRow label="From" value={<CopyableAddress addr={walletAddr} />} />
         {showCp ? (

@@ -163,6 +163,16 @@ describe("notificationAmountLabel", () => {
   it("falls back to the plain amount for a claim with no decoded reward", () => {
     expect(notificationAmountLabel(rec({ kind: "claim", amountDecimal: "5" }))).toBe("5 LYTH");
   });
+
+  it("uses the token symbol as the unit for an MRC-20 send (not LYTH)", () => {
+    expect(notificationAmountLabel(rec({ kind: "send", amountDecimal: "1.5", unit: "USDC" }))).toBe(
+      "1.5 USDC",
+    );
+  });
+
+  it("defaults a unit-less (legacy) record to LYTH", () => {
+    expect(notificationAmountLabel(rec({ kind: "send", amountDecimal: "3.5" }))).toBe("3.5 LYTH");
+  });
 });
 
 describe("delegationClusterLabel", () => {
