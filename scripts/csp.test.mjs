@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   connectSrc,
+  devCsp,
   operatorOrigins,
   prodCsp,
   FIXED_HOSTS,
@@ -81,5 +82,28 @@ describe("prodCsp — tight, and never blocks the http operators", () => {
     expect(csp).not.toContain("upgrade-insecure-requests");
     expect(csp).not.toContain("block-all-mixed-content");
     expect(csp).toContain("http://1.2.3.4:8545");
+  });
+});
+
+describe("devCsp — looser for Vite HMR, still no 'unsafe-eval'", () => {
+  const dev = devCsp(connectSrc(["http://1.2.3.4:8545"], { dev: true }));
+
+  it("relaxes ONLY script/style to 'unsafe-inline' (React-Refresh + HMR <style>)", () => {
+    expect(dev).toContain("script-src 'self' 'unsafe-inline'");
+    expect(dev).toContain("style-src 'self' 'unsafe-inline'");
+  });
+
+  it("still uses NO 'unsafe-eval' (Vite serves native ESM)", () => {
+    expect(dev).not.toContain("'unsafe-eval'");
+  });
+
+  it("carries the Vite HMR websocket + dev server in connect-src", () => {
+    for (const s of DEV_SOURCES) expect(dev).toContain(s);
+  });
+
+  it("keeps the lockables tight (object/frame 'none') and the operator origin", () => {
+    expect(dev).toContain("object-src 'none'");
+    expect(dev).toContain("frame-src 'none'");
+    expect(dev).toContain("http://1.2.3.4:8545");
   });
 });

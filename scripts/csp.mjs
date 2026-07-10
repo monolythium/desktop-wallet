@@ -81,3 +81,28 @@ export function prodCsp(connectSources) {
     "frame-ancestors 'none'",
   ].join("; ");
 }
+
+/**
+ * The looser DEV CSP for `pnpm tauri dev` (Vite HMR): `'unsafe-inline'` on
+ * script-src (the @vitejs/plugin-react inline React-Refresh preamble) and
+ * style-src (Vite's HMR-injected `<style>`), and `connect-src` carrying the Vite
+ * HMR websocket + dev server (via `connectSrc({ dev: true })`). Still NO
+ * `'unsafe-eval'` (Vite serves native ESM) — and this never enters the prod
+ * bundle (Tauri uses `csp` for the shipped app, `devCsp` only in dev).
+ */
+export function devCsp(connectSources) {
+  return [
+    "default-src 'self'",
+    "script-src 'self' 'unsafe-inline'",
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data:",
+    "font-src 'self'",
+    `connect-src ${connectSources.join(" ")}`,
+    "worker-src 'none'",
+    "frame-src 'none'",
+    "child-src 'none'",
+    "object-src 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+  ].join("; ");
+}

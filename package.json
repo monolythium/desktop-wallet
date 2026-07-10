@@ -12,6 +12,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "gen:csp": "node scripts/gen-csp.mjs",
+    "pretauri": "node scripts/gen-csp.mjs",
     "tauri": "tauri",
     "precargo": "tsc --noEmit && vite build"
   },
