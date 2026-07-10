@@ -34,6 +34,10 @@ export interface TokenDetailFacts {
   /** The token's decimals (native = 18; MRC-20 = metadata decimals, or null
    *  when unknown). */
   decimals: number | null;
+  /** MRC standard ("mrc20" / "mrc721" / …) from the token's metadata (falling
+   *  back to the balance row's mrc identity), or null when unknown. Gates the
+   *  send flow to fungible MRC-20. Null for native. */
+  standard: string | null;
   /** Raw 32-byte token id for an MRC-20 row; null for native. */
   tokenId: string | null;
   /** Block height the MRC-20 balance was last observed at; null otherwise. */
@@ -67,6 +71,7 @@ export function selectTokenDetailFacts(
       balanceAmount: ok ? parseDecimalAmount(live!.nativeBalance.value) : 0,
       balanceText: null, // native renders via balanceAmount (unchanged path)
       decimals: NATIVE_LYTH_DECIMALS,
+      standard: null, // native LYTH is not an MRC token
       tokenId: null,
       updatedAtBlock: null,
       assetPolicy: live?.assetPolicy.ok ? live.assetPolicy.value ?? null : null,
@@ -93,6 +98,9 @@ export function selectTokenDetailFacts(
     // null → the page shows an honest "—" (never raw base units as a figure).
     balanceText: row ? tokenAmountDisplay(row.balance, meta) : null,
     decimals: meta?.decimals ?? null,
+    // Prefer the metadata standard (reliable for factory-origin MRC-20); fall
+    // back to the balance row's mrc identity when metadata isn't loaded.
+    standard: meta?.standard ?? row?.mrc?.standard ?? null,
     tokenId: ref,
     updatedAtBlock: row ? row.updatedAtBlock : null,
     // No per-MRC asset-policy read is wired (loadLiveTokenStatus queries the

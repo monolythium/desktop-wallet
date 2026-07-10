@@ -40,10 +40,10 @@ beforeEach(() => {
 });
 
 describe("loadTokenMeta — fetch + cache", () => {
-  it("maps decimals/symbol/name from the metadata row", async () => {
+  it("maps decimals/symbol/name/standard from the metadata row", async () => {
     mrcMetadataFn.mockResolvedValueOnce(metaResponse());
     const meta = await loadTokenMeta("0xtoken");
-    expect(meta).toEqual({ decimals: 6, symbol: "TT", name: "Test Token" });
+    expect(meta).toEqual({ decimals: 6, symbol: "TT", name: "Test Token", standard: "mrc20" });
   });
 
   it("fetches once per asset id, then serves from cache (no refetch per render)", async () => {
@@ -59,7 +59,12 @@ describe("loadTokenMeta — fetch + cache", () => {
     expect(await loadTokenMeta("0xtoken")).toEqual(UNKNOWN_TOKEN_META);
     // A later successful read is not blocked by the failed one.
     mrcMetadataFn.mockResolvedValueOnce(metaResponse());
-    expect(await loadTokenMeta("0xtoken")).toEqual({ decimals: 6, symbol: "TT", name: "Test Token" });
+    expect(await loadTokenMeta("0xtoken")).toEqual({
+      decimals: 6,
+      symbol: "TT",
+      name: "Test Token",
+      standard: "mrc20",
+    });
     expect(mrcMetadataFn).toHaveBeenCalledTimes(2);
   });
 
@@ -75,6 +80,13 @@ describe("loadTokenMeta — fetch + cache", () => {
     mrcMetadataFn.mockResolvedValueOnce(metaResponse({ decimals: null }));
     expect((await loadTokenMeta("0xtoken")).decimals).toBeNull();
   });
+
+  it("carries the standard through so the send gate can exclude non-mrc20", async () => {
+    mrcMetadataFn.mockResolvedValueOnce(metaResponse({ standard: "mrc721", decimals: null }));
+    const meta = await loadTokenMeta("0xtoken");
+    expect(meta.standard).toBe("mrc721");
+    expect(meta.decimals).toBeNull();
+  });
 });
 
 describe("loadTokenMetaMap — deduped batch", () => {
@@ -84,8 +96,8 @@ describe("loadTokenMetaMap — deduped batch", () => {
     );
     const map = await loadTokenMetaMap(["0xa", "0xb", "0xa", "0xb", "0xa"]);
     expect(mrcMetadataFn).toHaveBeenCalledTimes(2); // deduped
-    expect(map.get("0xa")).toEqual({ decimals: 6, symbol: "AAA", name: "Test Token" });
-    expect(map.get("0xb")).toEqual({ decimals: 18, symbol: "BBB", name: "Test Token" });
+    expect(map.get("0xa")).toEqual({ decimals: 6, symbol: "AAA", name: "Test Token", standard: "mrc20" });
+    expect(map.get("0xb")).toEqual({ decimals: 18, symbol: "BBB", name: "Test Token", standard: "mrc20" });
   });
 });
 

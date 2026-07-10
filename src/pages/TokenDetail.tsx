@@ -15,7 +15,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { BridgeRiskPanel } from "../components/BridgeRiskPanel";
 import { ReceiveModal } from "../components/ReceiveModal";
-import { SendComposeModal } from "../components/SendComposeModal";
+import { SendComposeModal, type SendTokenContext } from "../components/SendComposeModal";
 import { TxRow } from "../components/TxRow";
 import { fmt } from "../components/format";
 import type { Route } from "../components/types";
@@ -121,6 +121,32 @@ export function TokenDetail({ goto }: Props) {
         ? fmt(facts.balanceAmount, fracDigits)
         : facts.balanceText ?? "—";
 
+  // A token is sendable only when it is a fungible MRC-20 (standard mrc20 —
+  // excludes 721/1155/4626), its decimals are known (never guess a scale), and a
+  // balance row exists. The modal then encodes the amount at these real decimals.
+  const sendableToken: SendTokenContext | null =
+    !facts.isNative &&
+    facts.standard === "mrc20" &&
+    facts.decimals !== null &&
+    facts.tokenId !== null &&
+    facts.balanceDisplay !== null
+      ? {
+          tokenId: facts.tokenId,
+          symbol: facts.ticker,
+          decimals: facts.decimals,
+          balanceBaseUnits: facts.balanceDisplay,
+        }
+      : null;
+  // Honest reason a non-native row's Send is disabled.
+  const sendDisabledReason =
+    facts.isNative || sendableToken !== null
+      ? undefined
+      : facts.standard !== null && facts.standard !== "mrc20"
+        ? "Only fungible MRC-20 tokens can be sent from the wallet."
+        : facts.decimals === null
+          ? "This token's decimals aren't available yet — can't send safely."
+          : "This token can't be sent right now.";
+
   return (
     <div className="w-page w-token-detail">
       <div className="w-breadcrumb">
@@ -177,16 +203,16 @@ export function TokenDetail({ goto }: Props) {
           </div>
         </div>
         <div className="w-tok-bal__actions">
-          {/* Send / Receive / Convert reuse the existing wallet surfaces.
-              Native LYTH is the only asset the wallet can build a transfer
-              for today; MRC-20 send/convert are not wired, so those buttons
-              are honestly disabled for MRC rows rather than opening a modal
-              that can't complete. */}
+          {/* Send reuses the single SendComposeModal: native LYTH, or a fungible
+              MRC-20 with a known scale (factory-origin, standard mrc20, decimals
+              loaded). MRC-721/1155/4626 and unknown-decimals rows stay honestly
+              disabled with a reason rather than opening a send that can't
+              encode safely. Convert stays unwired. */}
           <button
             className="btn btn--primary"
             onClick={() => setSendOpen(true)}
-            disabled={!walletAddress || !facts.isNative}
-            title={facts.isNative ? undefined : "MRC-20 send is not wired in this build"}
+            disabled={!walletAddress || (!facts.isNative && sendableToken === null)}
+            title={sendDisabledReason}
           >
             Send
           </button>
@@ -266,7 +292,11 @@ export function TokenDetail({ goto }: Props) {
       {tab === "bridges" ? <BridgesTab facts={facts} /> : null}
 
       {sendOpen && walletAddress ? (
-        <SendComposeModal fromBech32m={walletAddress} onClose={() => setSendOpen(false)} />
+        <SendComposeModal
+          fromBech32m={walletAddress}
+          token={sendableToken ?? undefined}
+          onClose={() => setSendOpen(false)}
+        />
       ) : null}
       {receiveOpen && walletAddress ? (
         <ReceiveModal address={walletAddress} onClose={() => setReceiveOpen(false)} />

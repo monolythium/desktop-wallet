@@ -14,16 +14,26 @@ import { formatTokenAmountDisplay } from "./lyth-display";
 
 /** The subset of `lyth_mrcMetadata` a display needs. `decimals === null` means
  *  the source event carried no decimals — the scale is unknown, so the amount
- *  renders as an honest em-dash rather than a wrongly-scaled figure. */
+ *  renders as an honest em-dash rather than a wrongly-scaled figure. `standard`
+ *  ("mrc20" / "mrc721" / …) gates the send flow to fungible MRC-20 — reliable
+ *  even for a factory-origin token whose balance row omits the mrc identity. */
 export interface TokenMeta {
   decimals: number | null;
   symbol: string | null;
   name: string | null;
+  /** Optional — set from a real metadata read; absent on inline/legacy metas
+   *  (treated as "not a sendable MRC-20" by the gate). */
+  standard?: string | null;
 }
 
 /** All-unknown metadata — the honest default when a token has no metadata row
  *  or the read failed (unknown scale → em-dash downstream). */
-export const UNKNOWN_TOKEN_META: TokenMeta = { decimals: null, symbol: null, name: null };
+export const UNKNOWN_TOKEN_META: TokenMeta = {
+  decimals: null,
+  symbol: null,
+  name: null,
+  standard: null,
+};
 
 // Session cache keyed by asset id. One successful fetch per token is enough.
 const cache = new Map<string, TokenMeta>();
@@ -49,6 +59,7 @@ export async function loadTokenMeta(assetId: string): Promise<TokenMeta> {
       decimals: m.decimals ?? null,
       symbol: m.symbol ?? null,
       name: m.name ?? null,
+      standard: m.standard ?? null,
     };
     cache.set(assetId, meta);
     return meta;

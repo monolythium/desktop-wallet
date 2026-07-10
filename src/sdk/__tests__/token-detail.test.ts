@@ -82,9 +82,9 @@ describe("selectTokenDetailFacts — MRC-20", () => {
     expect(facts.notFound).toBe(false);
   });
 
-  it("renders the balance at real decimals and the real symbol when metadata is present", () => {
+  it("renders the balance at real decimals and the real symbol/standard when metadata is present", () => {
     const meta = new Map<string, TokenMeta>([
-      [tokenId, { decimals: 6, symbol: "USDC", name: "USD Coin" }],
+      [tokenId, { decimals: 6, symbol: "USDC", name: "USD Coin", standard: "mrc20" }],
     ]);
     const facts = selectTokenDetailFacts(
       status({
@@ -96,9 +96,31 @@ describe("selectTokenDetailFacts — MRC-20", () => {
     expect(facts.ticker).toBe("USDC");
     expect(facts.name).toBe("USD Coin");
     expect(facts.decimals).toBe(6);
+    expect(facts.standard).toBe("mrc20"); // gates the send flow
     expect(facts.balanceText).toBe("1.5"); // 1500000 / 10^6
     // The raw string is still available, but the page renders balanceText.
     expect(facts.balanceDisplay).toBe("1500000");
+  });
+
+  it("falls back to the balance row's mrc standard when metadata isn't loaded", () => {
+    const facts = selectTokenDetailFacts(
+      status({
+        tokenBalances: {
+          ok: true,
+          value: [
+            {
+              tokenId,
+              balance: "1500000",
+              updatedAtBlock: 42n,
+              mrc: { standard: "mrc721", assetId: tokenId },
+            },
+          ],
+        },
+      }),
+      tokenId,
+    );
+    expect(facts.standard).toBe("mrc721"); // excluded from the send gate
+    expect(facts.decimals).toBeNull(); // no metadata → unknown scale
   });
 
   it("keeps balanceText null when metadata carries no decimals (honest '—')", () => {
