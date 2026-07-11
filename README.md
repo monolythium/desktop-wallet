@@ -148,7 +148,7 @@ The Stele runtime is intentionally separable — if you don't want any marketpla
 - The unlocked seed lives in service-worker-equivalent state in the Tauri host for the duration of one operation, then is zeroed.
 - Every destructive operation routes through the Operations drawer (`preview → auth → executing → done`) — no silent signing.
 - When the Stele feature is enabled, the loopback approval bridge requires a per-session bearer token + the user's explicit click for every destructive op forwarded by `lyth_mcp`.
-- The Tauri webview's CSP is currently `null` (Tauri-app practice for dynamic styles); the equivalent guarantees come from the IPC capability allowlist in `src-tauri/capabilities/`.
+- The Tauri webview runs a tight Content-Security-Policy (`default-src 'self'`, no `'unsafe-inline'`/`'unsafe-eval'`, no `upgrade-insecure-requests`). Its `connect-src` is generated from the SDK's operator set by `scripts/gen-csp.mjs` (`pnpm gen:csp`, run as a `pretauri` hook) and drift-guarded in CI, so it lists exactly the RPC endpoints the app talks to; a looser dev CSP covers Vite HMR only. The IPC capability allowlist in `src-tauri/capabilities/` is the second layer.
 
 The full set of in-scope vulnerability categories is enumerated in [`SECURITY.md`](./SECURITY.md).
 
