@@ -177,6 +177,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # The git tag is a fourth version source: latest.json's version comes from
+      # the tag while the built binary reports the in-file version. If they
+      # disagree the updater would offer a version the installed app never
+      # becomes — a perpetual phantom-update loop. Assert the tag equals the
+      # (already three-way-consistent) in-repo version before publishing anything,
+      # and fail the release loudly on mismatch. Reuses the version-consistency
+      # script (a bare `node` — no install needed).
+      - name: Assert release tag matches the in-repo version
+        env:
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: node scripts/check-versions.mjs "${TAG#v}"
+
       - uses: actions/download-artifact@v4
         with:
           path: ./artifacts

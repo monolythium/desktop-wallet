@@ -51,8 +51,10 @@ node scripts/check-versions.mjs      # must print "All three version sources agr
 > `latest.json` version from the tag (`vX.Y.Z` → `X.Y.Z`), while the built binary
 > reports the in-file version. **Tag exactly what the three files say.** A tag ahead
 > of the files makes the updater offer a version the installed binary never becomes
-> → a perpetual "update available" loop. (A release-path tag-vs-file assertion is a
-> planned hardening; until then this is a manual discipline.)
+> → a perpetual "update available" loop. This is now **enforced**: the release job's
+> first step runs `node scripts/check-versions.mjs "${TAG#v}"` and **fails the
+> release loudly** if the tag doesn't equal the in-repo version — so a mismatched
+> tag never reaches a build or a publish.
 
 Commit the bump on `dev` / `master` per the branch convention, so branch CI runs
 the version check before you tag.
