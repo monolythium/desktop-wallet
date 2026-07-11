@@ -313,4 +313,9 @@ jobs:
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
           files: ./artifacts/*
           draft: true
+          # Auto-populate the body from the commits/PRs since the previous
+          # release (GitHub's own generator) so a published release isn't blank.
+          # It's real history, not a hand-written changelog; the draft-review
+          # gate lets the maintainer curate it before publishing.
+          generate_release_notes: true
           fail_on_unmatched_files: false
