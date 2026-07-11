@@ -293,6 +293,23 @@ jobs:
             exit 1
           fi
 
+      # Publish a SHA256SUMS asset so a user can verify any file they download
+      # from the release page (integrity — independent of the OS code-signing
+      # and the updater's minisign .sig). Checksum every collected file except
+      # the sums file itself; quote the name (artifacts contain spaces) and sort
+      # for a reproducible list. Runs after latest.json so the manifest is
+      # covered too. `sha256sum -c SHA256SUMS` verifies it.
+      - name: Generate SHA256SUMS
+        run: |
+          set -euo pipefail
+          cd artifacts
+          : > SHA256SUMS
+          find . -maxdepth 1 -type f ! -name 'SHA256SUMS' -printf '%P\n' | sort | while IFS= read -r f; do
+            sha256sum "$f" >> SHA256SUMS
+          done
+          echo "=== SHA256SUMS ==="
+          cat SHA256SUMS
+
       # The release is created as a DRAFT on purpose. The maintainer reviews the
       # collected artifacts + the generated latest.json, then manually PUBLISHES
       # the draft as the latest (non-draft, non-prerelease) release. That manual
