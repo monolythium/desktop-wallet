@@ -11,18 +11,24 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { getChainInfo } from "@monolythium/core-sdk";
 import {
+  activeOperatorTrust,
   resetProviderForTest,
   setProviderForTest,
   type MonolythiumClient,
 } from "../client";
+import { NETWORK_SLUG } from "../chain-trust";
 import { HEALTH_TICK_MS, STALL_THRESHOLD_MS } from "../chain-health";
 import { useChainHealth, type ChainHealthView } from "../useChainHealth";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
+const PIN = getChainInfo(NETWORK_SLUG);
+
 type Stats = {
   chainId: number;
+  genesisHash: string | null;
   latestHeight: number;
   latestBlockHash: string | null;
   latestTimestamp: number | null;
@@ -33,8 +39,15 @@ type Stats = {
 let statsImpl: () => Promise<Stats>;
 let reads = 0;
 
+// A trusted head: the pinned chain id + genesis, with a varying head hash.
 function head(height: number, hash: string | null): Stats {
-  return { chainId: 69420, latestHeight: height, latestBlockHash: hash, latestTimestamp: null };
+  return {
+    chainId: PIN.chain_id,
+    genesisHash: PIN.genesis_hash,
+    latestHeight: height,
+    latestBlockHash: hash,
+    latestTimestamp: null,
+  };
 }
 
 function installFakeClient() {
@@ -145,6 +158,26 @@ describe("useChainHealth heartbeat", () => {
       await advance(HEALTH_TICK_MS);
       expect(view!.health).toEqual({ kind: "live", height: h });
     }
+  });
+
+  it("goes UNTRUSTED when the active operator answers a different chain id", async () => {
+    statsImpl = async () => ({ ...head(100, "0xaa"), chainId: 1 });
+    await mount();
+    expect(view!.health.kind).toBe("untrusted");
+    expect(activeOperatorTrust()).toBe("untrusted"); // seam marked fail-closed
+  });
+
+  it("goes ALL-UNTRUSTED (regenesis) on the right chain with a mismatched genesis", async () => {
+    statsImpl = async () => ({ ...head(100, "0xaa"), genesisHash: "0xdeadbeef" });
+    await mount();
+    expect(view!.health.kind).toBe("regenesis");
+    expect(activeOperatorTrust()).toBe("regenesis");
+  });
+
+  it("marks the seam trusted on a passing check", async () => {
+    await mount();
+    expect(view!.health.kind).toBe("live");
+    expect(activeOperatorTrust()).toBe(null);
   });
 
   it("goes OFFLINE when the read fails, then recovers to LIVE", async () => {

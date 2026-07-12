@@ -31,7 +31,7 @@ import {
   submitTransaction,
 } from "@monolythium/core-sdk/crypto";
 import type { NativeEvmTxFields } from "@monolythium/core-sdk/crypto";
-import { getProvider } from "./client";
+import { getTrustedProvider } from "./client";
 import { rpcClientOptions } from "./http";
 import { getNativeTransactionCount } from "./native-rpc";
 import { nextSendNonce, recordSubmittedNonce } from "./pending-nonce";
@@ -81,7 +81,9 @@ export async function submitNativeTx(
   const backend = MlDsa65Backend.fromSeed(args.seed);
   // A fresh transport bound to the shared provider endpoint, matching the
   // prior per-seam behaviour (the SDK client is request-scoped, not pooled).
-  const client = new RpcClient(getProvider().rpcClient.endpoint, rpcClientOptions());
+  // Fail-closed: `getTrustedProvider` throws when the active operator is
+  // untrusted, so the wallet never signs against an unverified chain.
+  const client = new RpcClient(getTrustedProvider().rpcClient.endpoint, rpcClientOptions());
   const fromHex = backend.getAddress();
 
   const feeOptions =

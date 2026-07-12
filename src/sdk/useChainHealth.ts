@@ -2,12 +2,12 @@
 //
 // Replaces the one-shot connection read for the status surface with a fixed 5 s
 // head poll (status specification §B/§D — the precondition for stall detection).
-// Each tick reads the chain head through the shared SDK client seam
-// (`loadChainHead` → `lyth_chainStats`; no second RPC path) and folds the
-// outcome through the pure decision core (`reduceHealth`), yielding one of
-// loading / live / stalled / offline. The trust/quarantine kinds are
-// unreachable here — a single failed read is `unreachable` → offline; their
-// real reads (fleet + genesis) are wired in a later pass.
+// Each tick verifies the active operator's chain id + genesis against the pin
+// and reads its head through the shared SDK client seam (no second RPC path),
+// folding the outcome through the pure decision core (`reduceHealth`) to yield
+// live / stalled (trusted head) or offline / untrusted / regenesis / quarantined
+// (the degraded cause from F1's resolver). Each tick marks the seam's trust
+// state so an untrusted operator serves no reads and signs nothing (fail-closed).
 //
 // Lifecycle follows the desktop's self-rescheduling-setTimeout convention (see
 // PendingTxReconciler): one timer, cleared on unmount; the read is skipped while
@@ -16,7 +16,13 @@
 // active endpoint changes, so a stall baseline is never carried across nodes.
 
 import { useEffect, useState } from "react";
-import { loadChainHead, subscribeEndpoint } from "./client";
+import {
+  currentEndpoint,
+  markActiveOperatorTrusted,
+  markActiveOperatorUntrusted,
+  subscribeEndpoint,
+} from "./client";
+import { verifyActiveOperatorHead } from "./chain-trust";
 import {
   HEALTH_TICK_MS,
   INITIAL_HEALTH_STATE,
@@ -76,16 +82,19 @@ export function useChainHealth(enabled: boolean): ChainHealthView {
       // Visibility gate: skip the RPC read while hidden, but keep the heartbeat
       // scheduled so it resumes cleanly on the next visible tick.
       if (document.visibilityState !== "hidden") {
-        const read = await loadChainHead();
+        const res = await verifyActiveOperatorHead();
         if (cancelled) return;
-        const obs: Observation = read.ok
-          ? { ok: true, height: read.height!, headId: read.headId!, chainId: read.chainId! }
-          : { ok: false, cause: "unreachable", reason: read.error?.message };
+        // Fail-closed: mark the seam so an untrusted operator serves no reads.
+        if (res.ok) markActiveOperatorTrusted();
+        else markActiveOperatorUntrusted(res.cause);
+        const obs: Observation = res.ok
+          ? { ok: true, height: res.height, headId: res.headId, chainId: res.chainId }
+          : { ok: false, cause: res.cause, reason: res.reason };
         state = reduceHealth(state, obs, Date.now());
         setView((prev) => ({
           health: state.health,
-          chainId: read.ok ? read.chainId! : prev.chainId,
-          endpoint: read.endpoint,
+          chainId: res.ok ? res.chainId : prev.chainId,
+          endpoint: res.ok ? res.url : currentEndpoint(),
         }));
       }
       schedule(HEALTH_TICK_MS);

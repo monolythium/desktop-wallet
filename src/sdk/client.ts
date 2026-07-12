@@ -9,6 +9,7 @@ import { RpcClient, SdkError, formatLyth, getRpcEndpoints } from "@monolythium/c
 import type { RpcClientOptions } from "@monolythium/core-sdk";
 import { rpcClientOptions } from "./http";
 import { readPersistedEndpoint, writePersistedEndpoint } from "./peers";
+import type { DegradedCause } from "./chain-health";
 
 export const MONOLYTHIUM_TESTNET_RPC_GATEWAY = "https://rpc.monolythium.com";
 
@@ -65,6 +66,29 @@ let _client: MonolythiumClient | null = null;
 let _clientOptions: RpcClientOptions = {};
 const _endpointSubscribers = new Set<(endpoint: string) => void>();
 
+// Trust gate for the active operator. `null` = trusted (or not yet checked — the
+// pinned genesis is compile-time correct, so the seam is optimistic until the
+// first health tick, which runs at mount). A non-null cause means the health
+// poll proved the active operator is NOT on the pinned chain/genesis (or is
+// quarantined/unreachable): reads through `getTrustedProvider` then fail-closed.
+let _activeTrust: DegradedCause | null = null;
+
+/** Mark the active operator trusted (a genesis + chain-id check passed). */
+export function markActiveOperatorTrusted(): void {
+  _activeTrust = null;
+}
+
+/** Mark the active operator untrusted with the resolved degraded cause; reads
+ *  through {@link getTrustedProvider} will refuse until trust is re-established. */
+export function markActiveOperatorUntrusted(cause: DegradedCause): void {
+  _activeTrust = cause;
+}
+
+/** The active operator's trust state: `null` when trusted, else the cause. */
+export function activeOperatorTrust(): DegradedCause | null {
+  return _activeTrust;
+}
+
 export function getProvider(options: RpcClientOptions = {}): MonolythiumClient {
   if (_client === null) {
     _clientOptions = options;
@@ -72,6 +96,21 @@ export function getProvider(options: RpcClientOptions = {}): MonolythiumClient {
     _client = { rpcClient, endpoint: rpcClient.endpoint };
   }
   return _client;
+}
+
+/**
+ * The provider, but fail-closed: throws when the active operator has been marked
+ * untrusted (wrong chain / stale genesis / quarantined / unreachable), so a
+ * trust failure is a real read failure — an untrusted operator serves no reads
+ * and signs nothing. Endpoint-management (`currentEndpoint`/`setEndpoint`/peer
+ * probing) stays on the ungated `getProvider` so the UI can still show + switch
+ * operators while degraded.
+ */
+export function getTrustedProvider(options: RpcClientOptions = {}): MonolythiumClient {
+  if (_activeTrust !== null) {
+    throw SdkError.endpoint(`refusing to use an untrusted operator (chain ${_activeTrust})`);
+  }
+  return getProvider(options);
 }
 
 /** The endpoint the memoized client is currently bound to (initializing the
@@ -107,6 +146,7 @@ export function resetProviderForTest(): void {
   _client = null;
   _clientOptions = {};
   _endpointSubscribers.clear();
+  _activeTrust = null;
 }
 
 export function setProviderForTest(client: MonolythiumClient): void {
@@ -123,7 +163,7 @@ export type ChainSnapshot = {
 };
 
 export async function loadChainSnapshot(address: string): Promise<ChainSnapshot> {
-  const { rpcClient, endpoint } = getProvider();
+  const { rpcClient, endpoint } = getTrustedProvider();
   try {
     const [chainId, round, profile] = await Promise.all([
       rpcClient.ethChainId(),
@@ -155,38 +195,6 @@ export async function loadChainSnapshot(address: string): Promise<ChainSnapshot>
       balanceLyth: "0",
       error: unwrapError(cause),
     };
-  }
-}
-
-/** One head-status read for the chain-health heartbeat: a single
- *  `lyth_chainStats` against the active endpoint (the same client seam every
- *  read uses — no second RPC path). `headId` is the identity the stall detector
- *  compares across ticks: the head block hash when the node exposes it, else the
- *  height as a string — fail-closed, since `latestBlockHash` is nullable. A
- *  failed read yields the shared typed-error shape. Address-independent (the
- *  head is chain-wide), unlike {@link loadChainSnapshot}. */
-export type ChainHeadRead = {
-  endpoint: string;
-  ok: boolean;
-  chainId?: number;
-  height?: number;
-  headId?: string;
-  error?: { kind: string; message: string };
-};
-
-export async function loadChainHead(): Promise<ChainHeadRead> {
-  const { rpcClient, endpoint } = getProvider();
-  try {
-    const stats = await rpcClient.lythChainStats();
-    return {
-      endpoint,
-      ok: true,
-      chainId: stats.chainId,
-      height: stats.latestHeight,
-      headId: stats.latestBlockHash ?? String(stats.latestHeight),
-    };
-  } catch (cause) {
-    return { endpoint, ok: false, error: unwrapError(cause) };
   }
 }
 
