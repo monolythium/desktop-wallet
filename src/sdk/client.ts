@@ -158,6 +158,38 @@ export async function loadChainSnapshot(address: string): Promise<ChainSnapshot>
   }
 }
 
+/** One head-status read for the chain-health heartbeat: a single
+ *  `lyth_chainStats` against the active endpoint (the same client seam every
+ *  read uses — no second RPC path). `headId` is the identity the stall detector
+ *  compares across ticks: the head block hash when the node exposes it, else the
+ *  height as a string — fail-closed, since `latestBlockHash` is nullable. A
+ *  failed read yields the shared typed-error shape. Address-independent (the
+ *  head is chain-wide), unlike {@link loadChainSnapshot}. */
+export type ChainHeadRead = {
+  endpoint: string;
+  ok: boolean;
+  chainId?: number;
+  height?: number;
+  headId?: string;
+  error?: { kind: string; message: string };
+};
+
+export async function loadChainHead(): Promise<ChainHeadRead> {
+  const { rpcClient, endpoint } = getProvider();
+  try {
+    const stats = await rpcClient.lythChainStats();
+    return {
+      endpoint,
+      ok: true,
+      chainId: stats.chainId,
+      height: stats.latestHeight,
+      headId: stats.latestBlockHash ?? String(stats.latestHeight),
+    };
+  } catch (cause) {
+    return { endpoint, ok: false, error: unwrapError(cause) };
+  }
+}
+
 function unwrapError(cause: unknown): { kind: string; message: string } {
   if (cause instanceof SdkError) {
     return { kind: cause.kind, message: cause.message };

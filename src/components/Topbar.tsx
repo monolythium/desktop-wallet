@@ -15,7 +15,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useActiveWallet } from "../sdk/active-wallet";
-import { useChainSnapshot } from "../sdk/useChainSnapshot";
+import { useChainHealth } from "../sdk/useChainHealth";
+import type { ChainHealth } from "../sdk/chain-health";
 import { getUnread, subscribeNotifications } from "../sdk/notifications-store";
 import {
   currentEndpoint,
@@ -66,26 +67,51 @@ const TITLES: Record<Route, string> = {
   about: "About",
 };
 
+// Interim mapping of the chain-health kind onto the topbar's existing
+// 3-severity dot. The heartbeat produces only loading / live / stalled /
+// offline; the trust/quarantine/reconnecting kinds are wired in later passes
+// and cannot occur here (the full 8-state banner + copy is a later pass). The
+// fallback stays red — it never claims a healthy state for an unobserved kind.
+function chainHealthDotClass(health: ChainHealth): string {
+  switch (health.kind) {
+    case "live":
+      return "";
+    case "loading":
+    case "stalled":
+      return "is-stale";
+    default:
+      return "is-down";
+  }
+}
+
+function chainHealthLabel(health: ChainHealth, chainId: number | null): string {
+  switch (health.kind) {
+    case "loading":
+      return "Connecting…";
+    case "live":
+      return `Synced · chain ${chainId ?? "?"} · #${health.height}`;
+    case "stalled":
+      return `Stalled · #${health.height}`;
+    case "offline":
+      return "Offline";
+    default:
+      return "Unavailable";
+  }
+}
+
 export function Topbar({ route, setRoute }: Props) {
   const wallet = useActiveWallet();
-  const chain = useChainSnapshot(wallet.status === "ready" ? wallet.address : "");
-  const dotClass =
-    wallet.status !== "ready" ? "is-stale"
-    : chain.status === "loading" ? "is-stale"
-    : chain.status === "error" ? "is-down"
-    : "";
-  const syncLabel =
-    wallet.status !== "ready" ? "No active address"
-    : chain.status === "loading" ? "Connecting…"
-    : chain.status === "error" ? `Offline · ${chain.snapshot?.error?.kind ?? "unknown"}`
-    : `Synced · chain ${chain.snapshot?.chainId} · #${chain.snapshot?.blockHeight ?? "?"}`;
+  const ready = wallet.status === "ready";
+  const chain = useChainHealth(ready);
+  const dotClass = !ready ? "is-stale" : chainHealthDotClass(chain.health);
+  const syncLabel = !ready ? "No active address" : chainHealthLabel(chain.health, chain.chainId);
 
   return (
     <header className="w-top">
       <div className="w-top__title">{TITLES[route]}</div>
       <div className="w-top__spacer" />
       <NotificationsBell active={route === "notifications"} onOpen={() => setRoute("notifications")} />
-      <PeerChip dotClass={dotClass} syncLabel={syncLabel} endpoint={chain.snapshot?.endpoint ?? null} />
+      <PeerChip dotClass={dotClass} syncLabel={syncLabel} endpoint={chain.endpoint} />
       <div className="w-top__user">
           <div className="w-top__user__avatar" />
         <div>
