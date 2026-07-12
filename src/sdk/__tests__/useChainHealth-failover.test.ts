@@ -14,13 +14,19 @@ vi.mock("../chain-trust", () => ({
   resolveTrustedHead: () => resolveTrustedHeadMock(),
 }));
 
+// The warm-start store is mocked so the hook never touches the real Tauri store.
+vi.mock("../chain-health-store", () => ({
+  loadWarmStartHead: vi.fn(async () => null),
+  saveWarmStartHead: vi.fn(async () => {}),
+}));
+
 import {
   currentEndpoint,
   resetProviderForTest,
   setProviderForTest,
   type MonolythiumClient,
 } from "../client";
-import { useChainHealth, type ChainHealthView } from "../useChainHealth";
+import { useChainHealth, __resetChainHealthModuleForTests, type ChainHealthView } from "../useChainHealth";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -29,7 +35,7 @@ let root: Root;
 let view: ChainHealthView | null;
 
 function Probe() {
-  view = useChainHealth(true);
+  view = useChainHealth("0xwallet");
   return null;
 }
 
@@ -49,6 +55,7 @@ async function mount() {
 }
 
 beforeEach(() => {
+  __resetChainHealthModuleForTests();
   setProviderForTest({ rpcClient: {} as MonolythiumClient["rpcClient"], endpoint: "http://active" });
   container = document.createElement("div");
   document.body.appendChild(container);

@@ -68,15 +68,15 @@ const TITLES: Record<Route, string> = {
 };
 
 // Interim mapping of the chain-health kind onto the topbar's existing
-// 3-severity dot. The heartbeat produces only loading / live / stalled /
-// offline; the trust/quarantine/reconnecting kinds are wired in later passes
-// and cannot occur here (the full 8-state banner + copy is a later pass). The
-// fallback stays red — it never claims a healthy state for an unobserved kind.
+// 3-severity dot. The trust/quarantine kinds still fall to red here; the full
+// 8-state chip + degraded banner + copy is a later pass. The fallback stays red
+// — it never claims a healthy state for an unobserved kind.
 function chainHealthDotClass(health: ChainHealth): string {
   switch (health.kind) {
     case "live":
       return "";
     case "loading":
+    case "reconnecting":
     case "stalled":
       return "is-stale";
     default:
@@ -88,6 +88,8 @@ function chainHealthLabel(health: ChainHealth, chainId: number | null): string {
   switch (health.kind) {
     case "loading":
       return "Connecting…";
+    case "reconnecting":
+      return `LAST SEEN #${health.height} · RECONNECTING…`;
     case "live":
       return `Synced · chain ${chainId ?? "?"} · #${health.height}`;
     case "stalled":
@@ -101,8 +103,9 @@ function chainHealthLabel(health: ChainHealth, chainId: number | null): string {
 
 export function Topbar({ route, setRoute }: Props) {
   const wallet = useActiveWallet();
-  const ready = wallet.status === "ready";
-  const chain = useChainHealth(ready);
+  const address = wallet.status === "ready" ? wallet.address : null;
+  const ready = address !== null;
+  const chain = useChainHealth(address);
   const dotClass = !ready ? "is-stale" : chainHealthDotClass(chain.health);
   const syncLabel = !ready ? "No active address" : chainHealthLabel(chain.health, chain.chainId);
 

@@ -12,12 +12,18 @@
 // the operator the wallet actually reads from. Each tick marks the seam's trust
 // state so an untrusted operator serves no reads and signs nothing (fail-closed).
 //
+// Warm-start (§I): the last-seen head is persisted per (address, chain) to the
+// durable store on every advance. On a true reopen the machine restores it to
+// show RECONNECTING (never LIVE) while the first poll is in flight, and seeds
+// the stall math so an already-stalled chain verdicts STALLED immediately. An
+// in-session remount (lock→unlock) instead shows the prior kind from a module
+// snapshot — no CONNECTING/RECONNECTING flash.
+//
 // Lifecycle follows the desktop's self-rescheduling-setTimeout convention (see
 // PendingTxReconciler): one timer, cleared on unmount; the read is skipped while
 // the window is hidden and refreshed immediately on becoming visible (status
 // specification §D.2 visibility gate); the machine restarts fresh when the
-// active endpoint changes (a failover), so a stall baseline is never carried
-// across nodes.
+// active endpoint changes (a failover) or the address changes (a new scope).
 
 import { useEffect, useState } from "react";
 import {
@@ -28,16 +34,19 @@ import {
   subscribeEndpoint,
 } from "./client";
 import { resolveTrustedHead } from "./chain-trust";
+import { loadWarmStartHead, saveWarmStartHead } from "./chain-health-store";
+import { TESTNET_CHAIN_ID_HEX } from "./peers";
 import {
   HEALTH_TICK_MS,
   INITIAL_HEALTH_STATE,
+  reconnectingSeed,
   reduceHealth,
   type ChainHealth,
   type Observation,
 } from "./chain-health";
 
 export interface ChainHealthView {
-  /** The current status kind (loading / live / stalled / offline this pass). */
+  /** The current status kind. */
   health: ChainHealth;
   /** Last observed chain id, for the status label; null until the first ok tick. */
   chainId: number | null;
@@ -47,14 +56,29 @@ export interface ChainHealthView {
 
 const IDLE_VIEW: ChainHealthView = { health: { kind: "loading" }, chainId: null, endpoint: null };
 
+// Module-scope snapshot of the last health kind (§I). Survives an in-session
+// remount (lock→unlock) so the chip shows the prior kind instantly; re-inits to
+// null on a true reopen (a fresh module load), where the durable warm-start
+// cache instead drives RECONNECTING.
+let lastKnownHealth: ChainHealth | null = null;
+
+/** Test-only — clear the module snapshot so each test opens cold. */
+export function __resetChainHealthModuleForTests(): void {
+  lastKnownHealth = null;
+}
+
 /**
- * Poll the chain head every {@link HEALTH_TICK_MS} while `enabled`, driving the
- * pure health machine. When disabled (e.g. no active wallet) the poll idles and
- * the view resets to CONNECTING…. The head read is chain-wide, so the hook takes
- * no address.
+ * Poll the chain head every {@link HEALTH_TICK_MS} while `address` is set,
+ * driving the pure health machine. Passing `null`/empty (no active wallet) idles
+ * the poll and resets the view to CONNECTING…. The head read is chain-wide; the
+ * address scopes only the warm-start cache (per address + chain), so one vault's
+ * cached head can never surface under another.
  */
-export function useChainHealth(enabled: boolean): ChainHealthView {
-  const [view, setView] = useState<ChainHealthView>(IDLE_VIEW);
+export function useChainHealth(address: string | null): ChainHealthView {
+  const scope = address && address.length > 0 ? address.toLowerCase() : null;
+  const [view, setView] = useState<ChainHealthView>(() =>
+    lastKnownHealth ? { health: lastKnownHealth, chainId: null, endpoint: null } : IDLE_VIEW,
+  );
   // Bumped on every endpoint switch so the poll effect re-runs against the new
   // node with a fresh stall baseline.
   const [endpointBump, setEndpointBump] = useState(0);
@@ -62,7 +86,7 @@ export function useChainHealth(enabled: boolean): ChainHealthView {
   useEffect(() => subscribeEndpoint(() => setEndpointBump((n) => n + 1)), []);
 
   useEffect(() => {
-    if (!enabled) {
+    if (scope === null) {
       setView(IDLE_VIEW);
       return;
     }
@@ -70,6 +94,12 @@ export function useChainHealth(enabled: boolean): ChainHealthView {
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
     let state = INITIAL_HEALTH_STATE;
+    let lastChainId: number | null = null;
+
+    const publish = (v: ChainHealthView) => {
+      lastKnownHealth = v.health; // module snapshot for the next in-session remount
+      setView(v);
+    };
 
     const clear = () => {
       if (timer !== null) {
@@ -93,6 +123,7 @@ export function useChainHealth(enabled: boolean): ChainHealthView {
           // Fail over the read path so health tracks the operator we read from.
           if (res.url !== currentEndpoint()) setEndpoint(res.url);
           markActiveOperatorTrusted();
+          lastChainId = res.chainId;
         } else {
           // Fail-closed: an untrusted fleet serves no reads.
           markActiveOperatorUntrusted(res.cause);
@@ -100,14 +131,47 @@ export function useChainHealth(enabled: boolean): ChainHealthView {
         const obs: Observation = res.ok
           ? { ok: true, height: res.height, headId: res.headId, chainId: res.chainId }
           : { ok: false, cause: res.cause, reason: res.reason };
+        const prevHeadId = state.lastHeadId;
         state = reduceHealth(state, obs, Date.now());
-        setView((prev) => ({
+        // Persist the last-seen head on a genuine advance, so a reopen can
+        // RECONNECT and verdict a persisted stall (§I). Best-effort, fire-and-forget.
+        if (
+          state.health.kind === "live" &&
+          state.lastHeadId !== null &&
+          state.lastHeadId !== prevHeadId &&
+          state.lastAdvancedAtMs !== null
+        ) {
+          void saveWarmStartHead(scope, TESTNET_CHAIN_ID_HEX, {
+            height: state.health.height,
+            headId: state.lastHeadId,
+            advancedAtMs: state.lastAdvancedAtMs,
+          });
+        }
+        publish({
           health: state.health,
-          chainId: res.ok ? res.chainId : prev.chainId,
+          chainId: lastChainId,
           endpoint: res.ok ? res.url : currentEndpoint(),
-        }));
+        });
       }
       schedule(HEALTH_TICK_MS);
+    };
+
+    const boot = async () => {
+      // §I step 2: seed RECONNECTING from the durable cache before the first
+      // poll. Replaces ONLY a still-loading view (an in-session remount keeps its
+      // prior kind); a cached head is NEVER shown as LIVE.
+      const cached = await loadWarmStartHead(scope, TESTNET_CHAIN_ID_HEX);
+      if (cancelled) return;
+      if (cached) {
+        state = reconnectingSeed(cached);
+        setView((prev) =>
+          prev.health.kind === "loading"
+            ? { health: state.health, chainId: prev.chainId, endpoint: currentEndpoint() }
+            : prev,
+        );
+      }
+      // §I step 3: the first poll resolves the real state.
+      void tick();
     };
 
     const onVisible = () => {
@@ -118,14 +182,14 @@ export function useChainHealth(enabled: boolean): ChainHealthView {
     };
     document.addEventListener("visibilitychange", onVisible);
 
-    void tick();
+    void boot();
 
     return () => {
       cancelled = true;
       clear();
       document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [enabled, endpointBump]);
+  }, [scope, endpointBump]);
 
   return view;
 }

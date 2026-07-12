@@ -166,6 +166,27 @@ export const INITIAL_HEALTH_STATE: HealthState = {
 };
 
 /**
+ * Seed the machine state from a persisted warm-start head (status specification
+ * §I steps 2–3): show RECONNECTING now, and carry the head identity + the
+ * last-advanced time so the first ok tick verdicts STALLED immediately when the
+ * persisted head was already past the threshold — via {@link reduceHealth}'s
+ * existing same-head-past-threshold branch, not a separate stall path. A cached
+ * head is NEVER surfaced as LIVE (it proves we once saw the chain, not that we
+ * are connected now). Pure.
+ */
+export function reconnectingSeed(head: {
+  height: number;
+  headId: string;
+  advancedAtMs: number;
+}): HealthState {
+  return {
+    health: { kind: "reconnecting", height: head.height },
+    lastHeadId: head.headId,
+    lastAdvancedAtMs: head.advancedAtMs,
+  };
+}
+
+/**
  * Fold one observation into the next state (status specification §D.2 + §E).
  *
  * - Failed tick → map the cause to a kind (§D.3); the stall timer is left

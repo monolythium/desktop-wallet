@@ -16,6 +16,7 @@ import {
   chainHealthForFailedPoll,
   chainHealthStallVerdict,
   classifyNoOperatorReason,
+  reconnectingSeed,
   reduceHealth,
   type DegradedCause,
   type FleetTrustSignals,
@@ -188,6 +189,28 @@ describe("success/degraded mutual exclusion per tick (§A)", () => {
       const kind = reduceHealth(base, failObs(cause), 1).health.kind;
       expect(["offline", "untrusted", "regenesis", "quarantined"]).toContain(kind);
     }
+  });
+});
+
+describe("reconnectingSeed — warm-start seed (§I)", () => {
+  it("seeds RECONNECTING (never live) carrying the head identity + advance time", () => {
+    const seeded = reconnectingSeed({ height: 42, headId: "0xseed", advancedAtMs: 1_000 });
+    expect(seeded.health).toEqual({ kind: "reconnecting", height: 42 });
+    expect(seeded.lastHeadId).toBe("0xseed");
+    expect(seeded.lastAdvancedAtMs).toBe(1_000);
+  });
+
+  it("a seeded machine verdicts STALLED immediately when the persisted head is past the threshold", () => {
+    const seeded = reconnectingSeed({ height: 42, headId: "0xseed", advancedAtMs: 0 });
+    // First ok tick: same head as persisted, now past the threshold → STALLED.
+    const next = reduceHealth(seeded, { ok: true, height: 42, headId: "0xseed", chainId: 69420 }, STALL_THRESHOLD_MS);
+    expect(next.health).toEqual({ kind: "stalled", height: 42 });
+  });
+
+  it("a seeded machine goes LIVE when the head advanced while closed", () => {
+    const seeded = reconnectingSeed({ height: 42, headId: "0xseed", advancedAtMs: 0 });
+    const next = reduceHealth(seeded, { ok: true, height: 43, headId: "0xnew", chainId: 69420 }, 5_000);
+    expect(next.health).toEqual({ kind: "live", height: 43 });
   });
 });
 
