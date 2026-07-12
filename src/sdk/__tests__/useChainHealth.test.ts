@@ -257,4 +257,21 @@ describe("useChainHealth warm-start (§I)", () => {
       advancedAtMs: 0,
     });
   });
+
+  it("an in-session remount shows the prior kind instantly — no CONNECTING flash (§N)", async () => {
+    await mount(); // → live, updates the module snapshot
+    expect(view!.health.kind).toBe("live");
+
+    // Unmount, then remount a FRESH instance WITHOUT resetting the module snapshot.
+    act(() => root.unmount());
+    mounted = false; // afterEach must not double-unmount the first root
+    const container2 = document.createElement("div");
+    document.body.appendChild(container2);
+    const root2 = createRoot(container2);
+    act(() => root2.render(createElement(Probe, { address: WALLET })));
+    // Instant initial render is the prior kind, not "loading".
+    expect(view!.health.kind).toBe("live");
+    act(() => root2.unmount());
+    container2.remove();
+  });
 });
