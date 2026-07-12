@@ -14,9 +14,11 @@ import { useEffect, useState } from "react";
 import { ApprovalOverlay } from "./components/ApprovalOverlay";
 import { Onboarding } from "./components/Onboarding";
 import { PendingTxReconciler } from "./components/PendingTxReconciler";
+import { ChainHealthBanner } from "./components/ChainHealthBanner";
 import { Sidebar } from "./components/Sidebar";
 import { Topbar } from "./components/Topbar";
 import { UpdateBanner } from "./components/UpdateBanner";
+import { ChainHealthProvider } from "./sdk/ChainHealthProvider";
 import { checkForUpdate, type UpdateAvailable } from "./sdk/updater";
 import { About } from "./pages/About";
 import { Activity } from "./pages/Activity";
@@ -242,6 +244,7 @@ export function App() {
     <LockProvider>
       <LockBoundary locked={<UnlockGate />}>
       <OperationsProvider>
+      <ChainHealthProvider>
       <div className="w-app">
         <Sidebar
           route={route}
@@ -252,6 +255,7 @@ export function App() {
         />
         <Topbar route={route} setRoute={setRoute} />
         <main className="w-main">
+          <ChainHealthBanner onReview={() => setRoute("about")} />
           {route === "home" ? <Home goto={setRoute} /> : null}
           {route === "activity" ? <Activity /> : null}
           {route === "wallets" ? <Wallets /> : null}
@@ -298,6 +302,7 @@ export function App() {
           />
         ) : null}
       </div>
+      </ChainHealthProvider>
       </OperationsProvider>
       </LockBoundary>
     </LockProvider>

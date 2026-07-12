@@ -15,8 +15,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useActiveWallet } from "../sdk/active-wallet";
-import { useChainHealth } from "../sdk/useChainHealth";
-import type { ChainHealth } from "../sdk/chain-health";
+import { useChainHealthView } from "../sdk/ChainHealthProvider";
+import { chainHealthPresentation } from "../sdk/chain-health-presentation";
 import { getUnread, subscribeNotifications } from "../sdk/notifications-store";
 import {
   currentEndpoint,
@@ -67,47 +67,13 @@ const TITLES: Record<Route, string> = {
   about: "About",
 };
 
-// Interim mapping of the chain-health kind onto the topbar's existing
-// 3-severity dot. The trust/quarantine kinds still fall to red here; the full
-// 8-state chip + degraded banner + copy is a later pass. The fallback stays red
-// — it never claims a healthy state for an unobserved kind.
-function chainHealthDotClass(health: ChainHealth): string {
-  switch (health.kind) {
-    case "live":
-      return "";
-    case "loading":
-    case "reconnecting":
-    case "stalled":
-      return "is-stale";
-    default:
-      return "is-down";
-  }
-}
-
-function chainHealthLabel(health: ChainHealth, chainId: number | null): string {
-  switch (health.kind) {
-    case "loading":
-      return "Connecting…";
-    case "reconnecting":
-      return `LAST SEEN #${health.height} · RECONNECTING…`;
-    case "live":
-      return `Synced · chain ${chainId ?? "?"} · #${health.height}`;
-    case "stalled":
-      return `Stalled · #${health.height}`;
-    case "offline":
-      return "Offline";
-    default:
-      return "Unavailable";
-  }
-}
-
 export function Topbar({ route, setRoute }: Props) {
   const wallet = useActiveWallet();
-  const address = wallet.status === "ready" ? wallet.address : null;
-  const ready = address !== null;
-  const chain = useChainHealth(address);
-  const dotClass = !ready ? "is-stale" : chainHealthDotClass(chain.health);
-  const syncLabel = !ready ? "No active address" : chainHealthLabel(chain.health, chain.chainId);
+  const ready = wallet.status === "ready";
+  const chain = useChainHealthView();
+  const pres = chainHealthPresentation(chain.health);
+  const dotClass = !ready ? "is-stale" : pres.dotClass;
+  const syncLabel = !ready ? "No active address" : pres.label;
 
   return (
     <header className="w-top">

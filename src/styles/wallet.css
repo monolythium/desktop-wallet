@@ -289,6 +289,8 @@ html[data-sidebar="collapsed"]:not([data-layout="topbar"]) .w-nav__item {
 }
 .w-top__sync .dot.is-stale { background: var(--warn); box-shadow: 0 0 8px var(--warn); }
 .w-top__sync .dot.is-down  { background: var(--err);  box-shadow: 0 0 8px var(--err); }
+/* CONNECTING — muted, and the only dot with NO glow (status specification §M). */
+.w-top__sync .dot.is-muted { background: var(--fg-400); box-shadow: none; }
 .w-top__sync__caret { display: inline-flex; opacity: 0.65; margin-left: 1px; }
 
 /* ============ Peer popover (sync-peer switcher) ============ */
@@ -959,6 +961,23 @@ html[data-sidebar="collapsed"]:not([data-layout="topbar"]) .w-nav__item {
 .w-banner.warn  { border-color: rgba(244, 201, 122, 0.35); color: var(--warn); background: rgba(244, 201, 122, 0.08); }
 .w-banner.error { border-color: rgba(255, 138, 154, 0.35); color: var(--alert); background: rgba(255, 138, 154, 0.08); }
 .w-banner.ok    { border-color: rgba(126, 227, 193, 0.35); color: var(--ok); background: rgba(126, 227, 193, 0.08); }
+
+/* ============ Chain-health degraded banner ============ */
+.w-chain-banner {
+  position: sticky; top: 0; z-index: 5;
+  display: flex; align-items: center; gap: 12px;
+  margin-bottom: 14px;
+}
+.w-chain-banner__text { flex: 1; min-width: 0; }
+.w-chain-banner__title { font-weight: 600; font-size: 12.5px; letter-spacing: 0.02em; }
+.w-chain-banner__body { margin-top: 3px; font-size: 11.5px; color: var(--fg-300); line-height: 1.5; }
+.w-chain-banner__action {
+  flex-shrink: 0; padding: 6px 10px; border-radius: 8px;
+  border: 1px solid var(--w-line); background: var(--w-bg); color: var(--fg-200);
+  font-size: 11.5px; font-family: inherit; cursor: pointer;
+  transition: border-color 160ms var(--e-out);
+}
+.w-chain-banner__action:hover { border-color: var(--fg-600); }
 
 /* ============ Settings rows ============ */
 .w-setting-row {
