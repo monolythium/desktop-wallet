@@ -15,6 +15,7 @@ import {
   STALL_WORST_CASE_TICKS,
   chainHealthForFailedPoll,
   chainHealthStallVerdict,
+  chainKindNotLive,
   classifyNoOperatorReason,
   reconnectingSeed,
   reduceHealth,
@@ -188,6 +189,19 @@ describe("success/degraded mutual exclusion per tick (§A)", () => {
     for (const cause of ["regenesis", "untrusted", "quarantined", "unreachable"] as const) {
       const kind = reduceHealth(base, failObs(cause), 1).health.kind;
       expect(["offline", "untrusted", "regenesis", "quarantined"]).toContain(kind);
+    }
+  });
+});
+
+describe("chainKindNotLive — balance/activity gating (§N/§O)", () => {
+  it("is true for the degraded kinds and stalled — including quarantined (§O hides the balance)", () => {
+    for (const kind of ["offline", "quarantined", "untrusted", "regenesis", "stalled"] as const) {
+      expect(chainKindNotLive(kind)).toBe(true);
+    }
+  });
+  it("is false for live, the transient kinds, and null", () => {
+    for (const kind of ["live", "loading", "reconnecting", null] as const) {
+      expect(chainKindNotLive(kind)).toBe(false);
     }
   });
 });

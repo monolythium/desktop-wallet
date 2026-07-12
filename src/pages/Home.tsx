@@ -13,6 +13,8 @@
 
 import { useEffect, useState } from "react";
 import { useChainSnapshot } from "../sdk/useChainSnapshot";
+import { useChainHealthView } from "../sdk/ChainHealthProvider";
+import { chainKindNotLive } from "../sdk/chain-health";
 import { ReceiveModal } from "../components/ReceiveModal";
 import { SendComposeModal } from "../components/SendComposeModal";
 import { TokenRow } from "../components/TokenRow";
@@ -63,6 +65,12 @@ export function Home({ goto }: Props) {
   // topbar owns the surfaced live-sync indicator; here it only backs the
   // Available figure when the token-status native balance read is in flight.
   const chain = useChainSnapshot(walletAddress);
+  // When the chain isn't live (offline / stalled / untrusted / regenesis /
+  // quarantined) the balance + confirmed activity are read from an operator we
+  // no longer trust or can't reach, so we pause the display rather than show a
+  // stale/wrong figure (status specification §N/§O — quarantined HIDES the
+  // balance). The honest "—" + empty preview replace it until the chain is live.
+  const chainNotLive = chainKindNotLive(useChainHealthView().health.kind);
 
   useEffect(() => {
     if (!walletAddress) {
@@ -111,7 +119,7 @@ export function Home({ goto }: Props) {
       : chain.status === "ok"
         ? chain.snapshot.balanceLythoshi
         : null;
-  const availableLyth = formatLythDisplay(availableLythoshi, 2) ?? "—";
+  const availableLyth = chainNotLive ? "—" : formatLythDisplay(availableLythoshi, 2) ?? "—";
 
   const summary: DelegationSummaryFacts = deriveDelegationSummary(delegationStatus);
   // Earned is correctly divided to LYTH by formatRewardLyth, but at full 18-dp
@@ -122,10 +130,12 @@ export function Home({ goto }: Props) {
       ? truncateDecimals(formatRewardLyth(rewards.value.totalAmountLythoshi), 2)
       : null;
 
-  // Token + activity previews via the shared mappers + row components.
-  const tokenRows = liveTokens ? liveTokenStatusToRows(liveTokens, tokenMeta) : [];
+  // Token + activity previews via the shared mappers + row components. Paused
+  // too while the chain isn't live — a token balance read from an untrusted /
+  // unreachable operator is as misleading as the hero figure.
+  const tokenRows = chainNotLive || !liveTokens ? [] : liveTokenStatusToRows(liveTokens, tokenMeta);
   const activityRows =
-    liveActivity?.ok && liveActivity.value ? liveActivity.value : [];
+    chainNotLive || !liveActivity?.ok || !liveActivity.value ? [] : liveActivity.value;
 
   return (
     <div className="w-page">

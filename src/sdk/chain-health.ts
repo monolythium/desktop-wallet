@@ -128,6 +128,25 @@ export function chainHealthForFailedPoll(cause: DegradedCause, reason?: string):
   }
 }
 
+/**
+ * Whether the chain is NOT live enough to trust its balance/activity display
+ * (status specification §N, with the §O correction). True for the degraded kinds
+ * AND `stalled` — including `quarantined`, which HIDES the balance (a stale
+ * in-code comment in the source system claimed otherwise; the shipped, and here
+ * authoritative, behavior hides it). False for `live` and the transient
+ * `loading` / `reconnecting` (a reopen keeps showing the last figure until the
+ * first poll resolves), and for `null` (no active wallet). Pure.
+ */
+export function chainKindNotLive(kind: ChainHealthKind | null): boolean {
+  return (
+    kind === "offline" ||
+    kind === "quarantined" ||
+    kind === "untrusted" ||
+    kind === "regenesis" ||
+    kind === "stalled"
+  );
+}
+
 // ── Stall predicate (status specification §E) ───────────────────────────────
 
 /**
