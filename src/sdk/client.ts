@@ -70,7 +70,8 @@ const _endpointSubscribers = new Set<(endpoint: string) => void>();
 // pinned genesis is compile-time correct, so the seam is optimistic until the
 // first health tick, which runs at mount). A non-null cause means the health
 // poll proved the active operator is NOT on the pinned chain/genesis (or is
-// quarantined/unreachable): reads through `getTrustedProvider` then fail-closed.
+// quarantined/unreachable): every read + broadcast through `getProvider` then
+// fails-closed.
 let _activeTrust: DegradedCause | null = null;
 
 /** Mark the active operator trusted (a genesis + chain-id check passed). */
@@ -78,8 +79,9 @@ export function markActiveOperatorTrusted(): void {
   _activeTrust = null;
 }
 
-/** Mark the active operator untrusted with the resolved degraded cause; reads
- *  through {@link getTrustedProvider} will refuse until trust is re-established. */
+/** Mark the active operator untrusted with the resolved degraded cause; every
+ *  read/broadcast through {@link getProvider} refuses until trust is
+ *  re-established. */
 export function markActiveOperatorUntrusted(cause: DegradedCause): void {
   _activeTrust = cause;
 }
@@ -89,7 +91,7 @@ export function activeOperatorTrust(): DegradedCause | null {
   return _activeTrust;
 }
 
-export function getProvider(options: RpcClientOptions = {}): MonolythiumClient {
+function ensureClient(options: RpcClientOptions = {}): MonolythiumClient {
   if (_client === null) {
     _clientOptions = options;
     const rpcClient = new RpcClient(defaultEndpoint(), rpcClientOptions(options));
@@ -99,24 +101,33 @@ export function getProvider(options: RpcClientOptions = {}): MonolythiumClient {
 }
 
 /**
- * The provider, but fail-closed: throws when the active operator has been marked
- * untrusted (wrong chain / stale genesis / quarantined / unreachable), so a
- * trust failure is a real read failure — an untrusted operator serves no reads
- * and signs nothing. Endpoint-management (`currentEndpoint`/`setEndpoint`/peer
- * probing) stays on the ungated `getProvider` so the UI can still show + switch
- * operators while degraded.
+ * The active provider — fail-closed. Throws when the health poll has marked the
+ * active operator untrusted (wrong chain / stale genesis / quarantined /
+ * unreachable), so an untrusted operator serves no reads and signs nothing:
+ * EVERY chain read and broadcast funnels through here, so the whole read surface
+ * is fail-closed at one seam. The health probe itself and endpoint
+ * display/switching use {@link getProviderUnchecked} — they must run while
+ * degraded (to detect recovery and to let the user see/switch operators).
  */
-export function getTrustedProvider(options: RpcClientOptions = {}): MonolythiumClient {
+export function getProvider(options: RpcClientOptions = {}): MonolythiumClient {
   if (_activeTrust !== null) {
     throw SdkError.endpoint(`refusing to use an untrusted operator (chain ${_activeTrust})`);
   }
-  return getProvider(options);
+  return ensureClient(options);
+}
+
+/** The active provider WITHOUT the trust gate — ONLY for the health probe (which
+ *  re-checks the untrusted operator each tick to detect recovery) and endpoint
+ *  display/switching. Never use for data reads or signing. */
+export function getProviderUnchecked(options: RpcClientOptions = {}): MonolythiumClient {
+  return ensureClient(options);
 }
 
 /** The endpoint the memoized client is currently bound to (initializing the
- *  client if it has not been created yet). */
+ *  client if it has not been created yet). Ungated so the UI can show + switch
+ *  operators while degraded. */
 export function currentEndpoint(): string {
-  return getProvider().endpoint;
+  return getProviderUnchecked().endpoint;
 }
 
 /**
@@ -163,7 +174,7 @@ export type ChainSnapshot = {
 };
 
 export async function loadChainSnapshot(address: string): Promise<ChainSnapshot> {
-  const { rpcClient, endpoint } = getTrustedProvider();
+  const { rpcClient, endpoint } = getProvider();
   try {
     const [chainId, round, profile] = await Promise.all([
       rpcClient.ethChainId(),

@@ -18,7 +18,7 @@
 
 import { RpcClient, getChainInfo, isQuarantineError } from "@monolythium/core-sdk";
 import type { ChainStatsResponse } from "@monolythium/core-sdk";
-import { currentEndpoint, getProvider } from "./client";
+import { currentEndpoint, getProviderUnchecked } from "./client";
 import { rpcClientOptions } from "./http";
 import { listPeers } from "./peers";
 import {
@@ -194,7 +194,9 @@ export async function resolveTrustedHead(
   const pinGenesis = info.genesis_hash;
   const active = currentEndpoint();
 
-  const activeVerdict = await verdictForClient(getProvider().rpcClient, active, pinChain, pinGenesis);
+  // The health probe re-checks the active operator even while it is untrusted
+  // (to detect recovery), so it reads through the UNCHECKED provider.
+  const activeVerdict = await verdictForClient(getProviderUnchecked().rpcClient, active, pinChain, pinGenesis);
   if (activeVerdict.trusted) {
     return resolveFleet([activeVerdict], pinChain);
   }

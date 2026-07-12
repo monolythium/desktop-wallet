@@ -3,7 +3,7 @@
 // Table-driven over the pure verdict/resolution helpers (the status
 // specification §F split: wrong chain id → untrusted; right chain, wrong/absent
 // genesis → regenesis / fail-closed), plus the fail-closed seam gate
-// (getTrustedProvider refuses an untrusted operator).
+// (getProvider refuses an untrusted operator; getProviderUnchecked does not).
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getChainInfo } from "@monolythium/core-sdk";
@@ -20,7 +20,8 @@ import {
   type OperatorVerdict,
 } from "../chain-trust";
 import {
-  getTrustedProvider,
+  getProvider,
+  getProviderUnchecked,
   markActiveOperatorTrusted,
   markActiveOperatorUntrusted,
   resetProviderForTest,
@@ -201,19 +202,22 @@ describe("resolveTrustedHead — fleet + failover + quarantine (health follows t
   });
 });
 
-describe("fail-closed seam — getTrustedProvider refuses an untrusted operator", () => {
+describe("fail-closed seam — getProvider refuses an untrusted operator", () => {
   afterEach(() => resetProviderForTest());
 
   it("returns the provider when trusted, throws once marked untrusted, recovers when re-trusted", () => {
     setProviderForTest({ rpcClient: {} as MonolythiumClient["rpcClient"], endpoint: "http://op" });
 
     // Default (not yet checked) is optimistic — the pin is compile-time correct.
-    expect(() => getTrustedProvider()).not.toThrow();
+    expect(() => getProvider()).not.toThrow();
 
     markActiveOperatorUntrusted("regenesis");
-    expect(() => getTrustedProvider()).toThrow(/untrusted operator \(chain regenesis\)/);
+    expect(() => getProvider()).toThrow(/untrusted operator \(chain regenesis\)/);
+    // The probe/endpoint accessor stays usable so recovery can be detected.
+    expect(() => getProviderUnchecked()).not.toThrow();
+    expect(getProviderUnchecked().endpoint).toBe("http://op");
 
     markActiveOperatorTrusted();
-    expect(getTrustedProvider().endpoint).toBe("http://op");
+    expect(getProvider().endpoint).toBe("http://op");
   });
 });
