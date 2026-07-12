@@ -16,9 +16,11 @@
 // This pass verifies the ACTIVE operator (single endpoint). The fleet probe +
 // failover that make OPERATOR QUARANTINED derivable are a follow-up.
 
-import { getChainInfo, isQuarantineError } from "@monolythium/core-sdk";
+import { RpcClient, getChainInfo, isQuarantineError } from "@monolythium/core-sdk";
 import type { ChainStatsResponse } from "@monolythium/core-sdk";
-import { getProvider } from "./client";
+import { currentEndpoint, getProvider } from "./client";
+import { rpcClientOptions } from "./http";
+import { listPeers } from "./peers";
 import {
   classifyNoOperatorReason,
   type DegradedCause,
@@ -138,23 +140,70 @@ export function resolveFleet(
 }
 
 /**
- * Verify the ACTIVE operator against the pin and return its trusted head, or the
- * degraded cause (fail-closed). Reads `lyth_chainStats` through the shared
- * provider seam (the active endpoint) — no second RPC path. A quarantine
- * rejection on the single active operator is a unanimous quarantine (1/1).
+ * Turn one operator's `lyth_chainStats` read into a trust verdict. A `-32047`
+ * quarantine rejection and a transport fault each become their own verdict
+ * (fail-closed) rather than throwing. Reused for the active operator (shared
+ * client seam) and each fleet operator (a transient client).
  */
-export async function verifyActiveOperatorHead(): Promise<TrustedHead> {
-  const info = getChainInfo(NETWORK_SLUG);
-  const { rpcClient, endpoint } = getProvider();
-  let stats: ChainStatsResponse;
+async function verdictForClient(
+  client: Pick<RpcClient, "lythChainStats">,
+  url: string,
+  pinChainId: number,
+  pinGenesis: string,
+): Promise<OperatorVerdict> {
   try {
-    stats = await rpcClient.lythChainStats();
+    const stats = await client.lythChainStats();
+    return verdictFromStats(stats, pinChainId, pinGenesis, url);
   } catch (err) {
-    if (isQuarantineError(err)) {
-      return { ok: false, cause: classifyNoOperatorReason(fleetSignals([quarantinedVerdict(endpoint)])) };
-    }
-    return { ok: false, cause: "unreachable", reason: (err as Error)?.message ?? String(err) };
+    return isQuarantineError(err) ? quarantinedVerdict(url) : unreachableVerdict(url);
   }
-  const verdict = verdictFromStats(stats, info.chain_id, info.genesis_hash, endpoint);
-  return resolveFleet([verdict], info.chain_id);
+}
+
+/** Probe one fleet operator by URL over a transient client bound to it (the same
+ *  fetch seam — no second RPC path). */
+export async function probeOperator(
+  url: string,
+  pinChainId: number,
+  pinGenesis: string,
+): Promise<OperatorVerdict> {
+  return verdictForClient(new RpcClient(url, rpcClientOptions()), url, pinChainId, pinGenesis);
+}
+
+/**
+ * Resolve a trusted head across the operator fleet, fail-closed (§F/§G/§K).
+ *
+ * Fast path: verify the ACTIVE operator (the user's / last failover's choice)
+ * through the shared client seam. `lyth_chainStats` carries BOTH the chain id
+ * and the genesis hash, so every steady-state tick re-confirms trust in one
+ * read — there is no window where a silently-forked operator reads LIVE.
+ *
+ * If the active operator is not trusted, probe the rest of the fleet
+ * (`listPeers`, the same SDK registry the CSP allowlist is generated from) in
+ * PARALLEL and select the first trusted operator to fail over to (§O5: one
+ * trusted+reachable operator ⇒ a healthy read). When none qualifies, the
+ * degraded cause comes from F1's `classifyNoOperatorReason` over the whole
+ * active set — so OPERATOR QUARANTINED requires unanimity (§G).
+ *
+ * `probe` is injectable for tests; production uses {@link probeOperator}.
+ */
+export async function resolveTrustedHead(
+  probe: typeof probeOperator = probeOperator,
+): Promise<TrustedHead> {
+  const info = getChainInfo(NETWORK_SLUG);
+  const pinChain = info.chain_id;
+  const pinGenesis = info.genesis_hash;
+  const active = currentEndpoint();
+
+  const activeVerdict = await verdictForClient(getProvider().rpcClient, active, pinChain, pinGenesis);
+  if (activeVerdict.trusted) {
+    return resolveFleet([activeVerdict], pinChain);
+  }
+
+  const others = await Promise.all(
+    listPeers()
+      .map((peer) => peer.url)
+      .filter((url) => url !== active)
+      .map((url) => probe(url, pinChain, pinGenesis)),
+  );
+  return resolveFleet([activeVerdict, ...others], pinChain);
 }

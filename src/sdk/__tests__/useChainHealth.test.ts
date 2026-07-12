@@ -22,6 +22,14 @@ import { NETWORK_SLUG } from "../chain-trust";
 import { HEALTH_TICK_MS, STALL_THRESHOLD_MS } from "../chain-health";
 import { useChainHealth, type ChainHealthView } from "../useChainHealth";
 
+// The fleet is just the active endpoint here, so the trust resolver's failover
+// probe makes no real network calls — the active operator is driven through the
+// mocked provider seam (setProviderForTest).
+vi.mock("../peers", async (orig) => ({
+  ...(await orig<typeof import("../peers")>()),
+  listPeers: () => [{ url: "http://test-operator", label: "test", region: null, tier: "gateway" }],
+}));
+
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const PIN = getChainInfo(NETWORK_SLUG);

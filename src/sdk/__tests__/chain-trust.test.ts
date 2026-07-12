@@ -5,14 +5,16 @@
 // genesis → regenesis / fail-closed), plus the fail-closed seam gate
 // (getTrustedProvider refuses an untrusted operator).
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { getChainInfo } from "@monolythium/core-sdk";
 import type { ChainStatsResponse } from "@monolythium/core-sdk";
 import {
   NETWORK_SLUG,
   fleetSignals,
+  probeOperator,
   quarantinedVerdict,
   resolveFleet,
+  resolveTrustedHead,
   unreachableVerdict,
   verdictFromStats,
   type OperatorVerdict,
@@ -25,6 +27,16 @@ import {
   setProviderForTest,
   type MonolythiumClient,
 } from "../client";
+
+// The fleet resolver reads its operator list from listPeers; pin it to a small
+// two-operator set so the injected probe drives the failover deterministically.
+vi.mock("../peers", async (orig) => ({
+  ...(await orig<typeof import("../peers")>()),
+  listPeers: () => [
+    { url: "http://active", label: "a", region: null, tier: "gateway" },
+    { url: "http://other", label: "b", region: null, tier: "official" },
+  ],
+}));
 
 const PIN = getChainInfo(NETWORK_SLUG);
 const PIN_CHAIN = PIN.chain_id;
@@ -128,6 +140,64 @@ describe("resolveFleet → trusted head or F1-classified cause (§F.7 precedence
     expect(fleetSignals([]).allQuarantined).toBe(false);
     expect(fleetSignals([wrongChain, regenesis]).anyGenesisMismatch).toBe(true);
     expect(fleetSignals([wrongChain]).anyWrongChainId).toBe(true);
+  });
+});
+
+describe("resolveTrustedHead — fleet + failover + quarantine (health follows the read path)", () => {
+  afterEach(() => resetProviderForTest());
+
+  function installActive(impl: () => Promise<ChainStatsResponse>): void {
+    const rpcClient = { lythChainStats: impl } as unknown as MonolythiumClient["rpcClient"];
+    setProviderForTest({ rpcClient, endpoint: "http://active" });
+  }
+  const trustedVerdict = (url: string): OperatorVerdict => ({
+    url, wrongChainId: false, genesisMismatch: false, quarantined: false, trusted: true, height: 100, headId: "0xh",
+  });
+
+  it("fast path: a trusted active operator resolves to it, no fleet probe", async () => {
+    installActive(async () => stats({}));
+    const probe = vi.fn() as unknown as typeof probeOperator;
+    const res = await resolveTrustedHead(probe);
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.url).toBe("http://active");
+    expect(probe).not.toHaveBeenCalled(); // the active op was trusted — no failover
+  });
+
+  it("failover: an untrusted active op with another trusted operator → the read path moves to it", async () => {
+    installActive(async () => ({ ...stats({}), chainId: 1 })); // active on the wrong chain
+    const probe: typeof probeOperator = async (url) =>
+      url === "http://other" ? trustedVerdict(url) : unreachableVerdict(url);
+    const res = await resolveTrustedHead(probe);
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.url).toBe("http://other"); // health now reads from the trusted operator
+  });
+
+  it("a wrong-chain fleet with no trusted operator → untrusted (§F.7 via F1)", async () => {
+    installActive(async () => ({ ...stats({}), chainId: 1 }));
+    const probe: typeof probeOperator = async (url) => unreachableVerdict(url);
+    const res = await resolveTrustedHead(probe);
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.cause).toBe("untrusted");
+  });
+
+  it("a unanimously quarantined fleet → quarantined (active -32047 recognized via isQuarantineError)", async () => {
+    installActive(async () => {
+      throw new Error("upstream unavailable: chain quarantined: reason=CheckpointStateRootMismatch");
+    });
+    const probe: typeof probeOperator = async (url) => quarantinedVerdict(url);
+    const res = await resolveTrustedHead(probe);
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.cause).toBe("quarantined");
+  });
+
+  it("a partially quarantined fleet is NOT quarantined → offline (§G unanimity)", async () => {
+    installActive(async () => {
+      throw new Error("chain quarantined");
+    });
+    const probe: typeof probeOperator = async (url) => unreachableVerdict(url); // other merely unreachable
+    const res = await resolveTrustedHead(probe);
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.cause).toBe("unreachable");
   });
 });
 
