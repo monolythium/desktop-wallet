@@ -15,6 +15,7 @@ import { ApprovalOverlay } from "./components/ApprovalOverlay";
 import { Onboarding } from "./components/Onboarding";
 import { PendingTxReconciler } from "./components/PendingTxReconciler";
 import { ChainHealthBanner } from "./components/ChainHealthBanner";
+import { ErrorBoundary, PageErrorFallback } from "./components/ErrorBoundary";
 import { Sidebar } from "./components/Sidebar";
 import { Topbar } from "./components/Topbar";
 import { UpdateBanner } from "./components/UpdateBanner";
@@ -256,6 +257,12 @@ export function App() {
         <Topbar route={route} setRoute={setRoute} />
         <main className="w-main">
           <ChainHealthBanner onReview={() => setRoute("about")} />
+          <ErrorBoundary
+            resetKey={route}
+            fallback={(retry) => (
+              <PageErrorFallback onHome={() => setRoute("home")} onRetry={retry} />
+            )}
+          >
           {route === "home" ? <Home goto={setRoute} /> : null}
           {route === "activity" ? <Activity /> : null}
           {route === "wallets" ? <Wallets /> : null}
@@ -292,6 +299,7 @@ export function App() {
           {route === "display" ? settingsPage("appearance") : null}
           {route === "recovery" ? settingsPage("reveal") : null}
           {route === "reset" ? settingsPage("reset") : null}
+          </ErrorBoundary>
         </main>
         {steleEnabled ? <ApprovalOverlay /> : null}
         <PendingTxReconciler />

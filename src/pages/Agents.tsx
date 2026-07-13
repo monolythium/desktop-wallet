@@ -58,6 +58,33 @@ function hexCapToLyth(hex: string): string {
   }
 }
 
+/** The absolute millisecond value `new Date()` accepts (ECMAScript time-value
+ *  range); beyond it `new Date(ms).toISOString()` throws a RangeError. */
+export const MAX_DATE_MS = 8_640_000_000_000_000;
+
+/** Parse anything into a bigint, defaulting to 0n on a malformed value instead
+ *  of throwing (`BigInt("garbage")` / `BigInt(undefined)` throw). Pure. */
+export function safeBigInt(v: unknown): bigint {
+  try {
+    return BigInt((v ?? 0n) as string | number | bigint);
+  } catch {
+    return 0n;
+  }
+}
+
+/** Format a Unix-seconds expiry as an ISO string, or an em-dash for a value that
+ *  would overflow the Date range — a huge on-chain expiry must never white-screen
+ *  the page via a `RangeError` during render. Pure. */
+export function expiryUnixToIso(seconds: bigint): string {
+  const ms = Number(seconds) * 1000;
+  if (!Number.isFinite(ms) || Math.abs(ms) > MAX_DATE_MS) return "—";
+  try {
+    return new Date(ms).toISOString();
+  } catch {
+    return "—";
+  }
+}
+
 export function Agents() {
   const ops = useOperations();
   const [agents, setAgents] = useState<AgentEntry[]>([]);
@@ -310,9 +337,7 @@ export function Agents() {
           k: "Expiry",
           v:
             fields.policyExpiryUnixSeconds && fields.policyExpiryUnixSeconds > 0n
-              ? new Date(
-                  Number(fields.policyExpiryUnixSeconds) * 1000,
-                ).toISOString()
+              ? expiryUnixToIso(fields.policyExpiryUnixSeconds)
               : "never",
         },
         { k: "Precompile", v: PRECOMPILE_LABEL },
@@ -856,9 +881,8 @@ function PolicyReviewModal({
     ? `${String(twBytes[30]).padStart(2, "0")}:00–${String(twBytes[31]).padStart(2, "0")}:00`
     : "Any time";
 
-  const expiry = BigInt(args.policyExpiry ?? 0n);
-  const expiryLine =
-    expiry > 0n ? new Date(Number(expiry) * 1000).toISOString() : "Never";
+  const expiry = safeBigInt(args.policyExpiry);
+  const expiryLine = expiry > 0n ? expiryUnixToIso(expiry) : "Never";
 
   return (
     <div
