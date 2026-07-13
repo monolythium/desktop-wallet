@@ -30,6 +30,10 @@ export function MnemonicGrid({
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">(
     "idle",
   );
+  // Copying is gated behind an explicit acknowledgement: the app cannot clear a
+  // copy that the OS keeps in clipboard history / cloud sync, so the safety
+  // promise of the old "auto-clears in 30 s" note was one it couldn't keep.
+  const [copyAck, setCopyAck] = useState(false);
 
   useEffect(() => {
     if (copyState === "idle") return;
@@ -96,9 +100,34 @@ export function MnemonicGrid({
 
       {showCopyButton && (
         <>
+          <label
+            style={{
+              display: "flex",
+              alignItems: "flex-start",
+              gap: 8,
+              fontFamily: "var(--f-sans)",
+              fontSize: 11,
+              color: "var(--warn)",
+              lineHeight: 1.5,
+              cursor: "pointer",
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={copyAck}
+              onChange={(e) => setCopyAck(e.target.checked)}
+              style={{ marginTop: 2, accentColor: "var(--gold)" }}
+            />
+            <span>
+              I understand a copied phrase may stay in my OS clipboard history
+              (e.g. Windows Win+V) or sync to the cloud, and this app can't clear
+              that. Writing it down is safer.
+            </span>
+          </label>
           <button
             type="button"
             onClick={() => void handleCopy()}
+            disabled={!copyAck}
             style={{
               display: "flex",
               alignItems: "center",
@@ -117,13 +146,14 @@ export function MnemonicGrid({
               fontFamily: "var(--f-sans)",
               fontSize: 12.5,
               fontWeight: 500,
-              cursor: "pointer",
+              cursor: copyAck ? "pointer" : "not-allowed",
+              opacity: copyAck ? 1 : 0.5,
               transition: "all 160ms var(--e-out)",
             }}
           >
             {copyState === "copied" ? <CheckGlyph /> : <CopyGlyph />}
             {copyState === "copied"
-              ? "Copied — clears in 30 s"
+              ? "Copied to clipboard"
               : copyState === "failed"
                 ? "Copy failed — try again"
                 : "Copy to clipboard"}
@@ -138,8 +168,8 @@ export function MnemonicGrid({
               textAlign: "center",
             }}
           >
-            The clipboard auto-clears after 30 s. Store the phrase in a
-            safe place before then.
+            The app makes a best-effort clipboard wipe after 30 s, but can't
+            guarantee it — your OS may keep an unclearable copy.
           </div>
         </>
       )}
