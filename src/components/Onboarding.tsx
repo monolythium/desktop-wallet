@@ -337,8 +337,9 @@ export function Onboarding({ onDone }: Props) {
             <div className="cap" style={{ marginBottom: 8 }}>Recovery phrase</div>
             <h1 style={{ margin: "0 0 8px" }}>Write this down</h1>
             <p style={{ margin: "0 0 14px", color: "var(--w-text-2)", fontSize: 13 }}>
-              This recovery phrase is the only recovery path for the encrypted
-              local vault. It will not be shown again.
+              These 24 words are the only way to restore this wallet. Write them
+              down and keep them offline — you can view them again later in
+              Settings, but treat them as secret.
             </p>
             <div
               style={{
@@ -353,21 +354,6 @@ export function Onboarding({ onDone }: Props) {
               ML-DSA-65 · {RECOVERY_WORDS} words
             </div>
             <MnemonicGrid mnemonic={mnemonic} />
-            <div
-              style={{
-                marginTop: 14,
-                padding: "10px 12px",
-                borderRadius: 10,
-                background: "rgba(242,180,65,0.08)",
-                border: "1px solid rgba(242,180,65,0.4)",
-                color: "var(--fg-100)",
-                fontSize: 12,
-                lineHeight: 1.5,
-              }}
-            >
-              Anyone with these words controls your funds — store them offline
-              and never share them. Monolythium cannot recover them for you.
-            </div>
             <div style={{ display: "flex", marginTop: 24 }}>
               <button
                 className="btn btn--primary"

@@ -170,9 +170,8 @@ export function AddVaultModal({ onClose, onAdded }: Props) {
                 lineHeight: 1.55,
               }}
             >
-              Write down or copy this recovery phrase. It will not be shown
-              again — the only way to recover this wallet later is from
-              these 24 words.
+              Write these 24 words down and keep them offline — they're the
+              only way to restore this wallet later.
             </p>
             <MnemonicGrid mnemonic={createdMnemonic} />
             <div style={{ display: "flex", marginTop: 20 }}>

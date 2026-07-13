@@ -17,6 +17,11 @@ import { MnemonicGrid } from "../MnemonicGrid";
 
 const PHRASE = Array.from({ length: 24 }, (_, i) => `word${i + 1}`).join(" ");
 
+// The copy control only exists once the phrase is revealed (the reveal gate),
+// so every copy assertion reveals first.
+const reveal = () =>
+  fireEvent.click(screen.getByRole("button", { name: /reveal recovery phrase/i }));
+
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
@@ -25,6 +30,7 @@ afterEach(() => {
 describe("MnemonicGrid copy hardening", () => {
   it("warns honestly about the OS clipboard and drops the old auto-clear promise", () => {
     render(<MnemonicGrid mnemonic={PHRASE} />);
+    reveal();
     expect(screen.getByText(/clipboard history/i)).toBeInTheDocument();
     expect(screen.getByText(/can't guarantee/i)).toBeInTheDocument();
     expect(screen.queryByText(/auto-clears after 30 s/i)).toBeNull(); // the old false promise is gone
@@ -32,6 +38,7 @@ describe("MnemonicGrid copy hardening", () => {
 
   it("gates the copy behind an explicit acknowledgement", async () => {
     render(<MnemonicGrid mnemonic={PHRASE} />);
+    reveal();
     const copy = screen.getByRole("button", { name: /copy to clipboard/i });
     expect(copy).toBeDisabled();
 
@@ -46,8 +53,9 @@ describe("MnemonicGrid copy hardening", () => {
     expect(copyWithAutoClear).toHaveBeenCalledTimes(1);
   });
 
-  it("shows no copy control (or checkbox) when showCopyButton is false", () => {
+  it("shows no copy control (or checkbox) even after reveal when showCopyButton is false", () => {
     render(<MnemonicGrid mnemonic={PHRASE} showCopyButton={false} />);
+    reveal();
     expect(screen.queryByRole("button", { name: /copy/i })).toBeNull();
     expect(screen.queryByRole("checkbox")).toBeNull();
   });

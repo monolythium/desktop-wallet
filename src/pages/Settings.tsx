@@ -578,21 +578,7 @@ function RevealPhrasePage({ onBack }: { onBack: () => void }) {
         <div className="w-card__body">
           {mnemonic ? (
             <>
-              <div
-                className="w-banner"
-                style={{
-                  borderColor: "var(--gold)",
-                  background: "rgba(var(--gold-glow), 0.10)",
-                  lineHeight: 1.6,
-                }}
-              >
-                <strong>Never share these words.</strong> Anyone who has them can
-                move your funds. Write them down and store them offline — don't
-                screenshot them or paste them anywhere that syncs.
-              </div>
-              <div style={{ marginTop: 16 }}>
-                <MnemonicGrid mnemonic={mnemonic} />
-              </div>
+              <MnemonicGrid mnemonic={mnemonic} />
               <div style={{ display: "flex", marginTop: 20 }}>
                 <button
                   className="btn btn--primary"
