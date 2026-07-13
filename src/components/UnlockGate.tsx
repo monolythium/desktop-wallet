@@ -12,8 +12,13 @@ import {
   getActiveAccount,
 } from "../sdk/keychain";
 import { isWrongPasswordFailure } from "../sdk/vault";
+import { loadActiveWallet } from "../sdk/active-wallet";
 import { useAutoLock } from "../sdk/auto-lock";
-import { resetConfirmMatches, resetWalletOnThisDevice } from "../sdk/reset";
+import {
+  resetConfirmMatches,
+  resetPhraseProofMatches,
+  resetWalletOnThisDevice,
+} from "../sdk/reset";
 import {
   lockoutRemainingMs,
   readLockoutState,
@@ -32,8 +37,25 @@ export function UnlockGate() {
   // device re-onboards (re-import from the recovery phrase) after the reload.
   const [forgotOpen, setForgotOpen] = useState(false);
   const [confirmText, setConfirmText] = useState("");
+  const [resetPhrase, setResetPhrase] = useState("");
   const [resetBusy, setResetBusy] = useState(false);
   const [resetError, setResetError] = useState<string | null>(null);
+  // The active vault's address, to verify the entered recovery phrase against
+  // (available even while locked — the catalog stores it in plaintext).
+  const [activeAddressHex, setActiveAddressHex] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void loadActiveWallet().then((w) => {
+      if (!cancelled) setActiveAddressHex(w.addressHex);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const resetProofOk = resetPhraseProofMatches(resetPhrase, activeAddressHex);
+  const canReset = resetConfirmMatches(confirmText) && resetProofOk && !resetBusy;
 
   // Re-check the persisted brute-force lockout against the wall clock on mount,
   // so a relaunch can't sidestep an in-progress lockout.
@@ -92,7 +114,7 @@ export function UnlockGate() {
   };
 
   const doReset = async () => {
-    if (!resetConfirmMatches(confirmText) || resetBusy) return;
+    if (!canReset) return;
     setResetBusy(true);
     setResetError(null);
     try {
@@ -106,6 +128,7 @@ export function UnlockGate() {
   const closeForgot = () => {
     setForgotOpen(false);
     setConfirmText("");
+    setResetPhrase("");
     setResetError(null);
   };
 
@@ -129,15 +152,35 @@ export function UnlockGate() {
               recovery phrase.
             </p>
             <div className="w-banner error" style={{ lineHeight: 1.6, textAlign: "left" }}>
-              This erases your wallet from this device — every account and its
-              encrypted vault. <strong>Only your recovery phrase can restore it.</strong>{" "}
-              Your funds on-chain are unaffected.
+              This erases <strong>every wallet</strong> on this device and its
+              encrypted vault. <strong>Only the recovery phrase can restore each
+              one</strong> — without it, those funds are gone. Your funds on-chain
+              are unaffected.
             </div>
             <label className="w-onboarding__field" style={{ marginTop: 16, textAlign: "left" }}>
-              <span className="cap">Type RESET to confirm</span>
+              <span className="cap">Enter this wallet's 24-word recovery phrase</span>
+              <textarea
+                autoFocus
+                autoCapitalize="none"
+                autoComplete="off"
+                autoCorrect="off"
+                spellCheck={false}
+                rows={3}
+                value={resetPhrase}
+                onChange={(e) => setResetPhrase(e.target.value)}
+                placeholder="word1 word2 word3 …"
+                style={{ resize: "vertical", fontFamily: "var(--f-mono)" }}
+              />
+              <span className="cap" style={{ color: resetProofOk ? "var(--ok)" : "var(--fg-500)", marginTop: 4 }}>
+                {resetProofOk
+                  ? "✓ Recovery phrase verified — you can restore this wallet"
+                  : "Confirms you can restore afterward. It never leaves this device."}
+              </span>
+            </label>
+            <label className="w-onboarding__field" style={{ marginTop: 12, textAlign: "left" }}>
+              <span className="cap">Then type RESET to confirm</span>
               <input
                 type="text"
-                autoFocus
                 autoCapitalize="characters"
                 autoComplete="off"
                 spellCheck={false}
@@ -158,7 +201,7 @@ export function UnlockGate() {
               <button
                 className="btn btn--primary"
                 style={{ marginLeft: "auto" }}
-                disabled={!resetConfirmMatches(confirmText) || resetBusy}
+                disabled={!canReset}
                 onClick={() => void doReset()}
               >
                 {resetBusy ? "Erasing…" : "Erase wallet"}

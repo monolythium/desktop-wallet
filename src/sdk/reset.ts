@@ -9,7 +9,7 @@
 // onboarding (the fresh-install state). Callable while locked: it never
 // decrypts a vault, so the lock screen can offer it as a forgot-password path.
 
-import { deleteAccount } from "./keychain";
+import { deleteAccount, deriveAddressHexFromMnemonic } from "./keychain";
 import { loadCatalog, removeVaultFromCatalog } from "./vaultCatalog";
 
 /** The word the user must type to confirm a destructive wallet reset. */
@@ -19,6 +19,27 @@ export const RESET_CONFIRM_WORD = "RESET";
  *  whitespace and case. */
 export function resetConfirmMatches(input: string): boolean {
   return input.trim().toUpperCase() === RESET_CONFIRM_WORD;
+}
+
+/**
+ * Possession proof required (in ADDITION to typing RESET) before the destructive
+ * wipe: the user must enter a recovery phrase that proves they can restore
+ * afterward, so a user who never backed up their phrase can't erase the only
+ * local copy — while a phrase-holding user who forgot the password still can
+ * (the wipe never decrypts, so this runs on the lock screen too).
+ *
+ * When the active vault's address is known, the entered phrase must derive it
+ * exactly (this phrase is THIS vault's). When it isn't (a legacy vault never
+ * unlocked, so there's no address to compare), a valid BIP-39 phrase is the best
+ * proof available. An invalid phrase never passes. Case-insensitive.
+ */
+export function resetPhraseProofMatches(
+  mnemonic: string,
+  expectedAddressHex: string | null,
+): boolean {
+  const derived = deriveAddressHexFromMnemonic(mnemonic);
+  if (derived === null) return false;
+  return expectedAddressHex ? derived === expectedAddressHex.toLowerCase() : true;
 }
 
 /** Erase every vault from this device, then reload so the boot probe re-runs and

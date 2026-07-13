@@ -27,6 +27,27 @@ function normalizeMnemonic(mnemonic: string): string {
   return mnemonic.trim().toLowerCase().replace(/\s+/g, " ");
 }
 
+/**
+ * Derive the 20-byte address (`0x…`, lowercased) a recovery phrase maps to,
+ * WITHOUT unlocking, decrypting, or storing anything — used to prove a user
+ * possesses a given vault's phrase (compare the result to the vault's stored
+ * `addressHex`). Returns null for an invalid phrase (bad checksum / not in the
+ * wordlist). The seed is zeroed immediately; nothing is logged or retained.
+ */
+export function deriveAddressHexFromMnemonic(mnemonic: string): string | null {
+  const normalized = normalizeMnemonic(mnemonic);
+  let seed: Uint8Array | null = null;
+  try {
+    mnemonicToEntropy(normalized, wordlist); // throws on an invalid phrase
+    seed = mnemonicToMlDsa65Seed(normalized);
+    return MlDsa65Backend.fromSeed(seed).getAddress().toLowerCase();
+  } catch {
+    return null;
+  } finally {
+    seed?.fill(0);
+  }
+}
+
 /** Legacy / first-install slot. New vaults mint fresh slot ids via
  *  `mintVaultSlot()` in vaultCatalog.ts; this constant stays as the
  *  migration anchor for installs that predate the multi-vault catalog. */

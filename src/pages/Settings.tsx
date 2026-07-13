@@ -7,7 +7,11 @@ import { CopyableAddress } from "../components/_detailModalParts";
 import { MnemonicGrid } from "../components/MnemonicGrid";
 import { getActiveAccount, revealRecoveryPhrase } from "../sdk/keychain";
 import { VaultCallError } from "../sdk/vault";
-import { resetConfirmMatches, resetWalletOnThisDevice } from "../sdk/reset";
+import {
+  resetConfirmMatches,
+  resetPhraseProofMatches,
+  resetWalletOnThisDevice,
+} from "../sdk/reset";
 import {
   AUTO_LOCK_OPTIONS,
   readAutoLockMinutes,
@@ -416,10 +420,13 @@ function ManageNotificationsPage({ onBack }: { onBack: () => void }) {
  * onboarding. On-chain funds are untouched; only the recovery phrase restores.
  */
 function ResetWalletPage({ onBack }: { onBack: () => void }) {
+  const wallet = useActiveWallet();
   const [confirmText, setConfirmText] = useState("");
+  const [resetPhrase, setResetPhrase] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const canReset = resetConfirmMatches(confirmText) && !busy;
+  const proofOk = resetPhraseProofMatches(resetPhrase, wallet.addressHex);
+  const canReset = resetConfirmMatches(confirmText) && proofOk && !busy;
 
   const doReset = async () => {
     if (!canReset) return;
@@ -449,15 +456,34 @@ function ResetWalletPage({ onBack }: { onBack: () => void }) {
       <div className="w-card">
         <div className="w-card__body">
           <div className="w-banner error" style={{ lineHeight: 1.6 }}>
-            This erases your wallet from this device — every account and its
-            encrypted vault. <strong>Only your recovery phrase can restore it.</strong>{" "}
-            Your funds on-chain are unaffected.
+            This erases <strong>every wallet</strong> on this device and its
+            encrypted vault. <strong>Only the recovery phrase can restore each
+            one</strong> — without it, those funds are gone. Your funds on-chain
+            are unaffected.
           </div>
           <label className="w-onboarding__field" style={{ marginTop: 16 }}>
-            <span className="cap">Type RESET to confirm</span>
+            <span className="cap">Enter this wallet's 24-word recovery phrase</span>
+            <textarea
+              autoCapitalize="none"
+              autoComplete="off"
+              autoCorrect="off"
+              spellCheck={false}
+              rows={3}
+              value={resetPhrase}
+              onChange={(e) => setResetPhrase(e.target.value)}
+              placeholder="word1 word2 word3 …"
+              style={{ resize: "vertical", fontFamily: "var(--f-mono)" }}
+            />
+            <span className="cap" style={{ color: proofOk ? "var(--ok)" : "var(--fg-500)", marginTop: 4 }}>
+              {proofOk
+                ? "✓ Recovery phrase verified — you can restore this wallet"
+                : "Confirms you can restore afterward. It never leaves this device."}
+            </span>
+          </label>
+          <label className="w-onboarding__field" style={{ marginTop: 12 }}>
+            <span className="cap">Then type RESET to confirm</span>
             <input
               type="text"
-              autoFocus
               autoCapitalize="characters"
               autoComplete="off"
               spellCheck={false}
