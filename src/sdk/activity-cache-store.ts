@@ -113,6 +113,26 @@ export async function writeConfirmedCache(
   }
 }
 
+/** Delete every confirmed-row cache entry this address owns, so removing a vault
+ *  leaves no orphaned scoped cache to accumulate. Matches by the exact prefix
+ *  `mono.activity.<addressLower>.` (the trailing dot prevents one address from
+ *  matching another that shares its prefix), so pruning one vault never touches
+ *  another's data. Best-effort. */
+export async function purgeScopesForAddress(addressLower: string): Promise<void> {
+  try {
+    const state = await loadState();
+    const prefix = `mono.activity.${addressLower}.`;
+    const confirmed: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(state.confirmed)) {
+      if (k.startsWith(prefix)) continue;
+      confirmed[k] = v;
+    }
+    await saveState({ version: 1, confirmed });
+  } catch {
+    // Best-effort — a purge failure just leaves the (now-unreferenced) entries.
+  }
+}
+
 /** Test-only — reset the singleton store + cache so each test starts clean. */
 export function __resetActivityCacheStoreForTests(): void {
   storePromise = null;

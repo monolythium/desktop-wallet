@@ -29,6 +29,7 @@ import { Store } from "@tauri-apps/plugin-store";
 import {
   NOTIFICATION_HISTORY_CAP,
   appendCapped,
+  appendNotifiedIdCapped,
   incomingWatermarkKey,
   notificationId,
   notificationsHistoryKey,
@@ -229,13 +230,39 @@ export async function recordNotification(
       scopes: {
         ...state.scopes,
         [historyKey]: { schemaVersion: 0, entries: nextEntries },
-        [setKey]: { schemaVersion: 0, ids: [...seen.ids, id] },
+        [setKey]: { schemaVersion: 0, ids: appendNotifiedIdCapped(seen.ids, id) },
       },
     });
 
     return { added: true, record };
   } catch {
     return { added: false, record: null };
+  }
+}
+
+/** Delete every scope this address owns — its per-(address, chain) history,
+ *  dedupe-set, and incoming-watermark entries — so removing a vault leaves no
+ *  orphaned scoped state to accumulate. Matches by the exact per-type prefix
+ *  `mono.notifications.<type>.<addressLower>.` (the trailing dot prevents one
+ *  address from matching another that merely shares its prefix — the same
+ *  no-cross-vault guard `listForScope` uses), so pruning one vault never touches
+ *  another's data. Best-effort. */
+export async function purgeScopesForAddress(addressLower: string): Promise<void> {
+  try {
+    const state = await loadState();
+    const prefixes = [
+      `mono.notifications.history.${addressLower}.`,
+      `mono.notifications.notified.${addressLower}.`,
+      `mono.notifications.incoming-watermark.${addressLower}.`,
+    ];
+    const nextScopes: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(state.scopes)) {
+      if (prefixes.some((p) => k.startsWith(p))) continue;
+      nextScopes[k] = v;
+    }
+    await saveState({ version: 1, scopes: nextScopes });
+  } catch {
+    // Best-effort — a purge failure just leaves the (now-unreferenced) scopes.
   }
 }
 

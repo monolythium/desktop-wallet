@@ -25,6 +25,22 @@
  *  drop silently on append. */
 export const NOTIFICATION_HISTORY_CAP = 50;
 
+/** Max dedupe-set ids retained per (address, chain) — newest-first. Bounds the
+ *  set that was previously unbounded (it grew one id per notification forever,
+ *  re-serialising the whole file O(n) on every write). Kept comfortably larger
+ *  than {@link NOTIFICATION_HISTORY_CAP} and any realistic re-observation window:
+ *  a tx only needs its id in the set for as long as it could plausibly be seen
+ *  again, and the reconcile poller drops terminal txs from tracking while
+ *  incoming-detection advances a watermark past processed blocks, so an evicted
+ *  old id is never re-observed and can't re-fire a notification. */
+export const NOTIFIED_SET_CAP = 256;
+
+/** Append `id` to a dedupe-set, keeping the newest {@link NOTIFIED_SET_CAP}.
+ *  Pure. */
+export function appendNotifiedIdCapped(ids: readonly string[], id: string): string[] {
+  return [...ids, id].slice(-NOTIFIED_SET_CAP);
+}
+
 /** Operation classification attached to a recorded notification. Drives the
  *  friendly title via {@link notificationTitle}. `contract_call` is the
  *  fallback for untagged / unrecognized paths. */
