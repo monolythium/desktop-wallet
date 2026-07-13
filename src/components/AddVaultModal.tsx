@@ -5,20 +5,28 @@
 //   - a password (with confirm; same strength policy as onboarding)
 //   - a mode: Create (fresh BIP-39 mnemonic) or Import (paste a phrase)
 //
-// On submit it mints a fresh keychain slot via mintVaultSlot,
-// createAndStoreVault writes the encrypted blob, then registerVault
-// adds the entry to the catalog. For Create, the modal then shows the
-// new mnemonic so the user can write it down before leaving.
+// The Create path mirrors first-run onboarding's safety ordering: it mints the
+// phrase in memory, shows it, then FORCES the same fill-in-the-blanks
+// VerifyPhrase before anything is written to disk. Only after verification does
+// it mint a slot and seal the vault (createAndStoreVault → registerVault). A
+// secondary wallet can never reach disk with a phrase the user didn't confirm.
+// Import seals directly — the user already holds the phrase.
 
 import { useEffect, useState } from "react";
 import { MnemonicGrid } from "./MnemonicGrid";
+import { VerifyPhrase } from "./VerifyPhrase";
 import {
   createAndStoreVault,
   setActiveAccount,
 } from "../sdk/keychain";
 import { VaultCallError } from "../sdk/vault";
 import { explainImportError } from "../lib/import-error";
-import { validateMnemonic } from "@monolythium/core-sdk/crypto";
+import {
+  generateMnemonic,
+  mnemonicToMlDsa65Seed,
+  validateMnemonic,
+  MlDsa65Backend,
+} from "@monolythium/core-sdk/crypto";
 import {
   mintVaultSlot,
   registerVault,
@@ -34,7 +42,7 @@ interface Props {
 }
 
 type Mode = "create" | "import";
-type Stage = "compose" | "show-phrase";
+type Stage = "compose" | "show-phrase" | "verify-phrase";
 
 const RECOVERY_WORDS = 24;
 
@@ -66,6 +74,31 @@ export function AddVaultModal({ onClose, onAdded }: Props) {
     password === confirm &&
     (mode === "create" || importDraft.trim().length > 0);
 
+  // Single persistence point — mints a slot and seals the given phrase, then
+  // wires the catalog/active state and drops password material. For Create this
+  // runs ONLY after VerifyPhrase succeeds; for Import it runs directly (the user
+  // already has the phrase). Passing the phrase as importMnemonic makes both
+  // paths seal a phrase the caller controls (Create shows+verifies it first).
+  const sealVault = async (mnemonicToSeal: string) => {
+    const slot = mintVaultSlot();
+    const result = await createAndStoreVault(slot, password, {
+      importMnemonic: mnemonicToSeal,
+    });
+    await registerVault(
+      { slot, name: name.trim(), addressHex: result.addressHex },
+      { setActive: setAsActive },
+    );
+    if (setAsActive) {
+      setActiveAccount(slot);
+      notifyActiveWalletChanged();
+    }
+    // Drop password material from state ASAP.
+    setPassword("");
+    setConfirm("");
+    setImportDraft("");
+    onAdded();
+  };
+
   const submit = async () => {
     if (!canSubmit) return;
     setBusy(true);
@@ -88,46 +121,65 @@ export function AddVaultModal({ onClose, onAdded }: Props) {
         setBusy(false);
         return;
       }
-    }
-
-    const slot = mintVaultSlot();
-    try {
-      const result = await createAndStoreVault(
-        slot,
-        password,
-        mode === "import" ? { importMnemonic: importDraft } : {},
-      );
-      await registerVault(
-        { slot, name: name.trim(), addressHex: result.addressHex },
-        { setActive: setAsActive },
-      );
-      if (setAsActive) {
-        setActiveAccount(slot);
-        notifyActiveWalletChanged();
-      }
-
-      // Drop password material from state ASAP.
-      setPassword("");
-      setConfirm("");
-      setImportDraft("");
-
-      onAdded();
-
-      if (mode === "create") {
-        setCreatedMnemonic(result.mnemonic);
-        setStage("show-phrase");
-        setBusy(false);
-      } else {
+      try {
+        await sealVault(cleaned);
         setBusy(false);
         onClose();
+      } catch (cause) {
+        const msg =
+          cause instanceof VaultCallError
+            ? cause.message
+            : explainImportError((cause as Error)?.message ?? String(cause));
+        setError(msg);
+        setBusy(false);
       }
+      return;
+    }
+
+    // Create: mint the phrase in memory and sanity-check it can derive a real
+    // ML-DSA-65 keypair, then show it. NOTHING is persisted here — the vault is
+    // sealed only after VerifyPhrase succeeds (onCreateVerified).
+    try {
+      const fresh = generateMnemonic();
+      const seed = mnemonicToMlDsa65Seed(fresh);
+      try {
+        MlDsa65Backend.fromSeed(seed); // throws if the SDK is broken
+      } finally {
+        seed.fill(0);
+      }
+      setCreatedMnemonic(fresh);
+      setStage("show-phrase");
+      setBusy(false);
     } catch (cause) {
-      if (cause instanceof VaultCallError) {
-        setError(cause.message);
-      } else {
-        const msg = (cause as Error)?.message ?? String(cause);
-        setError(mode === "import" ? explainImportError(msg) : msg);
-      }
+      setError((cause as Error)?.message ?? String(cause));
+      setBusy(false);
+    }
+  };
+
+  const onCreateVerified = async () => {
+    // Reached only after the user correctly placed the missing words — this is
+    // the first and only time a created secondary vault touches disk.
+    if (!createdMnemonic) {
+      setError("Lost the recovery phrase — start over.");
+      setStage("compose");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await sealVault(createdMnemonic);
+      setCreatedMnemonic(null);
+      setBusy(false);
+      onClose();
+    } catch (cause) {
+      // Seal failed after a correct verification — surface it and return to the
+      // phrase so the user can retry without losing the words.
+      setError(
+        cause instanceof VaultCallError
+          ? cause.message
+          : (cause as Error)?.message ?? String(cause),
+      );
+      setStage("show-phrase");
       setBusy(false);
     }
   };
@@ -157,7 +209,15 @@ export function AddVaultModal({ onClose, onAdded }: Props) {
         className="w-card"
         style={{ maxWidth: 480, width: "100%" }}
       >
-        {stage === "show-phrase" && createdMnemonic ? (
+        {stage === "verify-phrase" && createdMnemonic ? (
+          // Forced verification — the same fill-in-the-blanks check first-run
+          // uses, with no onBack so it can't be skipped. Sealing happens in
+          // onCreateVerified, so a wallet can't be created without verifying.
+          <VerifyPhrase
+            mnemonic={createdMnemonic}
+            onVerified={() => void onCreateVerified()}
+          />
+        ) : stage === "show-phrase" && createdMnemonic ? (
           <>
             <div className="w-card__head">
               <h3>Recovery phrase</h3>
@@ -171,16 +231,23 @@ export function AddVaultModal({ onClose, onAdded }: Props) {
               }}
             >
               Write these 24 words down and keep them offline — they're the
-              only way to restore this wallet later.
+              only way to restore this wallet later. Next you'll confirm a few
+              of them.
             </p>
             <MnemonicGrid mnemonic={createdMnemonic} />
+            {error && (
+              <div className="w-banner error" style={{ marginTop: 12 }}>
+                {error}
+              </div>
+            )}
             <div style={{ display: "flex", marginTop: 20 }}>
               <button
                 className="btn btn--primary"
                 style={{ marginLeft: "auto" }}
+                disabled={busy}
                 onClick={() => {
-                  setCreatedMnemonic(null);
-                  onClose();
+                  setError(null);
+                  setStage("verify-phrase");
                 }}
               >
                 I have backed it up
