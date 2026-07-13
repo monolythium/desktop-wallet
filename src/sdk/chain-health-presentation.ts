@@ -93,3 +93,31 @@ export function chainHealthPresentation(health: ChainHealth): ChainHealthPresent
 export function chainHealthBannerVisible(kind: ChainHealthKind): boolean {
   return kind === "untrusted" || kind === "regenesis" || kind === "quarantined" || kind === "offline";
 }
+
+/** A degraded connection state described for the Help page: a clean title (no
+ *  live head height) plus the SAME "what to do" hint the chip/banner show. */
+export interface ChainHealthHelpEntry {
+  kind: ChainHealthKind;
+  title: string;
+  hint: string;
+}
+
+/** The non-live connection states a stuck user might hit, each paired with the
+ *  exact `hint` from `chainHealthPresentation` — so the Help page references the
+ *  shipped copy (single source of truth) instead of re-authoring it. Ordered
+ *  worst/most-actionable first. Pure. */
+export function chainHealthHelpEntries(): ChainHealthHelpEntry[] {
+  const entry = (health: ChainHealth, title: string): ChainHealthHelpEntry => ({
+    kind: health.kind,
+    title,
+    hint: chainHealthPresentation(health).hint ?? "",
+  });
+  return [
+    entry({ kind: "regenesis" }, "All operators untrusted"),
+    entry({ kind: "untrusted" }, "Untrusted operator"),
+    entry({ kind: "quarantined" }, "Operator quarantined"),
+    entry({ kind: "offline", reason: "" }, "Offline"),
+    entry({ kind: "stalled", height: 0 }, "Stalled"),
+    entry({ kind: "reconnecting", height: 0 }, "Reconnecting"),
+  ];
+}

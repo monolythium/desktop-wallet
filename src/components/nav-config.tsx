@@ -212,6 +212,13 @@ const ICON_BULB = () => (
     <path d="M12 3a6 6 0 0 0-4 10.5c.7.7 1 1.5 1 2.5h6c0-1 .3-1.8 1-2.5A6 6 0 0 0 12 3Z" />
   </svg>
 );
+const ICON_HELP = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="9" />
+    <path d="M9.5 9a2.5 2.5 0 0 1 4.5 1.5c0 1.5-2 2-2 3.5" />
+    <path d="M12 17h.01" />
+  </svg>
+);
 
 // ── The categorized rail ─────────────────────────────────────────────────────
 // The collapsible categorized rail wiring each destination. The primary group
@@ -275,6 +282,7 @@ export const NAV_CATEGORIES: NavCategory[] = [
     id: "info",
     header: "Info",
     items: [
+      { id: "help", label: "Help", icon: ICON_HELP, route: "help" },
       { id: "about", label: "About", icon: ICON_INFO, route: "about" },
       { id: "resources", label: "Resources", icon: ICON_LINK, route: "resources" },
       { id: "why", label: "Why Monolythium", icon: ICON_BULB, route: "why-monolythium" },

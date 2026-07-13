@@ -64,6 +64,7 @@ const TITLES: Record<Route, string> = {
   reset: "Reset wallet",
   resources: "Resources",
   "why-monolythium": "Why Monolythium",
+  help: "Help",
   about: "About",
 };
 

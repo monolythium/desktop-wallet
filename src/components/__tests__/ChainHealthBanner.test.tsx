@@ -3,7 +3,7 @@
 // shared health context is mocked so the banner is driven state-by-state.
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { ChainHealthView } from "../../sdk/useChainHealth";
 import type { ChainHealth } from "../../sdk/chain-health";
 
@@ -43,6 +43,15 @@ describe("ChainHealthBanner", () => {
     expect(screen.getByText("ALL OPERATORS UNTRUSTED")).toBeInTheDocument();
     expect(screen.getByText(/re-genesised/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /review operators/i })).toBeInTheDocument();
+  });
+
+  it("offers a 'what does this mean?' link to Help when wired", () => {
+    setHealth({ kind: "offline", reason: "x" });
+    const onLearnMore = vi.fn();
+    render(<ChainHealthBanner onLearnMore={onLearnMore} />);
+    const btn = screen.getByRole("button", { name: /what does this mean/i });
+    fireEvent.click(btn);
+    expect(onLearnMore).toHaveBeenCalledTimes(1);
   });
 
   it("renders each red hard-trust state's title", () => {

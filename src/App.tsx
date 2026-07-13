@@ -34,6 +34,7 @@ import { MonoStudio } from "./pages/MonoStudio";
 import { Notifications } from "./pages/Notifications";
 import { Provider } from "./pages/Provider";
 import { Resources } from "./pages/Resources";
+import { Help } from "./pages/Help";
 import { RiscvContracts } from "./pages/RiscvContracts";
 import { Settings } from "./pages/Settings";
 import { Delegate } from "./pages/Delegate";
@@ -256,7 +257,10 @@ export function App() {
         />
         <Topbar route={route} setRoute={setRoute} />
         <main className="w-main">
-          <ChainHealthBanner onReview={() => setRoute("about")} />
+          <ChainHealthBanner
+            onReview={() => setRoute("about")}
+            onLearnMore={() => setRoute("help")}
+          />
           <ErrorBoundary
             resetKey={route}
             fallback={(retry) => (
@@ -295,6 +299,7 @@ export function App() {
           ) : null}
           {route === "resources" ? <Resources /> : null}
           {route === "why-monolythium" ? <WhyMonolythium /> : null}
+          {route === "help" ? <Help goto={setRoute} /> : null}
           {route === "settings" ? settingsPage() : null}
           {route === "display" ? settingsPage("appearance") : null}
           {route === "recovery" ? settingsPage("reveal") : null}

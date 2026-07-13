@@ -13,7 +13,15 @@ import {
   chainHealthPresentation,
 } from "../sdk/chain-health-presentation";
 
-export function ChainHealthBanner({ onReview }: { onReview?: () => void }) {
+export function ChainHealthBanner({
+  onReview,
+  onLearnMore,
+}: {
+  onReview?: () => void;
+  /** Route to the Help page's connection-status guidance — closes the loop
+   *  from "something's wrong" to "here's what it means". */
+  onLearnMore?: () => void;
+}) {
   const { health } = useChainHealthView();
   if (!chainHealthBannerVisible(health.kind)) return null;
   const pres = chainHealthPresentation(health);
@@ -23,6 +31,11 @@ export function ChainHealthBanner({ onReview }: { onReview?: () => void }) {
         <div className="w-chain-banner__title">{pres.label}</div>
         {pres.hint ? <div className="w-chain-banner__body">{pres.hint}</div> : null}
       </div>
+      {onLearnMore ? (
+        <button type="button" className="w-chain-banner__action" onClick={onLearnMore}>
+          What does this mean?
+        </button>
+      ) : null}
       {onReview ? (
         <button type="button" className="w-chain-banner__action" onClick={onReview}>
           Review operators
