@@ -11,7 +11,6 @@
 // skipping the probe entirely and treating the wallet as already set up.
 
 import { useEffect, useState } from "react";
-import { ApprovalOverlay } from "./components/ApprovalOverlay";
 import { Onboarding } from "./components/Onboarding";
 import { PendingTxReconciler } from "./components/PendingTxReconciler";
 import { Sidebar } from "./components/Sidebar";
@@ -24,15 +23,12 @@ import { AiTrading } from "./pages/AiTrading";
 import { Bridges } from "./pages/Bridges";
 import { Contacts } from "./pages/Contacts";
 import { Home } from "./pages/Home";
-import { Inbox } from "./pages/Inbox";
 import { News } from "./pages/News";
 import { MonoStudio } from "./pages/MonoStudio";
 import { Notifications } from "./pages/Notifications";
-import { Provider } from "./pages/Provider";
 import { RiscvContracts } from "./pages/RiscvContracts";
 import { Settings } from "./pages/Settings";
 import { Stake } from "./pages/Stake";
-import { Stele } from "./pages/Stele";
 import { TokenDetail } from "./pages/TokenDetail";
 import { Tokens } from "./pages/Tokens";
 import { Trade } from "./pages/Trade";
@@ -53,9 +49,7 @@ import {
 import { readDeveloperMode, writeDeveloperMode } from "./sdk/studio-host";
 import {
   readExperimentalEnabled,
-  readSteleEnabled,
   writeExperimentalEnabled,
-  writeSteleEnabled,
 } from "./sdk/feature-flags";
 import "./styles/tokens.css";
 import "./styles/wallet.css";
@@ -94,7 +88,6 @@ function isTauri(): boolean {
 export function App() {
   const [route, setRoute] = useState<Route>(() => readRoute());
   const [developerModeEnabled, setDeveloperModeEnabledState] = useState<boolean>(() => readDeveloperMode());
-  const [steleEnabled, setSteleEnabledState] = useState<boolean>(() => readSteleEnabled());
   const [experimentalEnabled, setExperimentalEnabledState] = useState<boolean>(() => readExperimentalEnabled());
   const [boot, setBoot] = useState<BootState>(() =>
     isTauri() ? { kind: "probing" } : { kind: "ready" },
@@ -182,13 +175,6 @@ export function App() {
   }, [developerModeEnabled, route]);
 
   useEffect(() => {
-    writeSteleEnabled(steleEnabled);
-    if (!steleEnabled && (route === "stele" || route === "inbox" || route === "provider")) {
-      setRoute("home");
-    }
-  }, [steleEnabled, route]);
-
-  useEffect(() => {
     writeExperimentalEnabled(experimentalEnabled);
     if (!experimentalEnabled && (route === "agents" || route === "ai-trade" || route === "notifications")) {
       setRoute("home");
@@ -198,11 +184,6 @@ export function App() {
   const setDeveloperModeEnabled = (enabled: boolean) => {
     setDeveloperModeEnabledState(enabled);
     writeDeveloperMode(enabled);
-  };
-
-  const setSteleEnabled = (enabled: boolean) => {
-    setSteleEnabledState(enabled);
-    writeSteleEnabled(enabled);
   };
 
   const setExperimentalEnabled = (enabled: boolean) => {
@@ -229,7 +210,6 @@ export function App() {
           route={route}
           setRoute={setRoute}
           developerModeEnabled={developerModeEnabled}
-          steleEnabled={steleEnabled}
           experimentalEnabled={experimentalEnabled}
         />
         <Topbar route={route} setRoute={setRoute} experimentalEnabled={experimentalEnabled} />
@@ -253,22 +233,16 @@ export function App() {
           {route === "trade" ? <Trade /> : null}
           {route === "ai-trade" ? <AiTrading /> : null}
           {route === "news" ? <News /> : null}
-          {route === "stele" && steleEnabled ? <Stele /> : null}
-          {route === "inbox" && steleEnabled ? <Inbox /> : null}
-          {route === "provider" && steleEnabled ? <Provider /> : null}
           {route === "notifications" && experimentalEnabled ? <Notifications /> : null}
           {route === "settings" ? (
             <Settings
               developerModeEnabled={developerModeEnabled}
               setDeveloperModeEnabled={setDeveloperModeEnabled}
-              steleEnabled={steleEnabled}
-              setSteleEnabled={setSteleEnabled}
               experimentalEnabled={experimentalEnabled}
               setExperimentalEnabled={setExperimentalEnabled}
             />
           ) : null}
         </main>
-        {steleEnabled ? <ApprovalOverlay /> : null}
         {experimentalEnabled ? <PendingTxReconciler /> : null}
         {pendingUpdate ? (
           <UpdateBanner

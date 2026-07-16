@@ -544,7 +544,7 @@ export function Agents() {
                   setCreateLabel(e.target.value);
                   setCreateError(null);
                 }}
-                placeholder="e.g. Travel booking agent"
+                placeholder="e.g. Treasury reporting agent"
                 style={inputStyle}
               />
               <label className="cap">Password for the new agent vault</label>

@@ -41,7 +41,7 @@ use thiserror::Error;
 
 /// Normal-tx base fee in LYTH (display unit, not wei). The chain returns
 /// the live base fee per epoch — for now this is a placeholder so the
-/// onboarding UI shows a plausible number.
+/// wallet UI shows a plausible number.
 ///
 /// TODO(name-base-fee): replace with live `eth_gasPrice` × estimated gas
 /// for a name-register tx once the RPC client is wired.
@@ -268,8 +268,7 @@ pub fn validate(name: &str) -> Result<NameAvailability, NameError> {
 
 /// Tauri command: validate a `.mono` name and estimate its registration
 /// price. Pure client-side check — no chain RPC required. Use this in
-/// Onboarding (when the user picks a name), Send (recipient autocomplete),
-/// and Stele (provider profile lookup) before any signing flow.
+/// wallet onboarding and Send recipient autocomplete before any signing flow.
 #[tauri::command]
 pub fn name_check_availability(name: String) -> Result<NameAvailability, NameError> {
     validate(&name)

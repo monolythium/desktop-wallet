@@ -1,8 +1,7 @@
 // `.mono` name validation + U-curve price estimation.
 // Wraps the Rust `name_check_availability` Tauri command. Pure client-side
 // check — does NOT touch the chain (live availability needs the RPC client
-// wired). Use this for Onboarding name picker, Send recipient autocomplete,
-// and Stele provider lookup.
+// wired). Use this for wallet onboarding and Send recipient autocomplete.
 
 import { invoke } from "@tauri-apps/api/core";
 

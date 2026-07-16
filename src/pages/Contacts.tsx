@@ -1,9 +1,8 @@
 // Contacts page — local wallet address book.
 // Shows on-chain addresses with last-used, labels, and tags.
 //
-// A compact AddressBookCard also lives in Inbox.tsx; this is the canonical
-// full-page management surface (list, search, add, remove, live account
-// policy probe).
+// This is the canonical full-page management surface (list, search, add,
+// remove, live account policy probe).
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useActiveWallet } from "../sdk/active-wallet";

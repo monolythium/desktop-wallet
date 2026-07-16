@@ -1,8 +1,7 @@
 // Local address-book store for wallet contacts.
 //
-// Contacts are a wallet-level feature, not a Stele-only feature. Native
-// builds persist through Tauri plugin-store; browser preview uses localStorage
-// so the management surface stays usable without the Tauri host.
+// Native builds persist through Tauri plugin-store; browser preview uses
+// localStorage so the management surface stays usable without the Tauri host.
 
 import { Store } from "@tauri-apps/plugin-store";
 import { requireTypedUserAddress } from "./address";
