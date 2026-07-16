@@ -175,9 +175,8 @@ export function TokenDetail({ goto }: Props) {
           <button className="btn" onClick={() => setReceiveOpen(true)} disabled={!walletAddress}>
             Receive
           </button>
-          {/* Convert (off-ramp) is the Stele marketplace flow; from here we
-              route to Trade for on-chain CLOB swaps (the native convert path).
-              No fabricated in-asset swap modal. */}
+          {/* Convert routes to Trade for on-chain CLOB swaps. No fabricated
+              in-asset swap modal. */}
           <button className="btn" onClick={() => goto("trade")}>
             Convert
           </button>

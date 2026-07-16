@@ -53,9 +53,6 @@ const TITLES: Record<Route, string> = {
   trade: "Trade",
   "ai-trade": "AI Trading",
   news: "News",
-  stele: "Stele",
-  inbox: "Inbox",
-  provider: "Provider",
   notifications: "Notifications",
   settings: "Settings",
 };

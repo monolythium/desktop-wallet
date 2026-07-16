@@ -19,7 +19,6 @@ Functional desktop shell with substantive Rust backend and a working Operations 
 - **SDK comes from npm.** `package.json` pins `@monolythium/core-sdk` to the exact version `0.4.17` from npm. The SDK is public ([`monolythium/mono-core-sdk`](https://github.com/monolythium/mono-core-sdk)) — `pnpm install` pulls it straight from the registry, no sibling checkout required.
 - **Packaged builds default to the public testnet RPC gateway.** `VITE_MONO_RPC_URL` still overrides the endpoint; local dev uses Vite's `/rpc` proxy against the SDK registry's operator list.
 - **Missing backend state fails closed.** Pages read live chain state, wallet-local state, or show an empty/disabled state; they do not fall back to hardcoded balances, trades, or news.
-- **The Stele marketplace tab is settings-gated and off by default.** Even when enabled, marketplace flows require the `lyth_mcp` sidecar running locally — see the Stele integration section below.
 
 Watch this repo for the first non-preview tag before treating any build as production-grade.
 
@@ -31,8 +30,8 @@ A native desktop wallet for Monolythium, built on Tauri 2 with a Rust backend an
 
 Architecture splits into:
 
-- **Tauri Rust host** (`src-tauri/src/`) — owns the OS-keychain bridge (`keychain.rs`), Argon2id + XChaCha20-Poly1305 vault (`vault.rs`), MCP shared-store bridge (`mcp_bridge.rs`), Studio devkit host (`studio_host.rs`), and the optional Stele marketplace runtime (`stele/`, gated behind a Cargo feature).
-- **React 19 frontend** (`src/`) — pages for Home, Activity, Wallets, Tokens, Stake, Contacts, RISC-V, Studio, Trade, AI Trading, News, Stele (settings-gated), Inbox (settings-gated), Provider (settings-gated), Settings. Sidebar nav + top-bar shell + Operations drawer overlay.
+- **Tauri Rust host** (`src-tauri/src/`) — owns the OS-keychain bridge (`keychain.rs`), Argon2id + XChaCha20-Poly1305 vault (`vault.rs`), and Studio devkit host (`studio_host.rs`).
+- **React 19 frontend** (`src/`) — pages for Home, Activity, Wallets, Tokens, Stake, Contacts, RISC-V, Studio, Trade, AI Trading, News, Notifications, and Settings. Sidebar nav + top-bar shell + Operations drawer overlay.
 - **Operations drawer** (`src/operations/`) — the audit boundary. Every privileged action (send, sign, stake, swap, rotate key, etc.) routes through `OperationsDrawer.tsx`'s `preview → auth → executing → done` state machine. Auth surface is "keychain" (OS-keychain unlock). No silent signing.
 
 ## Who this is for
@@ -62,9 +61,6 @@ less src-tauri/src/vault.rs
 
 # Read the Operations drawer state machine (audit boundary)
 less src/operations/OperationsDrawer.tsx
-
-# Read the Stele marketplace runtime (settings-gated; off by default)
-less src-tauri/src/stele/
 ```
 
 To build and run the full app:
@@ -95,15 +91,14 @@ desktop-wallet/
 │   ├── App.tsx, main.tsx
 │   ├── pages/                      # Home, Activity, Wallets, Tokens, Stake,
 │   │                               # Contacts, RISC-V, MonoStudio, Trade,
-│   │                               # AiTrading, News, Stele, Inbox, Provider,
-│   │                               # Settings
-│   ├── components/                 # Sidebar, Topbar, Onboarding, Approval
-│   │                               # overlays, etc.
+│   │                               # AiTrading, News, Notifications, Settings
+│   ├── components/                 # Sidebar, Topbar, Onboarding, wallet
+│   │                               # modals, etc.
 │   ├── operations/                 # OperationsDrawer + state machine + tests
 │   │                               # (the audit boundary — every privileged
 │   │                               # action goes through here)
 │   └── sdk/                        # Tauri bridge, chain client, live hooks,
-│                                   # Stele wrappers, etc.
+│                                   # wallet-local stores, etc.
 ├── src-tauri/                      # Rust backend
 │   └── src/
 │       ├── main.rs, lib.rs
@@ -111,11 +106,7 @@ desktop-wallet/
 │       │                           # framework / Windows Credential Manager /
 │       │                           # libsecret on Linux)
 │       ├── vault.rs                # Argon2id + XChaCha20-Poly1305 vault
-│       ├── mcp_bridge.rs           # Read-only bridge to lyth_mcp shared
-│       │                           # wallet store at ~/.lyth_mcp/wallets.json
-│       ├── studio_host.rs          # Mono Studio devkit host integration
-│       └── stele/                  # Stele marketplace runtime (settings-
-│                                   # gated, off by default — see below)
+│       └── studio_host.rs          # Mono Studio devkit host integration
 └── .github/workflows/release.yml   # 4-platform signed-release pipeline
 ```
 
@@ -129,25 +120,11 @@ desktop-wallet/
 
 No custom crypto. All sensitive operations go through audited, RustCrypto-aligned dependencies.
 
-## Stele marketplace tab (settings-gated, default off)
-
-The wallet bundles the Stele marketplace surface as a **settings-gated feature** (Settings → Stele marketplace → Enable). Default is **off**; the tab doesn't appear in the sidebar until enabled, and the Cargo `stele` feature gates the entire Rust runtime so default builds don't even compile the marketplace code.
-
-When enabled with `--features stele` and the [`lyth_mcp`](https://github.com/monolythium/lyth_mcp) sidecar installed locally:
-
-- **Stele tab** — browse providers (`vendor_search`), check `.mono` names, configure ChangeNow swaps, view Travel/Flight integrations, view Spend (Coinsbee) flow
-- **Inbox tab** — address book, booking-request form, tx outbox
-- **Provider tab** — agent-wallet management, x402 vendor policies, attestations
-- **Approval overlay** — modal that pops when `lyth_mcp` asks the wallet to sign something on the user's behalf; routes through the Operations drawer's authorization step
-
-The Stele runtime is intentionally separable — if you don't want any marketplace surface, build without `--features stele` and the entire `stele/` module is excluded from the binary.
-
 ## Security model (in brief)
 
 - The encrypted vault lives in the OS keychain (Apple Security framework / Windows Credential Manager / Linux libsecret), keyed by an Argon2id-derived KEK.
 - The unlocked seed lives in service-worker-equivalent state in the Tauri host for the duration of one operation, then is zeroed.
 - Every destructive operation routes through the Operations drawer (`preview → auth → executing → done`) — no silent signing.
-- When the Stele feature is enabled, the loopback approval bridge requires a per-session bearer token + the user's explicit click for every destructive op forwarded by `lyth_mcp`.
 - The Tauri webview's CSP is currently `null` (Tauri-app practice for dynamic styles); the equivalent guarantees come from the IPC capability allowlist in `src-tauri/capabilities/`.
 
 The full set of in-scope vulnerability categories is enumerated in [`SECURITY.md`](./SECURITY.md).
@@ -173,16 +150,15 @@ The shape is in place; no tagged release has run it end-to-end yet.
 - [**`monolythium/monarch-os-talos`**](https://github.com/monolythium/monarch-os-talos) — operator node OS.
 - [**`monolythium/mono-studio`**](https://github.com/monolythium/mono-studio) — public developer toolchain hosted by this wallet's Studio tab.
 - [**`monolythium/monoscan`**](https://github.com/monolythium/monoscan) — public block explorer the wallet links out to for tx receipts.
-- [**`monolythium/lyth_mcp`**](https://github.com/monolythium/lyth_mcp) — public MCP server consumed by the Stele tab when enabled.
 - **`monolythium/mono-core`** *(private; source flips to BSL-1.1 at mainnet)* — the chain itself.
 
 ## Contributing
 
-See [`CONTRIBUTING.md`](./CONTRIBUTING.md). Short version: run the three gates (`pnpm typecheck`, `cargo check`, `pnpm test`) locally before opening a PR. Do not bypass the Operations drawer; do not hardcode production RPC IPs; do not loosen the Stele approval-bridge boundary.
+See [`CONTRIBUTING.md`](./CONTRIBUTING.md). Short version: run the three gates (`pnpm typecheck`, `cargo check`, `pnpm test`) locally before opening a PR. Do not bypass the Operations drawer or hardcode production RPC IPs.
 
 ## Security
 
-See [`SECURITY.md`](./SECURITY.md). Short version: vulnerability reports to `security@monolythium.com`, **not** the public issue tracker. The in-scope categories cover keychain exfiltration, vault tamper, Operations drawer bypass, Stele approval-bridge bypass, approval-bridge replay, OS sandbox escape, chain-config corruption, runtime-provenance corruption, and unlocked-seed leak.
+See [`SECURITY.md`](./SECURITY.md). Short version: vulnerability reports to `security@monolythium.com`, **not** the public issue tracker. The in-scope categories cover keychain exfiltration, vault tamper, Operations drawer bypass, OS sandbox escape, chain-config corruption, runtime-provenance corruption, and unlocked-seed leak.
 
 ## License
 
