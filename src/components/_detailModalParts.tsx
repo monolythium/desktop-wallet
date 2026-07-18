@@ -11,6 +11,13 @@ import type { ReactNode } from "react";
 
 import { monoscanAddressUrl, monoscanTxUrl } from "../sdk/monoscan";
 import { loadReverseName } from "../sdk/reverse-name";
+import { addressbookGetByAddress } from "../sdk/addressbook";
+import {
+  preferredAddressLabel,
+  REGISTERED_CHIP_TEXT,
+  REGISTERED_CHIP_TITLE,
+} from "../sdk/address-label";
+import { CategoryBadge, categoryOfName } from "./CategoryBadge";
 
 /** Middle-truncate any string (bech32m address or hash) for compact
  *  display. Pure — never throws. */
@@ -92,12 +99,16 @@ export function MonoscanTxButton({ hash }: { hash: string }) {
 export function CopyableAddress({
   addr,
   name,
+  /** Set when `name` is a quorum-verified registered name (chip + category
+   *  badge). A contact label passes false — the chip is exclusively the
+   *  chain-verified marker. */
+  registered = false,
 }: {
   addr: string;
   name?: string | null;
+  registered?: boolean;
 }) {
   const [copied, setCopied] = useState(false);
-  const short = truncMiddle(addr);
   const onCopy = () => {
     void navigator.clipboard.writeText(addr).then(
       () => {
@@ -112,19 +123,55 @@ export function CopyableAddress({
   return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
       {name ? (
-        <span style={{ fontFamily: "var(--f-sans)", fontWeight: 600, color: "var(--fg-100)" }}>
-          {name}
+        <span style={{ display: "inline-flex", alignItems: "center" }}>
+          <span
+            style={{
+              fontFamily: "var(--f-sans)",
+              fontWeight: 600,
+              color: registered ? "rgba(var(--gold-glow), 1)" : "var(--fg-100)",
+            }}
+          >
+            {name}
+          </span>
+          {registered ? (
+            <>
+              <span
+                data-testid="name-chip"
+                title={REGISTERED_CHIP_TITLE}
+                style={{
+                  marginLeft: 6,
+                  fontSize: 9,
+                  fontWeight: 600,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.08em",
+                  padding: "1px 5px",
+                  borderRadius: 4,
+                  border: "1px solid rgba(var(--gold-glow), 0.5)",
+                  color: "rgba(var(--gold-glow), 1)",
+                }}
+              >
+                {REGISTERED_CHIP_TEXT}
+              </span>
+              <CategoryBadge category={categoryOfName(name)} />
+            </>
+          ) : null}
         </span>
       ) : null}
       <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+        {/* The FULL address — the label annotates, the address stands. */}
         <a
           href={monoscanAddressUrl(addr)}
           target="_blank"
           rel="noopener noreferrer"
           title={addr}
-          style={{ fontFamily: "var(--f-mono)", color: "var(--w-blue)" }}
+          style={{
+            fontFamily: "var(--f-mono)",
+            color: "var(--w-blue)",
+            wordBreak: "break-all",
+            textAlign: "right",
+          }}
         >
-          {short}
+          {addr}
         </a>
         <button
           type="button"
@@ -176,6 +223,33 @@ export function useReverseName(address: string | null | undefined): string | nul
  *  has one (honest fallback to the bare address otherwise). Use anywhere a bare
  *  counterparty/owner address is displayed. */
 export function NamedAddress({ addr }: { addr: string }) {
-  const name = useReverseName(addr);
-  return <CopyableAddress addr={addr} name={name} />;
+  const reverseName = useReverseName(addr);
+  const [contactName, setContactName] = useState<string | null>(null);
+
+  // The contact tier. Without it a saved contact was invisible in Activity
+  // detail while visible in the Send picker — one precedence, everywhere.
+  useEffect(() => {
+    let cancelled = false;
+    setContactName(null);
+    if (!addr) return;
+    void addressbookGetByAddress(addr)
+      .then((c) => {
+        if (!cancelled) setContactName(c?.name ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) setContactName(null); // display-only; never throws up
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [addr]);
+
+  const label = preferredAddressLabel(reverseName, contactName);
+  return (
+    <CopyableAddress
+      addr={addr}
+      name={label?.label ?? null}
+      registered={label?.kind === "registered"}
+    />
+  );
 }
