@@ -1,8 +1,13 @@
 // Contacts page — local wallet address book.
-// Shows on-chain addresses with last-used, labels, and tags.
+//
+// Rows are ordered most-recently-used first, which the v2 store makes TRUE by
+// actually writing `lastUsedAt` on a successful send (v1 documented the field
+// but nothing ever wrote it). Every address renders in FULL and wraps rather
+// than ellipsising: an ellipsis hides exactly the characters a verifying user
+// needs to check.
 //
 // A compact AddressBookCard also lives in Inbox.tsx; this is the canonical
-// full-page management surface (list, search, add, remove, live account
+// full-page management surface (list, search, add, edit, remove, live account
 // policy probe).
 
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -10,22 +15,23 @@ import { useActiveWallet } from "../sdk/active-wallet";
 import { requireTypedUserAddress } from "../sdk/address";
 import {
   addressbookAdd,
+  addressbookEditNote,
   addressbookLookup,
   addressbookRemove,
+  addressbookRename,
   AddressBookCallError,
+  MAX_NAME_LEN,
+  MAX_NOTE_LEN,
   type AddressBookEntry,
 } from "../sdk/addressbook";
 import { errorMessage, loadAccountPolicy } from "../sdk/live";
-
-const MAX_NAME_LEN = 64;
-const MAX_NOTE_LEN = 256;
 
 export function Contacts() {
   return (
     <div className="w-page">
       <div className="w-page__header">
         <h1>Contacts</h1>
-        <div className="sub">On-chain addresses · last-used, labels, tags.</div>
+        <div className="sub">Saved recipients · most recently used first.</div>
       </div>
 
       <AddressBookSection />
@@ -199,9 +205,10 @@ function AddressBookSection() {
           >
             {entries.map((entry) => (
               <ContactRow
-                key={entry.name}
+                key={entry.address}
                 entry={entry}
                 onRemove={() => void onRemove(entry.address)}
+                onSaved={() => void refresh(query.trim() || undefined)}
               />
             ))}
           </div>
@@ -244,7 +251,7 @@ function AddressBookSection() {
               <span className="cap">Name</span>
               <input
                 type="text"
-                placeholder="alice.mono"
+                placeholder="e.g. Alice, Exchange, Cold storage"
                 value={draftName}
                 maxLength={MAX_NAME_LEN}
                 onChange={(e) => setDraftName(e.target.value)}
@@ -298,12 +305,43 @@ function AddressBookSection() {
 function ContactRow({
   entry,
   onRemove,
+  onSaved,
 }: {
   entry: AddressBookEntry;
   onRemove: () => void;
+  onSaved: () => void;
 }) {
   const [confirming, setConfirming] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [draftName, setDraftName] = useState(entry.name);
+  const [draftNote, setDraftNote] = useState(entry.note ?? "");
+  const [editError, setEditError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const startEdit = () => {
+    setDraftName(entry.name);
+    setDraftNote(entry.note ?? "");
+    setEditError(null);
+    setEditing(true);
+  };
+
+  const onSave = async () => {
+    setEditError(null);
+    setSaving(true);
+    try {
+      // The ADDRESS is never editable — a different address is a different
+      // contact (remove + add), not a rename.
+      await addressbookRename(entry.address, draftName);
+      await addressbookEditNote(entry.address, draftNote);
+      setEditing(false);
+      onSaved();
+    } catch (cause) {
+      setEditError(cause instanceof AddressBookCallError ? cause.message : String(cause));
+    } finally {
+      setSaving(false);
+    }
+  };
 
   useEffect(() => {
     if (!copied) return;
@@ -326,15 +364,61 @@ function ContactRow({
       style={{ alignItems: "center", padding: "10px 0", gap: 12 }}
     >
       <div style={{ flex: 1, minWidth: 0 }}>
+        {editing ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <label style={fieldStyle()}>
+              <span className="cap">Name</span>
+              <input
+                type="text"
+                value={draftName}
+                maxLength={MAX_NAME_LEN}
+                onChange={(e) => setDraftName(e.target.value)}
+                style={textInputStyle()}
+              />
+            </label>
+            <label style={fieldStyle()}>
+              <span className="cap">Note (optional)</span>
+              <input
+                type="text"
+                value={draftNote}
+                maxLength={MAX_NOTE_LEN}
+                onChange={(e) => setDraftNote(e.target.value)}
+                style={textInputStyle()}
+              />
+            </label>
+            <div className="row-help mono" style={{ wordBreak: "break-all" }}>
+              {entry.address}
+            </div>
+            {editError ? (
+              <div className="row-help" style={{ color: "var(--err)" }}>
+                {editError}
+              </div>
+            ) : null}
+            <div style={{ display: "flex", gap: 6 }}>
+              <button
+                type="button"
+                className="btn btn--sm"
+                onClick={() => void onSave()}
+                disabled={saving}
+              >
+                {saving ? "Saving…" : "Save"}
+              </button>
+              <button
+                type="button"
+                className="btn btn--sm btn--ghost"
+                onClick={() => setEditing(false)}
+                disabled={saving}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : (
+          <>
         <div className="row-label">{entry.name}</div>
         <div
           className="row-help mono"
-          style={{
-            marginTop: 4,
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-          }}
+          style={{ marginTop: 4, wordBreak: "break-all" }}
           title={entry.address}
         >
           {entry.address}
@@ -370,6 +454,8 @@ function ContactRow({
             ))}
           </div>
         ) : null}
+          </>
+        )}
       </div>
       <div style={{ display: "flex", gap: 6 }}>
         <button
@@ -380,6 +466,11 @@ function ContactRow({
         >
           {copied ? "Copied" : "Copy"}
         </button>
+        {!editing && !confirming ? (
+          <button type="button" className="btn btn--sm btn--ghost" onClick={startEdit}>
+            Edit
+          </button>
+        ) : null}
         {confirming ? (
           <>
             <button
