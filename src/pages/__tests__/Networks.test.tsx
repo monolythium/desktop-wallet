@@ -129,3 +129,68 @@ describe("Networks — delete (both bodies)", () => {
     expect(localStorage.getItem(ACTIVE_CHAIN_KEY)).toBe("0x10F2C");
   });
 });
+
+describe("Networks — add custom chain form", () => {
+  async function openAdd() {
+    const r = renderNetworks(true);
+    await r.user.click(screen.getByRole("button", { name: "+ Add custom chain" }));
+    return r;
+  }
+
+  it("chain-id validators + the Decimal hint, verbatim", async () => {
+    const { user } = await openAdd();
+    const id = screen.getByPlaceholderText("0x539");
+    await user.type(id, "abc");
+    expect(screen.getByText("Chain id must be 0x-prefixed hex")).toBeInTheDocument();
+    await user.clear(id);
+    await user.type(id, "0x0");
+    expect(screen.getByText("Chain id must be a positive integer")).toBeInTheDocument();
+    await user.clear(id);
+    await user.type(id, "0x10F2C");
+    expect(screen.getByText("Chain id already exists in your list")).toBeInTheDocument();
+    await user.clear(id);
+    await user.type(id, "0x539");
+    expect(screen.getByText("Decimal: 1337")).toBeInTheDocument();
+  });
+
+  it("name / rpc / explorer / currency validators verbatim", async () => {
+    const { user } = await openAdd();
+    // Name required only once touched.
+    await user.click(screen.getByPlaceholderText("e.g. Monolythium"));
+    await user.tab();
+    expect(screen.getByText("Name is required")).toBeInTheDocument();
+    // rpc invalid.
+    await user.type(screen.getByPlaceholderText("https://rpc.example.com"), "notaurl");
+    expect(screen.getByText("Must be a valid URL")).toBeInTheDocument();
+    // explorer non-https.
+    await user.type(screen.getByPlaceholderText("https://scan.example.com"), "http://insecure");
+    expect(screen.getByText("Must be https://")).toBeInTheDocument();
+    // currency partial.
+    await user.type(screen.getByPlaceholderText("Symbol (e.g. LYTH)"), "LOC");
+    expect(screen.getByText("Provide all three currency fields, or leave all blank")).toBeInTheDocument();
+  });
+
+  it("a plain-http RPC is a WARNING (not a blocker) and the advisory box is present", async () => {
+    const { user } = await openAdd();
+    await user.type(screen.getByPlaceholderText("0x539"), "0x539");
+    await user.type(screen.getByPlaceholderText("e.g. Monolythium"), "Local");
+    await user.type(screen.getByPlaceholderText("https://rpc.example.com"), "http://localhost:8545");
+    expect(screen.getByText("Non-HTTPS RPC — only use for trusted local nodes.")).toBeInTheDocument();
+    expect(screen.getByText(/This chain is not in our verified registry\./)).toBeInTheDocument();
+    // The warning does NOT disable submit — every validator still passes.
+    expect(screen.getByRole("button", { name: "Add chain" })).toBeEnabled();
+  });
+
+  it("submit is disabled until valid; a valid submit adds the chain and returns to the list", async () => {
+    const { user } = await openAdd();
+    expect(screen.getByRole("button", { name: "Add chain" })).toBeDisabled();
+    await user.type(screen.getByPlaceholderText("0x539"), "0x539");
+    await user.type(screen.getByPlaceholderText("e.g. Monolythium"), "Local devnet");
+    await user.type(screen.getByPlaceholderText("https://rpc.example.com"), "https://node.example");
+    const submit = screen.getByRole("button", { name: "Add chain" });
+    expect(submit).toBeEnabled();
+    await user.click(submit);
+    expect(screen.getByText("Local devnet")).toBeInTheDocument(); // now in the list
+    expect(JSON.parse(localStorage.getItem(USER_CHAINS_KEY) ?? "{}")["0x539"]).toBeDefined();
+  });
+});
