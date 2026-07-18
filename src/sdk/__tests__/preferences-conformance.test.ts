@@ -23,28 +23,53 @@ const SHIPPED: { rel: string; source: string }[] = Object.entries(RAW)
   .filter(({ rel }) => !rel.includes("__tests__") && !rel.startsWith("test/"))
   .sort((a, b) => a.rel.localeCompare(b.rel));
 
-const ALLOWED = ["sdk/display-prefs.ts", "components/PreferencesPanel.tsx"];
+/** Modules permitted to touch the RAW preference accessors / storage key. The
+ *  sanctioned read path for every consumer is the `useDisplayCurrency()` hook,
+ *  which is deliberately NOT on this list — a slot reading the hook is fine; a
+ *  slot reaching past it into localStorage is not. */
+const ACCESSOR_ALLOWED = ["sdk/display-prefs.ts", "components/PreferencesPanel.tsx"];
 
-describe("P2 — the display-currency preference is stored-only", () => {
+/** Modules permitted to read the ISO-4217 table. Phase 07 added the fiat layer:
+ *  the formatter resolves per-currency precision as Intl → this table → 2, so it
+ *  is a legitimate consumer of the `decimals` metadata Phase 06 carried for it. */
+const TABLE_ALLOWED = [...ACCESSOR_ALLOWED, "sdk/fiat.ts"];
+
+const ACCESSOR_RE =
+  /readDisplayCurrency|saveDisplayCurrency|DISPLAY_CURRENCY_STORAGE_KEY|wallet\.displayCurrency/;
+
+describe("P2 — the display-currency preference is read only through sanctioned paths", () => {
   it("sees a non-trivial source tree (the guard is actually scanning)", () => {
     expect(SHIPPED.length).toBeGreaterThan(50);
     expect(SHIPPED.map((f) => f.rel)).toContain("sdk/display-prefs.ts");
+    expect(SHIPPED.map((f) => f.rel)).toContain("sdk/fiat.ts");
   });
 
-  it("no shipped module outside the store and the panel reads it", () => {
-    const offenders = SHIPPED.filter(({ rel }) => !ALLOWED.includes(rel))
-      .filter(({ source }) =>
-        /readDisplayCurrency|saveDisplayCurrency|DISPLAY_CURRENCY_STORAGE_KEY|wallet\.displayCurrency/.test(source),
-      )
+  it("no shipped module outside the store and the panel reads the raw accessors", () => {
+    const offenders = SHIPPED.filter(({ rel }) => !ACCESSOR_ALLOWED.includes(rel))
+      .filter(({ source }) => ACCESSOR_RE.test(source))
       .map(({ rel }) => rel);
     expect(offenders).toEqual([]);
   });
 
-  it("only the store and the panel touch the currency table (no early consumer)", () => {
-    const offenders = SHIPPED.filter(({ rel }) => !ALLOWED.includes(rel))
+  it("only the allowlisted modules touch the currency table", () => {
+    const offenders = SHIPPED.filter(({ rel }) => !TABLE_ALLOWED.includes(rel))
       .filter(({ source }) => /ISO_4217_CURRENCIES/.test(source))
       .map(({ rel }) => rel);
     expect(offenders).toEqual([]);
+  });
+
+  it("the guard still FAILS for an unlisted consumer (the detector works)", () => {
+    // Proves the allowlist is doing the work — an unlisted module that reads
+    // either surface is flagged. Without this, widening the allowlist could
+    // silently turn the guard into a no-op.
+    const intruder = { rel: "pages/SomeNewPage.tsx", source: "const c = readDisplayCurrency();" };
+    const table = { rel: "pages/SomeNewPage.tsx", source: "ISO_4217_CURRENCIES.map(x => x)" };
+
+    expect(ACCESSOR_ALLOWED).not.toContain(intruder.rel);
+    expect(ACCESSOR_RE.test(intruder.source)).toBe(true);
+
+    expect(TABLE_ALLOWED).not.toContain(table.rel);
+    expect(/ISO_4217_CURRENCIES/.test(table.source)).toBe(true);
   });
 });
 
