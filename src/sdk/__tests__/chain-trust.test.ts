@@ -98,12 +98,29 @@ describe("verdictFromStats — the §F chain-id vs genesis split", () => {
     const v = verdictFromStats(stats({ latestBlockHash: null, latestHeight: 77 }), PIN_CHAIN, PIN_GENESIS);
     expect(v.headId).toBe("77");
   });
+
+  it("records observed genesis + chain id additively without changing the trust decision", () => {
+    // A mismatch: the observed values are recorded, but the trust verdict is
+    // exactly what it was before the fields existed (fail-closed, not trusted).
+    const v = verdictFromStats(stats({ chainId: 1, genesisHash: "0xOTHER" }), PIN_CHAIN, PIN_GENESIS);
+    expect(v.observedChainId).toBe(1);
+    expect(v.observedGenesis).toBe("0xOTHER");
+    expect(v.trusted).toBe(false);
+    expect(v.wrongChainId).toBe(true);
+    // A trusted operator records its (matching) values too.
+    const t = verdictFromStats(stats({}), PIN_CHAIN, PIN_GENESIS);
+    expect(t.observedChainId).toBe(PIN_CHAIN);
+    expect(t.observedGenesis).toBe(PIN_GENESIS);
+    expect(t.trusted).toBe(true);
+    // Absent genesis records null and stays fail-closed.
+    expect(verdictFromStats(stats({ genesisHash: null }), PIN_CHAIN, PIN_GENESIS).observedGenesis).toBeNull();
+  });
 });
 
 describe("resolveFleet → trusted head or F1-classified cause (§F.7 precedence, not re-derived)", () => {
-  const trusted: OperatorVerdict = { url: "a", wrongChainId: false, genesisMismatch: false, quarantined: false, trusted: true, height: 100, headId: "0xh" };
-  const wrongChain: OperatorVerdict = { url: "b", wrongChainId: true, genesisMismatch: false, quarantined: false, trusted: false, height: null, headId: null };
-  const regenesis: OperatorVerdict = { url: "c", wrongChainId: false, genesisMismatch: true, quarantined: false, trusted: false, height: null, headId: null };
+  const trusted: OperatorVerdict = { url: "a", wrongChainId: false, genesisMismatch: false, quarantined: false, trusted: true, height: 100, headId: "0xh", observedGenesis: "0xh", observedChainId: 69420 };
+  const wrongChain: OperatorVerdict = { url: "b", wrongChainId: true, genesisMismatch: false, quarantined: false, trusted: false, height: null, headId: null, observedGenesis: null, observedChainId: 1 };
+  const regenesis: OperatorVerdict = { url: "c", wrongChainId: false, genesisMismatch: true, quarantined: false, trusted: false, height: null, headId: null, observedGenesis: "0xother", observedChainId: 69420 };
 
   // [verdicts, expected kind or "ok"]
   const cases: Array<[string, OperatorVerdict[], "ok" | "untrusted" | "regenesis" | "quarantined" | "offline"]> = [
@@ -152,7 +169,7 @@ describe("resolveTrustedHead — fleet + failover + quarantine (health follows t
     setProviderForTest({ rpcClient, endpoint: "http://active" });
   }
   const trustedVerdict = (url: string): OperatorVerdict => ({
-    url, wrongChainId: false, genesisMismatch: false, quarantined: false, trusted: true, height: 100, headId: "0xh",
+    url, wrongChainId: false, genesisMismatch: false, quarantined: false, trusted: true, height: 100, headId: "0xh", observedGenesis: "0xh", observedChainId: 69420,
   });
 
   it("fast path: a trusted active operator resolves to it, no fleet probe", async () => {

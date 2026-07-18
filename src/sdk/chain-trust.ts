@@ -47,6 +47,13 @@ export interface OperatorVerdict {
   /** Head height + identity, only meaningful when reachable on the right chain. */
   height: number | null;
   headId: string | null;
+  /** The genesis hash the operator reported, recorded for the inspection UI —
+   *  never consumed by the trust decision. Null when the operator answered no
+   *  genesis, was quarantined, or was unreachable. */
+  observedGenesis: string | null;
+  /** The chain id the operator reported, recorded for the inspection UI — never
+   *  consumed by the trust decision. Null when quarantined/unreachable. */
+  observedChainId: number | null;
 }
 
 /** The resolved head for a tick: a trusted operator's head, or a degraded cause
@@ -80,6 +87,8 @@ export function verdictFromStats(
     trusted: genesisOk,
     height: stats.latestHeight,
     headId: stats.latestBlockHash ?? String(stats.latestHeight),
+    observedGenesis: observed,
+    observedChainId: stats.chainId,
   };
 }
 
@@ -93,6 +102,8 @@ export function quarantinedVerdict(url = ""): OperatorVerdict {
     trusted: false,
     height: null,
     headId: null,
+    observedGenesis: null,
+    observedChainId: null,
   };
 }
 
@@ -106,6 +117,8 @@ export function unreachableVerdict(url = ""): OperatorVerdict {
     trusted: false,
     height: null,
     headId: null,
+    observedGenesis: null,
+    observedChainId: null,
   };
 }
 
