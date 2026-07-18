@@ -37,6 +37,7 @@ html[data-theme="default"] {
 
   --ok:    #7fc39a;
   --warn:  #e8b96a;
+  --warn-glow: 232, 185, 106;
   --alert: #e88a7a;
   --err:   #e88a7a;
   --info:  #8ab4d6;
@@ -71,6 +72,7 @@ html[data-theme="monolabs"] {
 
   --ok:    #7ee3c1;
   --warn:  #f4c97a;
+  --warn-glow: 244, 201, 122;
   --alert: #f08a8a;
   --err:   #f08a8a;
   --info:  #3bd0c4;
@@ -105,6 +107,7 @@ html[data-theme="monoplay"] {
 
   --ok:    #7ec39a;
   --warn:  #e8b96a;
+  --warn-glow: 232, 185, 106;
   --alert: #ff8a6b;
   --err:   #ff8a6b;
   --info:  #d88a95;
@@ -139,6 +142,7 @@ html[data-theme="mono"] {
 
   --ok:    #7fc39a;
   --warn:  #e8b96a;
+  --warn-glow: 232, 185, 106;
   --alert: #e88a7a;
   --err:   #e88a7a;
   --info:  #8ab4d6;
@@ -188,6 +192,7 @@ html[data-theme="glass"] {
 
   --ok:    #7ee3c1;
   --warn:  #f4c97a;
+  --warn-glow: 244, 201, 122;
   --alert: #ff8fb8;
   --err:   #ff8fb8;
   --info:  #7fb2ff;
@@ -265,6 +270,7 @@ html[data-theme="aurora"] {
 
   --ok:    #7ee3c1;
   --warn:  #f4c97a;
+  --warn-glow: 244, 201, 122;
   --alert: #ff89b0;
   --err:   #ff89b0;
   --info:  #6c9dff;
@@ -305,6 +311,7 @@ html[data-theme="crimson"] {
 
   --ok:    #8cc59a;
   --warn:  #f0b86a;
+  --warn-glow: 240, 184, 106;
   --alert: #ffa07a;
   --err:   #ffa07a;
   --info:  #e29090;
@@ -345,6 +352,7 @@ html[data-theme="neon"] {
 
   --ok:    #00ffc8;
   --warn:  #ffd54a;
+  --warn-glow: 255, 213, 74;
   --alert: #ff4f8a;
   --err:   #ff4f8a;
   --info:  #4ab8ff;
@@ -389,6 +397,7 @@ html[data-theme="midnight"] {
 
   --ok:    #7ed8b0;
   --warn:  #f0c870;
+  --warn-glow: 240, 200, 112;
   --alert: #ff8ca8;
   --err:   #ff8ca8;
   --info:  #9d7cff;
@@ -429,6 +438,7 @@ html[data-theme="retro"] {
 
   --ok:    #bfcf5a;
   --warn:  #ffc87a;
+  --warn-glow: 255, 200, 122;
   --alert: #ff8a5a;
   --err:   #ff8a5a;
   --info:  #e4a864;
@@ -478,6 +488,7 @@ html[data-theme="light"] {
 
   --ok:    #2f8a5a;
   --warn:  #c88b1a;
+  --warn-glow: 200, 139, 26;
   --alert: #b54a3a;
   --err:   #b54a3a;
   --info:  #3b6a8a;

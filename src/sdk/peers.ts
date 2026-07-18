@@ -20,6 +20,11 @@ import { walletFetch } from "./http";
 export const TESTNET_CHAIN_ID = 69420;
 export const TESTNET_CHAIN_ID_HEX = "0x10f2c";
 
+/** The canonical USER-FACING network name. The registry slug (`testnet-69420`)
+ *  stays an internal identifier; this is what a person reads before sending
+ *  funds, so it is spelled out rather than interpolated from a slug. */
+export const NETWORK_DISPLAY_NAME = "Monolythium Testnet";
+
 /** localStorage key for the user's selected RPC endpoint. */
 export const RPC_ENDPOINT_KEY = "wallet.rpcEndpoint";
 
