@@ -9,10 +9,18 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getChainInfo } from "@monolythium/core-sdk";
 import { useDeveloperMode } from "../sdk/developer-mode";
+import { useChainHealthView } from "../sdk/ChainHealthProvider";
 import { RiskBadgeChip } from "../components/RiskBadgeChip";
+import { truncMiddle } from "../components/_detailModalParts";
 import { currentEndpoint, setEndpoint, subscribeEndpoint } from "../sdk/client";
 import { listPeers } from "../sdk/peers";
+import { fetchLiveTestnetRegistry } from "../sdk/live-registry";
 import { probeOperator, NETWORK_SLUG } from "../sdk/chain-trust";
+import {
+  computeGenesisDrift,
+  readChainIdentity,
+  readSdkVersion,
+} from "../sdk/about";
 import {
   classifyOperatorRisk,
   operatorConnectBlockReason,
@@ -38,6 +46,7 @@ import {
   signingPill,
 } from "../sdk/operator-consensus";
 import type {
+  ChainInfo,
   OperatorRiskResponse,
   OperatorSigningActivityResponse,
   UpcomingDutiesResponse,
@@ -47,6 +56,7 @@ const hostOf = (url: string) => url.replace(/^https?:\/\//, "");
 
 export function Operators() {
   const devMode = useDeveloperMode();
+  const health = useChainHealthView().health;
   const [rows, setRows] = useState<OperatorInspectRow[] | null>(null);
   const [probing, setProbing] = useState(true);
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -115,6 +125,8 @@ export function Operators() {
             : ""}
       </div>
 
+      {health.kind === "regenesis" ? <ReGenesisExplainer /> : null}
+
       <div className="w-op-strip">
         <div className="w-op-strip__head">
           {activeInCatalogue ? (
@@ -169,6 +181,8 @@ export function Operators() {
       {devMode ? <ReportedAttributesCard rows={rows ?? []} /> : null}
 
       {devMode ? <ConsensusCards /> : null}
+
+      <ChainIdentityCard devMode={devMode} />
 
       {connect ? (
         <ConnectModal
@@ -309,6 +323,87 @@ function RiskLegendCard({ rows, devMode }: { rows: readonly OperatorInspectRow[]
             </div>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+/** Shown at the top only while the health machine reports re-genesis. All-user
+ *  copy; there is deliberately no "trust it anyway" affordance. */
+function ReGenesisExplainer() {
+  return (
+    <div className="w-card" style={{ borderColor: "var(--err)" }}>
+      <div className="w-card__head"><h3>Network re-genesis</h3></div>
+      <div className="w-card__body">
+        <div className="row-help">
+          Every operator is on chain ID 69420 but reports a different genesis than this build
+          expects. The wallet has paused balances and signing — trusting an unverified chain
+          automatically would defeat its genesis check. Your keys are unaffected. The wallet
+          reconnects automatically if the operators return to the pinned genesis; if the network
+          re-genesised, a wallet update pins the new one.
+        </div>
+        <div className="row-help" style={{ marginTop: 8, fontStyle: "italic" }}>
+          Public Monolythium testnet. Testnet state may reset without notice; do not store value on
+          this network.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Genesis pin display + registry-drift banner (§11). The pinned value is read
+ *  through getChainInfo (the symbol), never a hash literal, so a future re-pin
+ *  auto-tracks. Drift detection reuses Phase 01's computeGenesisDrift — one
+ *  derivation, two surfaces. */
+function ChainIdentityCard({ devMode }: { devMode: boolean }) {
+  const chain = readChainIdentity();
+  const info = getChainInfo(NETWORK_SLUG);
+  const sdkVersion = readSdkVersion();
+  const [live, setLive] = useState<ChainInfo | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void fetchLiveTestnetRegistry().then((r) => !cancelled && setLive(r));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const drift = computeGenesisDrift(chain, live);
+  return (
+    <div className="w-card">
+      <div className="w-card__head">
+        <h3>Chain identity</h3>
+        <span className="w-live-pill is-muted">registry</span>
+      </div>
+      <div className="w-card__body">
+        <DetailRow k="Network">{info.display_name ?? "testnet-69420"}</DetailRow>
+        <DetailRow k="Chain ID">{String(chain.chainId)}</DetailRow>
+        <DetailRow k="Pinned genesis">
+          <span title={chain.genesisHash}>{truncMiddle(chain.genesisHash, 10, 8)}</span>
+        </DetailRow>
+        {devMode ? (
+          <>
+            <div className="w-genesis-full">
+              <div className="row-help" style={{ marginBottom: 4 }}>Pinned genesis (full)</div>
+              <code className="w-genesis-full__hash">{chain.genesisHash}</code>
+            </div>
+            <DetailRow k="Registry genesis (live)">
+              {live ? truncMiddle(live.genesis_hash, 10, 8) : "registry unreachable"}
+            </DetailRow>
+            <DetailRow k="Binary sha">{live ? live.binary_sha : "registry unreachable"}</DetailRow>
+            <DetailRow k="SDK version">{sdkVersion ? `v${sdkVersion}` : "—"}</DetailRow>
+          </>
+        ) : null}
+        {drift ? (
+          <div className="w-drift-banner" role="status" title={drift.liveGenesisHash} style={{ marginTop: 12 }}>
+            The live chain registry reports genesis {truncMiddle(drift.liveGenesisHash, 10, 8)} —
+            different from this build's pin. The network may have re-genesised; this build keeps
+            trusting its pinned genesis and will pause reads if the fleet no longer matches it.
+            Update the wallet when a new release is available.
+          </div>
+        ) : null}
+        <div className="row-help" style={{ marginTop: 12 }}>
+          The wallet's pinned trust anchors stay compile-time; this card is informational.
+        </div>
       </div>
     </div>
   );

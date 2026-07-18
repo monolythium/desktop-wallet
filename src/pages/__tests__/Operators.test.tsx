@@ -6,6 +6,7 @@ import { screen, waitFor } from "@testing-library/react";
 import { renderWithProviders } from "../../test/renderWithProviders";
 import { DeveloperModeProvider } from "../../sdk/developer-mode";
 import { markActiveOperatorUntrusted, markActiveOperatorTrusted } from "../../sdk/client";
+import { readChainIdentity } from "../../sdk/about";
 import type { OperatorInspectRow } from "../../sdk/operator-inspect";
 import type { Peer, ProbeResult } from "../../sdk/peers";
 import type { OperatorVerdict } from "../../sdk/chain-trust";
@@ -44,6 +45,14 @@ vi.mock("../../sdk/client", async (orig) => ({
   currentEndpoint: () => "https://rpc.monolythium.com",
   subscribeEndpoint: () => () => {},
   setEndpoint: setEndpointMock.fn,
+}));
+const liveRegistryMock = vi.hoisted(() => ({ value: null as unknown }));
+vi.mock("../../sdk/live-registry", () => ({
+  fetchLiveTestnetRegistry: vi.fn(async () => liveRegistryMock.value),
+}));
+const healthMock = vi.hoisted(() => ({ kind: "loading" as string }));
+vi.mock("../../sdk/ChainHealthProvider", () => ({
+  useChainHealthView: () => ({ health: { kind: healthMock.kind }, chainId: 69420, endpoint: "x" }),
 }));
 const consensusMock = vi.hoisted(() => ({
   signing: null as unknown,
@@ -84,6 +93,8 @@ describe("Operators screen", () => {
     consensusMock.signing = null;
     consensusMock.risk = null;
     consensusMock.duties = null;
+    liveRegistryMock.value = null;
+    healthMock.kind = "loading";
     markActiveOperatorTrusted();
     vi.clearAllMocks();
   });
@@ -239,5 +250,40 @@ describe("Operators screen", () => {
     expect(screen.getByText(/Authority risk — authority 0/)).toBeInTheDocument();
     expect(screen.getByText("Healthy")).toBeInTheDocument();
     expect(screen.getByText(/Upcoming duties — authority 0/)).toBeInTheDocument();
+  });
+
+  it("chain identity card shows the pinned genesis for everyone; drift banner reacts to the live registry", async () => {
+    const pin = readChainIdentity().genesisHash;
+    // Live matches the pin → no drift banner.
+    liveRegistryMock.value = { genesis_hash: pin, binary_sha: "da04f8f5", display_name: "Monolythium Testnet", chain_id: 69420 };
+    rowsMock.rows = [row("http://a", { verdict: verdict("http://a", { trusted: true }) })];
+    const { unmount } = renderOperators(false);
+    expect(await screen.findByText("Chain identity")).toBeInTheDocument();
+    expect(screen.getByText("Chain ID")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.queryByText(/different from this build's pin/)).not.toBeInTheDocument(),
+    );
+    unmount();
+
+    // Live differs → the drift banner fires with the Operators-specific copy.
+    liveRegistryMock.value = { genesis_hash: "0xdifferentgenesis0000", binary_sha: "beef", display_name: "Monolythium Testnet", chain_id: 69420 };
+    rowsMock.rows = [row("http://a", { verdict: verdict("http://a", { trusted: true }) })];
+    renderOperators(false);
+    expect(await screen.findByText(/The live chain registry reports genesis/)).toBeInTheDocument();
+    expect(screen.getByText(/different from this build's pin/)).toBeInTheDocument();
+  });
+
+  it("re-genesis explainer renders only while the health machine reports regenesis", async () => {
+    healthMock.kind = "regenesis";
+    rowsMock.rows = [row("http://a", { verdict: verdict("http://a", { genesisMismatch: true }) })];
+    const { unmount } = renderOperators(false);
+    expect(await screen.findByText("Network re-genesis")).toBeInTheDocument();
+    unmount();
+
+    healthMock.kind = "live";
+    rowsMock.rows = [row("http://a", { verdict: verdict("http://a", { trusted: true }) })];
+    renderOperators(false);
+    await screen.findByText("Chain identity");
+    expect(screen.queryByText("Network re-genesis")).not.toBeInTheDocument();
   });
 });
