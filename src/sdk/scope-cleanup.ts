@@ -14,6 +14,7 @@ import { purgeScopesForAddress as purgeChainHealth } from "./chain-health-store"
 import { purgeScopesForAddress as purgeNotifications } from "./notifications-store";
 import { purgeScopesForAddress as purgeSentRecipients } from "./sent-recipients-store";
 import { purgeScopesForAddress as purgeLastKnownBalance } from "./last-known-balance";
+import { purgeNameNudgeForAddress } from "./has-name";
 
 /** Drop every scoped-store entry owned by the vault whose internal address is
  *  `addressHex`. A null addressHex (a vault never unlocked, no address captured)
@@ -33,4 +34,6 @@ export async function purgeVaultScopes(addressHex: string | null): Promise<void>
     purgeSentRecipients(addressLower),
     purgeLastKnownBalance(addressLower),
   ]);
+  // Synchronous localStorage — not part of the settled set above.
+  purgeNameNudgeForAddress(addressLower);
 }
