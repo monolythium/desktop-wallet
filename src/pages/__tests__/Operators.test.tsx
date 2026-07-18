@@ -77,11 +77,11 @@ vi.mock("../../sdk/chain-trust", async (orig) => {
   };
 });
 
-function renderOperators(devMode: boolean) {
+function renderOperators(devMode: boolean, goto: (r: string) => void = () => {}) {
   const control = { enabled: devMode, setEnabled: async () => true };
   return renderWithProviders(
     <DeveloperModeProvider value={control}>
-      <Operators />
+      <Operators goto={goto as never} />
     </DeveloperModeProvider>,
   );
 }
@@ -161,6 +161,14 @@ describe("Operators screen", () => {
     renderOperators(false);
     await screen.findByText("Live · 40 ms");
     expect(screen.getByText(/Connected to Public gateway/)).toBeInTheDocument();
+  });
+
+  it("routes to operator management from the Manage operators row (all-users, dev-badged)", async () => {
+    const goto = vi.fn();
+    rowsMock.rows = [row("http://a", { verdict: verdict("http://a", { trusted: true }) })];
+    const { user } = renderOperators(false, goto);
+    await user.click(await screen.findByRole("button", { name: /Manage operators/ }));
+    expect(goto).toHaveBeenCalledWith("operator-management");
   });
 
   it("has a Refresh control", async () => {

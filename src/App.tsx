@@ -33,6 +33,7 @@ import { News } from "./pages/News";
 import { MonoStudio } from "./pages/MonoStudio";
 import { Notifications } from "./pages/Notifications";
 import { Operators } from "./pages/Operators";
+import { OperatorManagement } from "./pages/OperatorManagement";
 import { Provider } from "./pages/Provider";
 import { Resources } from "./pages/Resources";
 import { Help } from "./pages/Help";
@@ -292,7 +293,8 @@ export function App() {
           {route === "bridges" ? <Bridges experimentalEnabled={experimentalEnabled} /> : null}
           {route === "agents" && experimentalEnabled ? <Agents /> : null}
           {route === "contacts" ? <Contacts /> : null}
-          {route === "operators" ? <Operators /> : null}
+          {route === "operators" ? <Operators goto={setRoute} /> : null}
+          {route === "operator-management" ? <OperatorManagement goto={setRoute} /> : null}
           {route === "riscv" ? <RiscvContracts goto={setRoute} /> : null}
           {route === "studio" ? <MonoStudio goto={setRoute} /> : null}
           {route === "trade" ? <Trade /> : null}

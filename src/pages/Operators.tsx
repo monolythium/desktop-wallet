@@ -13,7 +13,8 @@ import { useChainHealthView } from "../sdk/ChainHealthProvider";
 import { RiskBadgeChip } from "../components/RiskBadgeChip";
 import { truncMiddle } from "../components/_detailModalParts";
 import { currentEndpoint, setEndpoint, subscribeEndpoint } from "../sdk/client";
-import { listPeers } from "../sdk/peers";
+import { activeFleet } from "../sdk/fleet";
+import type { Route } from "../components/types";
 import { fetchLiveTestnetRegistry } from "../sdk/live-registry";
 import { probeOperator, NETWORK_SLUG } from "../sdk/chain-trust";
 import {
@@ -54,7 +55,7 @@ import type {
 
 const hostOf = (url: string) => url.replace(/^https?:\/\//, "");
 
-export function Operators() {
+export function Operators({ goto }: { goto: (r: Route) => void }) {
   const devMode = useDeveloperMode();
   const health = useChainHealthView().health;
   const [rows, setRows] = useState<OperatorInspectRow[] | null>(null);
@@ -85,8 +86,12 @@ export function Operators() {
 
   const summary = rows ? inspectSummary(rows) : null;
   const sorted = rows ? sortInspectRows(rows) : [];
-  const activeInCatalogue = listPeers().find((p) => p.url === activeEndpoint) ?? null;
-  const activeName = activeInCatalogue ? activeInCatalogue.label : hostOf(activeEndpoint);
+  // Resolve the active endpoint's label from the EFFECTIVE fleet (override-aware),
+  // not the raw catalogue — a user-configured operator (custom override or custom
+  // chain) is a legitimate dial target. Only a genuine build-time override
+  // (VITE_MONO_RPC_URL, not in any fleet) falls through to the override copy.
+  const activeInFleet = activeFleet().find((p) => p.url === activeEndpoint) ?? null;
+  const activeName = activeInFleet ? activeInFleet.label : hostOf(activeEndpoint);
 
   // The connect flow's three gates (§12): a UI pre-probe block over the current
   // row state, then a FRESH trust probe, then — only on a trusted verdict —
@@ -129,14 +134,14 @@ export function Operators() {
 
       <div className="w-op-strip">
         <div className="w-op-strip__head">
-          {activeInCatalogue ? (
-            <>Connected to {activeInCatalogue.label} · <span className="w-op-strip__host">{hostOf(activeEndpoint)}</span></>
+          {activeInFleet ? (
+            <>Connected to {activeInFleet.label} · <span className="w-op-strip__host">{hostOf(activeEndpoint)}</span></>
           ) : (
             <>Connected to <span className="w-op-strip__host">{hostOf(activeEndpoint)}</span></>
           )}
         </div>
         <div className="row-help" style={{ marginTop: 4 }}>
-          {activeInCatalogue
+          {activeInFleet
             ? "The wallet reads from one operator at a time. If this one degrades, the health probe switches to the first trusted operator automatically on the next tick."
             : "Build-time override — not in the registry catalogue."}
         </div>
@@ -183,6 +188,22 @@ export function Operators() {
       {devMode ? <ConsensusCards /> : null}
 
       <ChainIdentityCard devMode={devMode} />
+
+      <div className="w-card">
+        <div className="w-card__body">
+          <button
+            type="button"
+            className="w-live-row"
+            style={{ background: "none", border: "none", width: "100%", font: "inherit", color: "inherit", textAlign: "left", cursor: "pointer" }}
+            onClick={() => goto("operator-management")}
+          >
+            <div className="row-label">
+              Manage operators <span className="w-tag" style={{ marginLeft: 6 }}>dev</span>
+            </div>
+            <span className="row-help">Override the operator RPC list with your own nodes.</span>
+          </button>
+        </div>
+      </div>
 
       {connect ? (
         <ConnectModal
