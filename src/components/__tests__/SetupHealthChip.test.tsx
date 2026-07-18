@@ -98,10 +98,15 @@ describe("copy and affordances", () => {
     expect(goto).toHaveBeenCalledWith("settings");
   });
 
-  it("promises nothing unbuilt", async () => {
+  it("promises nothing unbuilt, and leaks no internal roadmap vocabulary", async () => {
     renderWithProviders(<SetupHealthChip address={ADDR} goto={vi.fn()} />);
     await vi.waitFor(() => expect(chip()).not.toBeNull());
-    expect(chip()!.textContent).not.toMatch(/coming soon/i);
+    const text = chip()!.textContent ?? "";
+    expect(text).not.toMatch(/coming soon/i);
+    // The rendered-copy half of the roadmap-vocabulary law (a source grep
+    // cannot tell a UI string from a comment; the DOM can).
+    expect(text).not.toMatch(/\bphase\s*\d/i);
+    expect(text).not.toMatch(/\broadmap\b/i);
   });
 });
 

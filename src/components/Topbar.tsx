@@ -6,12 +6,14 @@
 // one's region + latency + chain status, switch to any reachable peer, or let
 // the wallet switch to the fastest. See `sdk/peers.ts` + `sdk/client.ts`.
 //
-// When the experimental flag is on it also renders a notifications bell — a
-// quick-access shortcut with a live unread badge that opens the Notifications
-// center, the same route the sidebar's Notifications item navigates to (both are
-// experimental-gated, so they appear and disappear together). The count is read
-// from the notifications store and refreshed via the store's write subscription
-// (no polling) so it updates the moment a record is added or marked read.
+// It also renders a notifications bell — a quick-access shortcut with a live
+// unread badge that opens the Notifications center, the same route the sidebar's
+// Notifications item navigates to. Notifications are a DEFAULT-ON wallet
+// feature, so neither the bell nor the sidebar entry is flag-gated. The count is
+// read from the notifications store and refreshed via the store's write
+// subscription (no polling) so it updates the moment a record is added or marked
+// read; the badge renders only once a resolved count exceeds zero, so it never
+// flashes a "0".
 
 import { useEffect, useRef, useState } from "react";
 import { useActiveWallet } from "../sdk/active-wallet";

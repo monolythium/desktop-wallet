@@ -1,8 +1,8 @@
 // Feature-discovery hint.
 //
 // Names only surfaces that actually exist behind the flags — a discovery hint
-// that advertises something unbuilt is the "coming soon" pattern wearing a
-// different hat.
+// advertising something unbuilt is the same false promise the wallet forbids
+// elsewhere, wearing a different hat.
 
 import { useState } from "react";
 import type { Route } from "./types";
