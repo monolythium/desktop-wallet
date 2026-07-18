@@ -13,6 +13,7 @@ export type Route =
   | "contacts"
   | "operators"
   | "operator-management"
+  | "networks"
   | "riscv"
   | "studio"
   | "trade"
@@ -43,6 +44,7 @@ export const ALL_ROUTES: Route[] = [
   "contacts",
   "operators",
   "operator-management",
+  "networks",
   "riscv",
   "studio",
   "trade",

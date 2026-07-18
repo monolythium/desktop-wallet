@@ -34,6 +34,7 @@ import { MonoStudio } from "./pages/MonoStudio";
 import { Notifications } from "./pages/Notifications";
 import { Operators } from "./pages/Operators";
 import { OperatorManagement } from "./pages/OperatorManagement";
+import { Networks } from "./pages/Networks";
 import { Provider } from "./pages/Provider";
 import { Resources } from "./pages/Resources";
 import { Help } from "./pages/Help";
@@ -295,6 +296,7 @@ export function App() {
           {route === "contacts" ? <Contacts /> : null}
           {route === "operators" ? <Operators goto={setRoute} /> : null}
           {route === "operator-management" ? <OperatorManagement goto={setRoute} /> : null}
+          {route === "networks" ? <Networks /> : null}
           {route === "riscv" ? <RiscvContracts goto={setRoute} /> : null}
           {route === "studio" ? <MonoStudio goto={setRoute} /> : null}
           {route === "trade" ? <Trade /> : null}

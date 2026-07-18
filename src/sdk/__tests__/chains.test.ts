@@ -196,6 +196,25 @@ describe("active chain — lookup-miss guard, setActiveChain, scope key", () => 
     expect(seen).toEqual(["0x539"]);
   });
 
+  it("H8: activation notifies subscribers even when the endpoint is unchanged (shared RPC host)", () => {
+    // A custom chain whose rpc equals the current endpoint — a real setEndpoint
+    // would no-op, but the subscriber (which drives the rescope) MUST still fire.
+    addUserChain({ chainId: "0x539", name: "Shared", rpc: "https://rpc.monolythium.com" });
+    const seen: string[] = [];
+    subscribeActiveChain((id) => seen.push(id));
+    expect(setActiveChain("0x539").ok).toBe(true);
+    expect(seen).toEqual(["0x539"]);
+  });
+
+  it("H9: a hardened build reverts the active chain to builtin WITHOUT persisting; stores survive", () => {
+    localStorage.setItem(USER_CHAINS_KEY, JSON.stringify({ "0x539": custom() }));
+    localStorage.setItem(ACTIVE_CHAIN_KEY, "0x539");
+    hardenedMock.value = true;
+    expect(readActiveChainId()).toBe(BUILTIN_CHAIN_ID); // custom hidden → builtin
+    expect(localStorage.getItem(ACTIVE_CHAIN_KEY)).toBe("0x539"); // NOT written back
+    expect(localStorage.getItem(USER_CHAINS_KEY)).not.toBeNull(); // survives for the next dev run
+  });
+
   it("the builtin record pins nativeCurrency.decimals === 18 (1 LYTH = 10^18 lythoshi)", () => {
     expect(BUILTIN_CHAIN.nativeCurrency?.decimals).toBe(18);
   });
