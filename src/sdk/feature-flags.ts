@@ -137,3 +137,63 @@ export function writeNotifyWhileLocked(enabled: boolean): void {
     // localStorage unavailable — fall through.
   }
 }
+
+// Developer mode — DEFAULT OFF, device-scoped, fail-closed.
+//
+// The single switch that reveals the wallet's technical surfaces: raw RPC
+// endpoints, chain/genesis hashes, SDK/runtime build details, error codes, the
+// RISC-V console, and Mono Studio. It describes the operator of the machine, so
+// it is global — it survives lock/unlock and a wallet reset. Anything other than
+// the exact string "true" reads as OFF, and a storage exception reads as OFF, so
+// the read itself is the fail-closed gate with no async "resolving" window.
+export const DEVELOPER_MODE_KEY = "wallet.developerMode";
+
+// Stamped once (epoch-ms) on the FIRST successful enable, never rewritten while
+// a valid value exists, never cleared on disable. Reserved for a future
+// "new since you enabled this" affordance — nothing consumes it yet.
+export const DEVELOPER_MODE_FIRST_SEEN_KEY = "wallet.developerModeFirstSeenAt";
+
+export function readDeveloperMode(): boolean {
+  try {
+    return localStorage.getItem(DEVELOPER_MODE_KEY) === "true";
+  } catch {
+    return false; // fail-closed
+  }
+}
+
+/** Persist the flag and report whether the write landed. The guarded enable
+ *  flow awaits this result — a silently-swallowed failure is not acceptable for
+ *  the enable path (disable stays best-effort at the call site). */
+export function writeDeveloperMode(enabled: boolean): boolean {
+  try {
+    localStorage.setItem(DEVELOPER_MODE_KEY, enabled ? "true" : "false");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** The first-enabled timestamp, or null when absent or garbage. A non-finite or
+ *  non-positive stored value is treated as absent (and re-stamped next enable). */
+export function readDeveloperModeFirstSeenAt(): number | null {
+  try {
+    const raw = localStorage.getItem(DEVELOPER_MODE_FIRST_SEEN_KEY);
+    if (raw === null) return null;
+    const n = Number(raw);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Stamp the first-enabled timestamp, but only when none is already recorded, so
+ *  an off→on→off→on cycle keeps the original stamp. Best-effort: a stamp failure
+ *  never blocks the enable. */
+export function stampDeveloperModeFirstSeenAt(now: number): void {
+  try {
+    if (readDeveloperModeFirstSeenAt() !== null) return;
+    localStorage.setItem(DEVELOPER_MODE_FIRST_SEEN_KEY, String(now));
+  } catch {
+    // localStorage unavailable — fall through.
+  }
+}

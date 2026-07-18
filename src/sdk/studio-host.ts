@@ -10,7 +10,17 @@ import {
   type StudioHostStatus,
 } from "@monolythium/core-sdk";
 
-export const STUDIO_DEVELOPER_MODE_KEY = "wallet.developerMode";
+// Developer mode now lives in feature-flags.ts (one flag store). This re-export
+// keeps existing `from "./studio-host"` imports compiling.
+import { DEVELOPER_MODE_KEY } from "./feature-flags";
+export {
+  DEVELOPER_MODE_KEY,
+  readDeveloperMode,
+  writeDeveloperMode,
+} from "./feature-flags";
+
+/** @deprecated alias of DEVELOPER_MODE_KEY — kept for back-compat. */
+export const STUDIO_DEVELOPER_MODE_KEY = DEVELOPER_MODE_KEY;
 export const STUDIO_DEVKIT_CHANNEL_KEY = "wallet.devkitChannel";
 export const STUDIO_LOCAL_DEVKIT_PATH_KEY = "wallet.localDevkitPath";
 export const STUDIO_WORKSPACE_PATH_KEY = "wallet.studioWorkspacePath";
@@ -128,22 +138,6 @@ export interface SidecarCommandArgs {
   selectedProjectRoot?: string;
   authorityAddress?: string;
   networkId?: string;
-}
-
-export function readDeveloperMode(): boolean {
-  try {
-    return localStorage.getItem(STUDIO_DEVELOPER_MODE_KEY) === "true";
-  } catch {
-    return false;
-  }
-}
-
-export function writeDeveloperMode(enabled: boolean): void {
-  try {
-    localStorage.setItem(STUDIO_DEVELOPER_MODE_KEY, enabled ? "true" : "false");
-  } catch {
-    // Browser storage can be disabled in previews.
-  }
 }
 
 export function readDevkitChannel(): NativeDevkitChannel {
