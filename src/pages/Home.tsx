@@ -46,6 +46,7 @@ import {
 } from "../sdk/balance-display";
 import { BalanceFigure } from "../components/BalanceFigure";
 import { HeroChips, type HeroChipId } from "../components/HeroChips";
+import { SetupHealthChip } from "../components/SetupHealthChip";
 import { useFitText } from "../components/useFitText";
 import { formatLythFixed } from "../sdk/lyth-display";
 import { loadLastKnownBalance, saveLastKnownBalance } from "../sdk/last-known-balance";
@@ -317,6 +318,10 @@ export function Home({ goto }: Props) {
 
   return (
     <div className="w-page">
+      {/* Setup health — summary only, non-blocking, dismissible. Renders only
+          when an applicable step is actually incomplete. */}
+      {walletAddress && <SetupHealthChip address={walletAddress} goto={goto} />}
+
       {/* Hero */}
       <div className="w-hero">
         <div className="w-hero__label">
