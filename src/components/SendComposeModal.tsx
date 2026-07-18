@@ -400,12 +400,19 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
 
   // Display-only label for the Review `To` row — never gates or redirects a send.
   // The fail-closed FORWARD resolution that produces the signable address happens
-  // inline above (the debounced quorum); this convenience read only annotates the
-  // row with the single-operator registry reverse name (lyth_nameOf), then a local
-  // contact. A single operator's reverse answer may LABEL, never suppress (§7).
+  // inline above (the debounced quorum); this read only ANNOTATES the row, with
+  // the QUORUM-verified registry reverse name first, then a local contact label.
+  //
+  // A reverse name may LABEL, never SUPPRESS the first-time-recipient caution.
+  // The caution is about the USER'S HISTORY with this counterparty; a name is a
+  // property of the recipient, and a cheap one to acquire — an attacker can
+  // register a name for a phishing address for a fraction of a LYTH, which under
+  // a name-suppresses rule would silence exactly the warning built to catch it.
+  // Only a saved contact (an act by the user about the relationship) or a
+  // confirmed send history suppresses it. See `recipient-familiarity.ts`.
   const resolveRecipientName = async (toBech32m: string): Promise<string | null> => {
-    // The registry reverse name (lyth_nameOf) is the public on-chain identity —
-    // prefer it at confirm; fall back to the local contact label, then nothing.
+    // The registry reverse name is the public on-chain identity — prefer it at
+    // confirm; fall back to the local contact label, then nothing.
     const registryName = await loadReverseName(toBech32m);
     if (registryName) return registryName;
     if (resolvedContactName) return resolvedContactName;

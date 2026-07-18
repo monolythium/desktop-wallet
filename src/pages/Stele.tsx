@@ -36,6 +36,7 @@ import { classifyRecipientInput, resolveNameQuorum } from "../sdk/name-resolve";
 import { useOperations } from "../operations/context";
 import { useActiveWallet } from "../sdk/active-wallet";
 import { invalidateReverseNameFor, loadReverseName } from "../sdk/reverse-name";
+import { CategoryBadge } from "../components/CategoryBadge";
 import {
   mergeMyNames,
   readRegisteredNames,
@@ -1297,7 +1298,7 @@ function NameDetail({
       const a = result.availability;
       return (
         <div style={{ marginTop: 8, display: "flex", gap: 16, flexWrap: "wrap", fontSize: 13 }}>
-          <Stat label="Category" value={a.category} />
+          <StatWithBadge label="Category" value={a.category} category={a.category} />
           <Stat label="Primary label" value={`${a.primary_label} · ${a.primary_label_len}ch`} />
           <Stat label="Length ×" value={String(a.length_multiplier)} />
           <Stat label="Category ×" value={String(a.category_multiplier)} />
@@ -1313,6 +1314,29 @@ function Stat({ label, value }: { label: string; value: string }) {
     <div>
       <div className="row-label" style={{ fontSize: 11, opacity: 0.7 }}>{label}</div>
       <div style={{ fontFamily: "var(--w-font-mono, ui-monospace, monospace)" }}>{value}</div>
+    </div>
+  );
+}
+
+/** A {@link Stat} carrying the shared category pill. The badge renders only for
+ *  a known category — an unrecognised one shows the plain value rather than a
+ *  guessed badge. */
+function StatWithBadge({
+  label,
+  value,
+  category,
+}: {
+  label: string;
+  value: string;
+  category: string;
+}) {
+  return (
+    <div>
+      <div className="row-label" style={{ fontSize: 11, opacity: 0.7 }}>{label}</div>
+      <div style={{ fontFamily: "var(--w-font-mono, ui-monospace, monospace)" }}>
+        {value}
+        <CategoryBadge category={category} />
+      </div>
     </div>
   );
 }
