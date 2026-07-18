@@ -3,13 +3,16 @@ import {
   activeFeatureChips,
   ADDRESS_FORMAT_LABEL,
   ATOMIC_UNIT_LABEL,
+  computeGenesisDrift,
   operatorsSummary,
   readChainIdentity,
   runtimeFeatureChips,
   WALLET_TAGLINE,
   WALLET_TITLE,
+  type ChainIdentity,
   type FeatureFlagState,
 } from "../about";
+import type { ChainInfo } from "@monolythium/core-sdk";
 import type { ProbeResult } from "../peers";
 
 const ALL_OFF: FeatureFlagState = {
@@ -94,5 +97,33 @@ describe("developer-mode chain rows", () => {
       "risc-v",
     ]);
     expect(runtimeFeatureChips("")).toEqual([]);
+  });
+});
+
+describe("computeGenesisDrift", () => {
+  const bundled: ChainIdentity = { chainId: 69420, genesisHash: "0xAABB", binarySha: "da04f8f5" };
+  const live = (genesis_hash: string, binary_sha = "da04f8f5"): ChainInfo =>
+    ({ genesis_hash, binary_sha }) as unknown as ChainInfo;
+
+  it("returns null when there is no live answer", () => {
+    expect(computeGenesisDrift(bundled, null)).toBeNull();
+  });
+
+  it("returns null when the live genesis field is empty (a non-answer)", () => {
+    expect(computeGenesisDrift(bundled, live(""))).toBeNull();
+  });
+
+  it("returns null when the genesis matches case-insensitively (no drift)", () => {
+    expect(computeGenesisDrift(bundled, live("0xaabb"))).toBeNull();
+  });
+
+  it("reports drift on a genesis mismatch (binary sha omitted when it matches)", () => {
+    const drift = computeGenesisDrift(bundled, live("0xCCDD"));
+    expect(drift).toEqual({ liveGenesisHash: "0xCCDD", liveBinarySha: null });
+  });
+
+  it("includes the live binary sha only when it also differs", () => {
+    const drift = computeGenesisDrift(bundled, live("0xCCDD", "beefcafe"));
+    expect(drift).toEqual({ liveGenesisHash: "0xCCDD", liveBinarySha: "beefcafe" });
   });
 });

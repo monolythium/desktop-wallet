@@ -3,7 +3,12 @@
 // either a live read or an honest chain-level constant. The page composes these.
 
 import { getVersion } from "@tauri-apps/api/app";
-import { ADDRESS_KIND_HRPS, getChainInfo, LYTHOSHI_PER_LYTH } from "@monolythium/core-sdk";
+import {
+  ADDRESS_KIND_HRPS,
+  getChainInfo,
+  LYTHOSHI_PER_LYTH,
+  type ChainInfo,
+} from "@monolythium/core-sdk";
 import {
   readExperimentalEnabled,
   readIncomingEnabled,
@@ -135,6 +140,35 @@ export function readChainIdentity(): ChainIdentity {
     genesisHash: info.genesis_hash,
     binarySha: info.binary_sha,
   };
+}
+
+/** Registry-drift facts: the live registry publishes a genesis different from
+ *  the one this build enforces. Display-only — the bundled pin still gates
+ *  trust; a drift means the fleet re-genesised and this build is stale until it
+ *  updates. */
+export interface GenesisDrift {
+  liveGenesisHash: string;
+  /** The live binary sha, only when it ALSO differs from the bundled one. */
+  liveBinarySha: string | null;
+}
+
+/** Compare the enforced (bundled) chain identity against the live registry.
+ *  Returns null when there is no live answer, the live genesis field is empty
+ *  (treated as a non-answer), or the genesis matches case-insensitively — i.e.
+ *  the banner shows ONLY on a confirmed mismatch. Pure. */
+export function computeGenesisDrift(
+  bundled: ChainIdentity,
+  live: ChainInfo | null,
+): GenesisDrift | null {
+  if (!live) return null;
+  const liveGenesis = live.genesis_hash;
+  if (!liveGenesis) return null;
+  if (liveGenesis.toLowerCase() === bundled.genesisHash.toLowerCase()) return null;
+  const liveBinarySha =
+    live.binary_sha && live.binary_sha.toLowerCase() !== bundled.binarySha.toLowerCase()
+      ? live.binary_sha
+      : null;
+  return { liveGenesisHash: liveGenesis, liveBinarySha };
 }
 
 /** The resolved core-sdk version (build-time __SDK_VERSION__ define), or null

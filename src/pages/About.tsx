@@ -12,9 +12,12 @@ import { DeveloperModeToggle } from "../components/DeveloperModeToggle";
 import { useDeveloperMode } from "../sdk/developer-mode";
 import { checkForUpdate } from "../sdk/updater";
 import { listPeers, probePeer } from "../sdk/peers";
+import { fetchLiveTestnetRegistry } from "../sdk/live-registry";
+import type { ChainInfo } from "@monolythium/core-sdk";
 import {
   activeFeatureChips,
   CHAIN_STATIC_ROWS,
+  computeGenesisDrift,
   isTauriRuntime,
   loadRuntimeBlock,
   operatorsSummary,
@@ -54,9 +57,11 @@ export function About({ goto }: AboutProps) {
   const [update, setUpdate] = useState<UpdateState>({ kind: "checking" });
   const [operators, setOperators] = useState<OperatorsSummary | null>(null);
   const [runtime, setRuntime] = useState<RuntimeBlock | null>(null);
+  const [liveRegistry, setLiveRegistry] = useState<ChainInfo | null>(null);
   const chips = activeFeatureChips(readFeatureFlagState());
   const chain = readChainIdentity();
   const sdkVersion = readSdkVersion();
+  const drift = computeGenesisDrift(chain, liveRegistry);
 
   useEffect(() => {
     let cancelled = false;
@@ -108,6 +113,23 @@ export function About({ goto }: AboutProps) {
     let cancelled = false;
     void loadRuntimeBlock().then((block) => {
       if (!cancelled) setRuntime(block);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [developerModeEnabled]);
+
+  // The drift banner is developer-only, so its live-registry fetch is too — a
+  // stealth GitHub fetch for a hidden banner would violate the zero-network
+  // posture of gated surfaces. Clear it when dev mode turns off.
+  useEffect(() => {
+    if (!developerModeEnabled) {
+      setLiveRegistry(null);
+      return;
+    }
+    let cancelled = false;
+    void fetchLiveTestnetRegistry().then((info) => {
+      if (!cancelled) setLiveRegistry(info);
     });
     return () => {
       cancelled = true;
@@ -203,6 +225,17 @@ export function About({ goto }: AboutProps) {
             {CHAIN_STATIC_ROWS.map((row) => (
               <DRow key={row.label} label={row.label} value={row.value} />
             ))}
+            <div className="w-genesis-full">
+              <div className="row-help" style={{ marginBottom: 4 }}>Genesis (full)</div>
+              <code className="w-genesis-full__hash">{chain.genesisHash}</code>
+            </div>
+            {drift ? (
+              <div className="w-drift-banner" role="status" title={drift.liveGenesisHash}>
+                Live registry reports {truncMiddle(drift.liveGenesisHash, 10, 8)} — this
+                build's bundled genesis pin takes precedence until the wallet updates.
+                {drift.liveBinarySha ? ` Live binary sha: ${drift.liveBinarySha}.` : ""}
+              </div>
+            ) : null}
           </div>
         </div>
       ) : null}

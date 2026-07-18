@@ -817,6 +817,23 @@ html[data-sidebar="collapsed"]:not([data-layout="topbar"]) .w-nav__item {
 .w-confirm__actions { display: flex; gap: 10px; margin-top: 16px; }
 .w-confirm__actions .btn { flex: 1; justify-content: center; }
 
+/* About Chain card — full untruncated genesis pin + registry-drift banner. */
+.w-genesis-full { margin-top: 12px; }
+.w-genesis-full__hash {
+  display: block;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--fs-10); line-height: 1.5;
+  color: var(--w-text-2);
+  word-break: break-all;
+  background: var(--w-surface); border: 1px solid var(--w-line);
+  border-radius: var(--r-6); padding: 8px 10px;
+}
+.w-drift-banner {
+  margin-top: 12px; padding: 8px 10px; border-radius: var(--r-6);
+  border: 1px solid var(--warn); color: var(--warn);
+  background: var(--gold-bg); font-size: var(--fs-11); line-height: 1.5;
+}
+
 /* Developer-mode-required stub — centered card a gated page shows when off. */
 .w-devstub { display: flex; justify-content: center; padding: 32px 12px; }
 .w-devstub__card { width: min(420px, 96vw); text-align: center; }
