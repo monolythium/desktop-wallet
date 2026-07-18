@@ -55,8 +55,10 @@ vi.mock("../../sdk/name-resolve", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../sdk/name-resolve")>()),
   resolveNameQuorum: nameResolve.resolveNameQuorum,
 }));
-vi.mock("../../sdk/reverse-name", () => ({ loadReverseName: vi.fn(() => Promise.resolve(null)) }));
-vi.mock("../../sdk/addressbook", () => ({ addressbookLookup: vi.fn(() => Promise.resolve([])) }));
+const reverse = vi.hoisted(() => ({ loadReverseName: vi.fn() }));
+vi.mock("../../sdk/reverse-name", () => ({ loadReverseName: reverse.loadReverseName }));
+const addressbook = vi.hoisted(() => ({ addressbookLookup: vi.fn() }));
+vi.mock("../../sdk/addressbook", () => ({ addressbookLookup: addressbook.addressbookLookup }));
 vi.mock("../../sdk/finality", () => ({
   fetchFinalityPosture: vi.fn(() => Promise.resolve({ label: "anchor-level", height: null })),
 }));
@@ -83,6 +85,8 @@ beforeEach(() => {
   live.loadLiveWalletBalance.mockResolvedValue({ balanceLyth: "5", balanceLythoshi: "5000000000000000000" });
   live.loadLiveAddressActivity.mockResolvedValue({ ok: false, error: "n/a" });
   guard.loadSpendGuardLythoshi.mockResolvedValue(null); // default: no cross-check → basis = display balance
+  reverse.loadReverseName.mockResolvedValue(null);
+  addressbook.addressbookLookup.mockResolvedValue([]);
   // Live-floor quote (base 10^9, tip 10^9). Native limit 30_000n / token 250_000n.
   fee.previewNativeSendFee.mockImplementation((_c: unknown, opts?: { tokenTransfer?: boolean }) => {
     const limit = opts?.tokenTransfer ? 250_000n : NATIVE_TRANSFER_EXECUTION_UNIT_LIMIT;
@@ -429,6 +433,45 @@ describe("SendComposeModal — recipient parser adoption (T3)", () => {
     // The suggestion parsed cleanly: the typo hint is gone and the echo returns.
     expect(screen.queryByText(`Did you mean ${TO}?`)).toBeNull();
     expect(screen.getByText(TO)).toBeInTheDocument();
+  });
+});
+
+describe("SendComposeModal — known box + warning mutual exclusion (T5)", () => {
+  it("the amber first-time warning fires for a genuinely new recipient", async () => {
+    live.loadLiveAddressActivity.mockResolvedValue({ ok: true, value: [] }); // readable, no prior send
+    const { user } = renderWithProviders(<SendComposeModal fromBech32m={FROM} onClose={vi.fn()} />);
+    await user.type(screen.getByLabelText("Recipient typed bech32m address"), TO);
+    expect(await screen.findByText(/First-time recipient\./)).toBeInTheDocument();
+  });
+
+  it("a saved contact (matched by address) shows the green box and beats the warning", async () => {
+    live.loadLiveAddressActivity.mockResolvedValue({ ok: true, value: [] });
+    addressbook.addressbookLookup.mockResolvedValue([{ name: "Alice", address: TO }]);
+    const { user } = renderWithProviders(<SendComposeModal fromBech32m={FROM} onClose={vi.fn()} />);
+    await user.type(screen.getByLabelText("Recipient typed bech32m address"), TO);
+    expect(await screen.findByText(/Saved contact:/)).toBeInTheDocument();
+    expect(screen.getByText("Alice")).toBeInTheDocument();
+    expect(screen.queryByText(/First-time recipient\./)).toBeNull(); // green beats amber
+  });
+
+  it("a quorum-forward hit renders 'Registered name:' and suppresses the warning", async () => {
+    nameResolve.resolveNameQuorum.mockResolvedValue({ ok: true, address: RESOLVED });
+    live.loadLiveAddressActivity.mockResolvedValue({ ok: true, value: [] });
+    const { user } = renderWithProviders(<SendComposeModal fromBech32m={FROM} onClose={vi.fn()} />);
+    await user.type(screen.getByLabelText("Recipient typed bech32m address"), "alice.mono");
+    expect(await screen.findByText(/Registered name:/)).toBeInTheDocument();
+    expect(screen.queryByText(/First-time recipient\./)).toBeNull();
+  });
+
+  it("a single-operator reverse name fills NEITHER the green box nor suppresses the warning (R3)", async () => {
+    reverse.loadReverseName.mockResolvedValue("ReverseAlice"); // display-only review label
+    live.loadLiveAddressActivity.mockResolvedValue({ ok: true, value: [] });
+    const { user } = renderWithProviders(<SendComposeModal fromBech32m={FROM} onClose={vi.fn()} />);
+    await user.type(screen.getByLabelText("Recipient typed bech32m address"), TO);
+    expect(await screen.findByText(/First-time recipient\./)).toBeInTheDocument(); // NOT suppressed
+    expect(screen.queryByText(/Saved contact:/)).toBeNull();
+    expect(screen.queryByText(/Registered name:/)).toBeNull();
+    expect(screen.queryByText("ReverseAlice")).toBeNull(); // never enters the compose hint stack
   });
 });
 

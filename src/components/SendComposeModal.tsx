@@ -138,6 +138,9 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
   // Inline fail-closed resolution of a typed `.mono` name — debounced, stale-token
   // guarded. Only a `hit` produces a signable address (§4).
   const [resolveState, setResolveState] = useState<ResolveState>({ status: "idle" });
+  // A saved contact matched by ADDRESS (distinct from `resolvedContactName`, which
+  // is a contact picked from the picker). Feeds the green box + familiarity.
+  const [matchedContactName, setMatchedContactName] = useState<string | null>(null);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -225,6 +228,13 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
         ? resolveState.address
         : null;
   const recipientUsable = effectiveBech !== null;
+  // The contact that labels this recipient: a picked one, else one matched by
+  // address. Feeds the green box (slot 5) and familiarity's `isContact`.
+  const recipientContactName = resolvedContactName ?? matchedContactName;
+  // A quorum-confirmed FORWARD hit — the name the user actually typed. This (and a
+  // contact) is the ONLY thing that fills the green box / suppresses the warning;
+  // a single-operator reverse name may label the review row but never suppresses.
+  const quorumForwardHit = parse.inputForm === "mono-name" && resolveState.status === "hit";
 
   // Inline fail-closed forward resolution (§4). A structurally valid `.mono` name
   // is resolved as-you-type behind a 300 ms debounce (keeps the 4-endpoint fan-out
@@ -279,38 +289,49 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
     };
   }, [monoNameCanonical]);
 
-  // Sync recipient-only validity: a typed user address that parses and isn't
-  // our own. Gates the familiarity read (and which caution, if any, to show).
-  const recipientValid = useMemo(() => {
-    const t = recipient.trim();
-    if (!t.toLowerCase().startsWith(`${USER_HRP}1`)) return false;
-    if (t.toLowerCase() === fromBech32m.toLowerCase()) return false;
-    try {
-      typedBech32ToAddress(t, "user");
-      return true;
-    } catch {
-      return false;
-    }
-  }, [recipient, fromBech32m]);
-
-  // Classify the recipient from real history (saved contacts + confirmed
-  // activity cache ∪ live read + in-flight pending sends), all scoped to this
-  // account. Never claims "known" without a backing prior send/contact, and
-  // never claims "new" unless history was actually readable.
+  // Contact-by-address: when the effective recipient isn't a picked contact, look
+  // it up in the local address book by address. Entries are name-sorted, so the
+  // first exact-address match labels (the precedence rule when names share one
+  // address). A picked contact / no recipient / lookup failure → no address match.
   useEffect(() => {
-    if (!recipientValid) {
+    if (!effectiveBech || resolvedContactName) {
+      setMatchedContactName(null);
+      return;
+    }
+    let cancelled = false;
+    const target = effectiveBech.toLowerCase();
+    void addressbookLookup(effectiveBech)
+      .then((entries) => {
+        if (cancelled) return;
+        const match = entries.find((e) => e.address.toLowerCase() === target);
+        setMatchedContactName(match?.name ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) setMatchedContactName(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [effectiveBech, resolvedContactName]);
+
+  // Classify the EFFECTIVE recipient (the resolved address for a name) from real
+  // history (contacts + confirmed activity cache ∪ live read + in-flight pending
+  // sends), scoped to this account. Never "known" without a backing contact/send,
+  // never "new" unless the confirmed history was actually readable.
+  useEffect(() => {
+    if (!effectiveBech) {
       setFamiliarity("unknown");
       setHistoryUnreadable(false);
       return;
     }
-    if (resolvedContactName) {
+    if (recipientContactName) {
       setFamiliarity("known");
       setHistoryUnreadable(false);
       return;
     }
     let cancelled = false;
     setFamiliarity("unknown"); // clear any stale value while the read is in flight
-    const recipientLower = recipient.trim().toLowerCase();
+    const recipientLower = effectiveBech.toLowerCase();
     const fromLower = fromBech32m.toLowerCase();
     void (async () => {
       const chainIdHex = scopeChainKey();
@@ -341,7 +362,7 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [recipientValid, recipient, resolvedContactName, fromBech32m]);
+  }, [effectiveBech, recipientContactName, fromBech32m]);
 
   const validate = useMemo(
     () => () => {
@@ -806,33 +827,33 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
           </div>
         )}
 
-        {resolvedContactName && (
-          <div
-            style={{
-              marginTop: 6,
-              fontSize: 11,
-              color: "var(--fg-400)",
-              letterSpacing: "0.04em",
-            }}
-          >
-            Saved as <strong style={{ color: "var(--fg-200)" }}>{resolvedContactName}</strong>
+        {/* Slots 5 → 6 → 7, mutually exclusive (5 beats 6 beats 7). The green box
+            answers "do I know this recipient?" — a saved contact FIRST, then a
+            quorum-confirmed forward hit; a single-operator reverse name fills
+            neither (R3). Amber fires only for a genuinely new recipient; the
+            neutral caution only when the history was unreadable. */}
+        {recipientContactName ? (
+          <div style={knownBox}>
+            Saved contact: <strong style={{ color: "var(--fg-100)" }}>{recipientContactName}</strong>
           </div>
-        )}
-        {!resolvedContactName && familiarity === "new" && (
+        ) : quorumForwardHit && parse.monoName ? (
+          <div style={knownBox}>
+            Registered name: <strong style={{ color: "var(--fg-100)" }}>{parse.monoName.canonical}</strong>
+          </div>
+        ) : familiarity === "new" ? (
           <div style={cautionBox}>
             <strong>First-time recipient.</strong> You haven't sent to this
             address from this account before — double-check the destination is
             what you intended.
           </div>
-        )}
-        {!resolvedContactName && familiarity === "unknown" && recipientValid && historyUnreadable && (
+        ) : familiarity === "unknown" && effectiveBech !== null && historyUnreadable ? (
           // Honest fallback: history couldn't be read, so we don't claim
           // first-time or known — just a neutral verify-the-address caution.
           <div style={cautionBox}>
             Double-check the recipient address before sending — transactions
             can't be reversed.
           </div>
-        )}
+        ) : null}
 
         <div
           style={{
@@ -1081,6 +1102,17 @@ const cautionBox: React.CSSProperties = {
   color: "var(--fg-200)",
   background: "rgba(244,201,122,0.08)",
   border: "1px solid rgba(244,201,122,0.4)",
+  borderRadius: 8,
+};
+
+const knownBox: React.CSSProperties = {
+  marginTop: 8,
+  padding: "8px 10px",
+  fontSize: 12,
+  lineHeight: 1.5,
+  color: "var(--fg-200)",
+  background: "rgba(80,200,120,0.08)",
+  border: "1px solid rgba(80,200,120,0.35)",
   borderRadius: 8,
 };
 
