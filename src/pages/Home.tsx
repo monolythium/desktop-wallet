@@ -22,7 +22,7 @@
 //  - Endpoint / chain-height / probe telemetry is dropped from the hero (the
 //    topbar already shows live sync + the peer switcher).
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useChainSnapshot } from "../sdk/useChainSnapshot";
 import { useChainHealthView } from "../sdk/ChainHealthProvider";
 import { chainKindNotLive } from "../sdk/chain-health";
@@ -47,6 +47,7 @@ import { BalanceFigure } from "../components/BalanceFigure";
 import { HeroChips, type HeroChipId } from "../components/HeroChips";
 import { useFitText } from "../components/useFitText";
 import { formatLythFixed } from "../sdk/lyth-display";
+import { loadLastKnownBalance, saveLastKnownBalance } from "../sdk/last-known-balance";
 import {
   bpsToPercentLabel,
   delegatedLythoshiFromBps,
@@ -99,6 +100,29 @@ export function Home({ goto }: Props) {
   // this slot in-session with no reload.
   const currency = useDisplayCurrency();
 
+  // Last-known balance, shown (labelled) until a live read confirms. Held in a
+  // ref as well as state so the seed effect can tell whether a live value has
+  // already landed without re-subscribing.
+  const [seededLythoshi, setSeededLythoshi] = useState<string | null>(null);
+  const liveBalanceRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    liveBalanceRef.current = null;
+    setSeededLythoshi(null);
+    if (!walletAddress) return;
+    let cancelled = false;
+    void loadLastKnownBalance(walletAddress.toLowerCase()).then((seed) => {
+      // Apply ONLY if the live read has not already landed for this scope —
+      // checked after the await, so a fast live value is never overwritten by a
+      // slower seed and never re-labelled stale.
+      if (cancelled || seed === null || liveBalanceRef.current !== null) return;
+      setSeededLythoshi(seed);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [walletAddress]);
+
   useEffect(() => {
     if (!walletAddress) {
       setLiveTokens(null);
@@ -119,6 +143,16 @@ export function Home({ goto }: Props) {
       setLiveActivity(activity);
       setDelegationStatus(delegation);
       setRewards(rew);
+      // THE SINGLE WRITE PATH for the last-known balance: a confirmed-live read
+      // only. A failed read falls through, leaving the prior record untouched —
+      // never zeroed, never written from the seed.
+      const confirmed = tokens.nativeBalanceLythoshi.ok
+        ? tokens.nativeBalanceLythoshi.value ?? null
+        : null;
+      if (confirmed !== null) {
+        liveBalanceRef.current = confirmed;
+        void saveLastKnownBalance(walletAddress.toLowerCase(), confirmed, Date.now());
+      }
       // Token metadata (cached) so the "Your tokens" card shows MRC-20 amounts
       // at their real decimals; an honest "—" until it resolves.
       if (tokens.tokenBalances.ok && tokens.tokenBalances.value) {
@@ -149,8 +183,7 @@ export function Home({ goto }: Props) {
   // Every hero figure resolves through the one ordered ladder, so a fabricated
   // "0.00" while the balance is unknown is structurally unreachable, and a
   // remembered value can never ride through a window where the chain isn't
-  // live. `seededLythoshi` stays null until the last-known store lands.
-  const seededLythoshi: string | null = null;
+  // live.
   const totalState = balanceDisplayState(chainNotLive, availableLythoshi, seededLythoshi);
 
   // The delegated figure needs the bps from a read that actually RESOLVED —

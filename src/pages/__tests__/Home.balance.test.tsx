@@ -6,7 +6,7 @@
 // "loading" with "chain not live".
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import type { ChainHealth } from "../../sdk/chain-health";
 
 const healthMock = vi.hoisted(() => ({ health: { kind: "live", height: 1 } as ChainHealth }));
@@ -52,6 +52,18 @@ vi.mock("../../sdk/delegation", async (orig) => ({
 
 vi.mock("../../sdk/token-metadata", () => ({ loadTokenMetaMap: vi.fn(async () => new Map()) }));
 
+// The last-known balance store. `promise`, when set, lets a test control WHEN
+// the seed resolves so the seed-vs-live race is observable.
+const seedMock = vi.hoisted(() => ({
+  value: null as string | null,
+  promise: null as Promise<string | null> | null,
+}));
+const saveMock = vi.hoisted(() => vi.fn(async () => {}));
+vi.mock("../../sdk/last-known-balance", () => ({
+  loadLastKnownBalance: vi.fn(() => seedMock.promise ?? Promise.resolve(seedMock.value)),
+  saveLastKnownBalance: saveMock,
+}));
+
 import { renderWithProviders } from "../../test/renderWithProviders";
 import { Home } from "../Home";
 import { BalanceFigure } from "../../components/BalanceFigure";
@@ -66,6 +78,9 @@ beforeEach(() => {
   healthMock.health = { kind: "live", height: 1 };
   balanceMock.lythoshi = { ok: true, value: "12340000000000000000" };
   balanceMock.settle = true;
+  seedMock.value = null;
+  seedMock.promise = null;
+  saveMock.mockClear();
 });
 afterEach(() => vi.clearAllMocks());
 
@@ -159,5 +174,78 @@ describe("BalanceFigure — the stale presentation", () => {
     render(<BalanceFigure state={{ kind: "loading" }} />);
     expect(screen.getByLabelText(BALANCE_LOADING_LABEL)).toBeInTheDocument();
     expect(document.body.textContent).not.toMatch(/[0-9]/);
+  });
+});
+
+describe("Home hero — the seeded last-known balance", () => {
+  it("shows the remembered figure, labelled, before the live read lands", async () => {
+    seedMock.value = "3000000000000000000"; // 3 LYTH remembered
+    balanceMock.settle = false; // live read never lands
+    renderWithProviders(<Home goto={() => {}} />);
+
+    await vi.waitFor(() => expect(heroAmount()?.textContent).toBe("3.00LYTH"));
+    expect(screen.getByText(STALE_BALANCE_LABEL)).toBeInTheDocument();
+    expect(heroAmount()?.className).toContain("is-stale");
+  });
+
+  it("a live read replaces the seed and clears the label", async () => {
+    seedMock.value = "3000000000000000000";
+    renderWithProviders(<Home goto={() => {}} />);
+
+    await vi.waitFor(() => expect(heroAmount()?.textContent).toBe("12.34LYTH"));
+    expect(screen.queryByText(STALE_BALANCE_LABEL)).toBeNull();
+    expect(heroAmount()?.className).not.toContain("is-stale");
+  });
+
+  it("chain-not-live HIDES the remembered value (hidden beats seed)", async () => {
+    seedMock.value = "3000000000000000000";
+    healthMock.health = { kind: "quarantined", reason: "test" } as unknown as ChainHealth;
+    const { container } = renderWithProviders(<Home goto={() => {}} />);
+
+    await vi.waitFor(() => expect(heroAmount()?.textContent).toBe("—LYTH"));
+    // The remembered number must appear nowhere.
+    expect(container.textContent).not.toContain("3.00");
+    expect(screen.queryByText(STALE_BALANCE_LABEL)).toBeNull();
+  });
+
+  it("the stale label never renders without a figure", async () => {
+    seedMock.value = null; // nothing remembered
+    balanceMock.settle = false;
+    renderWithProviders(<Home goto={() => {}} />);
+
+    await screen.findAllByLabelText(BALANCE_LOADING_LABEL);
+    expect(screen.queryByText(STALE_BALANCE_LABEL)).toBeNull();
+  });
+
+  it("a seed arriving AFTER the live value is discarded (no re-labelling)", async () => {
+    // The seed read resolves late; by then the live value has landed.
+    let releaseSeed: (v: string | null) => void = () => {};
+    seedMock.promise = new Promise<string | null>((r) => {
+      releaseSeed = r;
+    });
+    renderWithProviders(<Home goto={() => {}} />);
+
+    await vi.waitFor(() => expect(heroAmount()?.textContent).toBe("12.34LYTH"));
+    await act(async () => {
+      releaseSeed("3000000000000000000");
+      await Promise.resolve();
+    });
+
+    // Still the live figure, still not marked stale.
+    expect(heroAmount()?.textContent).toBe("12.34LYTH");
+    expect(screen.queryByText(STALE_BALANCE_LABEL)).toBeNull();
+  });
+
+  it("writes the last-known record ONLY from a confirmed live read", async () => {
+    renderWithProviders(<Home goto={() => {}} />);
+    await vi.waitFor(() => expect(heroAmount()?.textContent).toBe("12.34LYTH"));
+    expect(saveMock).toHaveBeenCalledWith("0xabc", "12340000000000000000", expect.any(Number));
+  });
+
+  it("writes NOTHING when the balance read failed", async () => {
+    balanceMock.lythoshi = { ok: false };
+    renderWithProviders(<Home goto={() => {}} />);
+    await screen.findAllByLabelText(BALANCE_LOADING_LABEL);
+    expect(saveMock).not.toHaveBeenCalled();
   });
 });

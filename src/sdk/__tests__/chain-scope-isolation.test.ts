@@ -38,10 +38,16 @@ vi.mock("../client", async (orig) => ({
 
 import { BUILTIN_CHAIN_ID, __resetChainsForTests, addUserChain, scopeChainKey, setActiveChain } from "../chains";
 import { __resetChainHealthStoreForTests, loadWarmStartHead, saveWarmStartHead } from "../chain-health-store";
+import {
+  loadLastKnownBalance,
+  saveLastKnownBalance,
+  __resetLastKnownBalanceCacheForTest,
+} from "../last-known-balance";
 
 beforeEach(() => {
   backing.clear();
   __resetChainHealthStoreForTests();
+  __resetLastKnownBalanceCacheForTest();
   __resetChainsForTests();
   localStorage.clear();
 });
@@ -72,5 +78,36 @@ describe("chain scope isolation (H3)", () => {
     // And the custom scope still holds its own head, distinct from the builtin's.
     expect(setActiveChain("0x539").ok).toBe(true);
     expect(await loadWarmStartHead(ADDR, scopeChainKey())).toEqual({ height: 7, headId: "0xcustom", advancedAtMs: 200 });
+  });
+});
+
+describe("chain scope isolation — the last-known BALANCE (H1)", () => {
+  // The balance store is the highest-stakes member of this family: a leak here
+  // does not show a stale warning, it shows another network's BALANCE labelled
+  // as the user's. The record carries its own chainIdHex as defence in depth,
+  // but that check is only meaningful because reads and writes both derive the
+  // chain component from scopeChainKey() — with a fixed builtin constant on
+  // both sides it would compare against itself and always pass.
+  it("a custom chain never shows the builtin chain's remembered balance", async () => {
+    const ADDR = "mono1wallet";
+    const BUILTIN_BALANCE = "5000000000000000000"; // 5 LYTH
+
+    expect(scopeChainKey()).toBe("0x10f2c");
+    await saveLastKnownBalance(ADDR, BUILTIN_BALANCE, 1_000);
+    expect(await loadLastKnownBalance(ADDR)).toBe(BUILTIN_BALANCE);
+
+    // Activate a custom chain → no seed at all, so the hero shows a skeleton
+    // rather than the builtin chain's figure.
+    addUserChain({ chainId: "0x539", name: "Local", rpc: "http://localhost:8545" });
+    expect(setActiveChain("0x539").ok).toBe(true);
+    expect(scopeChainKey()).toBe("0x539");
+    expect(await loadLastKnownBalance(ADDR)).toBeNull();
+
+    // Each chain keeps its own figure.
+    await saveLastKnownBalance(ADDR, "9000000000000000000", 2_000);
+    expect(await loadLastKnownBalance(ADDR)).toBe("9000000000000000000");
+
+    expect(setActiveChain(BUILTIN_CHAIN_ID).ok).toBe(true);
+    expect(await loadLastKnownBalance(ADDR)).toBe(BUILTIN_BALANCE);
   });
 });
