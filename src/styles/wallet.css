@@ -817,6 +817,25 @@ html[data-sidebar="collapsed"]:not([data-layout="topbar"]) .w-nav__item {
 .w-confirm__actions { display: flex; gap: 10px; margin-top: 16px; }
 .w-confirm__actions .btn { flex: 1; justify-content: center; }
 
+/* Developer-mode-required stub — centered card a gated page shows when off. */
+.w-devstub { display: flex; justify-content: center; padding: 32px 12px; }
+.w-devstub__card { width: min(420px, 96vw); text-align: center; }
+.w-devstub__card .w-card__body { padding: 32px 18px; }
+.w-devstub__glyph {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 28px; color: var(--w-text-3); margin-bottom: 10px;
+}
+.w-devstub__title { margin: 0 0 6px; font-size: var(--fs-13); font-weight: 600; color: var(--w-text); }
+.w-devstub__body { margin: 0 auto; max-width: 320px; }
+.w-devstub__actions { display: flex; gap: 10px; justify-content: center; margin-top: 16px; }
+.w-devstub__btn {
+  padding: 7px 16px; border-radius: var(--r-pill);
+  border: 1px solid var(--w-accent); color: var(--w-accent);
+  background: var(--w-accent-bg); font: inherit; font-size: var(--fs-11);
+  cursor: pointer;
+}
+.w-devstub__btn:hover { background: var(--gold-bg); }
+
 /* Slide switch — role="switch" toggle (developer mode, and future settings). */
 .w-switch {
   position: relative; flex: none;

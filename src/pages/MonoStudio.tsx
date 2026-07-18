@@ -7,6 +7,9 @@ import {
   type StudioHostStatus,
 } from "@monolythium/core-sdk";
 import { useOperations } from "../operations/context";
+import { useDeveloperMode } from "../sdk/developer-mode";
+import { DevModeStub } from "../components/DevModeStub";
+import type { Route } from "../components/types";
 import {
   drainSidecarMessages,
   loadStudioHostStatus,
@@ -31,8 +34,7 @@ import {
 } from "../sdk/studio-host";
 
 interface MonoStudioProps {
-  developerModeEnabled: boolean;
-  setRouteSettings: () => void;
+  goto: (r: Route) => void;
 }
 
 interface PendingApproval {
@@ -51,7 +53,8 @@ const STUDIO_COMMANDS: Array<{ command: NativeDevCommandName; label: string }> =
   { command: "deploy_plan", label: "Deploy Plan" },
 ];
 
-export function MonoStudio({ developerModeEnabled, setRouteSettings }: MonoStudioProps) {
+export function MonoStudio({ goto }: MonoStudioProps) {
+  const developerModeEnabled = useDeveloperMode();
   const ops = useOperations();
   const [channel, setChannel] = useState<NativeDevkitChannel>(() => readDevkitChannel());
   const [localPath, setLocalPath] = useState(() => readLocalDevkitPath() ?? "");
@@ -73,6 +76,8 @@ export function MonoStudio({ developerModeEnabled, setRouteSettings }: MonoStudi
   const sidecarLabel = sidecarDisplayStatus(status, sidecarAction);
 
   useEffect(() => {
+    // Zero-network law: no host/sidecar read while the page is stubbed.
+    if (!developerModeEnabled) return;
     let cancelled = false;
     setBusy(true);
     loadStudioHostStatus({
@@ -105,6 +110,9 @@ export function MonoStudio({ developerModeEnabled, setRouteSettings }: MonoStudi
   }, [workspacePath]);
 
   useEffect(() => {
+    // Zero-network law: the workspace-trust probe is a backend call — never run
+    // it while the page is stubbed.
+    if (!developerModeEnabled) return;
     let cancelled = false;
     const refresh = async () => {
       try {
@@ -129,7 +137,7 @@ export function MonoStudio({ developerModeEnabled, setRouteSettings }: MonoStudi
     return () => {
       cancelled = true;
     };
-  }, [workspacePath]);
+  }, [workspacePath, developerModeEnabled]);
 
   const chooseLocal = async () => {
     if (!localPath.trim()) {
@@ -229,6 +237,7 @@ export function MonoStudio({ developerModeEnabled, setRouteSettings }: MonoStudi
   };
 
   useEffect(() => {
+    if (!developerModeEnabled) return;
     if (status.devkit.sidecarStatus !== "running") return;
     let cancelled = false;
     const drain = async () => {
@@ -258,7 +267,7 @@ export function MonoStudio({ developerModeEnabled, setRouteSettings }: MonoStudi
       cancelled = true;
       window.clearInterval(id);
     };
-  }, [status.devkit.sidecarStatus]);
+  }, [status.devkit.sidecarStatus, developerModeEnabled]);
 
   const stopSidecar = async () => {
     if (!status.devkit.installPath) return;
@@ -450,22 +459,12 @@ export function MonoStudio({ developerModeEnabled, setRouteSettings }: MonoStudi
       <div className="w-page">
         <div className="w-page__header">
           <h1>Mono Studio</h1>
-          <div className="sub">Developer Mode is disabled.</div>
+          <div className="sub">Native project tooling and approval review.</div>
         </div>
-        <div className="w-card">
-          <div className="w-card__head"><h3>Studio Host disabled</h3></div>
-          <div className="w-card__body">
-            <div className="w-setting-row">
-              <div>
-                <div className="row-label">Enable Mono Studio</div>
-                <div className="row-help">
-                  Developer Mode controls the Studio Host and on-demand DevKit checks.
-                </div>
-              </div>
-              <button className="btn btn--primary" onClick={setRouteSettings}>Open Settings</button>
-            </div>
-          </div>
-        </div>
+        <DevModeStub
+          body="Mono Studio is a developer tool. Turn on developer mode to use it."
+          goto={goto}
+        />
       </div>
     );
   }

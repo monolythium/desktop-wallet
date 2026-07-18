@@ -21,20 +21,34 @@ describe("visibleNav", () => {
     expect(visibleNav(cats, { ...ALL_OFF, experimentalEnabled: true }).map((c) => c.id)).toEqual(["a", "b"]);
   });
 
-  it("filters items by their flag gates", () => {
+  it("gates stele/experimental items by their flags", () => {
     const cats: NavCategory[] = [
       {
         id: "p",
         items: [
           { id: "always", label: "A", icon: ic, route: "home" },
-          { id: "dev", label: "D", icon: ic, route: "studio", developerOnly: true },
           { id: "stele", label: "S", icon: ic, route: "stele", steleOnly: true },
           { id: "exp", label: "E", icon: ic, route: "agents", experimentalOnly: true },
         ],
       },
     ];
     expect(visibleNav(cats, ALL_OFF)[0]!.items.map((i) => i.id)).toEqual(["always"]);
-    expect(visibleNav(cats, ALL_ON)[0]!.items.map((i) => i.id)).toEqual(["always", "dev", "stele", "exp"]);
+    expect(visibleNav(cats, ALL_ON)[0]!.items.map((i) => i.id)).toEqual(["always", "stele", "exp"]);
+  });
+
+  it("keeps developerOnly items discoverable regardless of the flag (the destination stubs)", () => {
+    const cats: NavCategory[] = [
+      {
+        id: "p",
+        items: [
+          { id: "always", label: "A", icon: ic, route: "home" },
+          { id: "dev", label: "D", icon: ic, route: "studio", developerOnly: true, badge: "dev" },
+        ],
+      },
+    ];
+    // Visible with developer mode OFF and ON alike.
+    expect(visibleNav(cats, ALL_OFF)[0]!.items.map((i) => i.id)).toEqual(["always", "dev"]);
+    expect(visibleNav(cats, ALL_ON)[0]!.items.map((i) => i.id)).toEqual(["always", "dev"]);
   });
 
   it("is pure — never mutates the input categories", () => {

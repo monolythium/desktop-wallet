@@ -299,14 +299,19 @@ export const NAV_CATEGORIES: NavCategory[] = [
 ];
 
 /** Filter each category's items by the active flags, then drop any category left
- *  empty (so a not-yet-populated category renders no header). Pure. */
+ *  empty (so a not-yet-populated category renders no header). Pure.
+ *
+ *  `developerOnly` items are kept DISCOVERABLE for everyone (they carry a "dev"
+ *  badge and their destination renders a stub when developer mode is off) — a
+ *  vanished menu item teaches nothing, whereas the stub carries the explanation
+ *  and the escape route. Only the stele/experimental product surfaces, which
+ *  have no stub, are dropped when their flag is off. */
 export function visibleNav(categories: NavCategory[], flags: NavFlags): NavCategory[] {
   return categories
     .map((cat) => ({
       ...cat,
       items: cat.items.filter(
         (n) =>
-          (!n.developerOnly || flags.developerModeEnabled) &&
           (!n.steleOnly || flags.steleEnabled) &&
           (!n.experimentalOnly || flags.experimentalEnabled),
       ),

@@ -185,15 +185,10 @@ export function App() {
     try { localStorage.setItem(ROUTE_KEY, route); } catch { /* ignore */ }
   }, [route]);
 
-  // Persistence + the firstSeenAt stamp live in the developer-mode control
-  // below (not a write-on-every-render effect). This effect only enforces the
-  // studio route bounce when the flag is off.
-  useEffect(() => {
-    if (!developerModeEnabled && route === "studio") {
-      setRoute("settings");
-    }
-  }, [developerModeEnabled, route]);
-
+  // Developer mode persists + stamps firstSeenAt through the control below, and
+  // its gated pages (Studio, RISC-V) render an in-place stub when off — so there
+  // is no route bounce to enforce here (unlike stele/experimental, which have no
+  // stub and bounce home).
   useEffect(() => {
     writeSteleEnabled(steleEnabled);
     if (!steleEnabled && (route === "stele" || route === "inbox" || route === "provider")) {
@@ -297,12 +292,7 @@ export function App() {
           {route === "agents" && experimentalEnabled ? <Agents /> : null}
           {route === "contacts" ? <Contacts /> : null}
           {route === "riscv" ? <RiscvContracts /> : null}
-          {route === "studio" ? (
-            <MonoStudio
-              developerModeEnabled={developerModeEnabled}
-              setRouteSettings={() => setRoute("settings")}
-            />
-          ) : null}
+          {route === "studio" ? <MonoStudio goto={setRoute} /> : null}
           {route === "trade" ? <Trade /> : null}
           {route === "ai-trade" ? <AiTrading /> : null}
           {route === "news" ? <News /> : null}
