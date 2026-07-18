@@ -238,3 +238,79 @@ describe("Hero — the pending-rewards line", () => {
     expect(rewardsLine()).toBeNull();
   });
 });
+
+describe("T11 — the fiat sub-line follows the ACTIVE chip", () => {
+  const fiatLine = () => document.querySelector(".w-hero__fiat");
+
+  it("feeds the total figure while Total is active", async () => {
+    renderWithProviders(<Home goto={() => {}} />);
+    await vi.waitFor(() => expect(heroAmount()?.textContent).toBe("100.00LYTH"));
+    // Empty form (no rate exists), so the assertion is about PRESENCE + symbol.
+    expect(fiatLine()?.textContent).toBe("$—");
+  });
+
+  it("re-feeds the derived delegated figure when Delegated is active", async () => {
+    const { user } = renderWithProviders(<Home goto={() => {}} />);
+    await vi.waitFor(() => expect(heroAmount()?.textContent).toBe("100.00LYTH"));
+    await user.click(chipByLabel("Delegated"));
+
+    expect(heroAmount()?.textContent).toBe("25.00LYTH");
+    expect(fiatLine()?.textContent).toBe("$—");
+  });
+
+  it("is ABSENT over a dash — a failed delegations read has no amount to price", async () => {
+    mocks.delegations = {
+      delegations: { ok: false, error: "operator down" },
+      activeClusters: { ok: true, value: [] },
+    };
+    const { user } = renderWithProviders(<Home goto={() => {}} />);
+    await vi.waitFor(() => expect(heroAmount()?.textContent).toBe("100.00LYTH"));
+    expect(fiatLine()).not.toBeNull(); // Total is a value
+
+    await user.click(chipByLabel("Delegated"));
+    expect(heroAmount()?.textContent).toBe("—LYTH");
+    // The ladder state is `hidden`, so no fiat at all — not "$—".
+    expect(fiatLine()).toBeNull();
+  });
+
+  it("is ABSENT over a skeleton — an unresolved read has no amount to price", async () => {
+    mocks.delegations = null;
+    const { user } = renderWithProviders(<Home goto={() => {}} />);
+    await vi.waitFor(() => expect(heroAmount()?.textContent).toBe("100.00LYTH"));
+
+    await user.click(chipByLabel("Delegated"));
+    expect(fiatLine()).toBeNull();
+  });
+
+  it("is ABSENT for both chips when the chain is not live", async () => {
+    healthMock.health = { kind: "offline" } as unknown as ChainHealth;
+    const { user } = renderWithProviders(<Home goto={() => {}} />);
+    await vi.waitFor(() => expect(heroAmount()?.textContent).toBe("—LYTH"));
+    expect(fiatLine()).toBeNull();
+
+    await user.click(chipByLabel("Delegated"));
+    expect(fiatLine()).toBeNull();
+  });
+
+  it("stays an additive sibling — the amount node gains no fiat byte", async () => {
+    const { user } = renderWithProviders(<Home goto={() => {}} />);
+    await vi.waitFor(() => expect(heroAmount()?.textContent).toBe("100.00LYTH"));
+    await user.click(chipByLabel("Delegated"));
+
+    expect(heroAmount()?.textContent).toBe("25.00LYTH");
+    expect(heroAmount()?.textContent).not.toContain("$");
+    expect(heroAmount()?.textContent).not.toContain("≈");
+    expect(heroAmount()?.querySelector(".w-hero__fiat")).toBeNull();
+  });
+
+  it("renders symbol-first with no digit (Phase 07's empty form, unchanged)", async () => {
+    const { user } = renderWithProviders(<Home goto={() => {}} />);
+    await vi.waitFor(() => expect(heroAmount()?.textContent).toBe("100.00LYTH"));
+    await user.click(chipByLabel("Delegated"));
+
+    const text = fiatLine()?.textContent ?? "";
+    expect(text.startsWith("$")).toBe(true);
+    expect(text).not.toMatch(/[0-9]/);
+    expect(text).not.toBe("$0");
+  });
+});
