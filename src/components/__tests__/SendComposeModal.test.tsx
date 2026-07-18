@@ -44,6 +44,11 @@ vi.mock("../../sdk/fee-preview", async (importOriginal) => ({
 }));
 const guard = vi.hoisted(() => ({ loadSpendGuardLythoshi: vi.fn() }));
 vi.mock("../../sdk/spend-guard", () => ({ loadSpendGuardLythoshi: guard.loadSpendGuardLythoshi }));
+const sentLog = vi.hoisted(() => ({ isSentRecipientVerified: vi.fn(), recordSentRecipient: vi.fn() }));
+vi.mock("../../sdk/sent-recipients-store", () => ({
+  isSentRecipientVerified: sentLog.isSentRecipientVerified,
+  recordSentRecipient: sentLog.recordSentRecipient,
+}));
 const send = vi.hoisted(() => ({ sendNativeLyth: vi.fn(), sendMrc20Token: vi.fn() }));
 vi.mock("../../sdk/native-send", () => ({ sendNativeLyth: send.sendNativeLyth }));
 vi.mock("../../sdk/token-send", async (importOriginal) => ({
@@ -87,6 +92,8 @@ beforeEach(() => {
   guard.loadSpendGuardLythoshi.mockResolvedValue(null); // default: no cross-check → basis = display balance
   reverse.loadReverseName.mockResolvedValue(null);
   addressbook.addressbookLookup.mockResolvedValue([]);
+  sentLog.isSentRecipientVerified.mockResolvedValue(false);
+  sentLog.recordSentRecipient.mockResolvedValue(undefined);
   // Live-floor quote (base 10^9, tip 10^9). Native limit 30_000n / token 250_000n.
   fee.previewNativeSendFee.mockImplementation((_c: unknown, opts?: { tokenTransfer?: boolean }) => {
     const limit = opts?.tokenTransfer ? 250_000n : NATIVE_TRANSFER_EXECUTION_UNIT_LIMIT;
@@ -433,6 +440,43 @@ describe("SendComposeModal — recipient parser adoption (T3)", () => {
     // The suggestion parsed cleanly: the typo hint is gone and the echo returns.
     expect(screen.queryByText(`Did you mean ${TO}?`)).toBeNull();
     expect(screen.getByText(TO)).toBeInTheDocument();
+  });
+});
+
+describe("SendComposeModal — sent-recipients log (T7)", () => {
+  it("logs the recipient after a native broadcast (seed + from + to)", async () => {
+    const { user } = renderWithProviders(<SendComposeModal fromBech32m={FROM} onClose={vi.fn()} />);
+    await user.type(screen.getByLabelText("Recipient typed bech32m address"), TO);
+    await user.type(screen.getByLabelText("Amount in LYTH"), "1");
+    await user.click(screen.getByRole("button", { name: "Review" }));
+    await waitFor(() => expect(cap.descriptor).toBeDefined());
+    const seed = new Uint8Array(32).fill(3);
+    await cap.descriptor!.execute({ vaultSeed: seed });
+    expect(sentLog.recordSentRecipient).toHaveBeenCalledWith({ seed, fromBech32m: FROM, toBech32m: TO });
+  });
+
+  it("token send logs the HUMAN recipient, not the token factory (C7)", async () => {
+    const token = { tokenId: TOKEN_ID, symbol: "USDC", decimals: 6, balanceBaseUnits: "2000000" };
+    const { user } = renderWithProviders(<SendComposeModal fromBech32m={FROM} token={token} onClose={vi.fn()} />);
+    await user.type(screen.getByLabelText("Recipient typed bech32m address"), TO);
+    await user.type(screen.getByLabelText("Amount in USDC"), "1");
+    await user.click(screen.getByRole("button", { name: "Review" }));
+    await waitFor(() => expect(cap.descriptor).toBeDefined());
+    await cap.descriptor!.execute({ vaultSeed: new Uint8Array(32) });
+    expect(sentLog.recordSentRecipient).toHaveBeenCalledWith(expect.objectContaining({ toBech32m: TO }));
+  });
+
+  it("a verified sent-log hit suppresses the first-time warning", async () => {
+    live.loadLiveAddressActivity.mockResolvedValue({ ok: true, value: [] }); // readable, no prior send
+    sentLog.isSentRecipientVerified.mockResolvedValue(true); // but the durable log knows this recipient
+    const { user } = renderWithProviders(<SendComposeModal fromBech32m={FROM} onClose={vi.fn()} />);
+    await user.type(screen.getByLabelText("Recipient typed bech32m address"), TO);
+    // Wait for the familiarity read (which consults the log) to complete, then
+    // assert the warning is suppressed even though history was readable-empty.
+    await waitFor(() =>
+      expect(sentLog.isSentRecipientVerified).toHaveBeenCalledWith({ fromBech32m: FROM, toBech32m: TO }),
+    );
+    expect(screen.queryByText(/First-time recipient\./)).toBeNull();
   });
 });
 

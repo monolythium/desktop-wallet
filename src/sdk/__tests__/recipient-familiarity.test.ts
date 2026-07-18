@@ -102,4 +102,42 @@ describe("classifyRecipient", () => {
       classifyRecipient({ recipientLower: "", fromLower: FROM, isContact: false, rows: [], pending: [] }),
     ).toBe("unknown");
   });
+
+  it("is 'known' from a verified sent-log hit, no contact/history needed (C4 forward)", () => {
+    expect(
+      classifyRecipient({
+        recipientLower: R,
+        fromLower: FROM,
+        isContact: false,
+        rows: null,
+        pending: null,
+        verifiedSentLogHit: true,
+      }),
+    ).toBe("known");
+  });
+
+  it("an ABSENT sent-log hit never fabricates 'new' — history still decides (C4 reverse)", () => {
+    // No log hit + unreadable history → 'unknown' (not 'new'); the log only adds "known".
+    expect(
+      classifyRecipient({
+        recipientLower: R,
+        fromLower: FROM,
+        isContact: false,
+        rows: null,
+        pending: null,
+        verifiedSentLogHit: false,
+      }),
+    ).toBe("unknown");
+    // No log hit + readable-empty history → 'new' comes from the history, not the log.
+    expect(
+      classifyRecipient({
+        recipientLower: R,
+        fromLower: FROM,
+        isContact: false,
+        rows: [{ counterparty: "mono1someoneelse", direction: "out" }],
+        pending: [],
+        verifiedSentLogHit: false,
+      }),
+    ).toBe("new");
+  });
 });

@@ -36,6 +36,7 @@ import {
 } from "../sdk/recipient-familiarity";
 import { previewNativeSendFee, type FeeQuoteBundle } from "../sdk/fee-preview";
 import { loadSpendGuardLythoshi } from "../sdk/spend-guard";
+import { isSentRecipientVerified, recordSentRecipient } from "../sdk/sent-recipients-store";
 import { renderFeeDisplay } from "../sdk/fee-display";
 import {
   NATIVE_TRANSFER_CHARGE_EXECUTION_UNITS,
@@ -350,9 +351,15 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
       } catch {
         pending = null;
       }
+      // Verified durable sent-log evidence (fail-safe false on any problem) —
+      // adds "known", never fabricates "new".
+      const verifiedSentLogHit = await isSentRecipientVerified({
+        fromBech32m,
+        toBech32m: effectiveBech,
+      }).catch(() => false);
       if (cancelled) return;
       setFamiliarity(
-        classifyRecipient({ recipientLower, fromLower, isContact: false, rows, pending }),
+        classifyRecipient({ recipientLower, fromLower, isContact: false, rows, pending, verifiedSentLogHit }),
       );
       // The confirmed history (cache ∪ live) is what establishes "never sent
       // before"; if it was unreadable we show the neutral verify caution, not a
@@ -520,6 +527,9 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
             amount: amountLyth,
             decimals: token.decimals,
           });
+          // Log the HUMAN recipient (never the token-factory precompile), seed
+          // still in scope, before the drawer scrubs it. Best-effort.
+          await recordSentRecipient({ seed: ctx.vaultSeed, fromBech32m, toBech32m });
           return {
             headline: `Broadcast ${result.amountDisplay} ${token.symbol}`,
             detail: `${result.txHash} · from ${result.from}`,
@@ -581,6 +591,9 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
           amountLyth,
           resolvedFee: nativeQuote.signedFee,
         });
+        // Log the recipient (integrity-tagged) while the seed is still in scope,
+        // before the drawer scrubs it. Best-effort — never throws into the send.
+        await recordSentRecipient({ seed: ctx.vaultSeed, fromBech32m, toBech32m });
         return {
           headline: `Broadcast ${amountLyth} LYTH`,
           detail: `${result.txHash} · from ${result.from}`,

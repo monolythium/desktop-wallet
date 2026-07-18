@@ -29,6 +29,9 @@ export interface ClassifyRecipientArgs {
   rows: ReadonlyArray<ActivityLike> | null;
   /** Tracked pending txs, or null when unreadable. */
   pending: ReadonlyArray<PendingLike> | null;
+  /** True when an HMAC-verified sent-recipients log entry exists for this
+   *  recipient. Adds "known" evidence ONLY — its absence never implies "new". */
+  verifiedSentLogHit?: boolean;
 }
 
 /** A confirmed row counts as a prior send only when it is an explicit OUTGOING
@@ -59,8 +62,12 @@ function hasPendingSend(
 
 export function classifyRecipient(args: ClassifyRecipientArgs): RecipientFamiliarity {
   if (args.recipientLower === "") return "unknown";
-  if (args.isContact) return "known";
+  // "known" evidence: a contact, a verified sent-log entry, a confirmed outgoing
+  // send, or an in-flight pending send. The sent-log bit only ever ADDS "known" —
+  // its absence falls through to the history logic below (never forces "new").
   if (
+    args.isContact ||
+    args.verifiedSentLogHit === true ||
     hasPriorConfirmedSend(args.rows, args.recipientLower) ||
     hasPendingSend(args.pending, args.recipientLower, args.fromLower)
   ) {
