@@ -7,6 +7,9 @@ import { useEffect, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { useFitText } from "./useFitText";
 import { NETWORK_DISPLAY_NAME, TESTNET_CHAIN_ID, TESTNET_CHAIN_ID_HEX } from "../sdk/peers";
+import { useReverseName } from "../sdk/use-reverse-names";
+import { REGISTERED_CHIP_TEXT, REGISTERED_CHIP_TITLE } from "../sdk/address-label";
+import { CategoryBadge, categoryOfName } from "./CategoryBadge";
 
 interface Props {
   address: string;
@@ -23,6 +26,8 @@ export function ReceiveModal({ address, onClose }: Props) {
   // The 43-char bech32m renders as large as fits on ONE line — the address
   // no-truncation law, satisfied by sizing rather than by wrapping.
   const addressFitRef = useFitText(address, 16, 9);
+  // Quorum-verified only — a single operator can never put a name here.
+  const ownName = useReverseName(address);
 
   useEffect(() => {
     if (!copied) return;
@@ -125,6 +130,42 @@ export function ReceiveModal({ address, onClose }: Props) {
         >
           Your address
         </div>
+
+        {/* Own-address registered name, when the quorum confirmed one. Nothing
+            reserves space when absent — the modal renders exactly as before.
+            The QR still encodes the ADDRESS, never the name. */}
+        {ownName ? (
+          <div
+            data-testid="receive-own-name"
+            style={{
+              alignSelf: "stretch",
+              marginBottom: 6,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <span style={{ fontWeight: 600, color: "rgba(var(--gold-glow), 1)" }}>{ownName}</span>
+            <span
+              data-testid="name-chip"
+              title={REGISTERED_CHIP_TITLE}
+              style={{
+                marginLeft: 6,
+                fontSize: 9,
+                fontWeight: 600,
+                textTransform: "uppercase",
+                letterSpacing: "0.08em",
+                padding: "1px 5px",
+                borderRadius: 4,
+                border: "1px solid rgba(var(--gold-glow), 0.5)",
+                color: "rgba(var(--gold-glow), 1)",
+              }}
+            >
+              {REGISTERED_CHIP_TEXT}
+            </span>
+            <CategoryBadge category={categoryOfName(ownName)} />
+          </div>
+        ) : null}
 
         {/* ONE canonical string: this text, the QR payload and the clipboard are
             byte-identical. The user's safety check is comparing what they see

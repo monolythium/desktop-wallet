@@ -5,17 +5,22 @@ import type { Tx } from "../data/types";
 interface Props {
   tx: Tx;
   onClick?: () => void;
+  /** Optional display label for the counterparty — a quorum-verified registered
+   *  name or a saved contact label (see the display-precedence law). Absent
+   *  leaves the row's existing counterparty rendering untouched. */
+  counterpartyLabel?: string | null;
 }
 
-export function TxRow({ tx, onClick }: Props) {
+export function TxRow({ tx, onClick, counterpartyLabel }: Props) {
   const typeLabel = tx.typeLabel;
+  const counterparty = counterpartyLabel ?? tx.counterparty;
   const label = tx.kind === "reward"
-    ? tx.counterparty
+    ? counterparty
     : tx.kind === "delegate"
-    ? `To ${tx.counterparty}`
+    ? `To ${counterparty}`
     : tx.direction === "in"
-    ? `From ${tx.counterparty}`
-    : `To ${tx.counterparty}`;
+    ? `From ${counterparty}`
+    : `To ${counterparty}`;
   const memo = tx.memo;
   const tok = tx.unit || "LYTH";
   // `amountText` is already unit-converted (lythoshi→LYTH) + decimal-capped by

@@ -17,6 +17,9 @@ import { scopeChainKey } from "../sdk/chains";
 import { ActivityDetail, type DetailRow } from "../components/ActivityDetail";
 import { NotificationDetail } from "../components/NotificationDetail";
 import { TxRow } from "../components/TxRow";
+import { useReverseNamesEager } from "../sdk/use-reverse-names";
+import { preferredAddressLabel } from "../sdk/address-label";
+import { addressbookLookup } from "../sdk/addressbook";
 import {
   activityDirection,
   activityRowToTx,
@@ -102,6 +105,44 @@ export function Activity() {
   const [tokenFilter, setTokenFilter] = useState<string>("all");
 
   const activityRows = confirmedRows;
+
+  // Counterparty labels for the visible rows. Only USER addresses participate —
+  // delegation rows already name their cluster, and a precompile is not a
+  // counterparty anyone labels.
+  const counterpartyAddresses = useMemo(
+    () =>
+      confirmedRows
+        .map((r) => r.counterparty)
+        .filter((a): a is string => typeof a === "string" && a.startsWith("mono1")),
+    [confirmedRows],
+  );
+  // Eager tier: warm entries render at once, then a BOUNDED set resolves.
+  const reverseNames = useReverseNamesEager(counterpartyAddresses);
+  const [contactNames, setContactNames] = useState<Map<string, string>>(new Map());
+
+  useEffect(() => {
+    let cancelled = false;
+    void addressbookLookup()
+      .then((rows) => {
+        if (cancelled) return;
+        setContactNames(new Map(rows.map((r) => [r.address.toLowerCase(), r.name])));
+      })
+      .catch(() => {
+        // Display-only — an unreadable book just leaves rows unlabelled.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  /** One precedence, same as every other surface: registered name, then
+   *  contact label, then nothing (the row keeps its existing rendering). */
+  const labelFor = (address: string | null | undefined): string | null => {
+    if (typeof address !== "string" || address === "") return null;
+    const key = address.toLowerCase();
+    return preferredAddressLabel(reverseNames.get(key) ?? null, contactNames.get(key) ?? null)
+      ?.label ?? null;
+  };
 
   // Native rows carry the zero-address token id, so normalize to the display
   // unit ("LYTH" for native, else the token id) — the filter lists LYTH, never
@@ -438,6 +479,7 @@ export function Activity() {
                 <TxRow
                   key={`c:${row.blockHeight}-${row.txIndex}-${row.logIndex}`}
                   tx={activityRowToTx(row, tokenMeta)}
+                  counterpartyLabel={labelFor(row.counterparty)}
                   onClick={() => setSelected(indexedRowToDetail(row))}
                 />
               );
