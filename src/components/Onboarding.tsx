@@ -28,6 +28,7 @@ import { explainImportError } from "../lib/import-error";
 import { MnemonicGrid } from "./MnemonicGrid";
 import { VerifyPhrase } from "./VerifyPhrase";
 import { WalletLogo } from "./WalletLogo";
+import { PreferencesPanel } from "./PreferencesPanel";
 import { PasswordStrengthMeter } from "./PasswordStrengthMeter";
 import { isPasswordValid, getPasswordStrength } from "../lib/password-validation";
 
@@ -240,6 +241,20 @@ export function Onboarding({ onDone }: Props) {
                 ML-DSA-65 signing keys, encrypted on this device. Create a new
                 wallet or restore one from its 24-word recovery phrase.
               </p>
+            </div>
+            {/* The SAME panel Settings renders. It applies immediately, adds no
+                step, and never gates either path — it touches no vault, keychain
+                or RPC, so it is safe here in the pre-vault boot state. */}
+            <PreferencesPanel />
+            <div
+              style={{
+                margin: "10px 0 18px",
+                textAlign: "center",
+                fontSize: 12,
+                color: "var(--fg-400)",
+              }}
+            >
+              {"You can change these anytime in Settings."}
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               <button
