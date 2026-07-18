@@ -72,6 +72,7 @@ describe("NAV_CATEGORIES config", () => {
   it("wires the Phase-1 destinations to their real routes/actions", () => {
     const byId = new Map(flat.map((i) => [i.id, i.route ?? `action:${i.action}`]));
     expect(byId.get("contacts")).toBe("contacts");
+    expect(byId.get("operators")).toBe("operators");
     expect(byId.get("riscv")).toBe("riscv");
     expect(byId.get("notifications")).toBe("notifications");
     expect(byId.get("recovery")).toBe("recovery"); // BIP-39 reveal
@@ -87,6 +88,16 @@ describe("NAV_CATEGORIES config", () => {
       expect(item?.developerOnly).toBe(true);
       expect(item?.badge).toBe("dev");
     }
+  });
+
+  it("shows Operators under Manage, ungated (an all-users surface)", () => {
+    const manage = NAV_CATEGORIES.find((c) => c.id === "manage");
+    const operators = manage?.items.find((i) => i.id === "operators");
+    expect(operators?.route).toBe("operators");
+    expect(operators?.developerOnly).toBeFalsy();
+    // Visible with every flag off.
+    const ids = visibleNav(NAV_CATEGORIES, ALL_OFF).flatMap((c) => c.items.map((i) => i.id));
+    expect(ids).toContain("operators");
   });
 
   it("labels the recovery item honestly (not 'Emergency recovery')", () => {

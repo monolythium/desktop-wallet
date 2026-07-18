@@ -82,7 +82,7 @@ export function Topbar({ route, setRoute }: Props) {
       <div className="w-top__title">{TITLES[route]}</div>
       <div className="w-top__spacer" />
       <NotificationsBell active={route === "notifications"} onOpen={() => setRoute("notifications")} />
-      <PeerChip dotClass={dotClass} syncLabel={syncLabel} endpoint={chain.endpoint} />
+      <PeerChip dotClass={dotClass} syncLabel={syncLabel} endpoint={chain.endpoint} onOpenOperators={() => setRoute("operators")} />
       <div className="w-top__user">
           <div className="w-top__user__avatar" />
         <div>
@@ -144,10 +144,12 @@ function PeerChip({
   dotClass,
   syncLabel,
   endpoint,
+  onOpenOperators,
 }: {
   dotClass: string;
   syncLabel: string;
   endpoint: string | null;
+  onOpenOperators: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState<string>(() => currentEndpoint());
@@ -271,6 +273,16 @@ function PeerChip({
           </div>
 
           <div className="w-peer-pop__foot">
+            <button
+              type="button"
+              className="btn btn--sm btn--ghost"
+              onClick={() => {
+                setOpen(false);
+                onOpenOperators();
+              }}
+            >
+              Open Operators
+            </button>
             <button
               type="button"
               className="btn btn--sm btn--primary"

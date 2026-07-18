@@ -201,8 +201,16 @@ export function About({ goto }: AboutProps) {
           </div>
           <div className="row-help" style={{ marginTop: 4 }}>
             Endpoints reachable and reporting the testnet chain id. Genesis-verified
-            operator health is not computed yet — this is a reachability figure.
+            per-operator health lives on the Operators screen.
           </div>
+          <button
+            style={{ ...ROW_BTN, marginTop: 10 }}
+            className="w-live-row"
+            onClick={() => goto("operators")}
+          >
+            <div className="row-label">Open Operators</div>
+            <span className="row-help">Per-operator trust status →</span>
+          </button>
         </div>
       </div>
 

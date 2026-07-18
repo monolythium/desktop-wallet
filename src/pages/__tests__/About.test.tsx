@@ -41,11 +41,11 @@ function liveInfo(genesis_hash: string, binary_sha = "da04f8f5"): ChainInfo {
   return { genesis_hash, binary_sha } as unknown as ChainInfo;
 }
 
-function renderAbout(enabled: boolean) {
+function renderAbout(enabled: boolean, goto: (r: string) => void = () => {}) {
   const control = { enabled, setEnabled: async () => true };
   return renderWithProviders(
     <DeveloperModeProvider value={control}>
-      <About goto={() => {}} />
+      <About goto={goto as never} />
     </DeveloperModeProvider>,
   );
 }
@@ -152,5 +152,21 @@ describe("About — version / update / build rows", () => {
   it("shows the build mode (development under test, not a packaged build)", () => {
     renderAbout(false);
     expect(screen.getByText("development")).toBeInTheDocument();
+  });
+});
+
+describe("About — operators card wiring", () => {
+  afterEach(() => {
+    liveMock.value = null;
+    vi.clearAllMocks();
+  });
+
+  it("no longer claims genesis health 'is not computed yet', and links to Operators", async () => {
+    const goto = vi.fn();
+    const { user } = renderAbout(false, goto);
+    expect(screen.queryByText(/is not computed yet/)).not.toBeInTheDocument();
+    expect(screen.getByText(/Genesis-verified per-operator health lives on the Operators screen/)).toBeInTheDocument();
+    await user.click(screen.getByText("Open Operators"));
+    expect(goto).toHaveBeenCalledWith("operators");
   });
 });
