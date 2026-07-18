@@ -106,7 +106,7 @@ export function PreferencesPanel() {
           ))}
         </div>
         <Caption>
-          {"Reserved for a future fiat estimate. There is no LYTH price source yet, so the wallet never shows a converted value — your choice is stored for when one exists."}
+          {"Sets the currency for the wallet's fiat estimates. There is no LYTH price source yet, so estimate slots show only your currency's symbol and a dash until one exists."}
         </Caption>
       </AccordionRow>
     </div>

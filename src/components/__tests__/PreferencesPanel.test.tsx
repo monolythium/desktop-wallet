@@ -9,7 +9,7 @@ import { PreferencesPanel } from "../PreferencesPanel";
 
 const LANGUAGE_CAPTION = "Display language. More locales will follow — English (US) for now.";
 const CURRENCY_CAPTION =
-  "Reserved for a future fiat estimate. There is no LYTH price source yet, so the wallet never shows a converted value — your choice is stored for when one exists.";
+  "Sets the currency for the wallet's fiat estimates. There is no LYTH price source yet, so estimate slots show only your currency's symbol and a dash until one exists.";
 
 function header(name: string): HTMLElement {
   return screen.getByRole("button", { name: new RegExp(`^${name}`) });
