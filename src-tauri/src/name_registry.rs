@@ -2,8 +2,14 @@
 //!
 //! Spec from `memory/v4-naming-registry-locked.md` and whitepaper v4.1 §22.8.
 //! Address allocation: precompile `0x110E` per Law §5.4. **This file is
-//! validation only** — actual registration goes through the chain RPC,
-//! which is not wired yet. See TODO.md → §1.5 Name registration.
+//! STRUCTURAL VALIDATION ONLY** (category, labels, multipliers). Registration
+//! itself IS wired, on the TypeScript side: the real U-curve price comes from
+//! the SDK quote read and submission goes through the shared submit seam.
+//!
+//! This file deliberately computes NO price. It once carried a placeholder base
+//! fee so the onboarding UI could show "a plausible number" — a fabricated
+//! figure for a value the user actually pays. It was removed rather than left
+//! dormant, so no future caller can pick it up by accident.
 //!
 //! TLD categories (all five for completeness, even though v1 wallet
 //! onboarding only registers human names):
@@ -38,14 +44,6 @@
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-
-/// Normal-tx base fee in LYTH (display unit, not wei). The chain returns
-/// the live base fee per epoch — for now this is a placeholder so the
-/// onboarding UI shows a plausible number.
-///
-/// TODO(name-base-fee): replace with live `eth_gasPrice` × estimated gas
-/// for a name-register tx once the RPC client is wired.
-const PLACEHOLDER_BASE_FEE_LYTH: f64 = 0.05;
 
 const STRUCTURAL_RESERVES: &[&str] = &["agent", "cluster", "contract", "system"];
 
@@ -115,8 +113,6 @@ pub struct NameAvailability {
     pub primary_label_len: usize,
     /// Whole-name byte length.
     pub whole_len: usize,
-    /// Computed price in LYTH (display unit). None for System names.
-    pub price_lyth: Option<String>,
     /// Length multiplier applied (U-curve).
     pub length_multiplier: f64,
     /// Category multiplier applied.
@@ -247,19 +243,12 @@ pub fn validate(name: &str) -> Result<NameAvailability, NameError> {
     let length_mult = length_multiplier(primary_label.len());
     let cat_mult = category.base_multiplier();
 
-    let price_lyth = cat_mult.map(|cm| {
-        let price = cm * length_mult * PLACEHOLDER_BASE_FEE_LYTH;
-        // Two decimal places for display.
-        format!("{price:.2}")
-    });
-
     Ok(NameAvailability {
         name: name.to_string(),
         category,
         primary_label_len: primary_label.len(),
         primary_label,
         whole_len: name.len(),
-        price_lyth,
         length_multiplier: length_mult,
         category_multiplier: cat_mult,
         on_chain_check_performed: false,
@@ -287,7 +276,6 @@ mod tests {
         assert_eq!(a.primary_label_len, 5);
         assert_eq!(a.length_multiplier, 3.0);
         assert_eq!(a.category_multiplier, Some(5.0));
-        assert!(a.price_lyth.is_some());
     }
 
     #[test]
@@ -363,21 +351,10 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn price_curve_short_expensive() {
-        let a = validate("a.mono").unwrap();
-        let b = validate("alice12.mono").unwrap();
-        let pa: f64 = a.price_lyth.unwrap().parse().unwrap();
-        let pb: f64 = b.price_lyth.unwrap().parse().unwrap();
-        assert!(pa > pb, "1-char should cost more than 7-char");
-    }
-
-    #[test]
-    fn price_curve_long_expensive() {
-        let sweet = validate("alicebob.mono").unwrap();
-        let longish = validate("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.mono").unwrap();
-        let sp: f64 = sweet.price_lyth.unwrap().parse().unwrap();
-        let lp: f64 = longish.price_lyth.unwrap().parse().unwrap();
-        assert!(lp > sp, "36-char should cost more than 8-char (sweet spot)");
-    }
+    // The U-curve PRICE tests are deliberately gone with the placeholder they
+    // asserted on. The curve's real shape is pinned on the TypeScript side
+    // against the SDK's `nameRegistrationCost`, which is the chain's own
+    // implementation — a Rust test over a fabricated base fee proved only that
+    // the fabrication was internally consistent. The structural multipliers
+    // (`length_multiplier`, `category_multiplier`) are still asserted above.
 }
