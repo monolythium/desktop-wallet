@@ -194,3 +194,67 @@ describe("Networks — add custom chain form", () => {
     expect(JSON.parse(localStorage.getItem(USER_CHAINS_KEY) ?? "{}")["0x539"]).toBeDefined();
   });
 });
+
+describe("Networks — edit custom chain form", () => {
+  async function openEdit(user: ReturnType<typeof renderNetworks>["user"], name: string) {
+    await user.click(screen.getByText(name));
+    await user.click(screen.getByRole("button", { name: "Edit" }));
+  }
+
+  it("locks the chain id (not an input) with the decimal hint", async () => {
+    addUserChain({ chainId: "0x539", name: "Local devnet", rpc: "http://localhost:8545" });
+    const { user } = renderNetworks(true);
+    await openEdit(user, "Local devnet");
+    expect(screen.getByText("Chain ID (locked)")).toBeInTheDocument();
+    expect(screen.getByText("Decimal: 1337")).toBeInTheDocument();
+    expect(screen.queryByDisplayValue("0x539")).not.toBeInTheDocument(); // rendered as text
+  });
+
+  it("shares the validators (name required, rpc must be valid)", async () => {
+    addUserChain({ chainId: "0x539", name: "Local devnet", rpc: "http://localhost:8545" });
+    const { user } = renderNetworks(true);
+    await openEdit(user, "Local devnet");
+    await user.clear(screen.getByDisplayValue("Local devnet"));
+    expect(screen.getByText("Name is required")).toBeInTheDocument();
+    await user.clear(screen.getByDisplayValue("http://localhost:8545"));
+    await user.type(screen.getByPlaceholderText("https://rpc.example.com"), "notaurl");
+    expect(screen.getByText("Must be a valid URL")).toBeInTheDocument();
+  });
+
+  it("patch semantics: clearing the explorer + all currency fields deletes them", async () => {
+    addUserChain({
+      chainId: "0x539",
+      name: "Local devnet",
+      rpc: "http://localhost:8545",
+      blockExplorer: "https://scan.example",
+      nativeCurrency: { name: "LocalCoin", symbol: "LOC", decimals: 9 },
+    });
+    const { user } = renderNetworks(true);
+    await openEdit(user, "Local devnet");
+    await user.clear(screen.getByPlaceholderText("https://scan.example.com"));
+    await user.clear(screen.getByPlaceholderText("Currency name (e.g. Monolythium LYTH)"));
+    await user.clear(screen.getByPlaceholderText("Symbol (e.g. LYTH)"));
+    await user.clear(screen.getByPlaceholderText("Decimals (e.g. 18)"));
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    const stored = JSON.parse(localStorage.getItem(USER_CHAINS_KEY)!)["0x539"];
+    expect(stored.blockExplorer).toBeUndefined();
+    expect(stored.nativeCurrency).toBeUndefined();
+  });
+
+  it("editing the ACTIVE chain's rpc re-follows the endpoint (setEndpoint(newRpc))", async () => {
+    addUserChain({ chainId: "0x539", name: "Local devnet", rpc: "http://localhost:8545" });
+    localStorage.setItem(ACTIVE_CHAIN_KEY, "0x539"); // custom is active
+    const { user } = renderNetworks(true);
+    await openEdit(user, "Local devnet");
+    await user.clear(screen.getByDisplayValue("http://localhost:8545"));
+    await user.type(screen.getByPlaceholderText("https://rpc.example.com"), "http://localhost:9999");
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    expect(setEndpointSpy).toHaveBeenCalledWith("http://localhost:9999");
+  });
+
+  it("the builtin chain never exposes Edit (guard)", async () => {
+    const { user } = renderNetworks(true);
+    await user.click(screen.getByText("Monolythium Testnet"));
+    expect(screen.queryByRole("button", { name: "Edit" })).not.toBeInTheDocument();
+  });
+});

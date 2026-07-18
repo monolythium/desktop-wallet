@@ -18,14 +18,20 @@ import {
   canonicalChainKey,
   chainRegistry,
   deleteUserChain,
+  editUserChain,
   readActiveChainId,
   setActiveChain,
   subscribeActiveChain,
   type ChainInput,
+  type ChainPatch,
   type ChainRecord,
 } from "../sdk/chains";
 
-type NetworksView = { kind: "list" } | { kind: "detail"; chainId: string } | { kind: "add" };
+type NetworksView =
+  | { kind: "list" }
+  | { kind: "detail"; chainId: string }
+  | { kind: "add" }
+  | { kind: "edit"; chainId: string };
 
 // ── Shared per-field validators (§12; Edit reuses them) ──────────────────────
 
@@ -118,12 +124,23 @@ export function Networks() {
           }}
           onCancel={() => setView({ kind: "list" })}
         />
+      ) : view.kind === "edit" && registry[view.chainId] && !registry[view.chainId]!.builtin ? (
+        <EditChain
+          record={registry[view.chainId]!}
+          active={activeId === view.chainId}
+          onDone={() => {
+            setRefresh((n) => n + 1);
+            setView({ kind: "detail", chainId: view.chainId });
+          }}
+          onCancel={() => setView({ kind: "detail", chainId: view.chainId })}
+        />
       ) : view.kind === "detail" && detail ? (
         <NetworkDetail
           record={detail}
           active={activeId === detail.chainId}
           onBack={() => setView({ kind: "list" })}
           onActivated={() => setView({ kind: "list" })}
+          onEdit={() => setView({ kind: "edit", chainId: detail.chainId })}
           onDeleted={() => {
             setRefresh((n) => n + 1);
             setView({ kind: "list" });
@@ -329,6 +346,104 @@ function AddChain({
   );
 }
 
+function EditChain({
+  record,
+  active,
+  onDone,
+  onCancel,
+}: {
+  record: ChainRecord;
+  active: boolean;
+  onDone: () => void;
+  onCancel: () => void;
+}) {
+  const [name, setName] = useState(record.name);
+  const [rpc, setRpc] = useState(record.rpc);
+  const [explorer, setExplorer] = useState(record.blockExplorer ?? "");
+  const [curName, setCurName] = useState(record.nativeCurrency?.name ?? "");
+  const [curSym, setCurSym] = useState(record.nativeCurrency?.symbol ?? "");
+  const [curDec, setCurDec] = useState(record.nativeCurrency ? String(record.nativeCurrency.decimals) : "");
+  const [submitError, setSubmitError] = useState<string | null>(null);
+
+  const nErr = nameError(name);
+  const rErr = rpcError(rpc);
+  const rWarn = rpcWarning(rpc);
+  const eErr = explorerError(explorer);
+  const cErr = currencyError(curName, curSym, curDec);
+  const valid = name.trim() !== "" && nErr === null && rpc.trim() !== "" && rErr === null && eErr === null && cErr === null;
+
+  const onSave = () => {
+    // Patch semantics (§13): a blank explorer deletes the field; an all-blank
+    // currency deletes nativeCurrency; a filled one sets it. The chainId is the
+    // immutable key and is not part of the patch.
+    const patch: ChainPatch = {
+      name: name.trim(),
+      rpc: rpc.trim(),
+      blockExplorer: explorer.trim() === "" ? null : explorer.trim(),
+      nativeCurrency: currencyValue(curName, curSym, curDec) ?? null,
+    };
+    const result = editUserChain(record.chainId, patch);
+    if (!result.ok) {
+      setSubmitError(result.reason || "save failed");
+      return;
+    }
+    // If the edited chain is active, re-activate it so the dial follows the new
+    // rpc immediately (setActiveChain runs the endpoint follow + rescope notify).
+    if (active) setActiveChain(record.chainId);
+    onDone();
+  };
+
+  return (
+    <>
+      <button type="button" className="btn btn--ghost btn--sm" onClick={onCancel} style={{ marginBottom: 12 }}>
+        ← Network details
+      </button>
+      <div className="w-card">
+        <div className="w-card__head"><h3>Edit chain</h3></div>
+        <div className="w-card__body">
+          <div className="w-form-stack">
+            <label className="w-field">
+              <span>Chain ID (locked)</span>
+              <div className="mono" style={{ cursor: "not-allowed", opacity: 0.7, padding: "8px 10px", border: "1px solid var(--w-line)", borderRadius: 8 }}>
+                {record.chainId}
+              </div>
+              <span className="row-help mono">Decimal: {record.chainIdNum}</span>
+            </label>
+            <FormField label="Name" error={nErr}>
+              <input value={name} placeholder="e.g. Monolythium" onChange={(e) => setName(e.target.value)} />
+            </FormField>
+            <FormField label="RPC URL" error={rErr} warning={rWarn}>
+              <input value={rpc} placeholder="https://rpc.example.com" onChange={(e) => setRpc(e.target.value)} />
+            </FormField>
+            <FormField label="Block explorer URL (optional)" error={eErr}>
+              <input value={explorer} placeholder="https://scan.example.com" onChange={(e) => setExplorer(e.target.value)} />
+            </FormField>
+            <FormField label="Native currency (optional, all-or-nothing)" error={cErr}>
+              <div className="w-form-stack">
+                <input value={curName} placeholder="Currency name (e.g. Monolythium LYTH)" onChange={(e) => setCurName(e.target.value)} />
+                <input value={curSym} placeholder="Symbol (e.g. LYTH)" onChange={(e) => setCurSym(e.target.value)} />
+                <input value={curDec} placeholder="Decimals (e.g. 18)" onChange={(e) => setCurDec(e.target.value)} />
+              </div>
+            </FormField>
+
+            <div className="w-card" style={{ borderColor: "var(--warn)" }}>
+              <div className="w-card__body">
+                <div className="row-help" style={{ color: "var(--warn)" }}>{CHAIN_ADVISORY}</div>
+              </div>
+            </div>
+
+            {submitError ? <div className="row-help mono" style={{ color: "var(--err)" }}>{submitError}</div> : null}
+
+            <button type="button" className="btn btn--primary btn--full" disabled={!valid} style={{ opacity: valid ? 1 : 0.5 }} onClick={onSave}>
+              Save changes
+            </button>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
 /** Chain-id validator — needs the existing registry keys for collision detection,
  *  so it lives with the component rather than in the shared block above. */
 function chainIdError(raw: string, existingKeys: ReadonlySet<string>): string | null {
@@ -370,12 +485,14 @@ function NetworkDetail({
   active,
   onBack,
   onActivated,
+  onEdit,
   onDeleted,
 }: {
   record: ChainRecord;
   active: boolean;
   onBack: () => void;
   onActivated: () => void;
+  onEdit: () => void;
   onDeleted: () => void;
 }) {
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -459,9 +576,14 @@ function NetworkDetail({
 
           <div className="w-card">
             <div className="w-card__body">
-              <button type="button" className="btn btn--full" style={{ color: "var(--err)", borderColor: "var(--err)" }} onClick={() => { setDeleteError(null); setConfirmingDelete(true); }}>
-                ⚠ Delete
-              </button>
+              <div className="w-form-grid-2">
+                <button type="button" className="btn btn--ghost" onClick={onEdit}>
+                  Edit
+                </button>
+                <button type="button" className="btn" style={{ color: "var(--err)", borderColor: "var(--err)" }} onClick={() => { setDeleteError(null); setConfirmingDelete(true); }}>
+                  ⚠ Delete
+                </button>
+              </div>
             </div>
           </div>
         </>
