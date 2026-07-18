@@ -229,11 +229,6 @@ export function App() {
     [developerModeEnabled, setDeveloperMode],
   );
 
-  // Legacy sync prop for the pages not yet migrated to useDeveloperModeControl.
-  const setDeveloperModeEnabled = (enabled: boolean) => {
-    void setDeveloperMode(enabled);
-  };
-
   const setSteleEnabled = (enabled: boolean) => {
     setSteleEnabledState(enabled);
     writeSteleEnabled(enabled);
@@ -315,13 +310,7 @@ export function App() {
           {route === "inbox" && steleEnabled ? <Inbox /> : null}
           {route === "provider" && steleEnabled ? <Provider /> : null}
           {route === "notifications" ? <Notifications /> : null}
-          {route === "about" ? (
-            <About
-              goto={setRoute}
-              developerModeEnabled={developerModeEnabled}
-              setDeveloperModeEnabled={setDeveloperModeEnabled}
-            />
-          ) : null}
+          {route === "about" ? <About goto={setRoute} /> : null}
           {route === "resources" ? <Resources /> : null}
           {route === "why-monolythium" ? <WhyMonolythium /> : null}
           {route === "help" ? <Help goto={setRoute} /> : null}

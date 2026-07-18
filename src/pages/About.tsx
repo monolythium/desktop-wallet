@@ -8,6 +8,8 @@ import { useEffect, useState } from "react";
 import type { CSSProperties } from "react";
 import type { Route } from "../components/types";
 import { DRow, truncMiddle } from "../components/_detailModalParts";
+import { DeveloperModeToggle } from "../components/DeveloperModeToggle";
+import { useDeveloperMode } from "../sdk/developer-mode";
 import { checkForUpdate } from "../sdk/updater";
 import { listPeers, probePeer } from "../sdk/peers";
 import {
@@ -44,11 +46,10 @@ const ROW_BTN: CSSProperties = {
 
 interface AboutProps {
   goto: (r: Route) => void;
-  developerModeEnabled: boolean;
-  setDeveloperModeEnabled: (enabled: boolean) => void;
 }
 
-export function About({ goto, developerModeEnabled, setDeveloperModeEnabled }: AboutProps) {
+export function About({ goto }: AboutProps) {
+  const developerModeEnabled = useDeveloperMode();
   const [version, setVersion] = useState<string | null>(null);
   const [update, setUpdate] = useState<UpdateState>({ kind: "checking" });
   const [operators, setOperators] = useState<OperatorsSummary | null>(null);
@@ -178,22 +179,7 @@ export function About({ goto, developerModeEnabled, setDeveloperModeEnabled }: A
           <h3>Developer mode</h3>
         </div>
         <div className="w-card__body">
-          <div className="w-setting-row">
-            <div>
-              <div className="row-label">Technical details</div>
-              <div className="row-help">
-                Shows the chain identity and the connected node's runtime build.
-                Reuses the same toggle as Settings.
-              </div>
-            </div>
-            <button
-              type="button"
-              className={`w-chip ${developerModeEnabled ? "is-on" : ""}`}
-              onClick={() => setDeveloperModeEnabled(!developerModeEnabled)}
-            >
-              {developerModeEnabled ? "Enabled" : "Disabled"}
-            </button>
-          </div>
+          <DeveloperModeToggle />
         </div>
       </div>
 
