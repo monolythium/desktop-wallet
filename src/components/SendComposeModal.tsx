@@ -558,9 +558,11 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
     feeBundle !== null && feeError === null && (isToken || nativeFeeDisplay?.ok === true);
 
   // Token: the sender needs LYTH for the fee RESERVATION even when sending a
-  // token — block when the known LYTH balance can't cover it (honest pre-send).
+  // token — block when the affordability basis can't cover it (honest pre-send).
+  // Reservation-based and guard-tightened: the same basis the native gate uses,
+  // so a lying operator can only tighten this block, never hide it.
   const feeCoverageError =
-    isToken && balanceLythoshi !== null && reservationLythoshi !== null && balanceLythoshi < reservationLythoshi
+    isToken && basisLythoshi !== null && reservationLythoshi !== null && basisLythoshi < reservationLythoshi
       ? "Not enough LYTH to cover the network fee for this token transfer."
       : null;
 

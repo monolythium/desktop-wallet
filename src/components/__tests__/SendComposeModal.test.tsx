@@ -316,3 +316,59 @@ describe("SendComposeModal — spend guard + affordability (T7)", () => {
     expect((screen.getByLabelText("Amount in LYTH") as HTMLInputElement).value).toBe("3");
   });
 });
+
+describe("SendComposeModal — token fee path (T8)", () => {
+  const token = { tokenId: TOKEN_ID, symbol: "USDC", decimals: 6, balanceBaseUnits: "2000000" };
+
+  it("headlines 'Network fee (max)' with the 250k reservation and 'Fee paid in LYTH', no Total row", async () => {
+    renderWithProviders(<SendComposeModal fromBech32m={FROM} token={token} onClose={vi.fn()} />);
+    expect(await screen.findByText("Network fee (max)")).toBeInTheDocument();
+    // Normal reservation: 2×10^9 per-unit × 250_000 = 5×10^14 = 0.0005 LYTH.
+    expect(screen.getByText("0.0005 LYTH")).toBeInTheDocument();
+    expect(screen.getByText("Fee paid in")).toBeInTheDocument();
+    expect(screen.getByText("LYTH (not USDC)")).toBeInTheDocument();
+    // A token fee is a different unit from the token amount — no Total row.
+    expect(screen.queryByText("Total (amount + fee)")).toBeNull();
+  });
+
+  it("blocks Review with the verbatim coverage message when the basis can't cover the reservation", async () => {
+    // A wallet with tokens but near-zero LYTH: basis (100 lythoshi) < 5×10^14 reservation.
+    live.loadLiveWalletBalance.mockResolvedValueOnce({ balanceLyth: "0", balanceLythoshi: "100" });
+    const { user } = renderWithProviders(<SendComposeModal fromBech32m={FROM} token={token} onClose={vi.fn()} />);
+    await user.type(screen.getByLabelText("Recipient typed bech32m address"), TO);
+    await user.type(screen.getByLabelText("Amount in USDC"), "1");
+    expect(
+      await screen.findByText("Not enough LYTH to cover the network fee for this token transfer."),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Review" })).toBeDisabled();
+  });
+
+  it("the guard tightens the token coverage block too (min(guard,balance) < reservation)", async () => {
+    // Display balance is a healthy 5 LYTH, but a guard operator floors it below the reservation.
+    guard.loadSpendGuardLythoshi.mockResolvedValue(100n);
+    renderWithProviders(<SendComposeModal fromBech32m={FROM} token={token} onClose={vi.fn()} />);
+    expect(
+      await screen.findByText("Not enough LYTH to cover the network fee for this token transfer."),
+    ).toBeInTheDocument();
+  });
+
+  it("token Max still fills the FULL token holding (fee is separate LYTH)", async () => {
+    const { user } = renderWithProviders(<SendComposeModal fromBech32m={FROM} token={token} onClose={vi.fn()} />);
+    const maxBtn = screen.getByRole("button", { name: "Max" });
+    await waitFor(() => expect(maxBtn).toBeEnabled());
+    await user.click(maxBtn);
+    expect((screen.getByLabelText("Amount in USDC") as HTMLInputElement).value).toBe("2"); // 2000000 / 10^6
+  });
+
+  it("the drawer fee row keeps 'Network fee (max)' with the reservation and no 'resolved at submit'", async () => {
+    const { user } = renderWithProviders(<SendComposeModal fromBech32m={FROM} token={token} onClose={vi.fn()} />);
+    await user.type(screen.getByLabelText("Recipient typed bech32m address"), TO);
+    await user.type(screen.getByLabelText("Amount in USDC"), "1.5");
+    await user.click(screen.getByRole("button", { name: "Review" }));
+    await waitFor(() => expect(cap.descriptor).toBeDefined());
+    const d = cap.descriptor!;
+    expect(d.diff.find((l) => l.k === "Network fee (max)")?.v).toBe("0.0005 LYTH");
+    expect(d.diff.find((l) => l.k === "Total (amount + fee)")).toBeUndefined(); // no Total for tokens
+    expect(JSON.stringify(d.diff)).not.toContain("resolved at submit");
+  });
+});
