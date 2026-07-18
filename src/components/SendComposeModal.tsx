@@ -6,12 +6,12 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   ADDRESS_KIND_HRPS,
-  MONOLYTHIUM_TESTNET_CHAIN_ID,
   NATIVE_LYTH_DECIMALS,
   formatLyth,
   parseLythToLythoshi,
   typedBech32ToAddress,
 } from "@monolythium/core-sdk";
+import { scopeChainKey } from "../sdk/chains";
 import { useOperations } from "../operations/context";
 import { sendNativeLyth } from "../sdk/native-send";
 import { sendMrc20Token, TOKEN_TRANSFER_EXECUTION_UNIT_LIMIT } from "../sdk/token-send";
@@ -196,7 +196,7 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
     const recipientLower = recipient.trim().toLowerCase();
     const fromLower = fromBech32m.toLowerCase();
     void (async () => {
-      const chainIdHex = `0x${MONOLYTHIUM_TESTNET_CHAIN_ID.toString(16)}`;
+      const chainIdHex = scopeChainKey();
       const scopeKey = activityCacheKey(fromLower, chainIdHex);
       const cached = await readConfirmedCache(scopeKey).catch(() => null);
       const live = await loadLiveAddressActivity(fromBech32m).catch(() => null);

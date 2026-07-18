@@ -13,7 +13,7 @@
 // off they are empty and the feed is exactly the indexed confirmed rows.
 
 import { useEffect, useMemo, useState } from "react";
-import { MONOLYTHIUM_TESTNET_CHAIN_ID } from "@monolythium/core-sdk";
+import { scopeChainKey } from "../sdk/chains";
 import { ActivityDetail, type DetailRow } from "../components/ActivityDetail";
 import { NotificationDetail } from "../components/NotificationDetail";
 import { TxRow } from "../components/TxRow";
@@ -163,7 +163,9 @@ export function Activity() {
     }
     setBusy(true);
     const addrLower = walletAddress.toLowerCase();
-    const chainIdHex = `0x${MONOLYTHIUM_TESTNET_CHAIN_ID.toString(16)}`;
+    // Scope every per-(address, chain) read to the ACTIVE chain — on a custom
+    // chain this keys away from the builtin so nothing leaks across a switch (H3).
+    const chainIdHex = scopeChainKey();
     const scopeKey = activityCacheKey(addrLower, chainIdHex);
     try {
       // 1. Instant paint from the persisted cache (also replaces a prior wallet's
