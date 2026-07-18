@@ -21,6 +21,7 @@ import {
 } from "react";
 import { readAutoLockMinutes } from "./auto-lock-setting";
 import { clearUnlockLockout } from "./unlock-lockout";
+import { clearSentRecipientIntegrityKeys } from "./sent-recipients";
 
 interface AutoLockApi {
   isLocked: boolean;
@@ -104,6 +105,13 @@ export function LockProvider({ children }: { children: ReactNode }) {
   // Keep the module-level copy in sync so non-React readers see the lock flag.
   useEffect(() => {
     _walletLocked = isLocked;
+  }, [isLocked]);
+
+  // Zeroize the one session secret this wallet caches — the sent-recipients
+  // integrity sub-keys — whenever it locks. (The seed itself is still decrypted
+  // per operation and never cached, so there is nothing else to wipe.)
+  useEffect(() => {
+    if (isLocked) clearSentRecipientIntegrityKeys();
   }, [isLocked]);
 
   // Arm on mount; tear the timer down on unmount.

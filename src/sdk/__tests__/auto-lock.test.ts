@@ -28,6 +28,12 @@ vi.mock("../auto-lock-setting", () => ({ readAutoLockMinutes: () => 1 }));
 vi.mock("../unlock-lockout", () => ({ clearUnlockLockout: vi.fn() }));
 
 import { LockProvider, useAutoLock } from "../auto-lock";
+import {
+  __sentRecipientKeyRefForTest,
+  clearSentRecipientIntegrityKeys,
+  computeSentRecipientTag,
+  hasSentRecipientKey,
+} from "../sent-recipients";
 
 const MINUTE = 60_000;
 
@@ -117,5 +123,17 @@ describe("LockProvider idle auto-lock", () => {
     act(() => api!.resumeTimer());
     advance(MINUTE);
     expect(api!.isLocked).toBe(true);
+  });
+
+  it("zeroizes the cached sent-recipients integrity key when the wallet locks (C2)", async () => {
+    clearSentRecipientIntegrityKeys();
+    mount();
+    const vault = "0x" + "aa".repeat(20);
+    await computeSentRecipientTag(new Uint8Array(32).fill(7), vault, "msg");
+    const ref = __sentRecipientKeyRefForTest(vault)!;
+    expect(ref.some((b) => b !== 0)).toBe(true); // key cached and non-zero
+    act(() => api!.lock());
+    expect(hasSentRecipientKey(vault)).toBe(false); // dropped on lock
+    expect(ref.every((b) => b === 0)).toBe(true); // and zeroized in place
   });
 });
