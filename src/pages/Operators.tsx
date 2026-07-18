@@ -29,6 +29,19 @@ import {
   type OperatorInspectRow,
 } from "../sdk/operator-inspect";
 import type { RuntimeBlock } from "../sdk/about";
+import {
+  bpsPct,
+  deriveOperatorRiskTier,
+  loadOperatorRisk,
+  loadSigningActivity,
+  loadUpcomingDuties,
+  signingPill,
+} from "../sdk/operator-consensus";
+import type {
+  OperatorRiskResponse,
+  OperatorSigningActivityResponse,
+  UpcomingDutiesResponse,
+} from "@monolythium/core-sdk";
 
 const hostOf = (url: string) => url.replace(/^https?:\/\//, "");
 
@@ -154,6 +167,8 @@ export function Operators() {
       <RiskLegendCard rows={rows ?? []} devMode={devMode} />
 
       {devMode ? <ReportedAttributesCard rows={rows ?? []} /> : null}
+
+      {devMode ? <ConsensusCards /> : null}
 
       {connect ? (
         <ConnectModal
@@ -331,6 +346,127 @@ function ReportedAttributesCard({ rows }: { rows: readonly OperatorInspectRow[] 
           })
         )}
       </div>
+    </div>
+  );
+}
+
+/** The three developer-gated consensus cards (§10). Each reads through the
+ *  trusted provider and HIDES on any failure — while the wallet is fail-closed
+ *  they simply do not load. Keyed on the consensus authority slot, not a row. */
+function ConsensusCards() {
+  const [signing, setSigning] = useState<OperatorSigningActivityResponse | null>(null);
+  const [risk, setRisk] = useState<OperatorRiskResponse | null>(null);
+  const [duties, setDuties] = useState<UpcomingDutiesResponse | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void loadSigningActivity().then((r) => !cancelled && setSigning(r));
+    void loadOperatorRisk().then((r) => !cancelled && setRisk(r));
+    void loadUpcomingDuties().then((r) => !cancelled && setDuties(r));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  return (
+    <>
+      {signing ? <SigningCard data={signing} /> : null}
+      {risk ? <AuthorityRiskCard data={risk} /> : null}
+      {duties ? <UpcomingDutiesCard data={duties} /> : null}
+    </>
+  );
+}
+
+function ConsensusPillView({ pill }: { pill: { label: string; color: string } }) {
+  return (
+    <span className="w-op-pill" style={{ color: pill.color }}>
+      <span className="w-op-pill__dot" style={{ background: pill.color }} />
+      {pill.label}
+    </span>
+  );
+}
+
+function SigningCard({ data }: { data: OperatorSigningActivityResponse }) {
+  const highest = data.entries.length
+    ? data.entries.reduce((a, b) => (b.round > a.round ? b : a))
+    : null;
+  return (
+    <div className="w-card">
+      <div className="w-card__head">
+        <h3>Chain signing — authority {data.authorityIndex} · round {String(data.currentRound)}</h3>
+        <div className="w-card__head__spacer" />
+        <span className="w-live-pill is-muted">{data.entries.length}/{data.limit}</span>
+      </div>
+      <div className="w-card__body">
+        {highest ? <ConsensusPillView pill={signingPill(highest.status)} /> : <div className="row-help">No signing history.</div>}
+      </div>
+    </div>
+  );
+}
+
+function AuthorityRiskCard({ data }: { data: OperatorRiskResponse }) {
+  const tier = deriveOperatorRiskTier(data);
+  const badge =
+    tier === "ok" ? { label: "Healthy", color: "var(--ok)" }
+    : tier === "warn" ? { label: "Near threshold", color: "var(--warn)" }
+    : { label: "At risk", color: "var(--err)" };
+  const jail = data.jailStatus;
+  const jailLine =
+    "jailed" in jail
+      ? jail.tombstoned
+        ? "Tombstoned — equivocation slash, permanently barred."
+        : jail.jailed
+          ? `Jailed until height ${String(jail.jailedUntilHeight)} (${String(jail.unjailCount)} prior unjails).`
+          : null
+      : null;
+  return (
+    <div className="w-card">
+      <div className="w-card__head">
+        <h3>Authority risk — authority {data.authorityIndex} · height {String(data.dataHeight)}</h3>
+        <div className="w-card__head__spacer" />
+        <ConsensusPillView pill={badge} />
+      </div>
+      <div className="w-card__body">
+        <div className="row-help">
+          miss {bpsPct(data.missRateBps)}% / headroom {bpsPct(data.remainingHeadroomBps)}% (slash {data.thresholdBps / 100}%)
+        </div>
+        {jailLine ? <div className="row-help" style={{ color: "var(--err)", marginTop: 4 }}>{jailLine}</div> : null}
+        {data.reasons.length > 0 ? <div className="row-help" style={{ marginTop: 4 }}>Reasons: {data.reasons.join(", ")}</div> : null}
+        <div className="row-help" style={{ marginTop: 4 }}>
+          Sampled over {data.windowRounds} rounds · {data.observedRounds} observed
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function UpcomingDutiesCard({ data }: { data: UpcomingDutiesResponse }) {
+  const d = data.duties;
+  const keyRotation =
+    "nextRound" in d.keyRotation
+      ? `next round ${String(d.keyRotation.nextRound)} · epoch ${String(d.keyRotation.epochLengthRounds)} rounds`
+      : `not scheduled: ${d.keyRotation.reason}`;
+  return (
+    <div className="w-card">
+      <div className="w-card__head">
+        <h3>Upcoming duties — authority {data.authorityIndex} · round {String(data.currentRound)}</h3>
+      </div>
+      <div className="w-card__body">
+        <DutyRow k="Attestation" v={`rounds ${String(d.attestation.startRound)}–${String(d.attestation.endRound)} · ${d.attestation.kind}`} scheduled />
+        <DutyRow k="Key rotation" v={keyRotation} scheduled={"nextRound" in d.keyRotation} />
+        <DutyRow k="Block production" v={d.blockProduction.reason} />
+        <DutyRow k="Sync" v={d.sync.reason} />
+      </div>
+    </div>
+  );
+}
+
+function DutyRow({ k, v, scheduled = false }: { k: string; v: string; scheduled?: boolean }) {
+  return (
+    <div className="w-op-detail__row">
+      <span className="w-op-detail__k">
+        <span className="w-op-pill__dot" style={{ background: scheduled ? "var(--ok)" : "var(--fg-500)", display: "inline-block", marginRight: 6 }} />
+        {k}
+      </span>
+      <span className="w-op-detail__v">{v}</span>
     </div>
   );
 }

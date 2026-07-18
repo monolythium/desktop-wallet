@@ -45,6 +45,17 @@ vi.mock("../../sdk/client", async (orig) => ({
   subscribeEndpoint: () => () => {},
   setEndpoint: setEndpointMock.fn,
 }));
+const consensusMock = vi.hoisted(() => ({
+  signing: null as unknown,
+  risk: null as unknown,
+  duties: null as unknown,
+}));
+vi.mock("../../sdk/operator-consensus", async (orig) => ({
+  ...(await orig<typeof import("../../sdk/operator-consensus")>()),
+  loadSigningActivity: vi.fn(async () => consensusMock.signing),
+  loadOperatorRisk: vi.fn(async () => consensusMock.risk),
+  loadUpcomingDuties: vi.fn(async () => consensusMock.duties),
+}));
 vi.mock("../../sdk/chain-trust", async (orig) => {
   const real = await orig<typeof import("../../sdk/chain-trust")>();
   return {
@@ -70,6 +81,9 @@ describe("Operators screen", () => {
   afterEach(() => {
     rowsMock.rows = [];
     probeMock.trusted = true;
+    consensusMock.signing = null;
+    consensusMock.risk = null;
+    consensusMock.duties = null;
     markActiveOperatorTrusted();
     vi.clearAllMocks();
   });
@@ -204,5 +218,26 @@ describe("Operators screen", () => {
     expect(await screen.findByText("Reported attributes")).toBeInTheDocument();
     expect(screen.getByText("indexer_history")).toBeInTheDocument();
     expect(screen.getByText("1/2")).toBeInTheDocument(); // 1 of 2 report it available
+  });
+
+  it("consensus cards hide on unavailable and render when data resolves", async () => {
+    // Dev on, all three loaders return null → no consensus cards.
+    rowsMock.rows = [row("http://a", { verdict: verdict("http://a", { trusted: true }) })];
+    const { unmount } = renderOperators(true);
+    await screen.findByText("Reported attributes");
+    expect(screen.queryByText(/Chain signing/)).not.toBeInTheDocument();
+    unmount();
+
+    // Data resolves → the cards render with their tier/pill.
+    consensusMock.signing = { schemaVersion: 1, authorityIndex: 0, currentRound: 42n, limit: 50, entries: [{ round: 42n, status: "signed" }] };
+    consensusMock.risk = { schemaVersion: 1, authorityIndex: 0, dataHeight: 100n, windowRounds: 200, missedRounds: 0, observedRounds: 200, missRateBps: 0, thresholdBps: 500, remainingHeadroomBps: 500, jailStatus: { reason: "not-tracked" }, reasons: [] };
+    consensusMock.duties = { schemaVersion: 1, authorityIndex: 0, currentRound: 42n, horizonRounds: 10, duties: { attestation: { startRound: 43n, endRound: 50n, kind: "vote" }, blockProduction: { reason: "unscheduled" }, sync: { reason: "n/a" }, keyRotation: { reason: "none" } } };
+    rowsMock.rows = [row("http://a", { verdict: verdict("http://a", { trusted: true }) })];
+    renderOperators(true);
+    expect(await screen.findByText(/Chain signing — authority 0 · round 42/)).toBeInTheDocument();
+    expect(screen.getByText("Signing (latest cert healthy)")).toBeInTheDocument();
+    expect(screen.getByText(/Authority risk — authority 0/)).toBeInTheDocument();
+    expect(screen.getByText("Healthy")).toBeInTheDocument();
+    expect(screen.getByText(/Upcoming duties — authority 0/)).toBeInTheDocument();
   });
 });
