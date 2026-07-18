@@ -155,6 +155,9 @@ describe("SendComposeModal — .mono resolution is fail-closed", () => {
     const { user } = renderWithProviders(<SendComposeModal fromBech32m={FROM} onClose={vi.fn()} />);
     await user.type(screen.getByLabelText("Recipient typed bech32m address"), "alice.mono");
     await user.type(screen.getByLabelText("Amount in LYTH"), "1");
+    // Resolution is INLINE now — wait for the hit hint (the full resolved address)
+    // before Review; the address shown is exactly the one signed.
+    await screen.findByText(RESOLVED);
     await user.click(screen.getByRole("button", { name: "Review" }));
 
     await waitFor(() => expect(cap.descriptor).toBeDefined());
@@ -163,16 +166,30 @@ describe("SendComposeModal — .mono resolution is fail-closed", () => {
     expect(send.sendNativeLyth).toHaveBeenCalledWith(expect.objectContaining({ to: RESOLVED }));
   });
 
-  it("an unresolved name BLOCKS the send (no operation opened, nothing signed)", async () => {
+  it("an unresolved name BLOCKS the send (miss hint inline, Review disabled, nothing signed)", async () => {
     nameResolve.resolveNameQuorum.mockResolvedValue({ ok: false, message: "name did not resolve across a quorum" });
     const { user } = renderWithProviders(<SendComposeModal fromBech32m={FROM} onClose={vi.fn()} />);
     await user.type(screen.getByLabelText("Recipient typed bech32m address"), "ghost.mono");
     await user.type(screen.getByLabelText("Amount in LYTH"), "1");
-    await user.click(screen.getByRole("button", { name: "Review" }));
-
+    // The miss surfaces inline (no signable address); Review never enables.
     expect(await screen.findByText(/did not resolve/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Review" })).toBeDisabled();
     expect(cap.descriptor).toBeUndefined();
     expect(send.sendNativeLyth).not.toHaveBeenCalled();
+  });
+
+  it("editing after a name resolves re-disables Review — no stale address survives (R1)", async () => {
+    nameResolve.resolveNameQuorum.mockResolvedValue({ ok: true, address: RESOLVED });
+    const { user } = renderWithProviders(<SendComposeModal fromBech32m={FROM} onClose={vi.fn()} />);
+    const field = screen.getByLabelText("Recipient typed bech32m address");
+    await user.type(field, "alice.mono");
+    await user.type(screen.getByLabelText("Amount in LYTH"), "1");
+    await screen.findByText(RESOLVED); // resolved; Review enabled
+    await waitFor(() => expect(screen.getByRole("button", { name: "Review" })).toBeEnabled());
+    // Edit the recipient — the resolved address must NOT linger.
+    await user.type(field, "x");
+    expect(screen.queryByText(RESOLVED)).toBeNull();
+    expect(screen.getByRole("button", { name: "Review" })).toBeDisabled();
   });
 });
 

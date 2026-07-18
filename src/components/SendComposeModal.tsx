@@ -20,7 +20,7 @@ import {
   maxTokenAmount,
   type TokenSendBlockReason,
 } from "../sdk/token-send-compose";
-import { classifyRecipientInput, resolveNameQuorum } from "../sdk/name-resolve";
+import { resolveNameQuorum } from "../sdk/name-resolve";
 import { parseRecipient } from "../sdk/recipient-parse";
 import { suggestBech32mCorrection } from "../sdk/bech32m-typo";
 import { loadReverseName } from "../sdk/reverse-name";
@@ -71,6 +71,14 @@ interface Props {
 }
 
 const USER_HRP = ADDRESS_KIND_HRPS.user;
+
+/** Inline `.mono` resolution state — one fail-closed value the hint and the
+ *  effective recipient both read. Only a `hit` yields a signable address. */
+type ResolveState =
+  | { status: "idle" }
+  | { status: "loading" }
+  | { status: "hit"; address: string }
+  | { status: "miss"; message: string };
 
 /** Inline message for a blocked token amount — honest and specific. */
 function tokenBlockMessage(reason: TokenSendBlockReason, symbol: string): string {
@@ -127,6 +135,9 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
   // address" (→ nothing).
   const [familiarity, setFamiliarity] = useState<RecipientFamiliarity>("unknown");
   const [historyUnreadable, setHistoryUnreadable] = useState(false);
+  // Inline fail-closed resolution of a typed `.mono` name — debounced, stale-token
+  // guarded. Only a `hit` produces a signable address (§4).
+  const [resolveState, setResolveState] = useState<ResolveState>({ status: "idle" });
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -195,6 +206,79 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
     };
   }, [fromBech32m, isToken]);
 
+  // Branch-precise recipient parse (§1) — drives the inline hint stack and the
+  // recipient half of Review gating. Recipient errors live inline (slot 1), never
+  // in the amount `validate` below.
+  const parse = useMemo(() => parseRecipient(recipient), [recipient]);
+  // Distance-1 typo suggestion — only for a mono1 input that failed to decode.
+  const typoSuggestion = useMemo(
+    () => (parse.inputForm === "mono1" && parse.error !== null ? suggestBech32mCorrection(recipient) : null),
+    [parse, recipient],
+  );
+  // The single value feeding the hint echo, the familiarity read, the Review `To`
+  // row, and the signed tx (law 3): a decoded mono1, or the address the inline
+  // quorum already confirmed for a name. Anything else → null (no signable target).
+  const effectiveBech =
+    parse.inputForm === "mono1"
+      ? parse.bech
+      : parse.inputForm === "mono-name" && resolveState.status === "hit"
+        ? resolveState.address
+        : null;
+  const recipientUsable = effectiveBech !== null;
+
+  // Inline fail-closed forward resolution (§4). A structurally valid `.mono` name
+  // is resolved as-you-type behind a 300 ms debounce (keeps the 4-endpoint fan-out
+  // off every keystroke); the `cancelled` closure is the stale-token guard, so a
+  // superseded input's result is discarded. Editing to anything that isn't a name
+  // resets to `idle`. Only a quorum `ok` whose address re-decodes becomes a `hit`.
+  const monoNameCanonical =
+    parse.inputForm === "mono-name" && parse.monoName ? parse.monoName.canonical : null;
+  useEffect(() => {
+    if (monoNameCanonical === null) {
+      setResolveState({ status: "idle" });
+      return;
+    }
+    let cancelled = false;
+    setResolveState({ status: "loading" });
+    const timer = setTimeout(() => {
+      void resolveNameQuorum(monoNameCanonical)
+        .then((verdict) => {
+          if (cancelled) return;
+          if (!verdict.ok) {
+            const message =
+              verdict.reason === "not_found"
+                ? "This name doesn't resolve on-chain right now — paste the typed mono1 address to send."
+                : verdict.message;
+            setResolveState({ status: "miss", message });
+            return;
+          }
+          // A quorum `ok` address must itself be a valid typed user address.
+          try {
+            typedBech32ToAddress(verdict.address, "user");
+          } catch {
+            setResolveState({
+              status: "miss",
+              message: "The name resolved to a malformed address — not sending.",
+            });
+            return;
+          }
+          setResolveState({ status: "hit", address: verdict.address });
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setResolveState({
+              status: "miss",
+              message: "Couldn't confirm this name with enough operators — not sending.",
+            });
+          }
+        });
+    }, 300);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [monoNameCanonical]);
+
   // Sync recipient-only validity: a typed user address that parses and isn't
   // our own. Gates the familiarity read (and which caution, if any, to show).
   const recipientValid = useMemo(() => {
@@ -259,20 +343,6 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
     };
   }, [recipientValid, recipient, resolvedContactName, fromBech32m]);
 
-  // Branch-precise recipient parse (§1) — drives the inline hint stack and the
-  // recipient half of Review gating. Recipient errors live inline (slot 1), never
-  // in the amount `validate` below.
-  const parse = useMemo(() => parseRecipient(recipient), [recipient]);
-  // Distance-1 typo suggestion — only for a mono1 input that failed to decode.
-  const typoSuggestion = useMemo(
-    () => (parse.inputForm === "mono1" && parse.error !== null ? suggestBech32mCorrection(recipient) : null),
-    [parse, recipient],
-  );
-  // A recipient the flow can act on: a decoded mono1, or a structurally valid
-  // `.mono` name (its address is confirmed at Review via the fail-closed quorum).
-  const recipientUsable =
-    parse.inputForm === "mono1" ? parse.bech !== null : parse.inputForm === "mono-name";
-
   const validate = useMemo(
     () => () => {
       const trimmedAmt = amount.trim();
@@ -295,11 +365,11 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
     [amount, token],
   );
 
-  // §25.2 item 6 — best-effort, local-only recipient-name resolution. The
-  // chain does expose name RPCs (lyth_resolveName / lyth_nameOf), but wiring
-  // live resolution into the send flow is deferred, so for now this only
-  // consults the local address book (and, when the recipient was typed as a
-  // `.mono` name, the client-side name validator). Never blocks the send.
+  // Display-only label for the Review `To` row — never gates or redirects a send.
+  // The fail-closed FORWARD resolution that produces the signable address happens
+  // inline above (the debounced quorum); this convenience read only annotates the
+  // row with the single-operator registry reverse name (lyth_nameOf), then a local
+  // contact. A single operator's reverse answer may LABEL, never suppress (§7).
   const resolveRecipientName = async (toBech32m: string): Promise<string | null> => {
     // The registry reverse name (lyth_nameOf) is the public on-chain identity —
     // prefer it at confirm; fall back to the local contact label, then nothing.
@@ -335,58 +405,38 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
       return;
     }
 
-    const input = classifyRecipientInput(recipient, USER_HRP);
     const amountLyth = amount.trim();
 
-    setReviewing(true);
-
-    // Resolve a `.mono` name to its owner address, fail-closed: a name that
-    // doesn't cleanly resolve across a quorum of operators BLOCKS the send. The
-    // resolved address is what we display AND what we sign — no hidden redirect.
-    let toBech32m: string;
-    let resolvedName: string | null = null;
-    if (input.kind === "name") {
-      const verdict = await resolveNameQuorum(input.name);
-      if (!verdict.ok) {
-        setReviewing(false);
-        setError(verdict.message);
-        return;
-      }
-      // The resolved address must itself be a valid typed user address.
-      try {
-        typedBech32ToAddress(verdict.address, "user");
-      } catch {
-        setReviewing(false);
-        setError("The name resolved to a malformed address — not sending.");
-        return;
-      }
-      toBech32m = verdict.address;
-      resolvedName = input.name;
-    } else {
-      toBech32m = recipient.trim();
+    // The recipient is the EFFECTIVE address — a decoded mono1, or the address the
+    // inline quorum already confirmed for a typed `.mono` name. No second resolve:
+    // what the hint showed is byte-identically what gets signed (display == signed).
+    const toBech32m = effectiveBech;
+    if (!toBech32m) {
+      setError("Enter a valid recipient address or a resolvable .mono name.");
+      return;
     }
 
     // Self-send guard on the RESOLVED address (a name could resolve to self).
     if (toBech32m.toLowerCase() === fromBech32m.toLowerCase()) {
-      setReviewing(false);
       setError("Recipient cannot be the wallet's own address.");
       return;
     }
 
-    // Best-effort disclosures — neither read gates the send; both fall
-    // back to a safe default on any failure.
+    setReviewing(true);
+
+    // The typed name (a quorum-confirmed forward hit) is the authoritative label;
+    // else the single-operator reverse name / contact (display-only). Either way
+    // the full address is shown and is exactly what gets signed.
+    const forwardName =
+      parse.inputForm === "mono-name" ? parse.monoName?.canonical ?? null : null;
     const [recipientName, finality] = await Promise.all([
       resolveRecipientName(toBech32m),
       fetchFinalityPosture().catch(() => ({ label: "anchor-level", height: null })),
     ]);
     setReviewing(false);
 
-    // A resolved `.mono` name is the authoritative label; else the address-book
-    // name. Either way the address is shown and is exactly what gets signed.
-    const displayName = resolvedName ?? recipientName;
-    const toLine = displayName
-      ? `${displayName} · ${toBech32m}`
-      : toBech32m;
+    const displayName = forwardName ?? recipientName;
+    const toLine = displayName ? `${displayName} · ${toBech32m}` : toBech32m;
 
     if (token) {
       // Re-evaluate at the token's real decimals (defense-in-depth over
@@ -736,6 +786,23 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
           <div style={hintText}>
             Will send to:{" "}
             <span style={{ color: "var(--fg-200)" }}>{parse.bech}</span>
+          </div>
+        )}
+
+        {/* Slot 4 — inline `.mono` resolution (§4). Loading/hit are neutral; a
+            miss takes the error tone. The hit address renders in FULL (no hex,
+            no truncation) — it is exactly what Review will sign. */}
+        {parse.inputForm === "mono-name" && parse.monoName && resolveState.status !== "idle" && (
+          <div style={{ ...hintText, color: resolveState.status === "miss" ? "var(--err)" : "var(--fg-400)" }}>
+            {resolveState.status === "loading" &&
+              `Looks like a ${parse.monoName.tld} name — resolving on-chain…`}
+            {resolveState.status === "hit" && (
+              <>
+                Resolved {parse.monoName.tld} name —{" "}
+                <span style={{ color: "var(--fg-200)" }}>{resolveState.address}</span>
+              </>
+            )}
+            {resolveState.status === "miss" && resolveState.message}
           </div>
         )}
 
