@@ -1,18 +1,14 @@
 // In-compose fee preview.
 //
-// The shared submit seam (`submitNativeTx`) resolves a live execution fee at
-// broadcast time via the SDK `resolveExecutionFee`. To show the fee BEFORE the
-// user confirms, this resolves the SAME transfer-class fee against the live
-// node quote and exposes the worst-case max fee (`maxFeePerGas × gasLimit`)
-// plus the total a send of `amountLythoshi` would reserve.
-//
-// HONESTY: this is the MAX the chain reserves (`maxFeePerGas × gasLimit`), not
-// the post-execution charge — the actual fee is `(base + tip) × units_used`
-// and is only known after the tx settles. The preview is labelled as a max so
-// the figure is never read as an exact charge.
+// Fetches the live execution-unit quote ONCE per compose open and expands it into
+// the dual-fee result (§3) at every tier. The compose surface reuses this bundle
+// for tier switches with no refetch: the DISPLAYED charge, the RESERVATION that
+// backs Max + the affordability gate, and the byte-identical `signedFee` all
+// derive from it. There is no separate "max fee" model any more — the honest
+// charge is the headline (native) and the reservation is honestly labelled
+// "(max)" (token), both from one quote.
 
-import { formatLyth, resolveExecutionFee, RpcClient } from "@monolythium/core-sdk";
-import type { ResolvedExecutionFee } from "@monolythium/core-sdk";
+import { RpcClient } from "@monolythium/core-sdk";
 import { getProvider } from "./client";
 import { rpcClientOptions } from "./http";
 import { getExecutionUnitQuote } from "./native-rpc";
@@ -53,51 +49,4 @@ export async function previewNativeSendFee(
       fast: computeNativeFeeQuote(quote.baseLythoshi, quote.suggestedTipLythoshi, "fast", limit),
     },
   };
-}
-
-export interface NativeFeePreview {
-  /** Resolved per-unit price + execution-unit limit (same shape submit uses). */
-  fee: ResolvedExecutionFee;
-  /** Worst-case max fee in lythoshi (`maxFeePerGas × gasLimit`). */
-  maxFeeLythoshi: bigint;
-  /** Worst-case max fee formatted as a decimal LYTH string. */
-  maxFeeLyth: string;
-}
-
-/** Compute the worst-case max fee a resolved fee implies. Pure. */
-export function maxFeeLythoshiFrom(fee: ResolvedExecutionFee): bigint {
-  return fee.maxFeePerGas * fee.gasLimit;
-}
-
-/**
- * Resolve the transfer-class execution fee from the live node quote and shape
- * it for the compose preview. Throws on a failed quote — the caller renders an
- * honest "fee unavailable" line rather than a fabricated number.
- *
- * `executionUnitLimit` overrides the SDK's transfer default so the shown worst-
- * case max fee matches what a heavier call (e.g. a token-factory transfer)
- * reserves at submit time — the preview stays honest instead of under-quoting.
- */
-export async function previewTransferFee(
-  client: RpcClient = new RpcClient(getProvider().rpcClient.endpoint, rpcClientOptions()),
-  executionUnitLimit?: bigint,
-): Promise<NativeFeePreview> {
-  const fee = await resolveExecutionFee(
-    client,
-    executionUnitLimit === undefined ? undefined : { executionUnitLimit },
-  );
-  const maxFeeLythoshi = maxFeeLythoshiFrom(fee);
-  return {
-    fee,
-    maxFeeLythoshi,
-    maxFeeLyth: formatLyth(maxFeeLythoshi.toString(), { includeUnit: false }),
-  };
-}
-
-/**
- * Total a send reserves: amount + worst-case max fee, formatted as LYTH. Pure.
- * `amountLythoshi` is the send value in lythoshi.
- */
-export function totalReservedLyth(amountLythoshi: bigint, maxFeeLythoshi: bigint): string {
-  return formatLyth((amountLythoshi + maxFeeLythoshi).toString(), { includeUnit: false });
 }

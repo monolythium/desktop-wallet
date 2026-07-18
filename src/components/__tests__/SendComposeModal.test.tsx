@@ -372,3 +372,22 @@ describe("SendComposeModal — token fee path (T8)", () => {
     expect(JSON.stringify(d.diff)).not.toContain("resolved at submit");
   });
 });
+
+describe("SendComposeModal — final conformance sweep (T9)", () => {
+  const oneLythString = /^\d[\d.]* LYTH$/; // a single number + unit, nothing else
+
+  it("native default (developer off): no unit wording; exactly one LYTH fee string", async () => {
+    renderWithProviders(<SendComposeModal fromBech32m={FROM} onClose={vi.fn()} />);
+    const feeStr = await screen.findByText("0.000042 LYTH");
+    expect(feeStr.textContent).toMatch(oneLythString);
+    expect(screen.getByRole("dialog").textContent ?? "").not.toMatch(/gas|gwei|wei|lythoshi|execution unit/i);
+  });
+
+  it("token default (developer off): no unit wording; exactly one LYTH fee string", async () => {
+    const token = { tokenId: TOKEN_ID, symbol: "USDC", decimals: 6, balanceBaseUnits: "2000000" };
+    renderWithProviders(<SendComposeModal fromBech32m={FROM} token={token} onClose={vi.fn()} />);
+    const feeStr = await screen.findByText("0.0005 LYTH");
+    expect(feeStr.textContent).toMatch(oneLythString);
+    expect(screen.getByRole("dialog").textContent ?? "").not.toMatch(/gas|gwei|wei|lythoshi|execution unit/i);
+  });
+});
