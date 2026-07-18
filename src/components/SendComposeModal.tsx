@@ -46,6 +46,8 @@ import {
 } from "../sdk/fee-model";
 import { TOKEN_TRANSFER_EXECUTION_UNIT_LIMIT } from "../sdk/token-send";
 import { useDeveloperMode } from "../sdk/developer-mode";
+import { formatFiatFromLythoshi, getLythFiatRate } from "../sdk/fiat";
+import { useDisplayCurrency } from "../sdk/display-prefs";
 import { ContactsPickerModal } from "./ContactsPickerModal";
 
 /** When present, the modal sends this MRC-20 token instead of native LYTH. The
@@ -120,6 +122,8 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
   const [balanceLyth, setBalanceLyth] = useState<string | null>(null);
   const [balanceLythoshi, setBalanceLythoshi] = useState<bigint | null>(null);
   const [balanceError, setBalanceError] = useState<string | null>(null);
+  // Subscribed so a currency change in Settings updates every slot in-session.
+  const currency = useDisplayCurrency();
   // Cross-operator balance floor — a spend-GATE input only, NEVER displayed as a
   // balance (F4). `null` = fewer than 2 operators cross-checked, so the basis
   // falls back to the display balance alone. It can only ever TIGHTEN the basis.
@@ -717,6 +721,24 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
       ? "Amount + fee exceeds balance."
       : null;
 
+  // ── Fiat siblings ─────────────────────────────────────────────────────────
+  // Additive only: each figure below feeds a SEPARATE span beside the canonical
+  // LYTH string. Nothing here reaches the ADR-0039 conformance seam — that call
+  // takes `chargeLythoshi` alone and its `defaultText` / `detailTexts` never see
+  // a fiat byte. A slot renders nothing at all when its amount is unknown; a
+  // "{symbol}—" there would claim the amount is known and merely unpriced.
+  const fiatRate = getLythFiatRate(currency);
+  const fiat = (lythoshi: bigint | string | null): string | null =>
+    lythoshi === null ? null : formatFiatFromLythoshi(lythoshi, currency, fiatRate);
+
+  // Token amounts get NO fiat slot — not even the empty form: no token price
+  // source exists behind this seam, so a slot there would promise a value that
+  // will never arrive. Only LYTH-denominated figures qualify.
+  const amountFiat = !isToken ? fiat(amountLythoshi) : null;
+  const availableFiat =
+    !isToken && !balanceError && balanceLyth !== null ? fiat(balanceLythoshi) : null;
+  const totalFiat = !isToken ? fiat(nativeTotalLythoshi) : null;
+
   // Fee-box row-1 value + tone: native charge via the seam / token reservation /
   // the three non-resolved states with their verbatim copy (§7).
   const feeValue: { text: string; err: boolean } = feeError
@@ -731,6 +753,16 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
               text: `Malformed fee data: ${nativeFeeDisplay && !nativeFeeDisplay.ok ? nativeFeeDisplay.failures.join("; ") : "unavailable"}`,
               err: true,
             };
+
+  // The fee row's fiat feed — null while the fee is loading, errored or
+  // malformed, so the canonical state text renders alone.
+  const feeFiat = feeValue.err
+    ? null
+    : isToken
+      ? fiat(reservationLythoshi)
+      : nativeFeeDisplay?.ok === true
+        ? fiat(chargeLythoshi)
+        : null;
 
   return (
     <div
@@ -911,6 +943,14 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
                       ? "…"
                       : `${balanceLyth} LYTH`}
               </span>
+              {/* Sibling only — never while loading ("…") or on a failed read
+                  ("—"), and never on the token path (that figure is
+                  token-denominated). */}
+              {availableFiat !== null && (
+                <span style={fiatSibling} data-testid="fiat-available">
+                  ({availableFiat})
+                </span>
+              )}
             </span>
             <button
               type="button"
@@ -943,6 +983,22 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
           aria-label={`Amount in ${assetLabel}`}
           style={inputStyle}
         />
+
+        {/* Entered-amount estimate. Native only, and only while the entry parses
+            — an invalid or empty amount has no figure to price. */}
+        {amountFiat !== null && (
+          <div
+            data-testid="fiat-amount"
+            style={{
+              marginTop: 6,
+              fontFamily: "var(--f-mono)",
+              fontSize: 11,
+              color: "var(--fg-400)",
+            }}
+          >
+            {amountFiat}
+          </div>
+        )}
 
         {/* Fee tier — Normal 1× / Fast 2× (transient per open, default Normal).
             Switching recomputes fee/Total/Max/gate synchronously from the cached
@@ -983,17 +1039,34 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
         >
           <div style={feeRow}>
             <span style={feeKey}>{isToken ? "Network fee (max)" : "Estimated fee"}</span>
-            <span style={{ ...feeVal, color: feeValue.err ? "var(--err)" : "var(--fg-100)" }}>
-              {feeValue.text}
+            {/* The canonical value span keeps its exact text; the fiat is a
+                sibling inside this wrapper, so the ADR-0039 conformance inputs
+                and the forbidden-wording DOM sweep never see a fiat byte. */}
+            <span style={{ display: "inline-flex", alignItems: "baseline" }}>
+              <span style={{ ...feeVal, color: feeValue.err ? "var(--err)" : "var(--fg-100)" }}>
+                {feeValue.text}
+              </span>
+              {feeFiat !== null && (
+                <span style={fiatSibling} data-testid="fiat-fee">
+                  ({feeFiat})
+                </span>
+              )}
             </span>
           </div>
           {!isToken ? (
             <div style={feeRow}>
               <span style={feeKey}>Total (amount + fee)</span>
-              <span style={feeVal}>
-                {nativeTotalLythoshi === null
-                  ? "—"
-                  : `${formatLyth(nativeTotalLythoshi.toString(), { includeUnit: false })} LYTH`}
+              <span style={{ display: "inline-flex", alignItems: "baseline" }}>
+                <span style={feeVal}>
+                  {nativeTotalLythoshi === null
+                    ? "—"
+                    : `${formatLyth(nativeTotalLythoshi.toString(), { includeUnit: false })} LYTH`}
+                </span>
+                {totalFiat !== null && (
+                  <span style={fiatSibling} data-testid="fiat-total">
+                    ({totalFiat})
+                  </span>
+                )}
               </span>
             </div>
           ) : (
@@ -1111,6 +1184,15 @@ const feeKey: React.CSSProperties = {
 const feeVal: React.CSSProperties = {
   fontFamily: "var(--f-mono)",
   color: "var(--fg-100)",
+};
+
+/** The shared fiat-sibling visual: parenthesised, muted with a COLOUR TOKEN —
+ *  never CSS opacity, since hierarchy comes from token tiers (readability law).
+ *  Same font as its row. */
+const fiatSibling: React.CSSProperties = {
+  color: "var(--fg-400)",
+  fontWeight: 400,
+  marginLeft: 6,
 };
 
 const detailRow: React.CSSProperties = {
