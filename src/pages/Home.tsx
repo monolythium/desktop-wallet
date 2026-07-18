@@ -24,9 +24,11 @@ import { useActiveWallet } from "../sdk/active-wallet";
 import { activityRowToTx } from "../sdk/activity-rows";
 import { liveTokenStatusToRows } from "../sdk/token-rows";
 import { loadTokenMetaMap, type TokenMeta } from "../sdk/token-metadata";
-import { formatLythDisplay, truncateDecimals } from "../sdk/lyth-display";
+import { truncateDecimals } from "../sdk/lyth-display";
 import { formatFiatFromLythoshi, getLythFiatRate } from "../sdk/fiat";
 import { useDisplayCurrency } from "../sdk/display-prefs";
+import { balanceDisplayState, STALE_BALANCE_LABEL } from "../sdk/balance-display";
+import { BalanceFigure } from "../components/BalanceFigure";
 import {
   deriveDelegationSummary,
   type DelegationSummaryFacts,
@@ -124,7 +126,12 @@ export function Home({ goto }: Props) {
       : chain.status === "ok"
         ? chain.snapshot.balanceLythoshi
         : null;
-  const availableLyth = chainNotLive ? "—" : formatLythDisplay(availableLythoshi, 2) ?? "—";
+  // Every hero figure resolves through the one ordered ladder, so a fabricated
+  // "0.00" while the balance is unknown is structurally unreachable, and a
+  // remembered value can never ride through a window where the chain isn't
+  // live. `seededLythoshi` stays null until the last-known store lands.
+  const seededLythoshi: string | null = null;
+  const totalState = balanceDisplayState(chainNotLive, availableLythoshi, seededLythoshi);
 
   const summary: DelegationSummaryFacts = deriveDelegationSummary(delegationStatus);
   // Earned is correctly divided to LYTH by formatRewardLyth, but at full 18-dp
@@ -154,26 +161,33 @@ export function Home({ goto }: Props) {
           </span>
         </div>
 
-        <div className="w-hero__amount">
-          {availableLyth}
+        <div className={`w-hero__amount${totalState.kind === "value" && totalState.stale ? " is-stale" : ""}`}>
+          <BalanceFigure state={totalState} />
           <span className="tok">LYTH</span>
         </div>
 
+        {/* Stale is a LABEL, never a value change — and it only ever appears
+            beside a real figure, never over the skeleton or the dash. */}
+        {totalState.kind === "value" && totalState.stale && (
+          <div className="w-hero__stale">{STALE_BALANCE_LABEL}</div>
+        )}
+
         {/* Fiat estimate — an ADDITIVE SIBLING; the amount above is untouched.
-            Rendered only when the amount itself is known: when the hero shows
-            "—" this line is absent ENTIRELY, never a dashed one. A bare "—"
-            means the amount is unavailable; "{symbol}—" would claim we know the
-            balance and merely cannot price it. */}
-        {!chainNotLive && availableLythoshi !== null && (
+            Rendered only when the ladder resolved to a real value: over a dash
+            or a skeleton the amount is unknown, and "{symbol}—" would claim we
+            know the balance and merely cannot price it. */}
+        {totalState.kind === "value" && (
           <div className="w-hero__fiat">
-            {formatFiatFromLythoshi(availableLythoshi, currency, getLythFiatRate(currency))}
+            {formatFiatFromLythoshi(totalState.lythoshi, currency, getLythFiatRate(currency))}
           </div>
         )}
 
         <div className="w-hero__meta">
           {/* No fiat here — this duplicates the hero figure, and one figure gets
               one fiat rendering. */}
-          <span>Available <b>{availableLyth} LYTH</b></span>
+          <span>
+            Available <b><BalanceFigure state={totalState} skeletonWidthCh={4} skeletonRadius={6} /> LYTH</b>
+          </span>
           {/* Delegated is delegated *weight* (bps) — no principal LYTH read
               exists, so we never render a fabricated LYTH figure here. */}
           <span>Delegated <b>{summary.totalWeightLabel}</b> weight</span>

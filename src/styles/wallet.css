@@ -647,6 +647,21 @@ html[data-sidebar="collapsed"]:not([data-layout="topbar"]) .w-nav__item {
   color: var(--fg-400);
   font-weight: 400;
 }
+/* The fraction of the hero figure — a styling hook at the same colour as the
+   integer part (do not invent a different tint). */
+.w-hero__amount .frac { color: var(--fg-100); }
+
+/* A figure the wallet remembers but has not re-confirmed this session. Dimmed
+   by TOKEN TIER, never by opacity — opacity-dimmed text is the readability law's
+   named failure. Stale is a label, never a change to the value. */
+.w-hero__amount.is-stale { color: var(--fg-400); }
+.w-hero__stale {
+  margin-top: 6px;
+  font-family: var(--f-mono);
+  font-size: 10px;
+  color: var(--fg-500);
+}
+
 /* Fiat estimate under the hero figure. Muted with a colour token, never with
    opacity — hierarchy comes from token tiers (readability law). */
 .w-hero__fiat {
