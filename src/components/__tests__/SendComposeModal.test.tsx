@@ -6,6 +6,7 @@ import { renderWithProviders, TEST_WALLET_ADDRESS } from "../../test/renderWithP
 import { computeNativeFeeQuote, NATIVE_TRANSFER_EXECUTION_UNIT_LIMIT } from "../../sdk/fee-model";
 import { DeveloperModeProvider } from "../../sdk/developer-mode";
 import { BECH32_CHARSET } from "../../sdk/bech32m-typo";
+import { PRIMARY_ACCOUNT, setActiveAccount } from "../../sdk/keychain";
 import type { OperationDescriptor } from "../../operations/types";
 
 /** Wrap a subtree with developer mode forced ON (the Phase 01 gate). */
@@ -94,6 +95,7 @@ beforeEach(() => {
   addressbook.addressbookLookup.mockResolvedValue([]);
   sentLog.isSentRecipientVerified.mockResolvedValue(false);
   sentLog.recordSentRecipient.mockResolvedValue(undefined);
+  setActiveAccount(PRIMARY_ACCOUNT); // each test opens under the default slot (§8.8)
   // Live-floor quote (base 10^9, tip 10^9). Native limit 30_000n / token 250_000n.
   fee.previewNativeSendFee.mockImplementation((_c: unknown, opts?: { tokenTransfer?: boolean }) => {
     const limit = opts?.tokenTransfer ? 250_000n : NATIVE_TRANSFER_EXECUTION_UNIT_LIMIT;
@@ -440,6 +442,21 @@ describe("SendComposeModal — recipient parser adoption (T3)", () => {
     // The suggestion parsed cleanly: the typo hint is gone and the echo returns.
     expect(screen.queryByText(`Did you mean ${TO}?`)).toBeNull();
     expect(screen.getByText(TO)).toBeInTheDocument();
+  });
+});
+
+describe("SendComposeModal — active-account guard (T10)", () => {
+  it("blocks the send when the active account changed after the descriptor opened", async () => {
+    const { user } = renderWithProviders(<SendComposeModal fromBech32m={FROM} onClose={vi.fn()} />);
+    await user.type(screen.getByLabelText("Recipient typed bech32m address"), TO);
+    await user.type(screen.getByLabelText("Amount in LYTH"), "1");
+    await user.click(screen.getByRole("button", { name: "Review" }));
+    await waitFor(() => expect(cap.descriptor).toBeDefined());
+    // Switch the active account AFTER the review opened, then sign.
+    setActiveAccount("slot-switched");
+    await expect(cap.descriptor!.execute({ vaultSeed: new Uint8Array(32) })).rejects.toThrow(/active account changed/);
+    expect(send.sendNativeLyth).not.toHaveBeenCalled(); // fail closed — nothing signed
+    setActiveAccount(PRIMARY_ACCOUNT);
   });
 });
 

@@ -162,6 +162,14 @@ describe("OperationsDrawer — classified error stage (T9)", () => {
     expect(screen.getByText("totally novel failure zzz")).toBeInTheDocument();
     expect(screen.queryByText("Technical details")).toBeNull();
   });
+
+  it("§8.8: the active-account sentinel renders the amber 'Account changed' card", async () => {
+    const { user } = renderWithProviders(
+      <OperationsDrawer descriptor={throwing("active account changed during signing — transaction cancelled for safety")} onClose={vi.fn()} />,
+    );
+    await user.click(screen.getByRole("button", { name: "Run" }));
+    expect(await screen.findByText("Account changed — transaction cancelled")).toBeInTheDocument();
+  });
 });
 
 describe("OperationsDrawer — close-block", () => {

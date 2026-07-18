@@ -37,6 +37,7 @@ import {
 import { previewNativeSendFee, type FeeQuoteBundle } from "../sdk/fee-preview";
 import { loadSpendGuardLythoshi } from "../sdk/spend-guard";
 import { isSentRecipientVerified, recordSentRecipient } from "../sdk/sent-recipients-store";
+import { getActiveAccount } from "../sdk/keychain";
 import { renderFeeDisplay } from "../sdk/fee-display";
 import {
   NATIVE_TRANSFER_CHARGE_EXECUTION_UNITS,
@@ -463,6 +464,11 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
     ]);
     setReviewing(false);
 
+    // Capture the active account at descriptor-open; the execute() guard (§8.8)
+    // refuses to sign if the active account changed while this review was open —
+    // fail closed, so a signed tx can never target the wrong account's context.
+    const activeSlotAtOpen = getActiveAccount();
+
     const displayName = forwardName ?? recipientName;
     const toLine = displayName ? `${displayName} · ${toBech32m}` : toBech32m;
 
@@ -517,6 +523,9 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
         ],
         notify: { kind: "send", amountDecimal: shown, unit: token.symbol, counterparty: toBech32m },
         execute: async (ctx) => {
+          if (getActiveAccount() !== activeSlotAtOpen) {
+            throw new Error("active account changed during signing — transaction cancelled for safety");
+          }
           if (!ctx?.vaultSeed) {
             throw new Error("vault seed unavailable after keychain authorization");
           }
@@ -589,6 +598,9 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
         maxFeeLythoshi: nativeQuote.reservationLythoshi,
       },
       execute: async (ctx) => {
+        if (getActiveAccount() !== activeSlotAtOpen) {
+          throw new Error("active account changed during signing — transaction cancelled for safety");
+        }
         if (!ctx?.vaultSeed) {
           throw new Error("vault seed unavailable after keychain authorization");
         }
