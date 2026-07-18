@@ -24,6 +24,8 @@ import { useOperations } from "../operations/context";
 import { AddVaultModal } from "../components/AddVaultModal";
 import { notifyActiveWalletChanged } from "../sdk/active-wallet";
 import { formatLyth } from "@monolythium/core-sdk";
+import { formatFiatFromLythoshi, getLythFiatRate } from "../sdk/fiat";
+import { useDisplayCurrency } from "../sdk/display-prefs";
 import {
   deriveLiveWalletIdentity,
   errorMessage,
@@ -44,6 +46,10 @@ import {
   type VaultEntry,
 } from "../sdk/vaultCatalog";
 
+/** Why these cells show a symbol and a dash. The oracle precompile IS on-chain;
+ *  what is missing is a registered LYTH price feed, so no rate is obtainable. */
+const NO_PRICE_FEED_TITLE = "No LYTH price feed is registered on-chain.";
+
 export function Wallets() {
   const ops = useOperations();
   const [identity, setIdentity] = useState<LiveWalletIdentity | null>(null);
@@ -59,6 +65,8 @@ export function Wallets() {
   );
   const [activeSlot, setActiveSlot] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
+  // Subscribed so a currency change updates both est-value slots in-session.
+  const currency = useDisplayCurrency();
   const [renamingSlot, setRenamingSlot] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
   const [removingSlot, setRemovingSlot] = useState<string | null>(null);
@@ -158,6 +166,7 @@ export function Wallets() {
     }
     return {
       lyth: formatLyth(lythoshi.toString(), { includeUnit: false }),
+      lythoshi,
       loaded,
       pending,
       errored,
@@ -276,7 +285,11 @@ export function Wallets() {
               </div>
               <div className="w-wallet-totals__cell">
                 <span className="k">Est. value</span>
-                <span className="v" title="No price oracle is available on-chain.">—</span>
+                {/* The partial-sum caveat is already disclosed by the counter
+                    cell beside this one, exactly as the LYTH total relies on. */}
+                <span className="v" title={NO_PRICE_FEED_TITLE} data-testid="fiat-totals">
+                  {formatFiatFromLythoshi(totals.lythoshi, currency, getLythFiatRate(currency))}
+                </span>
               </div>
               <div className="w-wallet-totals__cell">
                 <span className="k">Wallets</span>
@@ -380,9 +393,13 @@ export function Wallets() {
                     <div
                       className="row-help"
                       style={{ marginTop: 2, fontSize: 10.5 }}
-                      title="No price oracle is available on-chain."
+                      title={NO_PRICE_FEED_TITLE}
                     >
-                      —
+                      {/* Only a `ready` row has an amount to price. Every other
+                          state keeps the plain dash: the amount itself is
+                          unknown, which is a different fact from having an
+                          amount and no rate. */}
+                      {rowEstValue(balances.get(v.slot), currency)}
                     </div>
                   </div>
                 </div>
@@ -522,6 +539,15 @@ export function Wallets() {
       )}
     </div>
   );
+}
+
+/** A row's estimated value. `ready` is the only state carrying an amount, so
+ *  every other one keeps the plain em-dash — "{symbol}—" there would assert that
+ *  the balance is known and merely unpriced, which is false while it is still
+ *  loading, underived, or unavailable. */
+function rowEstValue(state: WalletBalanceState | undefined, currency: string): string {
+  if (state?.status !== "ready") return "—";
+  return formatFiatFromLythoshi(state.balance.balanceLythoshi, currency, getLythFiatRate(currency));
 }
 
 /** One wallet's native balance, rendered from its per-wallet fetch state.
