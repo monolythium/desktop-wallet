@@ -5,6 +5,7 @@ import { addressToTypedBech32 } from "@monolythium/core-sdk";
 import { renderWithProviders, TEST_WALLET_ADDRESS } from "../../test/renderWithProviders";
 import { computeNativeFeeQuote, NATIVE_TRANSFER_EXECUTION_UNIT_LIMIT } from "../../sdk/fee-model";
 import { DeveloperModeProvider } from "../../sdk/developer-mode";
+import { BECH32_CHARSET } from "../../sdk/bech32m-typo";
 import type { OperationDescriptor } from "../../operations/types";
 
 /** Wrap a subtree with developer mode forced ON (the Phase 01 gate). */
@@ -380,6 +381,37 @@ describe("SendComposeModal — token fee path (T8)", () => {
     expect(d.diff.find((l) => l.k === "Network fee (max)")?.v).toBe("0.0005 LYTH");
     expect(d.diff.find((l) => l.k === "Total (amount + fee)")).toBeUndefined(); // no Total for tokens
     expect(JSON.stringify(d.diff)).not.toContain("resolved at submit");
+  });
+});
+
+describe("SendComposeModal — recipient parser adoption (T3)", () => {
+  it("an all-uppercase paste echoes back the lowercase canonical (Will send to:)", async () => {
+    const { user } = renderWithProviders(<SendComposeModal fromBech32m={FROM} onClose={vi.fn()} />);
+    await user.type(screen.getByLabelText("Recipient typed bech32m address"), TO.toUpperCase());
+    expect(await screen.findByText(TO.toLowerCase())).toBeInTheDocument();
+  });
+
+  it("raw 0x input shows the retired-addresses error inline and disables Review", async () => {
+    const { user } = renderWithProviders(<SendComposeModal fromBech32m={FROM} onClose={vi.fn()} />);
+    await user.type(screen.getByLabelText("Recipient typed bech32m address"), "0x1234");
+    await user.type(screen.getByLabelText("Amount in LYTH"), "1");
+    expect(
+      screen.getByText("raw 0x addresses are retired; use a typed mono1 address or .mono name"),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Review" })).toBeDisabled();
+  });
+
+  it("a one-char typo offers 'Did you mean' and 'Use suggested' fixes it", async () => {
+    const i = 8;
+    const other = TO[i] === BECH32_CHARSET[0] ? BECH32_CHARSET[1]! : BECH32_CHARSET[0]!;
+    const typo = TO.slice(0, i) + other + TO.slice(i + 1);
+    const { user } = renderWithProviders(<SendComposeModal fromBech32m={FROM} onClose={vi.fn()} />);
+    await user.type(screen.getByLabelText("Recipient typed bech32m address"), typo);
+    expect(await screen.findByText(`Did you mean ${TO}?`)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Use suggested" }));
+    // The suggestion parsed cleanly: the typo hint is gone and the echo returns.
+    expect(screen.queryByText(`Did you mean ${TO}?`)).toBeNull();
+    expect(screen.getByText(TO)).toBeInTheDocument();
   });
 });
 

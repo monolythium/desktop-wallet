@@ -21,6 +21,8 @@ import {
   type TokenSendBlockReason,
 } from "../sdk/token-send-compose";
 import { classifyRecipientInput, resolveNameQuorum } from "../sdk/name-resolve";
+import { parseRecipient } from "../sdk/recipient-parse";
+import { suggestBech32mCorrection } from "../sdk/bech32m-typo";
 import { loadReverseName } from "../sdk/reverse-name";
 import { addressbookLookup } from "../sdk/addressbook";
 import { fetchFinalityPosture } from "../sdk/finality";
@@ -257,23 +259,22 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
     };
   }, [recipientValid, recipient, resolvedContactName, fromBech32m]);
 
+  // Branch-precise recipient parse (§1) — drives the inline hint stack and the
+  // recipient half of Review gating. Recipient errors live inline (slot 1), never
+  // in the amount `validate` below.
+  const parse = useMemo(() => parseRecipient(recipient), [recipient]);
+  // Distance-1 typo suggestion — only for a mono1 input that failed to decode.
+  const typoSuggestion = useMemo(
+    () => (parse.inputForm === "mono1" && parse.error !== null ? suggestBech32mCorrection(recipient) : null),
+    [parse, recipient],
+  );
+  // A recipient the flow can act on: a decoded mono1, or a structurally valid
+  // `.mono` name (its address is confirmed at Review via the fail-closed quorum).
+  const recipientUsable =
+    parse.inputForm === "mono1" ? parse.bech !== null : parse.inputForm === "mono-name";
+
   const validate = useMemo(
     () => () => {
-      // A recipient is either a typed bech32m address or a `.mono` name. A name
-      // is only structurally accepted here — it is resolved (fail-closed) in
-      // onReview before anything is signed.
-      const input = classifyRecipientInput(recipient, USER_HRP);
-      if (input.kind === "invalid") return input.reason;
-      if (input.kind === "address") {
-        try {
-          typedBech32ToAddress(input.address, "user");
-        } catch (cause) {
-          return cause instanceof Error ? cause.message : String(cause);
-        }
-        if (input.address.toLowerCase() === fromBech32m.toLowerCase()) {
-          return "Recipient cannot be the wallet's own address.";
-        }
-      }
       const trimmedAmt = amount.trim();
       if (!trimmedAmt) return "Amount is required.";
       if (token) {
@@ -291,7 +292,7 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
       if (Number(trimmedAmt) === 0) return "Amount must be greater than 0.";
       return null;
     },
-    [recipient, amount, fromBech32m, token],
+    [amount, token],
   );
 
   // §25.2 item 6 — best-effort, local-only recipient-name resolution. The
@@ -700,6 +701,44 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
           aria-label="Recipient typed bech32m address"
           style={inputStyle}
         />
+
+        {/* Hint stack slot 1 — parse error (verbatim, §1). */}
+        {parse.error && (
+          <div style={{ ...hintText, color: "var(--err)" }}>{parse.error}</div>
+        )}
+
+        {/* Slot 2 — distance-1 typo suggestion, mono1 parse-error inputs only. The
+            suggestion renders in FULL (no truncation, §law 2). */}
+        {parse.inputForm === "mono1" && parse.error !== null && typoSuggestion && (
+          <div style={typoHintBox}>
+            <span style={{ fontFamily: "var(--f-mono)", wordBreak: "break-all" }}>
+              Did you mean {typoSuggestion}?
+            </span>
+            <div>
+              <button
+                type="button"
+                className="btn btn--sm btn--ghost"
+                onClick={() => {
+                  setRecipient(typoSuggestion);
+                  if (resolvedContactName !== null) setResolvedContactName(null);
+                }}
+                style={{ marginTop: 6, padding: "4px 10px", fontSize: 11 }}
+              >
+                Use suggested
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Slot 3 — Will-send-to echo (decode + normalization proof): the FULL
+            lowercase canonical bech32m, wrapping, never truncated. */}
+        {parse.inputForm === "mono1" && parse.bech && (
+          <div style={hintText}>
+            Will send to:{" "}
+            <span style={{ color: "var(--fg-200)" }}>{parse.bech}</span>
+          </div>
+        )}
+
         {resolvedContactName && (
           <div
             style={{
@@ -902,7 +941,7 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
             onClick={() => void onReview()}
             style={{ flex: 1 }}
             disabled={
-              !recipient.trim() ||
+              !recipientUsable ||
               !amount.trim() ||
               reviewing ||
               Boolean(feeCoverageError) ||
@@ -975,6 +1014,26 @@ const cautionBox: React.CSSProperties = {
   color: "var(--fg-200)",
   background: "rgba(244,201,122,0.08)",
   border: "1px solid rgba(244,201,122,0.4)",
+  borderRadius: 8,
+};
+
+const hintText: React.CSSProperties = {
+  marginTop: 6,
+  fontSize: 11,
+  fontFamily: "var(--f-mono)",
+  color: "var(--fg-400)",
+  lineHeight: 1.5,
+  wordBreak: "break-all",
+};
+
+const typoHintBox: React.CSSProperties = {
+  marginTop: 8,
+  padding: "8px 10px",
+  fontSize: 11,
+  lineHeight: 1.5,
+  color: "var(--fg-200)",
+  background: "rgba(120,160,220,0.06)",
+  border: "1px solid rgba(120,160,220,0.3)",
   borderRadius: 8,
 };
 
