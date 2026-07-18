@@ -574,9 +574,13 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
     !isToken && basisLythoshi !== null && reservationLythoshi !== null
       ? basisLythoshi - reservationLythoshi
       : null;
+  // Native Max is live once the basis + fee load (§10) — NOT gated on a positive
+  // result: when the reservation exceeds the basis it fills "0" (an honest "you
+  // can't afford even the fee"), which the amount>0 / insufficient gate then
+  // blocks. Token Max needs a non-zero holding.
   const canFillMax = isToken
     ? tokenMaxAmount !== null && tokenMaxAmount !== "0"
-    : maxSpendableLythoshi !== null && maxSpendableLythoshi > 0n;
+    : maxSpendableLythoshi !== null;
 
   const onMax = () => {
     if (isToken) {
@@ -585,8 +589,9 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
       setError(null);
       return;
     }
-    if (maxSpendableLythoshi === null || maxSpendableLythoshi <= 0n) return;
-    setAmount(formatLyth(maxSpendableLythoshi.toString(), { includeUnit: false }));
+    if (maxSpendableLythoshi === null) return;
+    const fill = maxSpendableLythoshi > 0n ? maxSpendableLythoshi : 0n; // ≤ 0 → "0"
+    setAmount(formatLyth(fill.toString(), { includeUnit: false }));
     setError(null);
   };
 

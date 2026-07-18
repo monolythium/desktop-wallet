@@ -291,6 +291,16 @@ describe("SendComposeModal — spend guard + affordability (T7)", () => {
     expect(screen.getByRole("button", { name: "Review" })).toBeDisabled();
   });
 
+  it("Max is enabled but fills '0' when the reservation exceeds the basis (≤ 0 → '0')", async () => {
+    // Basis (100 lythoshi) < the 6×10^13 reservation → basis − reservation ≤ 0.
+    live.loadLiveWalletBalance.mockResolvedValueOnce({ balanceLyth: "0", balanceLythoshi: "100" });
+    const { user } = renderWithProviders(<SendComposeModal fromBech32m={FROM} onClose={vi.fn()} />);
+    const maxBtn = screen.getByRole("button", { name: "Max" });
+    await waitFor(() => expect(maxBtn).toBeEnabled()); // live once basis + fee load, regardless of sign
+    await user.click(maxBtn);
+    expect((screen.getByLabelText("Amount in LYTH") as HTMLInputElement).value).toBe("0");
+  });
+
   it("allows exact equality — a Max fill (amount + reservation == basis) is admissible", async () => {
     // guard null (beforeEach) → basis = balance 5 LYTH.
     const { user } = renderWithProviders(<SendComposeModal fromBech32m={FROM} onClose={vi.fn()} />);
