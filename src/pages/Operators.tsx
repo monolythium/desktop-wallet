@@ -15,6 +15,7 @@ import { ConnectFlowModal } from "../components/ConnectFlowModal";
 import { truncMiddle } from "../components/_detailModalParts";
 import { currentEndpoint, setEndpoint, subscribeEndpoint } from "../sdk/client";
 import { activeFleet } from "../sdk/fleet";
+import { activeChainRecord } from "../sdk/chains";
 import type { Route } from "../components/types";
 import { fetchLiveTestnetRegistry } from "../sdk/live-registry";
 import { probeOperator, NETWORK_SLUG } from "../sdk/chain-trust";
@@ -325,6 +326,29 @@ function ReGenesisExplainer() {
  *  auto-tracks. Drift detection reuses Phase 01's computeGenesisDrift — one
  *  derivation, two surfaces. */
 function ChainIdentityCard({ devMode }: { devMode: boolean }) {
+  const activeRecord = activeChainRecord();
+  // A custom chain has no genesis pin (§15) — never render it as genesis-verified.
+  if (!activeRecord.builtin) {
+    return (
+      <div className="w-card">
+        <div className="w-card__head">
+          <h3>Chain identity</h3>
+          <span className="w-live-pill is-muted">custom</span>
+        </div>
+        <div className="w-card__body">
+          <DetailRow k="Network">{activeRecord.name}</DetailRow>
+          <DetailRow k="Chain ID">{activeRecord.chainIdNum}</DetailRow>
+          <DetailRow k="Genesis">
+            <span style={{ color: "var(--warn)" }}>genesis unpinned</span>
+          </DetailRow>
+          <div className="row-help" style={{ marginTop: 12 }}>
+            This chain has no genesis pin — the wallet verifies its chain id on every health tick
+            but cannot verify its genesis identity.
+          </div>
+        </div>
+      </div>
+    );
+  }
   const chain = readChainIdentity();
   const info = getChainInfo(NETWORK_SLUG);
   const sdkVersion = readSdkVersion();
@@ -624,6 +648,9 @@ function OperatorRow({
 
 function OperatorDetail({ row, devMode }: { row: OperatorInspectRow; devMode: boolean }) {
   const { verdict, probe, capabilities } = row;
+  // On a custom chain there is no genesis pin (§15): a chain-id-trusted operator
+  // reads "genesis unpinned" (warn) — never "Verified" (nothing was verified).
+  const customChainActive = !activeChainRecord().builtin;
   const chainTitle = devMode
     ? verdict.observedGenesis ?? "operator did not return chain-genesis metadata"
     : undefined;
@@ -645,12 +672,16 @@ function OperatorDetail({ row, devMode }: { row: OperatorInspectRow; devMode: bo
   return (
     <div className="w-op-detail" onClick={(e) => e.stopPropagation()}>
       <DetailRow k="Chain">
-        {verdict.trusted ? (
-          <span style={{ color: "var(--ok)" }} title={chainTitle}>Verified</span>
-        ) : (
+        {!verdict.trusted ? (
           <span style={{ color: "var(--err)" }} title={chainTitle}>
             Not verified — the wallet won't trust this operator
           </span>
+        ) : customChainActive ? (
+          <span style={{ color: "var(--warn)" }} title="Custom chain — the chain id matches but the genesis is not pinned.">
+            genesis unpinned
+          </span>
+        ) : (
+          <span style={{ color: "var(--ok)" }} title={chainTitle}>Verified</span>
         )}
       </DetailRow>
       {devMode ? (

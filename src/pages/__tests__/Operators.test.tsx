@@ -6,6 +6,7 @@ import { screen, waitFor } from "@testing-library/react";
 import { renderWithProviders } from "../../test/renderWithProviders";
 import { DeveloperModeProvider } from "../../sdk/developer-mode";
 import { markActiveOperatorUntrusted, markActiveOperatorTrusted } from "../../sdk/client";
+import { ACTIVE_CHAIN_KEY, USER_CHAINS_KEY } from "../../sdk/chains";
 import { readChainIdentity } from "../../sdk/about";
 import type { OperatorInspectRow } from "../../sdk/operator-inspect";
 import type { Peer, ProbeResult } from "../../sdk/peers";
@@ -96,6 +97,7 @@ describe("Operators screen", () => {
     liveRegistryMock.value = null;
     healthMock.kind = "loading";
     markActiveOperatorTrusted();
+    localStorage.clear();
     vi.clearAllMocks();
   });
 
@@ -169,6 +171,24 @@ describe("Operators screen", () => {
     const { user } = renderOperators(false, goto);
     await user.click(await screen.findByRole("button", { name: /Manage operators/ }));
     expect(goto).toHaveBeenCalledWith("operator-management");
+  });
+
+  it("H4: with a custom chain active, trust surfaces read 'genesis unpinned', never 'Verified'", async () => {
+    localStorage.setItem(
+      USER_CHAINS_KEY,
+      JSON.stringify({ "0x539": { chainId: "0x539", chainIdNum: 1337, name: "Local devnet", rpc: "http://localhost:8545", official: false, builtin: false } }),
+    );
+    localStorage.setItem(ACTIVE_CHAIN_KEY, "0x539");
+    // A chain-id-trusted operator (on a custom chain, trusted = chain-id match).
+    rowsMock.rows = [row("http://a", { verdict: verdict("http://a", { trusted: true }), probe: probe("http://a", { latencyMs: 40 }) })];
+    const { user } = renderOperators(true);
+    // The chain-identity card reads unpinned, and nothing reads "Verified".
+    expect(await screen.findByText("genesis unpinned")).toBeInTheDocument();
+    expect(screen.queryByText("Verified")).not.toBeInTheDocument();
+    // Expanding the operator's Chain row also reads unpinned (not Verified).
+    await user.click(await screen.findByText("Live · 40 ms"));
+    expect(screen.getAllByText("genesis unpinned").length).toBeGreaterThanOrEqual(2);
+    expect(screen.queryByText("Verified")).not.toBeInTheDocument();
   });
 
   it("has a Refresh control", async () => {
