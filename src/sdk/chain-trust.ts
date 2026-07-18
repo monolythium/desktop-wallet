@@ -20,7 +20,7 @@ import { RpcClient, getChainInfo, isQuarantineError } from "@monolythium/core-sd
 import type { ChainStatsResponse } from "@monolythium/core-sdk";
 import { currentEndpoint, getProviderUnchecked } from "./client";
 import { rpcClientOptions } from "./http";
-import { listPeers } from "./peers";
+import { activeFleet } from "./fleet";
 import {
   classifyNoOperatorReason,
   type DegradedCause,
@@ -190,9 +190,9 @@ export async function probeOperator(
  * and the genesis hash, so every steady-state tick re-confirms trust in one
  * read — there is no window where a silently-forked operator reads LIVE.
  *
- * If the active operator is not trusted, probe the rest of the fleet
- * (`listPeers`, the same SDK registry the CSP allowlist is generated from) in
- * PARALLEL and select the first trusted operator to fail over to (§O5: one
+ * If the active operator is not trusted, probe the rest of the effective fleet
+ * (`activeFleet` — the override-aware dial set) in PARALLEL and select the first
+ * trusted operator to fail over to (§O5: one
  * trusted+reachable operator ⇒ a healthy read). When none qualifies, the
  * degraded cause comes from F1's `classifyNoOperatorReason` over the whole
  * active set — so OPERATOR QUARANTINED requires unanimity (§G).
@@ -215,7 +215,7 @@ export async function resolveTrustedHead(
   }
 
   const others = await Promise.all(
-    listPeers()
+    activeFleet()
       .map((peer) => peer.url)
       .filter((url) => url !== active)
       .map((url) => probe(url, pinChain, pinGenesis)),

@@ -12,7 +12,7 @@
 // (see `reverse-name.ts`) and is allowed to fall back to the bare address.
 
 import { walletFetch } from "./http";
-import { listPeers } from "./peers";
+import { activeFleet } from "./fleet";
 
 /** The user name TLD. A recipient ending in this is treated as a name to resolve. */
 export const USER_NAME_TLD = ".mono";
@@ -163,7 +163,7 @@ export async function resolveNameQuorum(
   const fetchImpl = opts.fetchImpl ?? walletFetch;
   const timeoutMs = opts.timeoutMs ?? 4000;
   const maxEndpoints = opts.maxEndpoints ?? 4;
-  const endpoints = (opts.endpoints ?? listPeers().map((p) => p.url)).slice(0, maxEndpoints);
+  const endpoints = (opts.endpoints ?? activeFleet().map((p) => p.url)).slice(0, maxEndpoints);
   const results = await Promise.all(
     endpoints.map((url) => resolveNameAt(url, name.toLowerCase(), fetchImpl, timeoutMs)),
   );

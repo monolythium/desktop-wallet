@@ -25,12 +25,12 @@ import {
 } from "../sdk/client";
 import {
   latencyBucket,
-  listPeers,
   pickFastest,
   probePeer,
   type Peer,
   type ProbeResult,
 } from "../sdk/peers";
+import { activeFleet } from "../sdk/fleet";
 import { shortHex } from "./format";
 import type { Route } from "./types";
 
@@ -159,7 +159,7 @@ function PeerChip({
   const [probing, setProbing] = useState<Set<string>>(new Set());
   const [switchingFastest, setSwitchingFastest] = useState(false);
   const wrapRef = useRef<HTMLDivElement | null>(null);
-  const peers = listPeers();
+  const peers = activeFleet();
 
   // Keep the active endpoint in sync with client-side switches.
   useEffect(() => subscribeEndpoint((url) => setActive(url)), []);

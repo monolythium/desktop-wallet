@@ -25,6 +25,25 @@ export function sdkTestnetRpcEndpoints(): readonly string[] {
   return TESTNET_RPC_ENDPOINTS;
 }
 
+// Endpoint policy seam — the composition layer (fleet.ts) registers the
+// effective-fleet-aware "is this endpoint dialable" test and the active custom
+// chain's rpc here, so this low-level module never imports fleet.ts / chains.ts
+// (which would cycle). Until registered, the fallbacks below preserve the
+// original SDK-registry behavior exactly, so a build/test that never loads
+// fleet.ts is byte-for-byte unchanged.
+interface EndpointPolicy {
+  /** True when `url` is a member of the current effective fleet's URLs. */
+  isKnown: (url: string) => boolean;
+  /** The active custom chain's rpc, or null when the builtin chain is active. */
+  activeCustomChainRpc: () => string | null;
+}
+let _endpointPolicy: EndpointPolicy | null = null;
+
+/** Register the fleet-aware endpoint policy (called once by fleet.ts at load). */
+export function registerEndpointPolicy(policy: EndpointPolicy): void {
+  _endpointPolicy = policy;
+}
+
 export function resolveDefaultEndpoint(env: EndpointEnv = import.meta.env): string {
   const fromEnv = env.VITE_MONO_RPC_URL?.trim();
   if (fromEnv) return fromEnv;
@@ -41,17 +60,21 @@ export function resolveDefaultEndpoint(env: EndpointEnv = import.meta.env): stri
  *  developer mode — the UI is never the enforcement point. See the laws codified
  *  in build-mode.ts. */
 export function isKnownEndpoint(url: string): boolean {
+  if (_endpointPolicy) return _endpointPolicy.isKnown(url);
   return TESTNET_RPC_ENDPOINT_SET.has(url);
 }
 
 /**
- * The endpoint the client should connect to at init: an explicit build-time
- * override or dev proxy wins (so local iteration and CI are deterministic),
- * otherwise a valid persisted user selection, otherwise the build default.
+ * The endpoint the client should connect to at init. Precedence: an explicit
+ * build-time override, then the active custom chain's rpc (an explicitly
+ * activated chain is stronger intent than the dev proxy), then the dev proxy,
+ * then a valid persisted user selection (fleet-known), otherwise the gateway.
  */
 export function resolveActiveEndpoint(env: EndpointEnv = import.meta.env): string {
   const fromEnv = env.VITE_MONO_RPC_URL?.trim();
   if (fromEnv) return fromEnv;
+  const customRpc = _endpointPolicy?.activeCustomChainRpc() ?? null;
+  if (customRpc) return customRpc;
   if (env.DEV) return "/rpc";
   const persisted = readPersistedEndpoint();
   if (persisted && isKnownEndpoint(persisted)) return persisted;

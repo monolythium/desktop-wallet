@@ -11,7 +11,8 @@ import { DRow, truncMiddle } from "../components/_detailModalParts";
 import { DeveloperModeToggle } from "../components/DeveloperModeToggle";
 import { useDeveloperMode } from "../sdk/developer-mode";
 import { checkForUpdate } from "../sdk/updater";
-import { listPeers, probePeer } from "../sdk/peers";
+import { probePeer } from "../sdk/peers";
+import { activeFleet } from "../sdk/fleet";
 import { fetchLiveTestnetRegistry } from "../sdk/live-registry";
 import { isHardenedBuild } from "../sdk/build-mode";
 import type { ChainInfo } from "@monolythium/core-sdk";
@@ -95,7 +96,7 @@ export function About({ goto }: AboutProps) {
 
   useEffect(() => {
     let cancelled = false;
-    const peers = listPeers();
+    const peers = activeFleet();
     void Promise.all(peers.map((p) => probePeer(p.url))).then((results) => {
       if (!cancelled) setOperators(operatorsSummary(results, peers.length));
     });

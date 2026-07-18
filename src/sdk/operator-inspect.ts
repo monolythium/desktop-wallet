@@ -11,7 +11,8 @@
 
 import { RpcClient, getChainInfo } from "@monolythium/core-sdk";
 import { rpcClientOptions } from "./http";
-import { listPeers, probePeer, type Peer, type ProbeResult } from "./peers";
+import { probePeer, type Peer, type ProbeResult } from "./peers";
+import { activeFleet } from "./fleet";
 import { probeOperator, unreachableVerdict, NETWORK_SLUG, type OperatorVerdict } from "./chain-trust";
 import { runtimeBlockFromProvenance, type RuntimeBlock } from "./about";
 import type { OperatorRiskInput } from "./operator-risk";
@@ -99,7 +100,7 @@ async function readIndexer(url: string): Promise<{ current: number | null; lates
 
 function defaults(over: Partial<InspectDeps>): InspectDeps {
   return {
-    peers: over.peers ?? listPeers,
+    peers: over.peers ?? activeFleet,
     verdict: over.verdict ?? probeOperator,
     reach: over.reach ?? ((url) => probePeer(url)),
     caps: over.caps ?? readCapabilities,
