@@ -817,6 +817,39 @@ html[data-sidebar="collapsed"]:not([data-layout="topbar"]) .w-nav__item {
 .w-confirm__actions { display: flex; gap: 10px; margin-top: 16px; }
 .w-confirm__actions .btn { flex: 1; justify-content: center; }
 
+/* Operator risk chip (shared by rows + legend). Tinted backgrounds are fixed
+   alphas because the token set defines no tinted surfaces. */
+.w-risk-chip {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 9px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em;
+  border-radius: 3px; padding: 1px 5px; border: 1px solid transparent; white-space: nowrap;
+}
+.w-risk-chip--err { color: var(--err); background: rgba(220,80,80,0.12); border-color: rgba(220,80,80,0.4); }
+.w-risk-chip--warn { color: var(--warn); background: rgba(220,180,80,0.12); border-color: rgba(220,180,80,0.4); }
+.w-risk-chip--info { color: var(--fg-300); background: rgba(120,160,220,0.08); border-color: rgba(120,160,220,0.3); }
+
+/* Operators screen. */
+.w-op-summary { font-family: var(--font-mono, ui-monospace, monospace); font-size: var(--fs-11); color: var(--w-text-3); margin-bottom: 12px; }
+.w-op-strip { padding: 10px 12px; border: 1px solid var(--w-line); border-radius: var(--r-8); background: var(--w-surface); margin-bottom: 14px; }
+.w-op-strip__head { font-size: var(--fs-12); color: var(--w-text); }
+.w-op-strip__host { font-family: var(--font-mono, ui-monospace, monospace); color: var(--w-text-2); }
+.w-op-row { display: flex; align-items: flex-start; gap: 10px; padding: 10px 4px; border-top: 1px solid var(--w-line); cursor: pointer; }
+.w-op-row:first-child { border-top: none; }
+.w-op-row__dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 4px; flex: none; }
+.w-op-row__dot--ok { background: var(--ok); }
+.w-op-row__dot--bad { background: var(--err); }
+.w-op-row__main { flex: 1; min-width: 0; }
+.w-op-row__name { font-size: var(--fs-12); font-weight: 600; color: var(--w-text); }
+.w-op-row__region { font-size: 10.5px; color: var(--w-text-3); margin-left: 6px; }
+.w-op-row__chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.w-op-row__dev { font-family: var(--font-mono, ui-monospace, monospace); font-size: var(--fs-10); color: var(--w-text-3); margin-top: 4px; word-break: break-all; }
+.w-op-pill { display: inline-flex; align-items: center; gap: 5px; font-size: var(--fs-11); }
+.w-op-pill__dot { width: 6px; height: 6px; border-radius: 50%; }
+.w-op-detail { border-top: 1px dashed var(--w-line); margin-top: 8px; padding-top: 8px; }
+.w-op-detail__row { display: flex; justify-content: space-between; gap: 12px; font-size: var(--fs-11); padding: 2px 0; }
+.w-op-detail__k { color: var(--w-text-3); }
+.w-op-detail__v { color: var(--w-text-2); font-family: var(--font-mono, ui-monospace, monospace); text-align: right; word-break: break-all; }
+
 /* About Chain card — full untruncated genesis pin + registry-drift banner. */
 .w-genesis-full { margin-top: 12px; }
 .w-genesis-full__hash {

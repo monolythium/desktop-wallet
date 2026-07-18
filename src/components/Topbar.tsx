@@ -49,6 +49,7 @@ const TITLES: Record<Route, string> = {
   bridges: "Bridges",
   agents: "Agents",
   contacts: "Contacts",
+  operators: "Operators",
   riscv: "RISC-V",
   studio: "Mono Studio",
   trade: "Trade",

@@ -98,6 +98,13 @@ const ICON_CONTACTS = () => (
     <path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" />
   </svg>
 );
+const ICON_OPERATORS = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="3" y="4" width="18" height="6" rx="1.5" />
+    <rect x="3" y="14" width="18" height="6" rx="1.5" />
+    <path d="M7 7h.01M7 17h.01" />
+  </svg>
+);
 const ICON_RISCV = () => (
   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <rect x="4" y="4" width="16" height="16" rx="2" />
@@ -258,6 +265,7 @@ export const NAV_CATEGORIES: NavCategory[] = [
     header: "Manage",
     items: [
       { id: "contacts", label: "Contacts", icon: ICON_CONTACTS, route: "contacts" },
+      { id: "operators", label: "Operators", icon: ICON_OPERATORS, route: "operators" },
       { id: "riscv", label: "RISC-V", icon: ICON_RISCV, route: "riscv", developerOnly: true, badge: "dev" },
     ],
   },
