@@ -12,6 +12,9 @@
 // hand-edited or corrupt `wallet.operators.override` can never inject a malformed
 // or unbounded list into the dial path — it simply falls back to the defaults.
 
+import { listPeers, type Peer } from "./peers";
+import { isHardenedBuild } from "./build-mode";
+
 export interface OperatorEntry {
   /** Human label for the operator row. */
   name: string;
@@ -34,6 +37,10 @@ export const OPERATOR_OVERRIDE_KEY = "wallet.operators.override";
 /** Verbatim reject reasons surfaced by {@link writeOperatorOverride}. */
 export const INVALID_LIST_REASON = "invalid operator list";
 export const STORAGE_FAIL_REASON = "couldn't save the operator list — storage unavailable";
+/** The save-time reject in a hardened (packaged) build when the override reaches
+ *  outside the canonical fleet (build-mode law 3 — pre-committed copy). */
+export const HARDENED_REJECT_REASON =
+  "This build only dials the built-in operators. Reorder or pin the listed operators — adding a custom RPC host needs a developer build.";
 
 /**
  * Validate an unknown value as an operator list (WHOLE-LIST reject). Returns the
@@ -83,6 +90,78 @@ export function mergeOperatorOverride(
   return source.map((e) => ({ ...e }));
 }
 
+/** The default operator entries: `listPeers()` (the gateway + the SDK-registry
+ *  fleet) mapped to entry shape. The wallet hardcodes NO operator list — a fleet
+ *  change is an SDK bump + rebuild. Used as the editor's draft seed, the source
+ *  of the canonical origins, and the fallback in {@link hardenedOperators}. */
+export function defaultOperatorEntries(): OperatorEntry[] {
+  return listPeers().map(peerToEntry);
+}
+
+function peerToEntry(p: Peer): OperatorEntry {
+  return { name: p.label, region: p.region ?? "", rpc: p.url };
+}
+
+/** The origin of an rpc URL, or null when it does not parse. */
+function originOf(rpc: string): string | null {
+  try {
+    return new URL(rpc).origin;
+  } catch {
+    return null;
+  }
+}
+
+function canonicalOriginSet(entries: OperatorEntry[]): Set<string> {
+  const origins = new Set<string>();
+  for (const e of entries) {
+    const o = originOf(e.rpc);
+    if (o !== null) origins.add(o);
+  }
+  return origins;
+}
+
+/** True iff EVERY override entry's rpc origin is a member of `canonicalOrigins`
+ *  (pure). Matched by ORIGIN, so a renamed or blank-region entry still counts as
+ *  in-fleet; a different port or scheme on the same host does not. */
+export function overrideWithinFleet(
+  canonicalOrigins: ReadonlySet<string>,
+  override: OperatorEntry[],
+): boolean {
+  return override.every((e) => {
+    const o = originOf(e.rpc);
+    return o !== null && canonicalOrigins.has(o);
+  });
+}
+
+/**
+ * The hardened-build dial rule (BINDING LAW) — resolve the effective operator
+ * list, always returning fresh copies:
+ *   - development build → `mergeOperatorOverride` (override verbatim, or defaults);
+ *   - hardened + null/empty override → defaults;
+ *   - hardened + within-fleet override → honored verbatim (reorder/pin/subset of
+ *     the canonical fleet must keep working in packaged builds);
+ *   - hardened + ANY out-of-fleet host → the WHOLE override is ignored → defaults
+ *     (the stored value is NOT deleted).
+ *
+ * This narrowing is the load-time backstop for the save-time reject: the packaged
+ * build's webview CSP `connect-src` is generated from the same SDK registry as
+ * the dial set, so an override pointing at a non-allowlisted host would have
+ * every request CSP-blocked. The dial set must therefore always be a subset of
+ * the allowlist. Runs at EVERY fleet resolution, regardless of developer mode.
+ */
+export function hardenedOperators(
+  defaults: OperatorEntry[],
+  override: OperatorEntry[] | null,
+  hardened: boolean,
+): OperatorEntry[] {
+  if (!hardened) return mergeOperatorOverride(defaults, override);
+  if (!override || override.length === 0) return defaults.map((e) => ({ ...e }));
+  if (overrideWithinFleet(canonicalOriginSet(defaults), override)) {
+    return override.map((e) => ({ ...e }));
+  }
+  return defaults.map((e) => ({ ...e }));
+}
+
 /**
  * Read the persisted override, re-validated on EVERY read. Absent / unparseable /
  * schema-invalid / storage-throw all → `null` (use the defaults). Hand-edited
@@ -100,10 +179,15 @@ export function readOperatorOverride(): OperatorEntry[] | null {
 
 /**
  * Persist the override, or remove it (revert to defaults) when `list` is null.
- * Returns an ok result or a verbatim reject reason. The hardened-build save gate
- * (an out-of-fleet host rejected up-front in packaged builds) is layered into
- * this write path by the hardened dial rule — see {@link writeOperatorOverride}
- * in the companion commit.
+ * Returns an ok result or a verbatim reject reason:
+ *   - null → remove the key (revert to defaults);
+ *   - validation fails → {@link INVALID_LIST_REASON};
+ *   - hardened build AND the list reaches outside the canonical fleet →
+ *     {@link HARDENED_REJECT_REASON} (an actionable up-front reject, not a silent
+ *     revert); the load-time {@link hardenedOperators} narrowing is the backstop
+ *     for values that bypass this path (hand-edited storage / a dev-build value);
+ *   - storage write throws → {@link STORAGE_FAIL_REASON};
+ *   - otherwise persist.
  */
 export function writeOperatorOverride(
   list: OperatorEntry[] | null,
@@ -118,6 +202,9 @@ export function writeOperatorOverride(
   }
   const valid = validateOperatorList(list);
   if (valid === null) return { ok: false, reason: INVALID_LIST_REASON };
+  if (isHardenedBuild() && !overrideWithinFleet(canonicalOriginSet(defaultOperatorEntries()), valid)) {
+    return { ok: false, reason: HARDENED_REJECT_REASON };
+  }
   try {
     localStorage.setItem(OPERATOR_OVERRIDE_KEY, JSON.stringify(valid));
     return { ok: true };
