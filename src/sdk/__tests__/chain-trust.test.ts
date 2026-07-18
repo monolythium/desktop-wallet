@@ -28,6 +28,9 @@ import {
   setProviderForTest,
   type MonolythiumClient,
 } from "../client";
+import { classifyNoOperatorReason } from "../chain-health";
+import { ACTIVE_CHAIN_KEY, USER_CHAINS_KEY } from "../chains";
+import { writeOperatorOverride } from "../operator-override";
 
 // The fleet resolver reads its operator list from listPeers; pin it to a small
 // two-operator set so the injected probe drives the failover deterministically.
@@ -114,6 +117,32 @@ describe("verdictFromStats — the §F chain-id vs genesis split", () => {
     expect(t.trusted).toBe(true);
     // Absent genesis records null and stays fail-closed.
     expect(verdictFromStats(stats({ genesisHash: null }), PIN_CHAIN, PIN_GENESIS).observedGenesis).toBeNull();
+  });
+});
+
+describe("verdictFromStats — null pin (custom chain, chain-id-only trust) [G1]", () => {
+  it("trusted iff chainId matches; genesisMismatch can NEVER fire", () => {
+    const okAny = verdictFromStats(stats({ genesisHash: "0xanything" }), PIN_CHAIN, null);
+    expect(okAny.trusted).toBe(true);
+    expect(okAny.genesisMismatch).toBe(false);
+    // right chain id, absent genesis → still trusted (no genesis to prove)
+    expect(verdictFromStats(stats({ genesisHash: null }), PIN_CHAIN, null).trusted).toBe(true);
+    // wrong chain id → untrusted, still never a genesis mismatch
+    const wrong = verdictFromStats(stats({ chainId: 999, genesisHash: "0xanything" }), PIN_CHAIN, null);
+    expect(wrong.trusted).toBe(false);
+    expect(wrong.wrongChainId).toBe(true);
+    expect(wrong.genesisMismatch).toBe(false);
+    // the observed genesis is still recorded (for display), just not judged on
+    expect(okAny.observedGenesis).toBe("0xanything");
+  });
+
+  it("regenesis is unreachable from custom-chain verdicts (no pin ⇒ no mismatch ⇒ never regenesis)", () => {
+    const customVerdicts = [
+      verdictFromStats(stats({ genesisHash: "0xa" }), PIN_CHAIN, null),
+      verdictFromStats(stats({ chainId: 1, genesisHash: "0xb" }), PIN_CHAIN, null),
+    ];
+    expect(fleetSignals(customVerdicts).anyGenesisMismatch).toBe(false);
+    expect(classifyNoOperatorReason(fleetSignals(customVerdicts))).not.toBe("regenesis");
   });
 });
 
@@ -216,6 +245,79 @@ describe("resolveTrustedHead — fleet + failover + quarantine (health follows t
     const res = await resolveTrustedHead(probe);
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.cause).toBe("unreachable");
+  });
+
+  it("the builtin path ALWAYS enforces genesis: right chain + wrong genesis → regenesis (G1)", async () => {
+    // No active chain set ⇒ builtin ⇒ resolveTrustedHead pins from getChainInfo
+    // (non-null genesis). A wrong genesis surfaces a definitive mismatch, proving
+    // the null-pin custom branch is never taken for the builtin chain.
+    installActive(async () => ({ ...stats({}), genesisHash: "0xwronggenesis00000000" }));
+    const probe: typeof probeOperator = async (url) => unreachableVerdict(url);
+    const res = await resolveTrustedHead(probe);
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.cause).toBe("regenesis");
+  });
+});
+
+describe("resolveTrustedHead — custom chain active (chain-id-only, no genesis pin)", () => {
+  afterEach(() => {
+    resetProviderForTest();
+    localStorage.clear();
+  });
+
+  it("an active operator on the custom chain id is trusted regardless of genesis", async () => {
+    // Activate a custom chain (0x539 = 1337) whose rpc is the active endpoint.
+    localStorage.setItem(
+      USER_CHAINS_KEY,
+      JSON.stringify({
+        "0x539": { chainId: "0x539", chainIdNum: 1337, name: "Local", rpc: "http://active", official: false, builtin: false },
+      }),
+    );
+    localStorage.setItem(ACTIVE_CHAIN_KEY, "0x539");
+    const rpcClient = {
+      lythChainStats: async () => ({ ...stats({}), chainId: 1337, genesisHash: "0xunrelatedgenesis" }),
+    } as unknown as MonolythiumClient["rpcClient"];
+    setProviderForTest({ rpcClient, endpoint: "http://active" });
+    const probe: typeof probeOperator = async (url) => unreachableVerdict(url);
+    const res = await resolveTrustedHead(probe);
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.url).toBe("http://active");
+      expect(res.chainId).toBe(1337);
+    }
+  });
+});
+
+describe("resolveTrustedHead — hot-reload: a saved override changes the walk with no restart", () => {
+  afterEach(() => {
+    resetProviderForTest();
+    localStorage.clear();
+  });
+
+  it("walks the newly-saved override fleet on the very next call", async () => {
+    // Active operator on the wrong chain so the fleet walk always runs.
+    const rpcClient = { lythChainStats: async () => ({ ...stats({}), chainId: 1 }) } as unknown as MonolythiumClient["rpcClient"];
+    setProviderForTest({ rpcClient, endpoint: "http://active" });
+    const probed: string[] = [];
+    const probe: typeof probeOperator = async (url) => {
+      probed.push(url);
+      return unreachableVerdict(url);
+    };
+
+    // Before: the default fleet (the mocked listPeers minus the active op).
+    await resolveTrustedHead(probe);
+    expect(probed).toEqual(["http://other"]);
+
+    // Save an override — no restart, no reset call. The next resolve walks it.
+    probed.length = 0;
+    expect(
+      writeOperatorOverride([
+        { name: "c1", region: "", rpc: "http://custom1:8545" },
+        { name: "c2", region: "", rpc: "http://custom2:8545" },
+      ]),
+    ).toEqual({ ok: true });
+    await resolveTrustedHead(probe);
+    expect([...probed].sort()).toEqual(["http://custom1:8545", "http://custom2:8545"]);
   });
 });
 

@@ -20,8 +20,8 @@
 // produced no hash — now fires here when the chain returns a reverted receipt
 // for a tx the wallet successfully broadcast.
 
-import { MONOLYTHIUM_TESTNET_CHAIN_ID } from "@monolythium/core-sdk";
 import { loadActiveWallet } from "./active-wallet";
+import { scopeChainKey } from "./chains";
 import { getProvider } from "./client";
 import { decodeClaimedAmount, decodeTxFeeLythoshi } from "./live";
 import { getNativeTransactionCount } from "./native-rpc";
@@ -48,11 +48,6 @@ async function scopeAddressLower(): Promise<string | null> {
   return wallet.status === "ready" ? wallet.address.toLowerCase() : null;
 }
 
-/** Hex chain id for the scope key — `0x10f2c` for testnet-69420. */
-function scopeChainIdHex(): string {
-  return `0x${MONOLYTHIUM_TESTNET_CHAIN_ID.toString(16)}`;
-}
-
 /** Enqueue a successfully-broadcast operation into the durable tracked set so
  *  the app-level poller follows it to a terminal state. Called from the
  *  OperationsDrawer's Done transition for operations that set `descriptor.notify`
@@ -70,7 +65,7 @@ export async function trackOperationTx(
   if (!addressLower) return;
   const tx: PendingTx = {
     txHash,
-    chainIdHex: scopeChainIdHex(),
+    chainIdHex: scopeChainKey(),
     addressLower,
     opKind: meta.kind,
     amountDecimal: meta.amountDecimal,

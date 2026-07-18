@@ -23,8 +23,8 @@
 // The tracked-tx core treats `lyth_txStatus="found"` / a success receipt as
 // the confirmed signal and only ever persists explicit "confirmed" / "failed".
 
-import { MONOLYTHIUM_TESTNET_CHAIN_ID } from "@monolythium/core-sdk";
 import { loadActiveWallet } from "./active-wallet";
+import { scopeChainKey } from "./chains";
 import { recordNotification } from "./notifications-store";
 import { toastTerminalNotification } from "./os-toast";
 import type { TxOpKind } from "./notifications";
@@ -35,11 +35,6 @@ import type { TxOpKind } from "./notifications";
 async function scopeAddressLower(): Promise<string | null> {
   const wallet = await loadActiveWallet();
   return wallet.status === "ready" ? wallet.address.toLowerCase() : null;
-}
-
-/** Hex chain id for the scope key — `0x10f2c` for testnet-69420. */
-function scopeChainIdHex(): string {
-  return `0x${MONOLYTHIUM_TESTNET_CHAIN_ID.toString(16)}`;
 }
 
 export interface OperationNotifyContext {
@@ -64,7 +59,7 @@ export async function recordOperationFailure(
   if (!addressLower) return;
   const { added, record } = await recordNotification({
     addressLower,
-    chainIdHex: scopeChainIdHex(),
+    chainIdHex: scopeChainKey(),
     txHash,
     status: "failed",
     blockNumber: null,

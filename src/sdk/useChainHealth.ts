@@ -35,7 +35,7 @@ import {
 } from "./client";
 import { resolveTrustedHead } from "./chain-trust";
 import { loadWarmStartHead, saveWarmStartHead } from "./chain-health-store";
-import { TESTNET_CHAIN_ID_HEX } from "./peers";
+import { scopeChainKey, subscribeActiveChain } from "./chains";
 import {
   HEALTH_TICK_MS,
   INITIAL_HEALTH_STATE,
@@ -84,6 +84,10 @@ export function useChainHealth(address: string | null): ChainHealthView {
   const [endpointBump, setEndpointBump] = useState(0);
 
   useEffect(() => subscribeEndpoint(() => setEndpointBump((n) => n + 1)), []);
+  // Re-run the poll effect on an active-chain switch even when the endpoint URL
+  // is unchanged (two chains can share one RPC host), so the machine always
+  // restarts under the new chain's scope with a fresh stall baseline.
+  useEffect(() => subscribeActiveChain(() => setEndpointBump((n) => n + 1)), []);
 
   useEffect(() => {
     if (scope === null) {
@@ -141,7 +145,7 @@ export function useChainHealth(address: string | null): ChainHealthView {
           state.lastHeadId !== prevHeadId &&
           state.lastAdvancedAtMs !== null
         ) {
-          void saveWarmStartHead(scope, TESTNET_CHAIN_ID_HEX, {
+          void saveWarmStartHead(scope, scopeChainKey(), {
             height: state.health.height,
             headId: state.lastHeadId,
             advancedAtMs: state.lastAdvancedAtMs,
@@ -160,7 +164,7 @@ export function useChainHealth(address: string | null): ChainHealthView {
       // §I step 2: seed RECONNECTING from the durable cache before the first
       // poll. Replaces ONLY a still-loading view (an in-session remount keeps its
       // prior kind); a cached head is NEVER shown as LIVE.
-      const cached = await loadWarmStartHead(scope, TESTNET_CHAIN_ID_HEX);
+      const cached = await loadWarmStartHead(scope, scopeChainKey());
       if (cancelled) return;
       if (cached) {
         state = reconnectingSeed(cached);

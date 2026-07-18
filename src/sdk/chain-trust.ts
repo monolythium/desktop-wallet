@@ -21,6 +21,7 @@ import type { ChainStatsResponse } from "@monolythium/core-sdk";
 import { currentEndpoint, getProviderUnchecked } from "./client";
 import { rpcClientOptions } from "./http";
 import { activeFleet } from "./fleet";
+import { activeChainRecord } from "./chains";
 import {
   classifyNoOperatorReason,
   type DegradedCause,
@@ -65,24 +66,35 @@ export type TrustedHead =
 
 /**
  * Build a trust verdict from one operator's `lyth_chainStats` (pure).
- * Fail-closed: a null/absent `genesisHash` is NOT a pass — it proves nothing, so
- * `trusted` stays false. Genesis is compared case-insensitively (§F.2). The head
- * identity is the block hash, or the height when the hash is null (fail-closed).
+ *
+ * With a NON-NULL pin (the builtin chain): fail-closed genesis proof — a
+ * null/absent `genesisHash` is NOT a pass (it proves nothing, so `trusted` stays
+ * false); genesis is compared case-insensitively (§F.2).
+ *
+ * With a NULL pin (a custom chain, §15): chain-id-only trust — there is no
+ * genesis to prove and no pin to mismatch against, so `trusted = chainIdOk` and
+ * `genesisMismatch` can NEVER fire (regenesis is unreachable on a custom chain).
+ * The observed genesis is still recorded for display; it is not judged on.
+ *
+ * The head identity is the block hash, or the height when the hash is null
+ * (fail-closed).
  */
 export function verdictFromStats(
   stats: ChainStatsResponse,
   pinChainId: number,
-  pinGenesis: string,
+  pinGenesis: string | null,
   url = "",
 ): OperatorVerdict {
   const chainIdOk = stats.chainId === pinChainId;
   const observed = stats.genesisHash;
   const genesisOk =
-    chainIdOk && observed != null && observed.toLowerCase() === pinGenesis.toLowerCase();
+    pinGenesis === null
+      ? chainIdOk
+      : chainIdOk && observed != null && observed.toLowerCase() === pinGenesis.toLowerCase();
   return {
     url,
     wrongChainId: !chainIdOk,
-    genesisMismatch: chainIdOk && observed != null && !genesisOk,
+    genesisMismatch: pinGenesis !== null && chainIdOk && observed != null && !genesisOk,
     quarantined: false,
     trusted: genesisOk,
     height: stats.latestHeight,
@@ -162,7 +174,7 @@ async function verdictForClient(
   client: Pick<RpcClient, "lythChainStats">,
   url: string,
   pinChainId: number,
-  pinGenesis: string,
+  pinGenesis: string | null,
 ): Promise<OperatorVerdict> {
   try {
     const stats = await client.lythChainStats();
@@ -177,7 +189,7 @@ async function verdictForClient(
 export async function probeOperator(
   url: string,
   pinChainId: number,
-  pinGenesis: string,
+  pinGenesis: string | null,
 ): Promise<OperatorVerdict> {
   return verdictForClient(new RpcClient(url, rpcClientOptions()), url, pinChainId, pinGenesis);
 }
@@ -202,9 +214,25 @@ export async function probeOperator(
 export async function resolveTrustedHead(
   probe: typeof probeOperator = probeOperator,
 ): Promise<TrustedHead> {
-  const info = getChainInfo(NETWORK_SLUG);
-  const pinChain = info.chain_id;
-  const pinGenesis = info.genesis_hash;
+  const record = activeChainRecord();
+  if (record.builtin) {
+    // Builtin chain: the pin ALWAYS comes from the SDK registry symbol (a
+    // non-null genesis) — genesis is enforced, and the null-pin custom branch is
+    // structurally unreachable here.
+    const info = getChainInfo(NETWORK_SLUG);
+    return resolveHeadOverFleet(info.chain_id, info.genesis_hash, probe);
+  }
+  // Custom chain (§15): chain-id-only trust, no genesis pin.
+  return resolveHeadOverFleet(record.chainIdNum, null, probe);
+}
+
+/** Resolve a trusted head over the effective fleet for a given pin (pure I/O
+ *  shape — the pin choice is made by {@link resolveTrustedHead}). */
+async function resolveHeadOverFleet(
+  pinChain: number,
+  pinGenesis: string | null,
+  probe: typeof probeOperator,
+): Promise<TrustedHead> {
   const active = currentEndpoint();
 
   // The health probe re-checks the active operator even while it is untrusted
