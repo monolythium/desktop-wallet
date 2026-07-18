@@ -258,7 +258,7 @@ export const NAV_CATEGORIES: NavCategory[] = [
     header: "Manage",
     items: [
       { id: "contacts", label: "Contacts", icon: ICON_CONTACTS, route: "contacts" },
-      { id: "riscv", label: "RISC-V", icon: ICON_RISCV, route: "riscv" },
+      { id: "riscv", label: "RISC-V", icon: ICON_RISCV, route: "riscv", developerOnly: true, badge: "dev" },
     ],
   },
   {

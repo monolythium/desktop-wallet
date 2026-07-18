@@ -1,6 +1,9 @@
 import { useState } from "react";
 import type { ReactNode } from "react";
 import { useOperations } from "../operations/context";
+import { useDeveloperMode } from "../sdk/developer-mode";
+import { DevModeStub } from "../components/DevModeStub";
+import type { Route } from "../components/types";
 import {
   normalizeMrvCallForm,
   normalizeMrvDeployForm,
@@ -12,7 +15,12 @@ import {
   submitMrvDeployPayloadTransaction,
 } from "../sdk/mrv";
 
-export function RiscvContracts() {
+interface RiscvContractsProps {
+  goto: (r: Route) => void;
+}
+
+export function RiscvContracts({ goto }: RiscvContractsProps) {
+  const developerModeEnabled = useDeveloperMode();
   const ops = useOperations();
   const [deploy, setDeploy] = useState<MrvDeployFormInput>({
     artifactBytes: "",
@@ -135,6 +143,23 @@ export function RiscvContracts() {
       },
     });
   };
+
+  if (!developerModeEnabled) {
+    return (
+      <div className="w-page">
+        <div className="w-page__header">
+          <h1>
+            RISC-V <span className="w-tag" style={{ marginLeft: 8 }}>MRV</span>
+          </h1>
+          <div className="sub">Deploy and call native MRV contracts.</div>
+        </div>
+        <DevModeStub
+          body="The RISC-V contract console is a developer tool. Turn on developer mode to use it."
+          goto={goto}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="w-page">

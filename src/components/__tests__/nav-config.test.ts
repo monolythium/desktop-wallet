@@ -81,6 +81,14 @@ describe("NAV_CATEGORIES config", () => {
     expect(byId.get("reset")).toBe("reset");
   });
 
+  it("marks the developer surfaces (Studio, RISC-V) developerOnly with a dev badge", () => {
+    for (const id of ["studio", "riscv"]) {
+      const item = flat.find((i) => i.id === id);
+      expect(item?.developerOnly).toBe(true);
+      expect(item?.badge).toBe("dev");
+    }
+  });
+
   it("labels the recovery item honestly (not 'Emergency recovery')", () => {
     const recovery = flat.find((i) => i.id === "recovery");
     expect(recovery?.label).toBe("Recovery phrase");

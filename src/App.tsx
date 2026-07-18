@@ -291,7 +291,7 @@ export function App() {
           {route === "bridges" ? <Bridges experimentalEnabled={experimentalEnabled} /> : null}
           {route === "agents" && experimentalEnabled ? <Agents /> : null}
           {route === "contacts" ? <Contacts /> : null}
-          {route === "riscv" ? <RiscvContracts /> : null}
+          {route === "riscv" ? <RiscvContracts goto={setRoute} /> : null}
           {route === "studio" ? <MonoStudio goto={setRoute} /> : null}
           {route === "trade" ? <Trade /> : null}
           {route === "ai-trade" ? <AiTrading /> : null}
