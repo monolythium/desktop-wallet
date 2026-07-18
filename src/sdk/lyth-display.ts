@@ -41,6 +41,44 @@ export function formatLythDisplay(
   }
 }
 
+/** Raw lythoshi → a FIXED-decimal display string: exact `formatLyth` conversion,
+ *  fractional part truncated toward zero to at most `dp` digits and then
+ *  zero-PADDED to exactly `dp` (unlike {@link truncateDecimals}, which trims
+ *  trailing zeros). The integer part passes through verbatim, including
+ *  `formatLyth`'s en-US comma grouping. `dp = 0` yields the integer part with no
+ *  decimal point.
+ *
+ *  Truncation, never rounding: a rounded-up display can OVERSTATE funds across a
+ *  boundary — `99999999999999999999` lythoshi (99.999…) at 2 dp must render
+ *  `99.99`, never `100.00`.
+ *
+ *  The padded form keeps the hero's fraction column stable, so the `.frac`
+ *  styling hook and the chip values do not jitter between `12.5` and `12.51`
+ *  shapes as the balance moves.
+ *
+ *  Absent / blank / undecodable input → null, so the caller renders an honest
+ *  absence rather than a fabricated `0.00`. Pure. */
+export function formatLythFixed(
+  lythoshi: string | bigint | null | undefined,
+  dp: number,
+): string | null {
+  if (lythoshi === null || lythoshi === undefined) return null;
+  if (!Number.isInteger(dp) || dp < 0) return null;
+  const raw = typeof lythoshi === "bigint" ? lythoshi.toString() : lythoshi;
+  if (typeof raw !== "string" || raw.trim() === "") return null;
+  let exact: string;
+  try {
+    exact = formatLyth(raw.trim(), { includeUnit: false });
+  } catch {
+    return null;
+  }
+  const dot = exact.indexOf(".");
+  const intPart = dot < 0 ? exact : exact.slice(0, dot);
+  if (dp === 0) return intPart;
+  const fracRaw = dot < 0 ? "" : exact.slice(dot + 1);
+  return `${intPart}.${fracRaw.slice(0, dp).padEnd(dp, "0")}`;
+}
+
 /** Raw base-units integer string (a token's on-chain balance) + the token's
  *  `decimals` → exact display amount, capped at `displayCap` fractional digits.
  *  Bigint-exact — never a float: the same truncate-not-round contract as

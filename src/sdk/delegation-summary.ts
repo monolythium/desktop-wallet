@@ -62,3 +62,41 @@ export function deriveDelegationSummary(status: LiveDelegationStatus | null): De
     delegationsError,
   };
 }
+
+/**
+ * The wallet's currently delegated LYTH, as an exact lythoshi integer string.
+ *
+ * Delegation on this chain is BY WEIGHT — basis points of the live balance,
+ * non-custodial. So the delegated figure is the chain's own definition of the
+ * wallet's current weighted contribution (`balance × bps / 10000`), not a
+ * fabricated principal and not an escrowed amount: the LYTH stays spendable.
+ *
+ * This is a DIFFERENT quantity from the whole-LYTH-floored effective voting
+ * weight shown on the Delegate page. The two must never be forced equal.
+ *
+ * Exact bigint math with floor semantics — no float, and the truncation can only
+ * ever understate. `totalBps = 0` with a real balance is an honest `"0"`, not an
+ * absence. A null balance, or a bps outside `0..10000` / non-integer, yields
+ * null so the caller renders an honest absence. Pure.
+ */
+export function delegatedLythoshiFromBps(
+  balanceLythoshi: string | null,
+  totalBps: number | null,
+): string | null {
+  if (balanceLythoshi === null || balanceLythoshi.trim() === "") return null;
+  if (
+    totalBps === null ||
+    !Number.isInteger(totalBps) ||
+    totalBps < 0 ||
+    totalBps > 10_000
+  ) {
+    return null;
+  }
+  let balance: bigint;
+  try {
+    balance = BigInt(balanceLythoshi.trim());
+  } catch {
+    return null;
+  }
+  return ((balance * BigInt(totalBps)) / 10_000n).toString();
+}
