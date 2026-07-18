@@ -33,6 +33,7 @@ import {
   type RecipientFamiliarity,
 } from "../sdk/recipient-familiarity";
 import { previewNativeSendFee, type FeeQuoteBundle } from "../sdk/fee-preview";
+import { loadSpendGuardLythoshi } from "../sdk/spend-guard";
 import { renderFeeDisplay } from "../sdk/fee-display";
 import {
   NATIVE_TRANSFER_CHARGE_EXECUTION_UNITS,
@@ -107,6 +108,10 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
   const [balanceLyth, setBalanceLyth] = useState<string | null>(null);
   const [balanceLythoshi, setBalanceLythoshi] = useState<bigint | null>(null);
   const [balanceError, setBalanceError] = useState<string | null>(null);
+  // Cross-operator balance floor — a spend-GATE input only, NEVER displayed as a
+  // balance (F4). `null` = fewer than 2 operators cross-checked, so the basis
+  // falls back to the display balance alone. It can only ever TIGHTEN the basis.
+  const [guardLythoshi, setGuardLythoshi] = useState<bigint | null>(null);
   // The live execution-unit quote expanded per tier (one fetch per open, reused
   // for tier switches). The active tier's `signedFee` is what gets signed —
   // display == signed. `null` while loading; a failed read is the fee error state.
@@ -144,6 +149,24 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
       })
       .catch((cause) => {
         if (!cancelled) setBalanceError(errorMessage(cause));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [fromBech32m]);
+
+  // Load the cross-operator spend guard concurrently with the display balance. It
+  // only ever tightens the affordability basis; a failed fan-out (or <2 answers)
+  // leaves it null and the basis falls back to the display balance. Never shown.
+  useEffect(() => {
+    let cancelled = false;
+    setGuardLythoshi(null);
+    void loadSpendGuardLythoshi(fromBech32m)
+      .then((g) => {
+        if (!cancelled) setGuardLythoshi(g);
+      })
+      .catch(() => {
+        if (!cancelled) setGuardLythoshi(null);
       });
     return () => {
       cancelled = true;
@@ -302,6 +325,12 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
     // Block a token send the sender can't pay the LYTH fee for (honest pre-send).
     if (feeCoverageError) {
       setError(feeCoverageError);
+      return;
+    }
+    // Defense-in-depth over the disabled Review button: never open a native send
+    // whose amount + reservation exceeds the affordability basis.
+    if (insufficientError) {
+      setError(insufficientError);
       return;
     }
 
@@ -508,6 +537,17 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
   const reservationLythoshi = activeQuote ? activeQuote.reservationLythoshi : null;
   const chargeLythoshi = activeQuote ? activeQuote.chargeLythoshi : null;
 
+  // Affordability basis (§10): the display balance, TIGHTENED by the spend guard
+  // when it cross-checked (never loosened). `null` only when the balance itself
+  // never loaded — then the gate honestly can't assert and the chain's admission
+  // check is the backstop.
+  const basisLythoshi =
+    balanceLythoshi === null
+      ? null
+      : guardLythoshi !== null && guardLythoshi < balanceLythoshi
+        ? guardLythoshi
+        : balanceLythoshi;
+
   // The native charge display runs through the ADR-0039 conformance-gated seam
   // (§6); a failed conformance is the malformed state, never a rendered row.
   const nativeFeeDisplay =
@@ -529,8 +569,8 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
   // never exceeds the balance (the reservation surplus refunds at inclusion).
   const tokenMaxAmount = token ? maxTokenAmount(token.balanceBaseUnits, token.decimals) : null;
   const maxSpendableLythoshi =
-    !isToken && balanceLythoshi !== null && reservationLythoshi !== null
-      ? balanceLythoshi - reservationLythoshi
+    !isToken && basisLythoshi !== null && reservationLythoshi !== null
+      ? basisLythoshi - reservationLythoshi
       : null;
   const canFillMax = isToken
     ? tokenMaxAmount !== null && tokenMaxAmount !== "0"
@@ -551,6 +591,20 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
   // Native Total = amount + the DISPLAYED charge (§3 rule 8), NOT the reservation.
   const nativeTotalLythoshi =
     !isToken && amountLythoshi !== null && chargeLythoshi !== null ? amountLythoshi + chargeLythoshi : null;
+
+  // Native insufficient-funds gate (§10): amount + the RESERVATION must fit the
+  // basis (strict `>` blocks — exact equality, as a Max fill produces, is allowed).
+  // A null basis (balance never loaded) can't assert — Review proceeds and the
+  // chain's admission check is the backstop. Re-evaluates reactively when the
+  // guard lands after an amount was already filled.
+  const insufficientError =
+    !isToken &&
+    amountLythoshi !== null &&
+    reservationLythoshi !== null &&
+    basisLythoshi !== null &&
+    amountLythoshi + reservationLythoshi > basisLythoshi
+      ? "Amount + fee exceeds balance."
+      : null;
 
   // Fee-box row-1 value + tone: native charge via the seam / token reservation /
   // the three non-resolved states with their verbatim copy (§7).
@@ -820,6 +874,12 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
           )}
         </div>
 
+        {insufficientError && !error && (
+          <p style={{ margin: "12px 0 0", fontSize: 12, color: "var(--err)", lineHeight: 1.5 }}>
+            {insufficientError}
+          </p>
+        )}
+
         {error && (
           <p style={{ margin: "12px 0 0", fontSize: 12, color: "var(--err)", lineHeight: 1.5 }}>
             {error}
@@ -834,7 +894,14 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
             className="btn btn--primary"
             onClick={() => void onReview()}
             style={{ flex: 1 }}
-            disabled={!recipient.trim() || !amount.trim() || reviewing || Boolean(feeCoverageError) || !feeResolved}
+            disabled={
+              !recipient.trim() ||
+              !amount.trim() ||
+              reviewing ||
+              Boolean(feeCoverageError) ||
+              Boolean(insufficientError) ||
+              !feeResolved
+            }
           >
             {reviewing ? "Checking…" : "Review"}
           </button>

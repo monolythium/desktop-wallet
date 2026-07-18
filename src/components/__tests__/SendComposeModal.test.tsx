@@ -1,6 +1,6 @@
 import type { ReactElement, ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor } from "@testing-library/react";
 import { addressToTypedBech32 } from "@monolythium/core-sdk";
 import { renderWithProviders, TEST_WALLET_ADDRESS } from "../../test/renderWithProviders";
 import { computeNativeFeeQuote, NATIVE_TRANSFER_EXECUTION_UNIT_LIMIT } from "../../sdk/fee-model";
@@ -41,6 +41,8 @@ vi.mock("../../sdk/fee-preview", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../sdk/fee-preview")>()),
   previewNativeSendFee: fee.previewNativeSendFee,
 }));
+const guard = vi.hoisted(() => ({ loadSpendGuardLythoshi: vi.fn() }));
+vi.mock("../../sdk/spend-guard", () => ({ loadSpendGuardLythoshi: guard.loadSpendGuardLythoshi }));
 const send = vi.hoisted(() => ({ sendNativeLyth: vi.fn(), sendMrc20Token: vi.fn() }));
 vi.mock("../../sdk/native-send", () => ({ sendNativeLyth: send.sendNativeLyth }));
 vi.mock("../../sdk/token-send", async (importOriginal) => ({
@@ -79,6 +81,7 @@ beforeEach(() => {
   cap.descriptor = undefined;
   live.loadLiveWalletBalance.mockResolvedValue({ balanceLyth: "5", balanceLythoshi: "5000000000000000000" });
   live.loadLiveAddressActivity.mockResolvedValue({ ok: false, error: "n/a" });
+  guard.loadSpendGuardLythoshi.mockResolvedValue(null); // default: no cross-check → basis = display balance
   // Live-floor quote (base 10^9, tip 10^9). Native limit 30_000n / token 250_000n.
   fee.previewNativeSendFee.mockImplementation((_c: unknown, opts?: { tokenTransfer?: boolean }) => {
     const limit = opts?.tokenTransfer ? 250_000n : NATIVE_TRANSFER_EXECUTION_UNIT_LIMIT;
@@ -262,5 +265,54 @@ describe("SendComposeModal — developer-mode fee breakdown (T6)", () => {
     const token = { tokenId: TOKEN_ID, symbol: "USDC", decimals: 6, balanceBaseUnits: "2000000" };
     renderWithProviders(devOn(<SendComposeModal fromBech32m={FROM} token={token} onClose={vi.fn()} />));
     expect(await screen.findByText("Reserved limit: 250000")).toBeInTheDocument();
+  });
+});
+
+describe("SendComposeModal — spend guard + affordability (T7)", () => {
+  it("the guard TIGHTENS the basis: Max fills (min(guard,balance) − reservation)", async () => {
+    // Balance 5 LYTH; guard cross-checks a lower 2 LYTH → basis = 2 LYTH.
+    let resolveGuard!: (v: bigint | null) => void;
+    guard.loadSpendGuardLythoshi.mockReturnValue(new Promise((res) => (resolveGuard = res)));
+    const { user } = renderWithProviders(<SendComposeModal fromBech32m={FROM} onClose={vi.fn()} />);
+    const maxBtn = screen.getByRole("button", { name: "Max" });
+    await waitFor(() => expect(maxBtn).toBeEnabled()); // balance + fee loaded
+    await act(async () => resolveGuard(2_000_000_000_000_000_000n)); // guard lands → basis 2 LYTH
+    await user.click(maxBtn);
+    // 2 LYTH − 0.00006 reservation = 1.99994 (NOT the 4.99994 the raw balance gives).
+    expect((screen.getByLabelText("Amount in LYTH") as HTMLInputElement).value).toBe("1.99994");
+  });
+
+  it("blocks when amount + reservation exceeds the (guard-tightened) basis and disables Review", async () => {
+    guard.loadSpendGuardLythoshi.mockResolvedValue(1_000_000_000_000_000_000n); // 1 LYTH floor
+    const { user } = renderWithProviders(<SendComposeModal fromBech32m={FROM} onClose={vi.fn()} />);
+    await user.type(screen.getByLabelText("Recipient typed bech32m address"), TO);
+    await user.type(screen.getByLabelText("Amount in LYTH"), "2"); // 2 LYTH > 1 LYTH basis
+    expect(await screen.findByText("Amount + fee exceeds balance.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Review" })).toBeDisabled();
+  });
+
+  it("allows exact equality — a Max fill (amount + reservation == basis) is admissible", async () => {
+    // guard null (beforeEach) → basis = balance 5 LYTH.
+    const { user } = renderWithProviders(<SendComposeModal fromBech32m={FROM} onClose={vi.fn()} />);
+    await user.type(screen.getByLabelText("Recipient typed bech32m address"), TO);
+    const maxBtn = screen.getByRole("button", { name: "Max" });
+    await waitFor(() => expect(maxBtn).toBeEnabled());
+    await user.click(maxBtn); // fills 4.99994; 4.99994 + 0.00006 == 5 exactly
+    expect(screen.queryByText("Amount + fee exceeds balance.")).toBeNull();
+    expect(screen.getByRole("button", { name: "Review" })).toBeEnabled();
+  });
+
+  it("re-evaluates reactively when the guard lands AFTER an amount was filled", async () => {
+    let resolveGuard!: (v: bigint | null) => void;
+    guard.loadSpendGuardLythoshi.mockReturnValue(new Promise((res) => (resolveGuard = res)));
+    const { user } = renderWithProviders(<SendComposeModal fromBech32m={FROM} onClose={vi.fn()} />);
+    await user.type(screen.getByLabelText("Recipient typed bech32m address"), TO);
+    await user.type(screen.getByLabelText("Amount in LYTH"), "3"); // fine vs the 5 LYTH balance
+    // Basis is still the balance (guard pending) → no error yet.
+    expect(screen.queryByText("Amount + fee exceeds balance.")).toBeNull();
+    await act(async () => resolveGuard(1_000_000_000_000_000_000n)); // guard floors basis to 1 LYTH
+    expect(await screen.findByText("Amount + fee exceeds balance.")).toBeInTheDocument();
+    // The filled amount is NOT silently rewritten — only the gate trips.
+    expect((screen.getByLabelText("Amount in LYTH") as HTMLInputElement).value).toBe("3");
   });
 });
