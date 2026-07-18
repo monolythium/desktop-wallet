@@ -4,10 +4,21 @@
 // token + recent-activity previews, and Send / Receive / Delegate / Buy hero CTAs.
 //
 // HONESTY:
-//  - "Available" is the live native balance (loadLiveTokenStatus → eth_getBalance).
-//  - "Delegated" is total delegated *weight* (basis points) — the SDK exposes
-//    no per-delegation principal LYTH, so we never print a fabricated LYTH figure.
-//  - "Earned" comes from lyth_pendingRewards (real lythoshi), rendered as LYTH.
+//  - "Total" is the live native balance (loadLiveTokenStatus → eth_getBalance).
+//  - "Delegated" is `balance × totalBps / 10000` in exact bigint math. The SDK
+//    still exposes no per-delegation principal LYTH, and we still never print a
+//    fabricated one — this is the chain's OWN definition of the wallet's current
+//    weighted contribution, since delegation here is by weight of the live
+//    balance and non-custodial (the LYTH stays spendable). It is a different
+//    quantity from the Delegate page's whole-LYTH-floored effective weight, and
+//    the two are deliberately never forced equal. It renders only when the
+//    delegations read actually resolved.
+//  - "Earned" comes from lyth_pendingRewards (a real hex lythoshi quantity),
+//    normalised then rendered as LYTH; an undecodable quantity shows no line.
+//  - Every balance figure resolves through the one ordered ladder
+//    (sdk/balance-display.ts), so a fabricated "0.00" while the value is unknown
+//    is structurally unreachable and a remembered value can never display while
+//    the chain isn't live.
 //  - Endpoint / chain-height / probe telemetry is dropped from the hero (the
 //    topbar already shows live sync + the peer switcher).
 
@@ -27,9 +38,18 @@ import { loadTokenMetaMap, type TokenMeta } from "../sdk/token-metadata";
 import { truncateDecimals } from "../sdk/lyth-display";
 import { formatFiatFromLythoshi, getLythFiatRate } from "../sdk/fiat";
 import { useDisplayCurrency } from "../sdk/display-prefs";
-import { balanceDisplayState, STALE_BALANCE_LABEL } from "../sdk/balance-display";
-import { BalanceFigure } from "../components/BalanceFigure";
 import {
+  balanceDisplayState,
+  STALE_BALANCE_LABEL,
+  type BalanceDisplayState,
+} from "../sdk/balance-display";
+import { BalanceFigure } from "../components/BalanceFigure";
+import { HeroChips, type HeroChipId } from "../components/HeroChips";
+import { useFitText } from "../components/useFitText";
+import { formatLythFixed } from "../sdk/lyth-display";
+import {
+  bpsToPercentLabel,
+  delegatedLythoshiFromBps,
   deriveDelegationSummary,
   type DelegationSummaryFacts,
 } from "../sdk/delegation-summary";
@@ -133,6 +153,49 @@ export function Home({ goto }: Props) {
   const seededLythoshi: string | null = null;
   const totalState = balanceDisplayState(chainNotLive, availableLythoshi, seededLythoshi);
 
+  // The delegated figure needs the bps from a read that actually RESOLVED —
+  // `deriveDelegationSummary` reports totalWeightBps 0 for both an unresolved
+  // and a failed read, so using it here would render a confident "0.00" for a
+  // read that never landed.
+  const delegationsResolved = delegationStatus?.delegations.ok === true;
+  const delegationsFailed = delegationStatus?.delegations.ok === false;
+  const delegatedLythoshi =
+    delegationsResolved && delegationStatus?.delegations.ok
+      ? delegatedLythoshiFromBps(
+          availableLythoshi,
+          delegationStatus.delegations.value?.totalBps ?? null,
+        )
+      : null;
+  // A FAILED read is hidden ("—"), not loading: the answer arrived and it was
+  // an error, so a skeleton would imply something is still on its way. An
+  // unresolved read keeps the skeleton.
+  const delegatedState: BalanceDisplayState =
+    delegationsFailed
+      ? { kind: "hidden" }
+      : balanceDisplayState(chainNotLive, delegatedLythoshi, null);
+
+  const [activeChip, setActiveChip] = useState<HeroChipId>("total");
+  const heroState = activeChip === "total" ? totalState : delegatedState;
+  // A whale-scale figure shrinks to stay on one line rather than wrapping away
+  // from its unit chip.
+  const heroFitRef = useFitText(
+    heroState.kind === "value" ? heroState.lythoshi : String(heroState.kind),
+    44,
+    24,
+  );
+
+  // `totalAmountLythoshi` is a HEX quantity (lyth_pendingRewards) — normalise to
+  // decimal lythoshi first. An undecodable quantity is treated as a failed read:
+  // no line at all, never a fabricated 0.00 and never a dash line.
+  const pendingRewardsLyth: string | null = (() => {
+    if (!rewards?.ok || !rewards.value) return null;
+    try {
+      return formatLythFixed(BigInt(rewards.value.totalAmountLythoshi).toString(), 2);
+    } catch {
+      return null;
+    }
+  })();
+
   const summary: DelegationSummaryFacts = deriveDelegationSummary(delegationStatus);
   // Earned is correctly divided to LYTH by formatRewardLyth, but at full 18-dp
   // precision; cap the on-screen value at 2 dp (truncated, trailing-zero trim)
@@ -154,44 +217,96 @@ export function Home({ goto }: Props) {
       {/* Hero */}
       <div className="w-hero">
         <div className="w-hero__label">
-          Total balance
-          <span style={{ color: "var(--w-text-3)" }}>·</span>
-          <span style={{ fontFamily: "var(--f-mono)", fontSize: 11, color: "var(--w-text-3)" }}>
-            live LYTH
-          </span>
+          {activeChip === "total" ? (
+            <>
+              Total balance
+              <span style={{ color: "var(--w-text-3)" }}>·</span>
+              <span style={{ fontFamily: "var(--f-mono)", fontSize: 11, color: "var(--w-text-3)" }}>
+                live LYTH
+              </span>
+            </>
+          ) : (
+            <>
+              Delegated
+              <span style={{ color: "var(--w-text-3)" }}>·</span>
+              <span style={{ fontFamily: "var(--f-mono)", fontSize: 11, color: "var(--w-text-3)" }}>
+                LYTH
+              </span>
+            </>
+          )}
         </div>
 
-        <div className={`w-hero__amount${totalState.kind === "value" && totalState.stale ? " is-stale" : ""}`}>
-          <BalanceFigure state={totalState} />
+        <div
+          ref={heroFitRef as React.RefObject<HTMLDivElement>}
+          className={`w-hero__amount${heroState.kind === "value" && heroState.stale ? " is-stale" : ""}`}
+        >
+          <BalanceFigure state={heroState} />
           <span className="tok">LYTH</span>
         </div>
 
         {/* Stale is a LABEL, never a value change — and it only ever appears
             beside a real figure, never over the skeleton or the dash. */}
-        {totalState.kind === "value" && totalState.stale && (
+        {heroState.kind === "value" && heroState.stale && (
           <div className="w-hero__stale">{STALE_BALANCE_LABEL}</div>
         )}
 
         {/* Fiat estimate — an ADDITIVE SIBLING; the amount above is untouched.
-            Rendered only when the ladder resolved to a real value: over a dash
-            or a skeleton the amount is unknown, and "{symbol}—" would claim we
-            know the balance and merely cannot price it. */}
-        {totalState.kind === "value" && (
+            Follows the ACTIVE chip, and renders only when that chip's ladder
+            state is a real value: over a dash or a skeleton the amount is
+            unknown, and "{symbol}—" would claim we know it and merely cannot
+            price it. */}
+        {heroState.kind === "value" && (
           <div className="w-hero__fiat">
-            {formatFiatFromLythoshi(totalState.lythoshi, currency, getLythFiatRate(currency))}
+            {formatFiatFromLythoshi(heroState.lythoshi, currency, getLythFiatRate(currency))}
           </div>
         )}
 
-        <div className="w-hero__meta">
-          {/* No fiat here — this duplicates the hero figure, and one figure gets
-              one fiat rendering. */}
-          <span>
-            Available <b><BalanceFigure state={totalState} skeletonWidthCh={4} skeletonRadius={6} /> LYTH</b>
-          </span>
-          {/* Delegated is delegated *weight* (bps) — no principal LYTH read
-              exists, so we never render a fabricated LYTH figure here. */}
-          <span>Delegated <b>{summary.totalWeightLabel}</b> weight</span>
-        </div>
+        {/* Delegated view — stacked lines, only while that chip is active and
+            the delegations read actually resolved. On a failed read the hero
+            shows its figure alone: the Delegation card below already carries the
+            verbatim error, and the hero never duplicates error copy. */}
+        {activeChip === "staked" && delegationsResolved && (
+          <div
+            style={{ display: "flex", flexDirection: "column", gap: 3, marginTop: 10, fontSize: 11.5, color: "var(--fg-100)", alignItems: "flex-start" }}
+          >
+            {summary.delegationCount > 0 ? (
+              <button
+                type="button"
+                onClick={() => goto("delegate")}
+                style={{ background: "none", border: "none", padding: 0, cursor: "pointer", color: "inherit", fontSize: "inherit" }}
+              >
+                Delegated to {summary.delegationCount}{" "}
+                {summary.delegationCount === 1 ? "cluster" : "clusters"} ·{" "}
+                <span style={{ color: "rgba(var(--gold-glow), 1)" }}>
+                  {bpsToPercentLabel(summary.totalWeightBps)}
+                </span>
+                <span style={{ fontSize: 11, marginLeft: 4 }}>→</span>
+              </button>
+            ) : (
+              <span>Not delegated</span>
+            )}
+            {/* Only on a resolved rewards read — a failed one renders NO line,
+                never a dash line and never a fabricated 0.00. */}
+            {pendingRewardsLyth !== null && (
+              <button
+                type="button"
+                onClick={() => goto("delegate")}
+                style={{ background: "none", border: "none", padding: 0, cursor: "pointer", color: "inherit", fontSize: "inherit" }}
+              >
+                <span style={{ color: "rgba(var(--gold-glow), 1)" }}>{pendingRewardsLyth}</span> LYTH
+                pending rewards
+                <span style={{ fontSize: 11, marginLeft: 4 }}>→</span>
+              </button>
+            )}
+          </div>
+        )}
+
+        <HeroChips
+          active={activeChip}
+          onSelect={setActiveChip}
+          totalState={totalState}
+          delegatedState={delegatedState}
+        />
 
         <div className="w-hero__bar">
           <button className="w-hbtn w-hbtn--primary" onClick={openNativeSend} disabled={!walletAddress}>

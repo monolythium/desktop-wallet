@@ -124,16 +124,19 @@ describe("Home hero fiat sub-line", () => {
     expect(amount?.querySelector(".w-hero__fiat")).toBeNull();
   });
 
-  it("the meta 'Available' line carries no fiat (one figure, one rendering)", async () => {
+  it("exactly ONE fiat rendering exists for the balance figure", async () => {
+    // The hero meta row that used to repeat the balance is gone (the chip pair
+    // carries both quantities now), so the "one figure, one fiat rendering"
+    // property is stronger than when this test was written: there is only one
+    // balance figure on the hero, and only one fiat node beside it.
     renderWithProviders(<Home goto={() => {}} />);
     await screen.findAllByText(/12.34/);
-    // Scoped to the Available span: the sibling "Delegated — weight" carries a
-    // legitimate pre-existing em-dash (no principal LYTH read exists) that has
-    // nothing to do with fiat.
-    const available = document.querySelector(".w-hero__meta span");
-    expect(available?.textContent).toBe("Available 12.34 LYTH");
-    expect(available?.textContent).not.toContain("$");
-    expect(available?.textContent).not.toContain("—");
-    expect(available?.textContent).not.toContain("≈");
+    expect(document.querySelectorAll(".w-hero__fiat")).toHaveLength(1);
+    expect(document.querySelector(".w-hero__meta")).toBeNull();
+
+    // The chips carry figures but never a fiat string of their own.
+    const chips = document.querySelector('[data-testid="hero-chips"]');
+    expect(chips?.textContent).not.toContain("$");
+    expect(chips?.textContent).not.toContain("≈");
   });
 });

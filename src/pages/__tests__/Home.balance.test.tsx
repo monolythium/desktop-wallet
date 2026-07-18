@@ -85,8 +85,9 @@ describe("Home hero — the never-fabricated-zero guarantee", () => {
     balanceMock.lythoshi = { ok: true, value: "0" };
     renderWithProviders(<Home goto={() => {}} />);
     await vi.waitFor(() => expect(heroAmount()?.textContent).toBe("0.00LYTH"));
-    // …and it is NOT a skeleton.
-    expect(screen.queryByLabelText(BALANCE_LOADING_LABEL)).toBeNull();
+    // …and the HERO figure is not a skeleton. (The Delegated chip legitimately
+    // still shows one — that read is unresolved in this fixture.)
+    expect(heroAmount()?.querySelector("[aria-busy]")).toBeNull();
   });
 
   it("renders the live figure at fixed 2 dp", async () => {
