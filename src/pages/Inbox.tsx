@@ -338,7 +338,6 @@ function AddressBookCard() {
         name: draftName.trim(),
         address: draftAddress.trim(),
         note: draftNote.trim() || null,
-        overwrite: false,
       });
       setDraftName("");
       setDraftAddress("");
@@ -355,10 +354,11 @@ function AddressBookCard() {
     }
   };
 
-  const onRemove = async (name: string) => {
+  // v2 is address-keyed — removing by name would silently match nothing.
+  const onRemove = async (address: string) => {
     setError(null);
     try {
-      await addressbookRemove(name);
+      await addressbookRemove(address);
       await refresh(query.trim() || undefined);
     } catch (cause) {
       if (cause instanceof AddressBookCallError) {
@@ -408,7 +408,7 @@ function AddressBookCard() {
                   </div>
                   {e.note ? <div className="row-help" style={{ marginTop: 4 }}>{e.note}</div> : null}
                 </div>
-                <button type="button" className="btn btn--sm" onClick={() => onRemove(e.name)}>
+                <button type="button" className="btn btn--sm" onClick={() => onRemove(e.address)}>
                   Remove
                 </button>
               </div>

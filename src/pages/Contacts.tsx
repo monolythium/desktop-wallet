@@ -113,7 +113,6 @@ function AddressBookSection() {
         name,
         address,
         note: note || null,
-        overwrite: false,
       });
       setDraftName("");
       setDraftAddress("");
@@ -130,10 +129,11 @@ function AddressBookSection() {
     }
   };
 
-  const onRemove = async (name: string) => {
+  // v2 is address-keyed — removing by name would silently match nothing.
+  const onRemove = async (address: string) => {
     setError(null);
     try {
-      await addressbookRemove(name);
+      await addressbookRemove(address);
       await refresh(query.trim() || undefined);
     } catch (cause) {
       if (cause instanceof AddressBookCallError) {
@@ -201,7 +201,7 @@ function AddressBookSection() {
               <ContactRow
                 key={entry.name}
                 entry={entry}
-                onRemove={() => void onRemove(entry.name)}
+                onRemove={() => void onRemove(entry.address)}
               />
             ))}
           </div>
