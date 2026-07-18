@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { screen } from "@testing-library/react";
 import { renderWithProviders } from "../../test/renderWithProviders";
 import type { OperationDescriptor, OperationResult } from "../types";
@@ -102,6 +102,65 @@ describe("OperationsDrawer — secret hygiene", () => {
     // The seed the operation signed with is scrubbed to all-zero afterwards.
     expect(Array.from(captured!)).toEqual(new Array(32).fill(0));
     expect(lockout.clearUnlockLockout).toHaveBeenCalledTimes(1); // success resets the counter
+  });
+});
+
+describe("OperationsDrawer — classified error stage (T9)", () => {
+  const throwing = (message: string): OperationDescriptor =>
+    readOp(() => Promise.reject(new Error(message)));
+
+  afterEach(() => localStorage.removeItem("wallet.developerMode"));
+
+  it("renders a classified card (headline + plain-language body) for a thrown error", async () => {
+    const { user } = renderWithProviders(<OperationsDrawer descriptor={throwing("insufficient funds for transfer")} onClose={vi.fn()} />);
+    await user.click(screen.getByRole("button", { name: "Run" }));
+    expect(await screen.findByText("Insufficient LYTH")).toBeInTheDocument();
+    expect(screen.getByText(/doesn't have enough LYTH/)).toBeInTheDocument();
+  });
+
+  it("routes the 'Operators' mention when onNavigate is supplied (closes + navigates)", async () => {
+    const onNavigate = vi.fn();
+    const onClose = vi.fn();
+    const { user } = renderWithProviders(
+      <OperationsDrawer descriptor={throwing("untrusted genesis")} onClose={onClose} onNavigate={onNavigate} />,
+    );
+    await user.click(screen.getByRole("button", { name: "Run" }));
+    await screen.findByText("Chain genesis mismatch");
+    await user.click(screen.getByRole("button", { name: "Operators" }));
+    expect(onClose).toHaveBeenCalled();
+    expect(onNavigate).toHaveBeenCalledWith("operators");
+  });
+
+  it("leaves 'Operators' as plain text when no route callback is supplied", async () => {
+    const { user } = renderWithProviders(<OperationsDrawer descriptor={throwing("untrusted genesis")} onClose={vi.fn()} />);
+    await user.click(screen.getByRole("button", { name: "Run" }));
+    await screen.findByText("Chain genesis mismatch");
+    expect(screen.queryByRole("button", { name: "Operators" })).toBeNull();
+  });
+
+  it("shows dev-gated Technical details (with the raw message) only when developer mode is on", async () => {
+    localStorage.setItem("wallet.developerMode", "true");
+    const { user } = renderWithProviders(<OperationsDrawer descriptor={throwing("insufficient funds")} onClose={vi.fn()} />);
+    await user.click(screen.getByRole("button", { name: "Run" }));
+    await screen.findByText("Insufficient LYTH");
+    expect(screen.getByText("Technical details")).toBeInTheDocument();
+    expect(screen.getByText("insufficient funds")).toBeInTheDocument(); // the raw pre-classification message
+  });
+
+  it("hides Technical details when developer mode is off", async () => {
+    const { user } = renderWithProviders(<OperationsDrawer descriptor={throwing("insufficient funds")} onClose={vi.fn()} />);
+    await user.click(screen.getByRole("button", { name: "Run" }));
+    await screen.findByText("Insufficient LYTH");
+    expect(screen.queryByText("Technical details")).toBeNull();
+  });
+
+  it("never shows Technical details for an unknown error (its body IS the raw message)", async () => {
+    localStorage.setItem("wallet.developerMode", "true");
+    const { user } = renderWithProviders(<OperationsDrawer descriptor={throwing("totally novel failure zzz")} onClose={vi.fn()} />);
+    await user.click(screen.getByRole("button", { name: "Run" }));
+    await screen.findByText("Transaction failed");
+    expect(screen.getByText("totally novel failure zzz")).toBeInTheDocument();
+    expect(screen.queryByText("Technical details")).toBeNull();
   });
 });
 

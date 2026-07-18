@@ -7,6 +7,7 @@
 // real keystore signing path.
 
 import type { TxOpKind } from "../sdk/notifications";
+import type { SendErrorContext } from "../sdk/send-error";
 
 export type OperationStage = "preview" | "auth" | "executing" | "done" | "error";
 
@@ -58,6 +59,12 @@ export interface OperationDescriptor {
    * a canonical tx hash leave this unset and record nothing.
    */
   notify?: OperationNotifyMeta;
+  /**
+   * Optional figures for the error classifier's insufficient-funds shortfall
+   * body (§8.5). Native send descriptors supply LYTH balance/amount/reservation;
+   * other operations omit it and get the generic body.
+   */
+  errorContext?: SendErrorContext;
   /**
    * The actual work. Resolves with an arbitrary "result" payload (tx hash,
    * RPC echo, etc.); throws to land the drawer in `error`. Implementations

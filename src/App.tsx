@@ -263,7 +263,7 @@ export function App() {
     <LockProvider>
       <LockBoundary locked={<UnlockGate />}>
       <DeveloperModeProvider value={developerModeControl}>
-      <OperationsProvider>
+      <OperationsProvider onNavigate={setRoute}>
       <ChainHealthProvider>
       <div className="w-app">
         <Sidebar

@@ -30,6 +30,16 @@ import {
   recordWrongUnlockAttempt,
 } from "../sdk/unlock-lockout";
 import { MlDsa65Backend } from "@monolythium/core-sdk/crypto";
+import {
+  classifySendError,
+  errorLinksOperators,
+  extractSendError,
+  formatSendError,
+  severityColours,
+  type SendErrorInput,
+} from "../sdk/send-error";
+import { readDeveloperMode } from "../sdk/feature-flags";
+import type { Route } from "../components/types";
 import type {
   OperationExecutionContext,
   OperationDescriptor,
@@ -40,6 +50,10 @@ import type {
 interface Props {
   descriptor: OperationDescriptor;
   onClose: () => void;
+  /** Optional route callback — when present, the classified error card renders
+   *  its "Operators" mention as a link that closes the drawer and routes there.
+   *  Absent ⇒ the word stays plain text. */
+  onNavigate?: (route: Route) => void;
 }
 
 const STAGE_ORDER: ReadonlyArray<Exclude<OperationStage, "error">> = [
@@ -68,10 +82,11 @@ type AuthError =
   | { kind: "keychain"; cause: KeychainCallError }
   | { kind: "vault"; cause: VaultCallError };
 
-export function OperationsDrawer({ descriptor, onClose }: Props) {
+export function OperationsDrawer({ descriptor, onClose, onNavigate }: Props) {
   const [stage, setStage] = useState<OperationStage>("preview");
   const [result, setResult] = useState<OperationResult | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  // The raw thrown error (message + optional JSON-RPC code), classified at render.
+  const [errorRaw, setErrorRaw] = useState<SendErrorInput | null>(null);
   // Auth-specific error state. We keep this separate from the global
   // `error` so the Auth pane can show a "try again" hint without dropping
   // the user into the terminal Error stage. Only `runExecute` failures
@@ -208,7 +223,7 @@ export function OperationsDrawer({ descriptor, onClose }: Props) {
       return;
     }
     if (descriptor.auth === "passkey") {
-      setError("Passkey signing is unavailable in this build.");
+      setErrorRaw({ message: "Passkey signing is unavailable in this build.", code: null });
       setStage("error");
       return;
     }
@@ -217,7 +232,7 @@ export function OperationsDrawer({ descriptor, onClose }: Props) {
 
   const runExecute = async (ctx: OperationExecutionContext = {}) => {
     setStage("executing");
-    setError(null);
+    setErrorRaw(null);
     let resultTxHash: string | undefined;
     try {
       const r = await descriptor.execute(ctx);
@@ -235,8 +250,7 @@ export function OperationsDrawer({ descriptor, onClose }: Props) {
         void trackOperationTx(descriptor.notify, resultTxHash, r.nonce);
       }
     } catch (cause) {
-      const message = (cause as Error)?.message ?? String(cause);
-      setError(message);
+      setErrorRaw(extractSendError(cause));
       setStage("error");
       // Terminal transition: the node / precompile / SDK rejected the
       // submission — a genuine failure, recorded immediately (when a canonical
@@ -293,7 +307,14 @@ export function OperationsDrawer({ descriptor, onClose }: Props) {
           ) : null}
           {stage === "executing" ? <ExecutingPane descriptor={descriptor} /> : null}
           {stage === "done" && result ? <DonePane descriptor={descriptor} result={result} /> : null}
-          {stage === "error" ? <ErrorPane error={error ?? "Unknown error"} /> : null}
+          {stage === "error" ? (
+            <ErrorPane
+              input={errorRaw ?? { message: "Unknown error", code: null }}
+              context={descriptor.errorContext}
+              onNavigate={onNavigate}
+              onClose={onClose}
+            />
+          ) : null}
         </div>
 
         <div className="w-drawer__foot">
@@ -567,11 +588,97 @@ function DonePane({ descriptor, result }: { descriptor: OperationDescriptor; res
   );
 }
 
-function ErrorPane({ error }: { error: string }) {
+function ErrorPane({
+  input,
+  context,
+  onNavigate,
+  onClose,
+}: {
+  input: SendErrorInput;
+  context?: import("../sdk/send-error").SendErrorContext;
+  onNavigate?: (route: Route) => void;
+  onClose: () => void;
+}) {
+  const display = formatSendError(input);
+  const c = classifySendError(display, context);
+  const colours = severityColours[c.severity];
+  // Dev-gated raw detail — hidden when off, and pointless for `unknown` (its body
+  // IS the raw message). Read live (never cached at mount).
+  const showTechnical = readDeveloperMode() && c.kind !== "unknown";
+  // The "Operators" mention becomes a link only when a route callback exists AND
+  // this is a network-class error (genesis / quarantine / offline).
+  const linkable = onNavigate !== undefined && errorLinksOperators(c.kind);
+
   return (
-    <div className="w-banner error">
-      <div style={{ fontWeight: 600, marginBottom: 4 }}>Operation failed</div>
-      <div style={{ fontFamily: "var(--f-mono)", fontSize: 11.5, wordBreak: "break-all" }}>{error}</div>
+    <div
+      style={{
+        padding: "12px 14px",
+        borderRadius: 10,
+        background: colours.cardBg,
+        border: `1px solid ${colours.border}`,
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+        <span aria-hidden style={{ color: colours.fg }}>{c.severity === "info" ? "ⓘ" : "⚠"}</span>
+        <div style={{ fontWeight: 600, color: colours.fg }}>{c.headline}</div>
+      </div>
+      <div style={{ fontSize: 12.5, lineHeight: 1.6, color: "var(--w-text-2)" }}>
+        {linkable ? (
+          <BodyWithOperatorsLink
+            body={c.body}
+            onActivate={() => {
+              onClose();
+              onNavigate?.("operators");
+            }}
+          />
+        ) : (
+          c.body
+        )}
+      </div>
+      {showTechnical ? (
+        <details style={{ marginTop: 10 }}>
+          <summary style={{ fontSize: 11, color: "var(--w-text-3)", cursor: "pointer" }}>Technical details</summary>
+          <div
+            style={{
+              marginTop: 6,
+              fontFamily: "var(--f-mono)",
+              fontSize: 11,
+              color: "var(--w-text-3)",
+              wordBreak: "break-all",
+            }}
+          >
+            {input.message}
+          </div>
+        </details>
+      ) : null}
     </div>
+  );
+}
+
+/** Render a body, turning the LAST literal "Operators" into a link-styled button. */
+function BodyWithOperatorsLink({ body, onActivate }: { body: string; onActivate: () => void }) {
+  const word = "Operators";
+  const idx = body.lastIndexOf(word);
+  if (idx === -1) return <>{body}</>;
+  return (
+    <>
+      {body.slice(0, idx)}
+      <button
+        type="button"
+        onClick={onActivate}
+        style={{
+          background: "none",
+          border: "none",
+          padding: 0,
+          font: "inherit",
+          color: "var(--w-accent, #7aa2f7)",
+          textDecoration: "underline",
+          cursor: "pointer",
+        }}
+      >
+        {word}
+      </button>
+      {body.slice(idx + word.length)}
+    </>
   );
 }

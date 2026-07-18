@@ -581,6 +581,13 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
         },
       ],
       notify: { kind: "send", amountDecimal: amountLyth, counterparty: toBech32m },
+      // Shortfall enrichment for an insufficient-funds error (§8.5): real LYTH
+      // balance / amount / worst-case reservation from the compose state.
+      errorContext: {
+        balanceLythoshi: balanceLythoshi ?? undefined,
+        amountLythoshi: parseLythToLythoshi(amountLyth),
+        maxFeeLythoshi: nativeQuote.reservationLythoshi,
+      },
       execute: async (ctx) => {
         if (!ctx?.vaultSeed) {
           throw new Error("vault seed unavailable after keychain authorization");

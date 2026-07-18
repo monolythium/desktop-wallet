@@ -6,6 +6,7 @@ import { createContext, useCallback, useContext, useState } from "react";
 import type { ReactNode } from "react";
 import { OperationsDrawer } from "./OperationsDrawer";
 import type { OperationDescriptor } from "./types";
+import type { Route } from "../components/types";
 
 interface OperationsApi {
   open: (descriptor: OperationDescriptor) => void;
@@ -14,7 +15,15 @@ interface OperationsApi {
 
 const Ctx = createContext<OperationsApi | null>(null);
 
-export function OperationsProvider({ children }: { children: ReactNode }) {
+export function OperationsProvider({
+  children,
+  onNavigate,
+}: {
+  children: ReactNode;
+  /** Forwarded to the drawer so a classified error's "Operators" mention can
+   *  route. Omit ⇒ the mention stays plain text. */
+  onNavigate?: (route: Route) => void;
+}) {
   const [active, setActive] = useState<OperationDescriptor | null>(null);
 
   const open = useCallback((descriptor: OperationDescriptor) => {
@@ -25,7 +34,7 @@ export function OperationsProvider({ children }: { children: ReactNode }) {
   return (
     <Ctx.Provider value={{ open, close }}>
       {children}
-      {active ? <OperationsDrawer descriptor={active} onClose={close} /> : null}
+      {active ? <OperationsDrawer descriptor={active} onClose={close} onNavigate={onNavigate} /> : null}
     </Ctx.Provider>
   );
 }

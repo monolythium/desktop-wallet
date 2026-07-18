@@ -443,6 +443,22 @@ describe("SendComposeModal — recipient parser adoption (T3)", () => {
   });
 });
 
+describe("SendComposeModal — error-context threading (T9)", () => {
+  it("the native descriptor carries LYTH balance/amount/reservation for shortfall enrichment", async () => {
+    const { user } = renderWithProviders(<SendComposeModal fromBech32m={FROM} onClose={vi.fn()} />);
+    await user.type(screen.getByLabelText("Recipient typed bech32m address"), TO);
+    await user.type(screen.getByLabelText("Amount in LYTH"), "1");
+    await user.click(screen.getByRole("button", { name: "Review" }));
+    await waitFor(() => expect(cap.descriptor).toBeDefined());
+    // balance 5 LYTH, amount 1 LYTH, reservation = 2×10^9 × 30_000 = 6×10^13 (Normal).
+    expect(cap.descriptor!.errorContext).toEqual({
+      balanceLythoshi: 5_000_000_000_000_000_000n,
+      amountLythoshi: 1_000_000_000_000_000_000n,
+      maxFeeLythoshi: 60_000_000_000_000n,
+    });
+  });
+});
+
 describe("SendComposeModal — sent-recipients log (T7)", () => {
   it("logs the recipient after a native broadcast (seed + from + to)", async () => {
     const { user } = renderWithProviders(<SendComposeModal fromBech32m={FROM} onClose={vi.fn()} />);
