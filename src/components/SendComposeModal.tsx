@@ -34,7 +34,13 @@ import {
 } from "../sdk/recipient-familiarity";
 import { previewNativeSendFee, type FeeQuoteBundle } from "../sdk/fee-preview";
 import { renderFeeDisplay } from "../sdk/fee-display";
-import type { FeeTier } from "../sdk/fee-model";
+import {
+  NATIVE_TRANSFER_CHARGE_EXECUTION_UNITS,
+  NATIVE_TRANSFER_EXECUTION_UNIT_LIMIT,
+  type FeeTier,
+} from "../sdk/fee-model";
+import { TOKEN_TRANSFER_EXECUTION_UNIT_LIMIT } from "../sdk/token-send";
+import { useDeveloperMode } from "../sdk/developer-mode";
 import { ContactsPickerModal } from "./ContactsPickerModal";
 
 /** When present, the modal sends this MRC-20 token instead of native LYTH. The
@@ -81,6 +87,9 @@ function tokenBlockMessage(reason: TokenSendBlockReason, symbol: string): string
 
 export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
   const ops = useOperations();
+  // Phase 01 gate — read live (never cached at mount) so one flip re-renders the
+  // low-level fee breakdown without a remount. Fail-closed OFF with no provider.
+  const devMode = useDeveloperMode();
   const isToken = token != null;
   const assetLabel = token ? token.symbol : "LYTH";
   const [recipient, setRecipient] = useState("");
@@ -778,6 +787,37 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
               {feeCoverageError}
             </div>
           )}
+
+          {/* Low-level fee breakdown — the ONLY surface that exposes per-unit
+              prices, unit counts, and the charged-vs-reserved split. Gated on
+              Phase 01's developer mode (§8); display-only, computed from the
+              cached quote — no network read on render or expand. Missing fields
+              render "—", never a guess. */}
+          {devMode && activeQuote && (
+            <details style={{ marginTop: 4 }}>
+              <summary style={{ fontSize: 11, color: "var(--fg-400)", cursor: "pointer" }}>
+                Low-level compatibility fee details
+              </summary>
+              <div style={{ display: "grid", gap: 4, marginTop: 6 }}>
+                <div style={detailRow}>
+                  {`Priority price: ${decLythoshi(activeQuote.tieredTipLythoshi)} lythoshi / execution unit (${
+                    tier === "normal" ? "Normal" : "Fast"
+                  } · ${tier === "normal" ? "1" : "2"}×)`}
+                </div>
+                <div style={detailRow}>
+                  {`Base price: ${decLythoshi(feeBundle?.quote.baseLythoshi)} lythoshi / execution unit`}
+                </div>
+                <div style={detailRow}>
+                  {`Execution units (charged): ${NATIVE_TRANSFER_CHARGE_EXECUTION_UNITS.toString()}`}
+                </div>
+                <div style={detailRow}>
+                  {`Reserved limit: ${(
+                    isToken ? TOKEN_TRANSFER_EXECUTION_UNIT_LIMIT : NATIVE_TRANSFER_EXECUTION_UNIT_LIMIT
+                  ).toString()}`}
+                </div>
+              </div>
+            </details>
+          )}
         </div>
 
         {error && (
@@ -839,6 +879,19 @@ const feeVal: React.CSSProperties = {
   fontFamily: "var(--f-mono)",
   color: "var(--fg-100)",
 };
+
+const detailRow: React.CSSProperties = {
+  fontSize: 11,
+  fontFamily: "var(--f-mono)",
+  color: "var(--fg-400)",
+  lineHeight: 1.5,
+};
+
+/** Render a bigint field as a plain decimal lythoshi string, or "—" when the
+ *  value is missing (the breakdown never guesses a number). */
+function decLythoshi(v: bigint | null | undefined): string {
+  return v == null ? "—" : v.toString();
+}
 
 const cautionBox: React.CSSProperties = {
   marginTop: 8,

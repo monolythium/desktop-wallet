@@ -1,10 +1,20 @@
-import type { ReactNode } from "react";
+import type { ReactElement, ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import { addressToTypedBech32 } from "@monolythium/core-sdk";
 import { renderWithProviders, TEST_WALLET_ADDRESS } from "../../test/renderWithProviders";
 import { computeNativeFeeQuote, NATIVE_TRANSFER_EXECUTION_UNIT_LIMIT } from "../../sdk/fee-model";
+import { DeveloperModeProvider } from "../../sdk/developer-mode";
 import type { OperationDescriptor } from "../../operations/types";
+
+/** Wrap a subtree with developer mode forced ON (the Phase 01 gate). */
+function devOn(ui: ReactElement): ReactElement {
+  return (
+    <DeveloperModeProvider value={{ enabled: true, setEnabled: async () => true }}>
+      {ui}
+    </DeveloperModeProvider>
+  );
+}
 
 // Capture the descriptor the modal hands to the drawer, so we can assert that
 // what the review SHOWS is exactly what `execute()` SIGNS.
@@ -212,5 +222,45 @@ describe("SendComposeModal — fee tiers + the honest charge (T5)", () => {
         resolvedFee: { maxFeePerGas: 2_000_000_000n, maxPriorityFeePerGas: 1_000_000_000n, gasLimit: 30_000n },
       }),
     );
+  });
+});
+
+describe("SendComposeModal — developer-mode fee breakdown (T6)", () => {
+  it("is hidden by default (developer mode off) and leaks no per-unit wording", async () => {
+    renderWithProviders(<SendComposeModal fromBech32m={FROM} onClose={vi.fn()} />);
+    await screen.findByText("0.000042 LYTH");
+    expect(screen.queryByText("Low-level compatibility fee details")).toBeNull();
+    expect(screen.getByRole("dialog").textContent ?? "").not.toMatch(/lythoshi|execution unit/i);
+  });
+
+  it("developer mode on: the four verbatim rows, computed from the cached quote", async () => {
+    renderWithProviders(devOn(<SendComposeModal fromBech32m={FROM} onClose={vi.fn()} />));
+    expect(await screen.findByText("Low-level compatibility fee details")).toBeInTheDocument();
+    // Live-floor quote (tip 10^9, base 10^9); Normal tier.
+    expect(
+      screen.getByText("Priority price: 1000000000 lythoshi / execution unit (Normal · 1×)"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Base price: 1000000000 lythoshi / execution unit")).toBeInTheDocument();
+    expect(screen.getByText("Execution units (charged): 21000")).toBeInTheDocument();
+    expect(screen.getByText("Reserved limit: 30000")).toBeInTheDocument();
+  });
+
+  it("recomputes the priority price for Fast and fires ZERO extra reads on expand/switch", async () => {
+    const { user } = renderWithProviders(devOn(<SendComposeModal fromBech32m={FROM} onClose={vi.fn()} />));
+    await screen.findByText("Low-level compatibility fee details");
+    expect(fee.previewNativeSendFee).toHaveBeenCalledTimes(1); // the one mount fetch
+    await user.click(screen.getByText("Low-level compatibility fee details")); // expand the <details>
+    await user.click(screen.getByRole("button", { name: /Fast/ }));
+    // Fast: tieredTip = scaleByBps(10^9, 2×) = 2×10^9.
+    expect(
+      screen.getByText("Priority price: 2000000000 lythoshi / execution unit (Fast · 2×)"),
+    ).toBeInTheDocument();
+    expect(fee.previewNativeSendFee).toHaveBeenCalledTimes(1); // network-silent
+  });
+
+  it("token mode shows the 250000 reserved limit", async () => {
+    const token = { tokenId: TOKEN_ID, symbol: "USDC", decimals: 6, balanceBaseUnits: "2000000" };
+    renderWithProviders(devOn(<SendComposeModal fromBech32m={FROM} token={token} onClose={vi.fn()} />));
+    expect(await screen.findByText("Reserved limit: 250000")).toBeInTheDocument();
   });
 });
