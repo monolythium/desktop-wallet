@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import { addressToTypedBech32 } from "@monolythium/core-sdk";
 import { renderWithProviders, TEST_WALLET_ADDRESS } from "../../test/renderWithProviders";
+import { computeNativeFeeQuote, NATIVE_TRANSFER_EXECUTION_UNIT_LIMIT } from "../../sdk/fee-model";
 import type { OperationDescriptor } from "../../operations/types";
 
 // Capture the descriptor the modal hands to the drawer, so we can assert that
@@ -25,10 +26,10 @@ vi.mock("../../sdk/live", async (importOriginal) => ({
   loadLiveWalletBalance: live.loadLiveWalletBalance,
   loadLiveAddressActivity: live.loadLiveAddressActivity,
 }));
-const fee = vi.hoisted(() => ({ previewTransferFee: vi.fn() }));
+const fee = vi.hoisted(() => ({ previewNativeSendFee: vi.fn() }));
 vi.mock("../../sdk/fee-preview", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../sdk/fee-preview")>()),
-  previewTransferFee: fee.previewTransferFee,
+  previewNativeSendFee: fee.previewNativeSendFee,
 }));
 const send = vi.hoisted(() => ({ sendNativeLyth: vi.fn(), sendMrc20Token: vi.fn() }));
 vi.mock("../../sdk/native-send", () => ({ sendNativeLyth: send.sendNativeLyth }));
@@ -68,11 +69,16 @@ beforeEach(() => {
   cap.descriptor = undefined;
   live.loadLiveWalletBalance.mockResolvedValue({ balanceLyth: "5", balanceLythoshi: "5000000000000000000" });
   live.loadLiveAddressActivity.mockResolvedValue({ ok: false, error: "n/a" });
-  // 1e12 per-unit × 100k units = 1e17 lythoshi = 0.1 LYTH worst-case max fee.
-  fee.previewTransferFee.mockResolvedValue({
-    fee: { maxFeePerGas: 1_000_000_000_000n, maxPriorityFeePerGas: 1_000_000_000_000n, gasLimit: 100_000n },
-    maxFeeLythoshi: 100_000_000_000_000_000n,
-    maxFeeLyth: "0.1",
+  // Live-floor quote (base 10^9, tip 10^9). Native limit 30_000n / token 250_000n.
+  fee.previewNativeSendFee.mockImplementation((_c: unknown, opts?: { tokenTransfer?: boolean }) => {
+    const limit = opts?.tokenTransfer ? 250_000n : NATIVE_TRANSFER_EXECUTION_UNIT_LIMIT;
+    return Promise.resolve({
+      quote: { baseLythoshi: 1_000_000_000n, suggestedTipLythoshi: 1_000_000_000n, source: "latest_block" },
+      perTier: {
+        normal: computeNativeFeeQuote(1_000_000_000n, 1_000_000_000n, "normal", limit),
+        fast: computeNativeFeeQuote(1_000_000_000n, 1_000_000_000n, "fast", limit),
+      },
+    });
   });
   send.sendNativeLyth.mockResolvedValue({ txHash: "0xabc", from: FROM, amountLythoshi: "0", amountDisplay: "0", nonce: 1 });
   send.sendMrc20Token.mockResolvedValue({ txHash: "0xdef", from: FROM, tokenId: TOKEN_ID, amountBase: "0", amountDisplay: "0", nonce: 1 });
@@ -116,16 +122,16 @@ describe("SendComposeModal — shown == signed", () => {
   });
 });
 
-describe("SendComposeModal — Max leaves the fee", () => {
-  it("Max fills the balance minus the worst-case network fee (never overspends)", async () => {
+describe("SendComposeModal — Max leaves the fee reservation", () => {
+  it("Max fills the balance minus the active-tier reservation (never overspends)", async () => {
     const { user } = renderWithProviders(<SendComposeModal fromBech32m={FROM} onClose={vi.fn()} />);
     const maxBtn = screen.getByRole("button", { name: "Max" });
     await waitFor(() => expect(maxBtn).toBeEnabled()); // enabled once balance + fee load
     await user.click(maxBtn);
 
     const amount = screen.getByLabelText("Amount in LYTH") as HTMLInputElement;
-    // 5 LYTH − 0.1 LYTH max fee = 4.9, strictly below the 5-LYTH balance.
-    expect(amount.value).toBe("4.9");
+    // 5 LYTH − (2×10^9 × 30_000 = 6×10^13 = 0.00006 LYTH) reservation = 4.99994.
+    expect(amount.value).toBe("4.99994");
   });
 });
 
@@ -153,5 +159,58 @@ describe("SendComposeModal — .mono resolution is fail-closed", () => {
     expect(await screen.findByText(/did not resolve/i)).toBeInTheDocument();
     expect(cap.descriptor).toBeUndefined();
     expect(send.sendNativeLyth).not.toHaveBeenCalled();
+  });
+});
+
+describe("SendComposeModal — fee tiers + the honest charge (T5)", () => {
+  it("defaults to Normal and headlines the honest charge + Total (amount + charge)", async () => {
+    const { user } = renderWithProviders(<SendComposeModal fromBech32m={FROM} onClose={vi.fn()} />);
+    expect(screen.getByRole("button", { name: /Normal/ })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: /Fast/ })).toHaveAttribute("aria-pressed", "false");
+    // The honest charge (perUnit 2×10^9 × 21_000 = 0.000042 LYTH), NOT a max.
+    expect(await screen.findByText("0.000042 LYTH")).toBeInTheDocument();
+    await user.type(screen.getByLabelText("Amount in LYTH"), "1.5");
+    expect(await screen.findByText("1.500042 LYTH")).toBeInTheDocument(); // amount + charge
+  });
+
+  it("switching to Fast recomputes synchronously with NO second quote", async () => {
+    const { user } = renderWithProviders(<SendComposeModal fromBech32m={FROM} onClose={vi.fn()} />);
+    await screen.findByText("0.000042 LYTH");
+    await user.click(screen.getByRole("button", { name: /Fast/ }));
+    expect(await screen.findByText("0.000063 LYTH")).toBeInTheDocument(); // 3×10^9 × 21_000
+    expect(fee.previewNativeSendFee).toHaveBeenCalledTimes(1); // one fetch per open
+  });
+
+  it("a failed quote shows the honest error and disables Review", async () => {
+    fee.previewNativeSendFee.mockRejectedValueOnce(new Error("operator untrusted"));
+    const { user } = renderWithProviders(<SendComposeModal fromBech32m={FROM} onClose={vi.fn()} />);
+    await user.type(screen.getByLabelText("Recipient typed bech32m address"), TO);
+    await user.type(screen.getByLabelText("Amount in LYTH"), "1");
+    expect(await screen.findByText(/Could not fetch fee: operator untrusted/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Review" })).toBeDisabled();
+  });
+
+  it("the default fee box carries no gas/gwei/wei/lythoshi/execution-unit wording", async () => {
+    renderWithProviders(<SendComposeModal fromBech32m={FROM} onClose={vi.fn()} />);
+    await screen.findByText("0.000042 LYTH");
+    expect(screen.getByRole("dialog").textContent ?? "").not.toMatch(/gas|gwei|wei|lythoshi|execution unit/i);
+  });
+
+  it("signs the active tier's fee VERBATIM (resolvedFee == the previewed signedFee)", async () => {
+    const { user } = renderWithProviders(<SendComposeModal fromBech32m={FROM} onClose={vi.fn()} />);
+    await screen.findByText("0.000042 LYTH");
+    await user.type(screen.getByLabelText("Recipient typed bech32m address"), TO);
+    await user.type(screen.getByLabelText("Amount in LYTH"), "1.5");
+    await user.click(screen.getByRole("button", { name: "Review" }));
+    await waitFor(() => expect(cap.descriptor).toBeDefined());
+    // The drawer fee row is the honest charge, tier-labelled; no "resolved at submit".
+    expect(cap.descriptor!.diff.find((l) => l.k === "Fee (Normal)")?.v).toBe("0.000042 LYTH");
+    expect(JSON.stringify(cap.descriptor!.diff)).not.toContain("resolved at submit");
+    await cap.descriptor!.execute({ vaultSeed: new Uint8Array(32) });
+    expect(send.sendNativeLyth).toHaveBeenCalledWith(
+      expect.objectContaining({
+        resolvedFee: { maxFeePerGas: 2_000_000_000n, maxPriorityFeePerGas: 1_000_000_000n, gasLimit: 30_000n },
+      }),
+    );
   });
 });

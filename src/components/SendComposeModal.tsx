@@ -14,7 +14,7 @@ import {
 import { scopeChainKey } from "../sdk/chains";
 import { useOperations } from "../operations/context";
 import { sendNativeLyth } from "../sdk/native-send";
-import { sendMrc20Token, TOKEN_TRANSFER_EXECUTION_UNIT_LIMIT } from "../sdk/token-send";
+import { sendMrc20Token } from "../sdk/token-send";
 import {
   evaluateTokenSendAmount,
   maxTokenAmount,
@@ -32,12 +32,9 @@ import {
   classifyRecipient,
   type RecipientFamiliarity,
 } from "../sdk/recipient-familiarity";
-import {
-  maxFeeLythoshiFrom,
-  previewTransferFee,
-  totalReservedLyth,
-  type NativeFeePreview,
-} from "../sdk/fee-preview";
+import { previewNativeSendFee, type FeeQuoteBundle } from "../sdk/fee-preview";
+import { renderFeeDisplay } from "../sdk/fee-display";
+import type { FeeTier } from "../sdk/fee-model";
 import { ContactsPickerModal } from "./ContactsPickerModal";
 
 /** When present, the modal sends this MRC-20 token instead of native LYTH. The
@@ -101,10 +98,13 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
   const [balanceLyth, setBalanceLyth] = useState<string | null>(null);
   const [balanceLythoshi, setBalanceLythoshi] = useState<bigint | null>(null);
   const [balanceError, setBalanceError] = useState<string | null>(null);
-  // Live-resolved transfer fee (same path the submit seam uses). Surfaced
-  // in-compose so the fee + total are visible before the user confirms.
-  const [feePreview, setFeePreview] = useState<NativeFeePreview | null>(null);
+  // The live execution-unit quote expanded per tier (one fetch per open, reused
+  // for tier switches). The active tier's `signedFee` is what gets signed —
+  // display == signed. `null` while loading; a failed read is the fee error state.
+  const [feeBundle, setFeeBundle] = useState<FeeQuoteBundle | null>(null);
   const [feeError, setFeeError] = useState<string | null>(null);
+  // Fee tier — transient per open (never persisted), default Normal.
+  const [tier, setTier] = useState<FeeTier>("normal");
   // First-time-recipient signal — derived from real send history + contacts;
   // "unknown" asserts nothing. `historyUnreadable` distinguishes "valid address
   // but no history readable" (→ neutral verify caution) from "not yet a valid
@@ -141,18 +141,17 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
     };
   }, [fromBech32m]);
 
-  // Resolve the live transfer fee once the modal opens. Independent of the
-  // amount (a bare transfer's fee shape doesn't depend on value), so one read
-  // covers the whole compose; a failed read shows an honest "fee unavailable".
+  // Fetch the execution-unit quote ONCE when the modal opens and expand it per
+  // tier. A bare transfer's fee shape doesn't depend on the amount, so one read
+  // covers the whole compose; tier switches recompute synchronously from this
+  // cached bundle (no refetch). A failed/malformed read is the fee error state.
   useEffect(() => {
     let cancelled = false;
-    setFeePreview(null);
+    setFeeBundle(null);
     setFeeError(null);
-    // A token-factory transfer reserves more execution units than a bare native
-    // transfer, so the shown worst-case max fee must reflect that limit.
-    void previewTransferFee(undefined, isToken ? TOKEN_TRANSFER_EXECUTION_UNIT_LIMIT : undefined)
-      .then((preview) => {
-        if (!cancelled) setFeePreview(preview);
+    void previewNativeSendFee(undefined, { tokenTransfer: isToken })
+      .then((bundle) => {
+        if (!cancelled) setFeeBundle(bundle);
       })
       .catch((cause) => {
         if (!cancelled) setFeeError(errorMessage(cause));
@@ -361,6 +360,14 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
       // The shown amount is the EXACT inverse of the encoded base units — what
       // the review displays is precisely what will be signed and sent.
       const shown = verdict.displayAmount;
+      // A token's units-used isn't deterministic pre-execution, so the honest
+      // figure is the RESERVATION, kept labelled "(max)". Review is fee-gated, so
+      // the bundle is present.
+      const tokenQuote = feeBundle?.perTier[tier];
+      if (!tokenQuote) {
+        setError("Fee unavailable — reopen to retry.");
+        return;
+      }
       ops.open({
         title: `Send ${token.symbol}`,
         subtitle: "MRC-20 transfer · plaintext",
@@ -372,7 +379,7 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
           { k: "Amount", v: `${shown} ${token.symbol}` },
           {
             k: "Network fee (max)",
-            v: feePreview ? `${feePreview.maxFeeLyth} LYTH` : "resolved at submit",
+            v: `${formatLyth(tokenQuote.reservationLythoshi.toString(), { includeUnit: false })} LYTH`,
             kind: "fee" as const,
           },
           { k: "Finality", v: finality.label, kind: "value" },
@@ -415,6 +422,19 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
       return;
     }
 
+    // feeResolved gated Review, so the bundle is present — capture the active
+    // tier's quote so the diff shows exactly what gets signed (shown == signed).
+    const nativeQuote = feeBundle?.perTier[tier];
+    if (!nativeQuote) {
+      setError("Fee unavailable — reopen to retry.");
+      return;
+    }
+    const nativeChargeText = formatLyth(nativeQuote.chargeLythoshi.toString(), { includeUnit: false });
+    const nativeTotalText = formatLyth(
+      (parseLythToLythoshi(amountLyth) + nativeQuote.chargeLythoshi).toString(),
+      { includeUnit: false },
+    );
+
     ops.open({
       title: `Send ${amountLyth} LYTH`,
       subtitle: "Native ML-DSA send · plaintext",
@@ -425,10 +445,11 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
         { k: "Token", v: "LYTH" },
         { k: "Amount", v: `${amountLyth} LYTH` },
         {
-          k: "Network fee (max)",
-          v: feePreview ? `${feePreview.maxFeeLyth} LYTH` : "resolved at submit",
+          k: `Fee (${tier === "normal" ? "Normal" : "Fast"})`,
+          v: `${nativeChargeText} LYTH`,
           kind: "fee" as const,
         },
+        { k: "Total (amount + fee)", v: `${nativeTotalText} LYTH` },
         { k: "Finality", v: finality.label, kind: "value" },
       ],
       effects: [
@@ -448,6 +469,7 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
           seed: ctx.vaultSeed,
           to: toBech32m,
           amountLyth,
+          resolvedFee: nativeQuote.signedFee,
         });
         return {
           headline: `Broadcast ${amountLyth} LYTH`,
@@ -473,24 +495,33 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
     }
   }, [amount]);
 
-  const maxFeeLythoshi = feePreview ? maxFeeLythoshiFrom(feePreview.fee) : null;
+  const activeQuote = feeBundle ? feeBundle.perTier[tier] : null;
+  const reservationLythoshi = activeQuote ? activeQuote.reservationLythoshi : null;
+  const chargeLythoshi = activeQuote ? activeQuote.chargeLythoshi : null;
 
-  // The sender needs native LYTH for the fee even when sending a token. Block a
-  // token send when the known LYTH balance can't cover the shown worst-case fee
-  // (an honest pre-send block instead of an opaque submit failure). Only asserts
-  // when both figures are known.
+  // The native charge display runs through the ADR-0039 conformance-gated seam
+  // (§6); a failed conformance is the malformed state, never a rendered row.
+  const nativeFeeDisplay =
+    !isToken && chargeLythoshi !== null ? renderFeeDisplay({ chargeLythoshi }) : null;
+  // The fee is "resolved" only when the exact figure that will be signed can be
+  // shown. Review + Max stay disabled otherwise — never sign an unseen fee.
+  const feeResolved =
+    feeBundle !== null && feeError === null && (isToken || nativeFeeDisplay?.ok === true);
+
+  // Token: the sender needs LYTH for the fee RESERVATION even when sending a
+  // token — block when the known LYTH balance can't cover it (honest pre-send).
   const feeCoverageError =
-    isToken && balanceLythoshi !== null && maxFeeLythoshi !== null && balanceLythoshi < maxFeeLythoshi
+    isToken && balanceLythoshi !== null && reservationLythoshi !== null && balanceLythoshi < reservationLythoshi
       ? "Not enough LYTH to cover the network fee for this token transfer."
       : null;
 
-  // Token "Max" fills the FULL token holding (the fee is paid in LYTH, so it's
-  // not netted out). Native "Max" fills the balance MINUS the worst-case fee so
-  // the send + fee never exceeds the balance.
+  // Token "Max" fills the FULL token holding (fee is separate LYTH). Native "Max"
+  // fills the balance MINUS the active-tier RESERVATION so amount + reservation
+  // never exceeds the balance (the reservation surplus refunds at inclusion).
   const tokenMaxAmount = token ? maxTokenAmount(token.balanceBaseUnits, token.decimals) : null;
   const maxSpendableLythoshi =
-    !isToken && balanceLythoshi !== null && maxFeeLythoshi !== null
-      ? balanceLythoshi - maxFeeLythoshi
+    !isToken && balanceLythoshi !== null && reservationLythoshi !== null
+      ? balanceLythoshi - reservationLythoshi
       : null;
   const canFillMax = isToken
     ? tokenMaxAmount !== null && tokenMaxAmount !== "0"
@@ -508,12 +539,24 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
     setError(null);
   };
 
-  // Native only: amount + fee reservation (both LYTH). A token amount and the
-  // LYTH fee are different units, so no combined total is shown for a token.
-  const totalReserved =
-    !isToken && amountLythoshi !== null && maxFeeLythoshi !== null
-      ? totalReservedLyth(amountLythoshi, maxFeeLythoshi)
-      : null;
+  // Native Total = amount + the DISPLAYED charge (§3 rule 8), NOT the reservation.
+  const nativeTotalLythoshi =
+    !isToken && amountLythoshi !== null && chargeLythoshi !== null ? amountLythoshi + chargeLythoshi : null;
+
+  // Fee-box row-1 value + tone: native charge via the seam / token reservation /
+  // the three non-resolved states with their verbatim copy (§7).
+  const feeValue: { text: string; err: boolean } = feeError
+    ? { text: `Could not fetch fee: ${feeError}`, err: true }
+    : feeBundle === null
+      ? { text: "Loading fee…", err: false }
+      : isToken
+        ? { text: `${formatLyth(reservationLythoshi!.toString(), { includeUnit: false })} LYTH`, err: false }
+        : nativeFeeDisplay && nativeFeeDisplay.ok
+          ? { text: nativeFeeDisplay.defaultText, err: false }
+          : {
+              text: `Malformed fee data: ${nativeFeeDisplay && !nativeFeeDisplay.ok ? nativeFeeDisplay.failures.join("; ") : "unavailable"}`,
+              err: true,
+            };
 
   return (
     <div
@@ -644,14 +687,14 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
               type="button"
               className="btn btn--sm btn--ghost"
               onClick={onMax}
-              disabled={!canFillMax}
+              disabled={!canFillMax || (!isToken && !feeResolved)}
               title={
                 isToken
                   ? canFillMax
                     ? `Send your full ${assetLabel} balance`
                     : "Token balance required"
-                  : canFillMax
-                    ? "Send the full balance minus the max network fee"
+                  : canFillMax && feeResolved
+                    ? "Send the full balance minus the fee reservation"
                     : "Live balance and fee required"
               }
               style={{ padding: "4px 10px", fontSize: 11 }}
@@ -672,9 +715,32 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
           style={inputStyle}
         />
 
-        {/* In-compose fee + total — the SAME transfer fee the submit seam
-            resolves at broadcast. Shown as a MAX (maxFeePerGas × gasLimit),
-            never an exact post-execution charge. */}
+        {/* Fee tier — Normal 1× / Fast 2× (transient per open, default Normal).
+            Switching recomputes fee/Total/Max/gate synchronously from the cached
+            quote — no refetch. There is deliberately no Slow tier (it would
+            floor-clamp into a no-op) and no custom fee input (§4). */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 12 }}>
+          <button
+            type="button"
+            className={`w-chip ${tier === "normal" ? "is-on" : ""}`}
+            aria-pressed={tier === "normal"}
+            onClick={() => setTier("normal")}
+          >
+            Normal · 1×
+          </button>
+          <button
+            type="button"
+            className={`w-chip ${tier === "fast" ? "is-on" : ""}`}
+            aria-pressed={tier === "fast"}
+            onClick={() => setTier("fast")}
+          >
+            Fast · 2×
+          </button>
+        </div>
+
+        {/* In-compose fee + total. Native: the HONEST charge (perUnit × 21_000) —
+            the deduction the chain actually takes. Token: the reservation
+            ("Network fee (max)") — a precompile's units-used isn't deterministic. */}
         <div
           style={{
             marginTop: 12,
@@ -687,23 +753,18 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
           }}
         >
           <div style={feeRow}>
-            <span style={feeKey}>Network fee (max)</span>
-            <span style={feeVal}>
-              {feeError ? "unavailable" : feePreview === null ? "…" : `${feePreview.maxFeeLyth} LYTH`}
+            <span style={feeKey}>{isToken ? "Network fee (max)" : "Estimated fee"}</span>
+            <span style={{ ...feeVal, color: feeValue.err ? "var(--err)" : "var(--fg-100)" }}>
+              {feeValue.text}
             </span>
           </div>
-          {/* Native: amount + fee are both LYTH, so a combined total is shown.
-              Token: the amount is in the token and the fee in LYTH — different
-              units — so no combined total; instead surface the LYTH-fee note. */}
           {!isToken ? (
             <div style={feeRow}>
               <span style={feeKey}>Total (amount + fee)</span>
               <span style={feeVal}>
-                {feeError
+                {nativeTotalLythoshi === null
                   ? "—"
-                  : totalReserved === null
-                    ? "—"
-                    : `${totalReserved} LYTH`}
+                  : `${formatLyth(nativeTotalLythoshi.toString(), { includeUnit: false })} LYTH`}
               </span>
             </div>
           ) : (
@@ -712,10 +773,6 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
               <span style={feeVal}>LYTH (not {assetLabel})</span>
             </div>
           )}
-          <div style={{ fontSize: 10.5, color: "var(--fg-400)", lineHeight: 1.5 }}>
-            Fee is the maximum the chain reserves; the actual charge is
-            {" "}(base + tip) × units used and may be lower.
-          </div>
           {feeCoverageError && (
             <div style={{ fontSize: 11, color: "var(--err)", lineHeight: 1.5 }}>
               {feeCoverageError}
@@ -737,7 +794,7 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
             className="btn btn--primary"
             onClick={() => void onReview()}
             style={{ flex: 1 }}
-            disabled={!recipient.trim() || !amount.trim() || reviewing || Boolean(feeCoverageError)}
+            disabled={!recipient.trim() || !amount.trim() || reviewing || Boolean(feeCoverageError) || !feeResolved}
           >
             {reviewing ? "Checking…" : "Review"}
           </button>
