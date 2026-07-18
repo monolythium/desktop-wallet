@@ -11,6 +11,7 @@ import { getChainInfo } from "@monolythium/core-sdk";
 import { useDeveloperMode } from "../sdk/developer-mode";
 import { useChainHealthView } from "../sdk/ChainHealthProvider";
 import { RiskBadgeChip } from "../components/RiskBadgeChip";
+import { ConnectFlowModal } from "../components/ConnectFlowModal";
 import { truncMiddle } from "../components/_detailModalParts";
 import { currentEndpoint, setEndpoint, subscribeEndpoint } from "../sdk/client";
 import { activeFleet } from "../sdk/fleet";
@@ -206,9 +207,14 @@ export function Operators({ goto }: { goto: (r: Route) => void }) {
       </div>
 
       {connect ? (
-        <ConnectModal
-          state={connect}
-          activeName={activeName}
+        <ConnectFlowModal
+          name={connect.row.peer.label}
+          phase={
+            connect.phase === "result"
+              ? { phase: "result", ok: connect.ok, message: connect.message }
+              : { phase: connect.phase }
+          }
+          confirmLead={`You're on ${activeName}. `}
           onConfirm={() => void runConnect(connect.row)}
           onClose={() => setConnect(null)}
         />
@@ -221,64 +227,6 @@ type ConnectState =
   | { phase: "confirm"; row: OperatorInspectRow }
   | { phase: "checking"; row: OperatorInspectRow }
   | { phase: "result"; row: OperatorInspectRow; ok: boolean; message: string };
-
-function ConnectModal({
-  state,
-  activeName,
-  onConfirm,
-  onClose,
-}: {
-  state: ConnectState;
-  activeName: string;
-  onConfirm: () => void;
-  onClose: () => void;
-}) {
-  const name = state.row.peer.label;
-  const dismissable = state.phase !== "checking";
-  return (
-    <div
-      className="w-overlay w-overlay--center"
-      role="presentation"
-      onClick={() => dismissable && onClose()}
-    >
-      <div className="w-card w-confirm" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
-        <div className="w-card__body">
-          {state.phase === "confirm" ? (
-            <>
-              <h3 className="w-confirm__title">Connect to this operator?</h3>
-              <p className="row-help" style={{ marginTop: 8 }}>
-                You're on {activeName}. Connect to <strong>{name}</strong>? The wallet runs a
-                health &amp; security check first and won't switch if it fails.
-              </p>
-              <div className="w-confirm__actions">
-                <button type="button" className="btn btn--ghost" onClick={onClose}>Cancel</button>
-                <button type="button" className="btn btn--primary" onClick={onConfirm}>Connect</button>
-              </div>
-            </>
-          ) : state.phase === "checking" ? (
-            <>
-              <h3 className="w-confirm__title">Connect to this operator?</h3>
-              <p className="row-help" style={{ marginTop: 8 }}>
-                Running a health &amp; security check on <strong>{name}</strong>…
-              </p>
-            </>
-          ) : (
-            <>
-              <h3 className="w-confirm__title" style={{ color: state.ok ? "var(--ok)" : "var(--err)" }}>
-                {state.ok ? "Connected" : "Can't connect"}
-              </h3>
-              <p className="row-help" style={{ marginTop: 8 }}>{state.message}</p>
-              <div className="w-confirm__actions">
-                <button type="button" className="btn btn--primary" onClick={onClose}>Done</button>
-                <button type="button" className="btn btn--ghost" onClick={onClose}>Close</button>
-              </div>
-            </>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
 
 /** Which rows currently exhibit each risk kind — computed from the SAME
  *  classifier that renders the row chips, so the buckets can't drift. */

@@ -28,6 +28,20 @@ vi.mock("../../sdk/peers", async (orig) => ({
   ],
 }));
 
+const probeMock = vi.hoisted(() => ({ trusted: true }));
+vi.mock("../../sdk/chain-trust", async (orig) => {
+  const real = await orig<typeof import("../../sdk/chain-trust")>();
+  return {
+    ...real,
+    probeOperator: vi.fn(async (url: string) =>
+      probeMock.trusted
+        ? { ...real.unreachableVerdict(url), trusted: true, height: 1, headId: "0xh" }
+        : real.unreachableVerdict(url),
+    ),
+  };
+});
+import { probeOperator } from "../../sdk/chain-trust";
+
 function renderMgmt(devMode: boolean, goto: (r: string) => void = () => {}) {
   const control = { enabled: devMode, setEnabled: async () => true };
   return renderWithProviders(
@@ -39,6 +53,7 @@ function renderMgmt(devMode: boolean, goto: (r: string) => void = () => {}) {
 
 afterEach(() => {
   hardenedMock.value = false;
+  probeMock.trusted = true;
   localStorage.clear();
   vi.clearAllMocks();
 });
@@ -161,6 +176,56 @@ describe("OperatorManagement — Save side effects", () => {
     await user.click(screen.getByRole("button", { name: "Save" }));
     expect(screen.getByText(HARDENED_REJECT_REASON)).toBeInTheDocument();
     expect(localStorage.getItem(OPERATOR_OVERRIDE_KEY)).toBeNull();
+    expect(setEndpointSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe("OperatorManagement — adoption flow (Use this operator)", () => {
+  it("the Connect guard blocks the probe with the client-guard copy when any row is invalid", async () => {
+    const { user } = renderMgmt(true);
+    // Invalidate row 0 (clear its rpc) so the whole draft is invalid.
+    await user.clear(screen.getAllByPlaceholderText("http://… or https://…")[0]!);
+    // Row 1 is still usable — open its confirm, then Connect hits the §8 guard.
+    await user.click(screen.getAllByRole("button", { name: "Use this operator" })[1]!);
+    await user.click(screen.getByRole("button", { name: "Connect" }));
+    expect(screen.getByText("Fix the invalid operator rows before using one.")).toBeInTheDocument();
+    expect(probeOperator).not.toHaveBeenCalled();
+  });
+
+  it("adopts a verified operator: confirm → Connected, front-moved + persisted + switched", async () => {
+    probeMock.trusted = true;
+    const { user } = renderMgmt(true);
+    await user.click(screen.getAllByRole("button", { name: "Use this operator" })[1]!); // op-a
+    expect(screen.getByRole("dialog")).toHaveTextContent("Connect to this operator?");
+    await user.click(screen.getByRole("button", { name: "Connect" }));
+    expect(await screen.findByText("Connected to op-a.")).toBeInTheDocument();
+    expect(setEndpointSpy).toHaveBeenCalledWith(OP_A);
+    const stored = JSON.parse(localStorage.getItem(OPERATOR_OVERRIDE_KEY)!) as { rpc: string }[];
+    expect(stored[0]!.rpc).toBe(OP_A); // moved to the front
+  });
+
+  it("a failed probe shows the plural failure copy and changes NOTHING", async () => {
+    probeMock.trusted = false;
+    const { user } = renderMgmt(true);
+    await user.click(screen.getAllByRole("button", { name: "Use this operator" })[1]!);
+    await user.click(screen.getByRole("button", { name: "Connect" }));
+    const result = await screen.findByText(/Couldn't connect to op-a/);
+    expect(result).toHaveTextContent("Your operators were left unchanged.");
+    expect(localStorage.getItem(OPERATOR_OVERRIDE_KEY)).toBeNull(); // unchanged
+    expect(setEndpointSpy).not.toHaveBeenCalled();
+  });
+
+  it("H2: a probe-pass in a HARDENED build still rejects an out-of-fleet host", async () => {
+    hardenedMock.value = true;
+    probeMock.trusted = true;
+    const { user } = renderMgmt(true);
+    const rpc = screen.getAllByPlaceholderText("http://… or https://…")[1]!;
+    await user.clear(rpc);
+    await user.type(rpc, "http://9.9.9.9:8545");
+    await user.click(screen.getAllByRole("button", { name: "Use this operator" })[1]!);
+    await user.click(screen.getByRole("button", { name: "Connect" }));
+    expect(await screen.findByText(HARDENED_REJECT_REASON)).toBeInTheDocument();
+    expect(localStorage.getItem(OPERATOR_OVERRIDE_KEY)).toBeNull(); // probe pass does NOT bypass the reject
     expect(setEndpointSpy).not.toHaveBeenCalled();
   });
 });

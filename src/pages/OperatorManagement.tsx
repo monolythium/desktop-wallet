@@ -8,11 +8,14 @@
 // hardened-build out-of-fleet save is rejected up-front with the verbatim reason.
 
 import { useState } from "react";
+import { getChainInfo } from "@monolythium/core-sdk";
 import type { Route } from "../components/types";
 import { useDeveloperMode } from "../sdk/developer-mode";
 import { DevModeStub } from "../components/DevModeStub";
+import { ConnectFlowModal } from "../components/ConnectFlowModal";
 import { currentEndpoint, setEndpoint } from "../sdk/client";
 import { activeFleet, operatorOverrideActive } from "../sdk/fleet";
+import { probeOperator, NETWORK_SLUG } from "../sdk/chain-trust";
 import {
   defaultOperatorEntries,
   readOperatorOverride,
@@ -66,11 +69,17 @@ export function OperatorManagement({ goto }: { goto: (r: Route) => void }) {
   );
 }
 
+type EditorConnect =
+  | { phase: "confirm"; row: DraftRow }
+  | { phase: "checking"; row: DraftRow }
+  | { phase: "result"; row: DraftRow; ok: boolean; message: string };
+
 function OperatorEditor() {
   const [rows, setRows] = useState<DraftRow[]>(seedDraft);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [overrideActive, setOverrideActive] = useState<boolean>(() => operatorOverrideActive());
   const [hasPersisted, setHasPersisted] = useState<boolean>(() => readOperatorOverride() !== null);
+  const [connect, setConnect] = useState<EditorConnect | null>(null);
 
   // Dirty check (§7.5): pairwise compare the draft against (override ?? defaults).
   const baseline = readOperatorOverride() ?? defaultOperatorEntries();
@@ -117,6 +126,47 @@ function OperatorEditor() {
     setHasPersisted(false);
   };
 
+  // "Use this operator" adoption (§8): a client guard, then a FRESH trust probe,
+  // then — only on a trusted verdict — front-move + persist through the normal
+  // write path (so the hardened out-of-fleet reject still applies) + setEndpoint.
+  // A failed probe (or a write reject) changes nothing.
+  const runConnect = async (row: DraftRow) => {
+    const name = row.name.trim();
+    if (!draftValid) {
+      setConnect(null);
+      setSubmitError("Fix the invalid operator rows before using one.");
+      return;
+    }
+    setSubmitError(null);
+    setConnect({ phase: "checking", row });
+    const info = getChainInfo(NETWORK_SLUG);
+    const rpc = row.rpc.trim();
+    const verdict = await probeOperator(rpc, info.chain_id, info.genesis_hash);
+    if (!verdict.trusted) {
+      setConnect({
+        phase: "result",
+        row,
+        ok: false,
+        message: `Couldn't connect to ${name} — it's unreachable, on a different chain, or quarantined. Your operators were left unchanged.`,
+      });
+      return;
+    }
+    const reordered = [row, ...rows.filter((r) => r.id !== row.id)];
+    const list = reordered.map((r) => ({ name: r.name.trim(), region: r.region.trim(), rpc: r.rpc.trim() }));
+    const result = writeOperatorOverride(list);
+    if (!result.ok) {
+      // e.g. a hardened build rejecting an out-of-fleet host — probe-pass or not.
+      setConnect(null);
+      setSubmitError(result.reason);
+      return;
+    }
+    setEndpoint(rpc);
+    setRows(seedDraft());
+    setOverrideActive(operatorOverrideActive());
+    setHasPersisted(true);
+    setConnect({ phase: "result", row, ok: true, message: `Connected to ${name}.` });
+  };
+
   return (
     <>
       <div className="w-card" style={{ borderColor: overrideActive ? "var(--ok)" : undefined }}>
@@ -143,9 +193,11 @@ function OperatorEditor() {
                 row={row}
                 index={i}
                 total={rows.length}
+                checking={connect?.phase === "checking" && connect.row.id === row.id}
                 onField={update}
                 onDelete={() => deleteRow(row.id)}
                 onMove={(to) => move(i, to)}
+                onUse={() => setConnect({ phase: "confirm", row })}
               />
             ))
           )}
@@ -179,6 +231,19 @@ function OperatorEditor() {
           </div>
         </div>
       </div>
+
+      {connect ? (
+        <ConnectFlowModal
+          name={connect.row.name.trim()}
+          phase={
+            connect.phase === "result"
+              ? { phase: "result", ok: connect.ok, message: connect.message }
+              : { phase: connect.phase }
+          }
+          onConfirm={() => void runConnect(connect.row)}
+          onClose={() => setConnect(null)}
+        />
+      ) : null}
     </>
   );
 }
@@ -187,19 +252,24 @@ function OperatorDraftRow({
   row,
   index,
   total,
+  checking,
   onField,
   onDelete,
   onMove,
+  onUse,
 }: {
   row: DraftRow;
   index: number;
   total: number;
+  checking: boolean;
   onField: (id: number, field: keyof Omit<DraftRow, "id">, value: string) => void;
   onDelete: () => void;
   onMove: (to: number) => void;
+  onUse: () => void;
 }) {
   const nameError = row.name.trim().length === 0;
   const rpcError = !isHttpUrl(row.rpc.trim());
+  const usable = !nameError && !rpcError;
 
   return (
     <div className="w-op-draft-row">
@@ -248,6 +318,15 @@ function OperatorDraftRow({
           placeholder="fsn1 (optional)"
           onChange={(e) => onField(row.id, "region", e.target.value)}
         />
+        <button
+          type="button"
+          className="w-chip"
+          disabled={checking || !usable}
+          title="Probe this operator; if it's reachable and verified on the pinned chain, the wallet moves it to the front and switches to it (the others stay as fallback)."
+          onClick={onUse}
+        >
+          {checking ? "Checking…" : "Use this operator"}
+        </button>
       </label>
       <label className="w-op-draft-line">
         <span className="w-op-draft-line__k">RPC</span>
