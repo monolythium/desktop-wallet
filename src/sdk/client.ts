@@ -34,7 +34,12 @@ export function resolveDefaultEndpoint(env: EndpointEnv = import.meta.env): stri
 
 /** True when `url` is a known, switchable endpoint (the gateway or an official
  *  SDK endpoint). A persisted value is only honored when it still validates —
- *  a stale or hand-edited entry falls back to the build default. */
+ *  a stale or hand-edited entry falls back to the build default.
+ *
+ *  Hardened-build law 2 (known-endpoint dial): endpoint selection honours only
+ *  this known set, enforced here at the dial layer on every boot regardless of
+ *  developer mode — the UI is never the enforcement point. See the laws codified
+ *  in build-mode.ts. */
 export function isKnownEndpoint(url: string): boolean {
   return TESTNET_RPC_ENDPOINT_SET.has(url);
 }

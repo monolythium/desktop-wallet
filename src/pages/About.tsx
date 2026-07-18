@@ -13,6 +13,7 @@ import { useDeveloperMode } from "../sdk/developer-mode";
 import { checkForUpdate } from "../sdk/updater";
 import { listPeers, probePeer } from "../sdk/peers";
 import { fetchLiveTestnetRegistry } from "../sdk/live-registry";
+import { isHardenedBuild } from "../sdk/build-mode";
 import type { ChainInfo } from "@monolythium/core-sdk";
 import {
   activeFeatureChips,
@@ -35,6 +36,7 @@ type UpdateState =
   | { kind: "checking" }
   | { kind: "preview" } // browser preview — no Tauri updater
   | { kind: "current" }
+  | { kind: "error" } // the manifest fetch failed — never rendered as "up to date"
   | { kind: "available"; version: string };
 
 const ROW_BTN: CSSProperties = {
@@ -81,11 +83,10 @@ export function About({ goto }: AboutProps) {
     }
     void checkForUpdate().then((result) => {
       if (cancelled) return;
-      setUpdate(
-        result.available
-          ? { kind: "available", version: result.version }
-          : { kind: "current" },
-      );
+      // Honest-absence law: a failed check must NEVER render "up to date".
+      if (result.kind === "available") setUpdate({ kind: "available", version: result.version });
+      else if (result.kind === "error") setUpdate({ kind: "error" });
+      else setUpdate({ kind: "current" });
     });
     return () => {
       cancelled = true;
@@ -154,7 +155,16 @@ export function About({ goto }: AboutProps) {
           </div>
           <div style={{ marginTop: 14 }}>
             <InfoRow label="Version" value={version ? `v${version}` : "…"} />
-            <InfoRow label="Update" value={updateLabel(update)} />
+            <InfoRow label="Update" value={updateLabel(update)} title={updateTitle(update)} />
+            <InfoRow
+              label="Build"
+              value={isHardenedBuild() ? "hardened" : "development"}
+              title={
+                isHardenedBuild()
+                  ? "Packaged release build — network access is restricted to the canonical operator fleet and pinned hosts."
+                  : "Unpackaged development build."
+              }
+            />
           </div>
         </div>
       </div>
@@ -297,11 +307,11 @@ export function About({ goto }: AboutProps) {
   );
 }
 
-function InfoRow({ label, value }: { label: string; value: string }) {
+function InfoRow({ label, value, title }: { label: string; value: string; title?: string }) {
   return (
     <div className="w-setting-row">
       <div className="row-label">{label}</div>
-      <div className="row-help mono" style={{ margin: 0 }}>
+      <div className="row-help mono" style={{ margin: 0 }} title={title}>
         {value}
       </div>
     </div>
@@ -316,7 +326,15 @@ function updateLabel(update: UpdateState): string {
       return "development build";
     case "current":
       return "up to date";
+    case "error":
+      return "couldn't check for updates";
     case "available":
       return `update available → v${update.version}`;
   }
+}
+
+function updateTitle(update: UpdateState): string | undefined {
+  return update.kind === "error"
+    ? "The update manifest couldn't be fetched. The wallet retries on the next launch."
+    : undefined;
 }

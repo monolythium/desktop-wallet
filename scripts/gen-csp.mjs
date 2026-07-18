@@ -8,6 +8,9 @@
 // the SAME getRpcEndpoints("testnet-69420") the runtime uses — never hand-copied
 // — so an SDK bump regenerates them. The scripts/csp-drift.test.mjs guard fails
 // in CI if the committed config is stale, forcing a re-run of this script.
+//
+// This is hardened-build law 1 (egress allowlist ≡ dial-set); see the laws
+// codified in src/sdk/build-mode.ts. The CSP must never be hand-edited.
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";

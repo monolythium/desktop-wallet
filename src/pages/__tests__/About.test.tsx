@@ -12,8 +12,11 @@ import { readChainIdentity } from "../../sdk/about";
 import { fetchLiveTestnetRegistry } from "../../sdk/live-registry";
 import { About } from "../About";
 
+const updateMock = vi.hoisted(() => ({
+  value: { kind: "none" } as { kind: "none" } | { kind: "error" } | { kind: "available"; version: string; notes: null; pubDate: null },
+}));
 vi.mock("../../sdk/updater", () => ({
-  checkForUpdate: vi.fn(async () => ({ available: false })),
+  checkForUpdate: vi.fn(async () => updateMock.value),
 }));
 
 vi.mock("../../sdk/peers", async (orig) => ({
@@ -118,5 +121,36 @@ describe("About — Chain card genesis + drift banner", () => {
     await waitFor(() => {
       expect(screen.queryByText(/takes precedence/)).not.toBeInTheDocument();
     });
+  });
+});
+
+describe("About — version / update / build rows", () => {
+  afterEach(() => {
+    updateMock.value = { kind: "none" };
+    vi.clearAllMocks();
+  });
+
+  it("renders a real 'up to date' answer", async () => {
+    updateMock.value = { kind: "none" };
+    renderAbout(false);
+    expect(await screen.findByText("up to date")).toBeInTheDocument();
+  });
+
+  it("renders an available update", async () => {
+    updateMock.value = { kind: "available", version: "9.9.9", notes: null, pubDate: null };
+    renderAbout(false);
+    expect(await screen.findByText("update available → v9.9.9")).toBeInTheDocument();
+  });
+
+  it("renders a failed check honestly — never 'up to date'", async () => {
+    updateMock.value = { kind: "error" };
+    renderAbout(false);
+    expect(await screen.findByText("couldn't check for updates")).toBeInTheDocument();
+    expect(screen.queryByText("up to date")).not.toBeInTheDocument();
+  });
+
+  it("shows the build mode (development under test, not a packaged build)", () => {
+    renderAbout(false);
+    expect(screen.getByText("development")).toBeInTheDocument();
   });
 });

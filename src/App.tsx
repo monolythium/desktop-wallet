@@ -121,7 +121,7 @@ export function App() {
     if (boot.kind !== "ready") return;
     let cancelled = false;
     void checkForUpdate().then((result) => {
-      if (cancelled || !result.available) return;
+      if (cancelled || result.kind !== "available") return;
       setPendingUpdate(result);
     });
     return () => {
