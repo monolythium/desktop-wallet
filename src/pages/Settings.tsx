@@ -43,7 +43,6 @@ import {
 } from "../sdk/studio-host";
 import {
   LAYOUTS,
-  THEMES,
   applyLayout,
   applyTheme,
   readLayout,
@@ -51,6 +50,7 @@ import {
   type LayoutId,
 } from "../sdk/theme";
 import { DeveloperModeToggle } from "../components/DeveloperModeToggle";
+import { ThemeGrid } from "../components/ThemeGrid";
 
 interface SettingsProps {
   steleEnabled: boolean;
@@ -825,40 +825,7 @@ function AppearancePage({ onBack }: { onBack: () => void }) {
             Pick a palette. Applies across the wallet and persists on this
             device.
           </div>
-          <div className="w-theme-grid">
-            {THEMES.map((t) => {
-              const active = t.id === theme;
-              return (
-                <button
-                  key={t.id}
-                  type="button"
-                  className={`w-theme-swatch ${active ? "is-on" : ""}`}
-                  onClick={() => pickTheme(t.id)}
-                  aria-pressed={active}
-                  title={t.desc}
-                >
-                  <span className="w-theme-swatch__top">
-                    <span
-                      className="w-theme-swatch__dot"
-                      style={{
-                        background: t.swatch,
-                        boxShadow: `0 0 12px ${t.swatch}55`,
-                      }}
-                    />
-                    <span className="w-theme-swatch__label">{t.label}</span>
-                    {active ? (
-                      <span className="w-theme-swatch__check" aria-hidden="true">
-                        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2">
-                          <path d="m2 6 3 3 5-6" />
-                        </svg>
-                      </span>
-                    ) : null}
-                  </span>
-                  <span className="w-theme-swatch__desc">{t.desc}</span>
-                </button>
-              );
-            })}
-          </div>
+          <ThemeGrid selectedId={theme} onSelect={pickTheme} />
         </div>
         <ChipRow
           label="Layout"
