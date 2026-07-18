@@ -101,8 +101,31 @@ describe("desktop provider-gate predicates", () => {
   it("classifies the fail-closed provider gate's causes honestly", () => {
     expect(classifySendError("refusing to use an untrusted operator (chain regenesis)").kind).toBe("genesis-mismatch");
     expect(classifySendError("refusing to use an untrusted operator (chain untrusted)").kind).toBe("genesis-mismatch");
-    expect(classifySendError("refusing to use an untrusted operator (chain quarantined)").kind).toBe("chain-quarantined");
     expect(classifySendError("refusing to use an untrusted operator (chain unreachable)").kind).toBe("operator-offline");
+  });
+
+  it("a TOTAL fleet quarantine (chain quarantined) is the ALL-operators row (err), not the single-operator one", () => {
+    // The gate raises `(chain quarantined)` only when the whole fleet is quarantined,
+    // so the honest render is #8 (err, "Every operator …"), not #9's "uses other operators".
+    const c = classifySendError("refusing to use an untrusted operator (chain quarantined)");
+    expect(c.kind).toBe("chain-quarantined");
+    expect(c.headline).toBe("Operators quarantined");
+    expect(c.severity).toBe("err");
+    // A genuine SINGLE-node quarantine still maps to the softer single-operator row.
+    const single = classifySendError("checkpoint state-root mismatch");
+    expect(single.headline).toBe("Operator node unavailable");
+    expect(single.severity).toBe("warn");
+  });
+
+  it("a real SDK transport failure (network drop) → operator-offline, not unknown", () => {
+    // The SDK wraps a failed fetch as `transport failure calling <method>: <cause>`.
+    const c = classifySendError("transport failure calling mesh_submitTx: Failed to fetch");
+    expect(c.kind).toBe("operator-offline");
+    expect(c.headline).toBe("Can't reach the network");
+    expect(c.severity).toBe("warn");
+    // Raw browser / undici causes are covered too.
+    expect(classifySendError("TypeError: Failed to fetch").kind).toBe("operator-offline");
+    expect(classifySendError("fetch failed").kind).toBe("operator-offline");
   });
 });
 

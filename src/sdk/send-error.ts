@@ -200,7 +200,13 @@ const RULES: Rule[] = [
       "A transaction at this nonce is already pending and hasn't confirmed yet. Wait for it to confirm. Your funds are unaffected: this was rejected before inclusion.",
   },
   {
-    match: (l) => has(l, "operators quarantined"),
+    // "operators quarantined" is the canonical all-fleet wording; "chain
+    // quarantined" is the desktop fail-closed provider gate's total-quarantine
+    // cause (`(chain quarantined)` is raised ONLY when the whole fleet is
+    // quarantined — activeCount>0 && allQuarantined), so it belongs here (err,
+    // "no working operator"), NOT on the single-operator row #9 whose "uses
+    // other operators" body would be false during a total quarantine.
+    match: (l) => has(l, "operators quarantined", "chain quarantined"),
     kind: "chain-quarantined",
     headline: "Operators quarantined",
     severity: "err",
@@ -240,8 +246,12 @@ const RULES: Rule[] = [
       "Another transaction with the same nonce is already in the mempool. Wait for it to confirm, then try again.",
   },
   {
+    // "transport failure" is the SDK's actual wrapper for a failed fetch
+    // (`transport failure calling <method>: <cause>`), and "failed to fetch" /
+    // "fetch failed" are the raw browser/undici causes — a genuine network drop
+    // on the send path arrives as one of these, not the spec's expected tokens.
     match: (l) =>
-      has(l, "unreachable", "timeout", "network error", "rpc error", "no monolythium testnet operator reachable", "no operator reachable"),
+      has(l, "unreachable", "timeout", "network error", "rpc error", "no monolythium testnet operator reachable", "no operator reachable", "transport failure", "failed to fetch", "fetch failed"),
     kind: "operator-offline",
     headline: "Can't reach the network",
     severity: "warn",
