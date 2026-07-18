@@ -248,8 +248,6 @@ export function App() {
   // phrase / Reset) all render the same page, opened on the right sub-page.
   const settingsPage = (initialSubPage?: "appearance" | "reveal" | "reset") => (
     <Settings
-      developerModeEnabled={developerModeEnabled}
-      setDeveloperModeEnabled={setDeveloperModeEnabled}
       steleEnabled={steleEnabled}
       setSteleEnabled={setSteleEnabled}
       experimentalEnabled={experimentalEnabled}

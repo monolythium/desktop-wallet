@@ -50,10 +50,9 @@ import {
   readTheme,
   type LayoutId,
 } from "../sdk/theme";
+import { DeveloperModeToggle } from "../components/DeveloperModeToggle";
 
 interface SettingsProps {
-  developerModeEnabled: boolean;
-  setDeveloperModeEnabled: (enabled: boolean) => void;
   steleEnabled: boolean;
   setSteleEnabled: (enabled: boolean) => void;
   experimentalEnabled: boolean;
@@ -65,7 +64,7 @@ interface SettingsProps {
 
 type SettingsSubPage = "main" | "notifications" | "appearance" | "reset" | "reveal";
 
-export function Settings({ developerModeEnabled, setDeveloperModeEnabled, steleEnabled, setSteleEnabled, experimentalEnabled, setExperimentalEnabled, initialSubPage }: SettingsProps) {
+export function Settings({ steleEnabled, setSteleEnabled, experimentalEnabled, setExperimentalEnabled, initialSubPage }: SettingsProps) {
   const wallet = useActiveWallet();
   const [devkitChannel, setDevkitChannel] = useState<NativeDevkitChannel>(() => readDevkitChannel());
   const [autoLockMinutes, setAutoLockMinutes] = useState<number>(() => readAutoLockMinutes());
@@ -244,23 +243,9 @@ export function Settings({ developerModeEnabled, setDeveloperModeEnabled, steleE
       {steleEnabled ? <OutboundMcpCard /> : null}
 
       <div className="w-card">
-        <div className="w-card__head"><h3>Developer Mode</h3></div>
+        <div className="w-card__head"><h3>Developer mode</h3></div>
         <div className="w-card__body">
-          <div className="w-setting-row">
-            <div>
-              <div className="row-label">Enable Mono Studio</div>
-              <div className="row-help">
-                Shows the Studio Host and checks the separately installed DevKit only when enabled.
-              </div>
-            </div>
-            <button
-              type="button"
-              className={`w-chip ${developerModeEnabled ? "is-on" : ""}`}
-              onClick={() => setDeveloperModeEnabled(!developerModeEnabled)}
-            >
-              {developerModeEnabled ? "Enabled" : "Disabled"}
-            </button>
-          </div>
+          <DeveloperModeToggle />
           <ChipRow
             label="DevKit channel"
             help="Stable wallet releases do not bundle the full DevKit. Channel selection controls update checks."
