@@ -14,6 +14,7 @@ import {
   boundPerUnitPrice,
   clampTipToFloor,
   computeNativeFeeQuote,
+  postClampResolvedFee,
   scaleByBps,
   type FeeTier,
 } from "../fee-model";
@@ -109,5 +110,26 @@ describe("computeNativeFeeQuote — the dual-fee model", () => {
     // exceeds 10^15), which is the honest bound — not a rounding artifact.
     const q = computeNativeFeeQuote(huge, huge, "fast", NATIVE);
     expect(q.perUnitPriceLythoshi).toBe(MAX_EXECUTION_UNIT_PRICE_LYTHOSHI);
+  });
+});
+
+describe("postClampResolvedFee — binds every resolver path", () => {
+  it("lowers an absurd price to the ceiling and raises a sub-floor tip", () => {
+    expect(postClampResolvedFee({ maxFeePerGas: 10n ** 18n, maxPriorityFeePerGas: 1n, gasLimit: 30_000n })).toEqual({
+      maxFeePerGas: MAX_EXECUTION_UNIT_PRICE_LYTHOSHI,
+      maxPriorityFeePerGas: MEMPOOL_PRIORITY_TIP_FLOOR_LYTHOSHI,
+      gasLimit: 30_000n,
+    });
+  });
+
+  it("never lets the tip exceed maxFeePerGas and never touches gasLimit", () => {
+    const r = postClampResolvedFee({ maxFeePerGas: 500_000_000n, maxPriorityFeePerGas: 9_000_000_000n, gasLimit: 12_345n });
+    expect(r.maxPriorityFeePerGas).toBeLessThanOrEqual(r.maxFeePerGas);
+    expect(r.gasLimit).toBe(12_345n);
+  });
+
+  it("leaves an already-in-bounds fee unchanged (the common case)", () => {
+    const fee = { maxFeePerGas: 2_000_000_000n, maxPriorityFeePerGas: 1_000_000_000n, gasLimit: 30_000n };
+    expect(postClampResolvedFee(fee)).toEqual(fee);
   });
 });

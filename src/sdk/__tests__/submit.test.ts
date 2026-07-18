@@ -64,6 +64,7 @@ vi.mock("../native-rpc", () => ({
   getNativeTransactionCount: vi.fn(() => Promise.resolve(3n)),
 }));
 
+import { resolveExecutionFee } from "@monolythium/core-sdk";
 import { resetProviderForTest, setProviderForTest, type MonolythiumClient } from "../client";
 import { submitNativeTx } from "../submit";
 
@@ -99,5 +100,31 @@ describe("submitNativeTx — plaintext path", () => {
     await submitNativeTx({ seed: SEED, to: TO, feeClass: "registry" });
     const call = submitTransactionSpy.mock.calls[0]![0];
     expect(call.tx.gasLimit).toBe(250_000n);
+  });
+
+  it("F2: a supplied resolvedFee is signed BYTE-IDENTICALLY (no re-resolve)", async () => {
+    vi.mocked(resolveExecutionFee).mockClear();
+    const resolvedFee = { maxFeePerGas: 3_000_000_000n, maxPriorityFeePerGas: 2_000_000_000n, gasLimit: 30_000n };
+    await submitNativeTx({ seed: SEED, to: TO, valueLythoshi: 5n, resolvedFee });
+    const call = submitTransactionSpy.mock.calls[0]![0];
+    expect(call.tx.maxFeePerGas).toBe(3_000_000_000n);
+    expect(call.tx.maxPriorityFeePerGas).toBe(2_000_000_000n);
+    expect(call.tx.gasLimit).toBe(30_000n);
+    expect(call.tx.value).toBe(5n); // value untouched
+    expect(resolveExecutionFee).not.toHaveBeenCalled(); // no re-quote when preview-supplied
+  });
+
+  it("F3: the resolver output is bounded — absurd price → ceiling, sub-floor tip → floor, value untouched", async () => {
+    vi.mocked(resolveExecutionFee).mockResolvedValueOnce({
+      maxFeePerGas: 1_000_000_000_000_000_000n, // 10^18 — absurd
+      maxPriorityFeePerGas: 500_000_000n, // 5×10^8 — sub-floor
+      gasLimit: 30_000n,
+    });
+    await submitNativeTx({ seed: SEED, to: TO, valueLythoshi: 42n });
+    const call = submitTransactionSpy.mock.calls[0]![0];
+    expect(call.tx.maxFeePerGas).toBe(1_000_000_000_000_000n); // 10^15 ceiling
+    expect(call.tx.maxPriorityFeePerGas).toBe(1_000_000_000n); // raised to the 10^9 floor
+    expect(call.tx.maxPriorityFeePerGas).toBeLessThanOrEqual(call.tx.maxFeePerGas);
+    expect(call.tx.value).toBe(42n); // the clamp NEVER touches value
   });
 });

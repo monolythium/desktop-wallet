@@ -4,18 +4,23 @@
 // `submitTransaction` → `mesh_submitTx` (the inclusion path that confirms on
 // the chain).
 //
-// The SDK owns signing, native tx bincode, and sane fee defaults (we no longer
-// hardcode an execution-unit limit — the transfer default ~100k + clamped tip
-// comes from the SDK).
+// The SDK owns signing + native tx bincode. The send path signs the compose
+// preview's tiered fee VERBATIM when one is provided (shown == signed);
+// otherwise it defaults the native limit to 30_000 units
+// (NATIVE_TRANSFER_EXECUTION_UNIT_LIMIT, above the 24_309 ML-DSA-65 intrinsic
+// floor) and the resolver's fee is bounded by the shared floor/ceiling in
+// submitNativeTx.
 
 import {
   addressToTypedBech32,
   formatLyth,
   parseLythToLythoshi,
 } from "@monolythium/core-sdk";
+import type { ResolvedExecutionFee } from "@monolythium/core-sdk";
 import type { NativeEvmTxFields } from "@monolythium/core-sdk/crypto";
 import { requireTypedUserAddressHex } from "./address";
 import { submitNativeTx } from "./submit";
+import { NATIVE_TRANSFER_EXECUTION_UNIT_LIMIT } from "./fee-model";
 
 export interface SendNativeLythArgs {
   seed: Uint8Array;
@@ -23,6 +28,9 @@ export interface SendNativeLythArgs {
   to: string;
   amountLyth: string;
   executionUnitLimit?: bigint;
+  /** The compose preview's tiered fee — signed VERBATIM (shown == signed) when
+   *  present; otherwise the resolver runs (bounded by the shared clamps). */
+  resolvedFee?: ResolvedExecutionFee;
 }
 
 export interface SendNativeLythResult {
@@ -85,9 +93,8 @@ export async function sendNativeLyth(args: SendNativeLythArgs): Promise<SendNati
     to: toHex,
     valueLythoshi: BigInt(amountLythoshi),
     feeClass: "transfer",
-    ...(args.executionUnitLimit === undefined
-      ? {}
-      : { executionUnitLimit: args.executionUnitLimit }),
+    executionUnitLimit: args.executionUnitLimit ?? NATIVE_TRANSFER_EXECUTION_UNIT_LIMIT,
+    ...(args.resolvedFee === undefined ? {} : { resolvedFee: args.resolvedFee }),
   });
 
   return {

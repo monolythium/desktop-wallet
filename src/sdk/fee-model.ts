@@ -94,6 +94,25 @@ export interface NativeFeeQuote {
  * (FeeMismatch is structurally unreachable), and `charge < reservation` for every
  * quote and tier (21_000 < the signed limit at the same per-unit price).
  */
+/**
+ * Bound an already-resolved fee (SDK resolver output) by the shared floor +
+ * ceiling: the ceiling can only LOWER an absurd per-unit price, the floor can
+ * only RAISE a sub-floor tip, and the tip can never exceed maxFeePerGas. Touches
+ * ONLY the two fee fields — `gasLimit` passes through and no caller's transaction
+ * `value` is ever in scope here. Every signed write that still uses the resolver
+ * (delegation, registry, token, CLOB, MRV) runs through this, so one import binds
+ * them all. Pure.
+ */
+export function postClampResolvedFee(fee: ResolvedExecutionFee): ResolvedExecutionFee {
+  const maxFeePerGas = boundPerUnitPrice(fee.maxFeePerGas);
+  const clampedTip = clampTipToFloor(fee.maxPriorityFeePerGas);
+  return {
+    maxFeePerGas,
+    maxPriorityFeePerGas: clampedTip < maxFeePerGas ? clampedTip : maxFeePerGas,
+    gasLimit: fee.gasLimit,
+  };
+}
+
 export function computeNativeFeeQuote(
   baseLythoshi: bigint,
   suggestedTipLythoshi: bigint,

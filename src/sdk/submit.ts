@@ -11,13 +11,14 @@
 // — the encrypted mempool was removed (DEC-029), so there is no longer a
 // private/encrypted submit lane to route to.
 //
-// FEES come from the SDK sane-fee resolvers (`resolveExecutionFee` /
-// `resolveRegistryExecutionFee`): they read the live `lyth_executionUnitPrice`
-// quote, apply the safety multiplier, clamp the priority tip to the per-unit
-// max price (the plaintext path rejects `priority_tip > max_execution_unit_price`
-// with `FeeMismatch`), and default the execution-unit limit per write class
-// (transfer ~100k, registry/register ~250k). We never hardcode the old
-// per-seam limits.
+// FEES: a caller may pass a `resolvedFee` (the compose preview's tiered fee),
+// which is signed VERBATIM so display == signed. Absent that, the SDK sane-fee
+// resolvers (`resolveExecutionFee` / `resolveRegistryExecutionFee`) read the live
+// `lyth_executionUnitPrice` quote, apply the safety multiplier, and default the
+// execution-unit limit per write class (the installed SDK transfer default is
+// 500_000n; registry/register ~250k) — and their output is then bounded by the
+// shared floor + ceiling (`postClampResolvedFee`), so every signed write is fee-
+// bounded whether or not it supplies its own fee.
 
 import {
   MONOLYTHIUM_TESTNET_CHAIN_ID,
@@ -26,6 +27,7 @@ import {
   resolveRegistryExecutionFee,
 } from "@monolythium/core-sdk";
 import type { ResolvedExecutionFee } from "@monolythium/core-sdk";
+import { postClampResolvedFee } from "./fee-model";
 import {
   MlDsa65Backend,
   submitTransaction,
@@ -50,11 +52,18 @@ export interface SubmitNativeTxArgs {
   input?: string;
   /**
    * Override the SDK default execution-unit limit for this write. Leave
-   * unset to take the sane per-class default (transfer ~100k / registry ~250k).
+   * unset to take the sane per-class default (SDK transfer default 500_000n /
+   * registry ~250k). Ignored when `resolvedFee` is supplied (its gasLimit wins).
    */
   executionUnitLimit?: bigint;
   /** Fee-resolution class. `transfer` (default) vs `registry`/`register`. */
   feeClass?: SubmitFeeClass;
+  /**
+   * A pre-resolved fee to sign VERBATIM (shown == signed) — no re-resolve, no
+   * re-quote, no adjustment. When absent, the SDK resolver runs and is bounded by
+   * the shared floor/ceiling. Never affects `value`.
+   */
+  resolvedFee?: ResolvedExecutionFee;
 }
 
 export interface SubmitNativeTxResult {
@@ -91,11 +100,21 @@ export async function submitNativeTx(
       ? undefined
       : { executionUnitLimit: args.executionUnitLimit };
 
+  // A supplied `resolvedFee` is signed exactly as previewed (shown == signed).
+  // Otherwise resolve and bound the result by the shared floor + ceiling — this
+  // binds every resolver path (delegation / registry / token / CLOB / MRV) and
+  // touches only the fee fields, never `value`.
+  const feePromise: Promise<ResolvedExecutionFee> =
+    args.resolvedFee !== undefined
+      ? Promise.resolve(args.resolvedFee)
+      : (args.feeClass === "registry"
+          ? resolveRegistryExecutionFee(client, feeOptions)
+          : resolveExecutionFee(client, feeOptions)
+        ).then(postClampResolvedFee);
+
   const [committedNonce, fee] = await Promise.all([
     getNativeTransactionCount(client, fromHex),
-    args.feeClass === "registry"
-      ? resolveRegistryExecutionFee(client, feeOptions)
-      : resolveExecutionFee(client, feeOptions),
+    feePromise,
   ]);
   // Local pending-nonce: sign max(committed, lastSubmitted+1) so a 2nd submit
   // before the 1st commits doesn't reuse the nonce (the chain exposes only the
