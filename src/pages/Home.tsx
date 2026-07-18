@@ -25,6 +25,8 @@ import { activityRowToTx } from "../sdk/activity-rows";
 import { liveTokenStatusToRows } from "../sdk/token-rows";
 import { loadTokenMetaMap, type TokenMeta } from "../sdk/token-metadata";
 import { formatLythDisplay, truncateDecimals } from "../sdk/lyth-display";
+import { formatFiatFromLythoshi, getLythFiatRate } from "../sdk/fiat";
+import { useDisplayCurrency } from "../sdk/display-prefs";
 import {
   deriveDelegationSummary,
   type DelegationSummaryFacts,
@@ -71,6 +73,9 @@ export function Home({ goto }: Props) {
   // stale/wrong figure (status specification §N/§O — quarantined HIDES the
   // balance). The honest "—" + empty preview replace it until the chain is live.
   const chainNotLive = chainKindNotLive(useChainHealthView().health.kind);
+  // Subscribed, not read once: picking a new currency in Settings re-renders
+  // this slot in-session with no reload.
+  const currency = useDisplayCurrency();
 
   useEffect(() => {
     if (!walletAddress) {
@@ -154,7 +159,20 @@ export function Home({ goto }: Props) {
           <span className="tok">LYTH</span>
         </div>
 
+        {/* Fiat estimate — an ADDITIVE SIBLING; the amount above is untouched.
+            Rendered only when the amount itself is known: when the hero shows
+            "—" this line is absent ENTIRELY, never a dashed one. A bare "—"
+            means the amount is unavailable; "{symbol}—" would claim we know the
+            balance and merely cannot price it. */}
+        {!chainNotLive && availableLythoshi !== null && (
+          <div className="w-hero__fiat">
+            {formatFiatFromLythoshi(availableLythoshi, currency, getLythFiatRate(currency))}
+          </div>
+        )}
+
         <div className="w-hero__meta">
+          {/* No fiat here — this duplicates the hero figure, and one figure gets
+              one fiat rendering. */}
           <span>Available <b>{availableLyth} LYTH</b></span>
           {/* Delegated is delegated *weight* (bps) — no principal LYTH read
               exists, so we never render a fabricated LYTH figure here. */}
