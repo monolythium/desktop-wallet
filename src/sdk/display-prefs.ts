@@ -7,13 +7,19 @@
 // corrupt, or absent value reads as the default, and a blocked localStorage never
 // surfaces an error.
 //
-// HONESTY: the display-currency preference is a STORED PREFERENCE ONLY. The
-// wallet has no LYTH→fiat price source, so nothing is converted and no fiat
-// amount renders anywhere. The `decimals` (minor-unit) metadata is carried now so
-// a future formatting layer can read per-currency precision without a data
-// migration; nothing in this phase reads it. There is deliberately no symbol
-// column — currency glyphs come from `Intl.NumberFormat` at format time, never
-// from a hand-maintained table.
+// HONESTY: no LYTH→fiat rate is obtainable (no LYTH/USD feed is registered
+// on-chain — see `sdk/fiat.ts`), so the wallet converts nothing. The preference
+// selects only WHICH currency's symbol the fiat slots show beside their honest
+// em-dash. The `decimals` (minor-unit) metadata is read by `sdk/fiat.ts` for
+// per-currency precision. There is deliberately no symbol column — currency
+// glyphs come from `Intl.NumberFormat` at format time, never from a
+// hand-maintained table.
+//
+// `useDisplayCurrency()` below is the sanctioned subscription every fiat slot
+// uses; consumers must not reach past it into localStorage (guarded by
+// `__tests__/preferences-conformance.test.ts`).
+
+import { useSyncExternalStore } from "react";
 
 // ── Language ────────────────────────────────────────────────────────────────
 
@@ -123,4 +129,48 @@ export function saveDisplayCurrency(value: string): void {
   } catch {
     // Blocked storage — the selection still applies for this session.
   }
+  // Dispatched even when persistence failed: the in-session selection still
+  // applies visually, so every mounted slot must re-read either way.
+  notifyDisplayPrefsChanged();
+}
+
+// ── Reactivity ──────────────────────────────────────────────────────────────
+
+/** Same-document change signal. `storage` only fires in OTHER documents, so a
+ *  selection made in this window needs its own event for mounted subscribers.
+ *  Named for display preferences generally, not currency alone. */
+export const DISPLAY_PREFS_EVENT = "wallet:display-prefs";
+
+function notifyDisplayPrefsChanged(): void {
+  try {
+    window.dispatchEvent(new CustomEvent(DISPLAY_PREFS_EVENT));
+  } catch {
+    // No window (or an environment without CustomEvent) — nothing to notify.
+  }
+}
+
+/** Module-level so the subscription is not torn down and rebuilt every render. */
+function subscribeDisplayPrefs(onChange: () => void): () => void {
+  window.addEventListener(DISPLAY_PREFS_EVENT, onChange);
+  window.addEventListener("storage", onChange);
+  return () => {
+    window.removeEventListener(DISPLAY_PREFS_EVENT, onChange);
+    window.removeEventListener("storage", onChange);
+  };
+}
+
+/**
+ * The sanctioned read path for every display-currency consumer: a validated
+ * code, seeded synchronously from localStorage (no hydration flash) and
+ * re-read whenever the preference changes in this document or another one.
+ *
+ * Consumers use THIS rather than `readDisplayCurrency` directly, so a selection
+ * made in the preferences panel updates every mounted slot in-session.
+ */
+export function useDisplayCurrency(): string {
+  return useSyncExternalStore(
+    subscribeDisplayPrefs,
+    readDisplayCurrency,
+    readDisplayCurrency,
+  );
 }
