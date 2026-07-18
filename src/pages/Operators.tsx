@@ -11,7 +11,11 @@ import { useDeveloperMode } from "../sdk/developer-mode";
 import { RiskBadgeChip } from "../components/RiskBadgeChip";
 import { currentEndpoint, subscribeEndpoint } from "../sdk/client";
 import { listPeers } from "../sdk/peers";
-import { classifyOperatorRisk } from "../sdk/operator-risk";
+import {
+  classifyOperatorRisk,
+  OPERATOR_RISK_LEGEND,
+  type OperatorRiskKind,
+} from "../sdk/operator-risk";
 import {
   inspectOperators,
   inspectSummary,
@@ -113,6 +117,77 @@ export function Operators() {
             ))
           )}
         </div>
+      </div>
+
+      <RiskLegendCard rows={rows ?? []} devMode={devMode} />
+    </div>
+  );
+}
+
+/** Which rows currently exhibit each risk kind — computed from the SAME
+ *  classifier that renders the row chips, so the buckets can't drift. */
+function affectedByKind(rows: readonly OperatorInspectRow[]): Map<OperatorRiskKind, OperatorInspectRow[]> {
+  const map = new Map<OperatorRiskKind, OperatorInspectRow[]>();
+  for (const row of rows) {
+    const kinds = new Set(classifyOperatorRisk(toRiskInput(row)).map((b) => b.kind));
+    for (const kind of kinds) {
+      const list = map.get(kind) ?? [];
+      list.push(row);
+      map.set(kind, list);
+    }
+  }
+  return map;
+}
+
+function RiskLegendCard({ rows, devMode }: { rows: readonly OperatorInspectRow[]; devMode: boolean }) {
+  const [open, setOpen] = useState<OperatorRiskKind | null>(null);
+  const affected = affectedByKind(rows);
+  const entries = OPERATOR_RISK_LEGEND.filter((e) => devMode || !e.devOnly);
+
+  return (
+    <div className="w-card">
+      <div className="w-card__head"><h3>Risk legend</h3></div>
+      <div className="w-card__body">
+        <div className="row-help" style={{ marginBottom: 12 }}>
+          Each chip on an operator row decodes a signal the wallet collected from its probe
+          round-trip. Most are advisory — the wallet's health failover already routes around
+          offline / untrusted operators.
+        </div>
+        {entries.map((entry) => {
+          const hit = affected.get(entry.kind) ?? [];
+          const isOpen = open === entry.kind;
+          return (
+            <div key={entry.kind} className="w-legend-entry">
+              <div className="w-legend-entry__head">
+                <span className="w-legend-entry__label">{entry.label}</span>
+                {hit.length > 0 ? (
+                  <button
+                    type="button"
+                    className="w-legend-affected"
+                    onClick={() => setOpen(isOpen ? null : entry.kind)}
+                  >
+                    {hit.length} affected
+                  </button>
+                ) : null}
+              </div>
+              <div className="row-help" style={{ marginTop: 2 }}>{entry.body}</div>
+              {isOpen ? (
+                <div className="w-legend-list">
+                  {hit.map((row) => (
+                    <div key={row.peer.url} className="w-legend-list__row">
+                      <span className="w-op-row__name">{row.peer.label}</span>
+                      <span className="w-op-row__region">
+                        {[row.peer.region, devMode ? hostOf(row.peer.url) : null]
+                          .filter(Boolean)
+                          .join(" · ")}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          );
+        })}
       </div>
     </div>
   );

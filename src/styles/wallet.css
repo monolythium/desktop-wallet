@@ -849,6 +849,17 @@ html[data-sidebar="collapsed"]:not([data-layout="topbar"]) .w-nav__item {
 .w-op-detail__row { display: flex; justify-content: space-between; gap: 12px; font-size: var(--fs-11); padding: 2px 0; }
 .w-op-detail__k { color: var(--w-text-3); }
 .w-op-detail__v { color: var(--w-text-2); font-family: var(--font-mono, ui-monospace, monospace); text-align: right; word-break: break-all; }
+.w-legend-entry { padding: 8px 0; border-top: 1px solid var(--w-line); }
+.w-legend-entry:first-of-type { border-top: none; }
+.w-legend-entry__head { display: flex; align-items: center; gap: 8px; }
+.w-legend-entry__label { font-size: var(--fs-12); font-weight: 600; color: var(--w-text); }
+.w-legend-affected {
+  font-family: var(--font-mono, ui-monospace, monospace); font-size: 9px; font-weight: 600;
+  border-radius: 3px; padding: 1px 5px; cursor: pointer;
+  color: var(--err); background: rgba(220,80,80,0.12); border: 1px solid rgba(220,80,80,0.4);
+}
+.w-legend-list { margin-top: 6px; padding: 6px 8px; border-radius: var(--r-6); background: rgba(220,80,80,0.06); border: 1px solid rgba(220,80,80,0.25); }
+.w-legend-list__row { display: flex; align-items: baseline; padding: 2px 0; }
 
 /* About Chain card — full untruncated genesis pin + registry-drift banner. */
 .w-genesis-full { margin-top: 12px; }

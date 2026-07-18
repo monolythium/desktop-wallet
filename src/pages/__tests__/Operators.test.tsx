@@ -75,8 +75,11 @@ describe("Operators screen", () => {
     ];
     renderOperators(false);
     expect(await screen.findByText("Live · 40 ms")).toBeInTheDocument();
-    expect(screen.getByText("Quarantined")).toBeInTheDocument();
-    expect(screen.getByText("Untrusted")).toBeInTheDocument();
+    // "Quarantined" also appears as a legend label, so scope to the row pill.
+    const pills = document.querySelectorAll(".w-op-pill");
+    const pillText = Array.from(pills).map((p) => p.textContent);
+    expect(pillText).toContain("Quarantined");
+    expect(pillText).toContain("Untrusted");
   });
 
   it("hides the dev mono line when developer mode is off, shows it when on", async () => {
@@ -111,5 +114,24 @@ describe("Operators screen", () => {
     rowsMock.rows = [row("http://a", { verdict: verdict("http://a", { trusted: true }) })];
     renderOperators(false);
     await waitFor(() => expect(screen.getByRole("button", { name: "Refresh" })).toBeEnabled());
+  });
+
+  it("legend: filters dev-only entries and shows affected buckets from the same classifier", async () => {
+    rowsMock.rows = [
+      row("http://down", { verdict: verdict("http://down"), probe: probe("http://down", { reachable: false, chainIdOk: false, error: "timeout" }) }),
+    ];
+    const { user, unmount } = renderOperators(false);
+    // All-user legend entries present; dev-only ones hidden while off.
+    expect(await screen.findByText("Offline / unreachable")).toBeInTheDocument();
+    expect(screen.queryByText("High latency")).not.toBeInTheDocument();
+    // The unreachable operator drives a "1 affected" badge that expands to its name.
+    await user.click(screen.getByRole("button", { name: "1 affected" }));
+    expect(screen.getAllByText("http://down").length).toBeGreaterThan(0);
+    unmount();
+
+    // Dev mode reveals the dev-only legend entries.
+    rowsMock.rows = [row("http://a", { verdict: verdict("http://a", { trusted: true }) })];
+    renderOperators(true);
+    expect(await screen.findByText("High latency")).toBeInTheDocument();
   });
 });
