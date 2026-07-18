@@ -15,6 +15,27 @@ export async function getExecutionUnitPriceLythoshi(client: RpcClient): Promise<
   );
 }
 
+/** Read the live execution-unit quote as the SEPARATE base + suggested tip the
+ *  fee model needs (the summed `executionUnitPriceLythoshi` field is not used —
+ *  the dual-fee math scales the tip and adds the base independently). A malformed
+ *  quantity throws with the field name; the caller renders the honest fee error. */
+export async function getExecutionUnitQuote(
+  client: RpcClient,
+): Promise<{ baseLythoshi: bigint; suggestedTipLythoshi: bigint; source: string }> {
+  const quote = await client.lythExecutionUnitPrice();
+  return {
+    baseLythoshi: normalizeRpcQuantity(
+      quote.basePricePerExecutionUnitLythoshi,
+      "lyth_executionUnitPrice.basePricePerExecutionUnitLythoshi",
+    ),
+    suggestedTipLythoshi: normalizeRpcQuantity(
+      quote.priorityTipLythoshi,
+      "lyth_executionUnitPrice.priorityTipLythoshi",
+    ),
+    source: quote.source,
+  };
+}
+
 function userAddressForRpc(address: string): string {
   return address.startsWith("0x") || address.startsWith("0X")
     ? addressToTypedBech32("user", address)
