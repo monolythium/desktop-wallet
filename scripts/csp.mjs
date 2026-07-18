@@ -27,6 +27,18 @@ export const IPC_SOURCE = "ipc: http://ipc.localhost";
 export const DEV_SOURCES = ["ws://localhost:1420", "http://localhost:1420"];
 
 /**
+ * Bare scheme sources — DEV connect-src ONLY. They let a runtime-added custom
+ * operator or custom-chain RPC (any http/https host, e.g. a local devnet) resolve
+ * under `pnpm tauri dev`; without them the operator/chain editor is dead in the
+ * only build allowed to use it. They are NEVER emitted in prod — the prod policy
+ * stays the strict per-origin allowlist. isHardenedBuild() (src/sdk/build-mode.ts)
+ * and this dev/prod CSP split are BOTH keyed on the same Vite PROD flag, so the
+ * build whose CSP can serve custom hosts is exactly the build whose dial policy
+ * (hardenedOperators in src/sdk/operator-override.ts) permits them.
+ */
+export const DEV_SCHEME_SOURCES = ["http:", "https:"];
+
+/**
  * Endpoint objects (`{ url }`) or url strings → deduped origin strings
  * (`scheme://host:port`). Normalizes through `URL` so a url carrying a path
  * collapses to its origin; a malformed url is skipped, not emitted.
@@ -54,7 +66,7 @@ export function operatorOrigins(endpoints) {
  */
 export function connectSrc(operators, { dev = false, extra = [] } = {}) {
   const sources = ["'self'", IPC_SOURCE, ...FIXED_HOSTS, ...(operators ?? []), ...extra];
-  if (dev) sources.push(...DEV_SOURCES);
+  if (dev) sources.push(...DEV_SOURCES, ...DEV_SCHEME_SOURCES);
   return [...new Set(sources)];
 }
 

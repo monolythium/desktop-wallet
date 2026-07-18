@@ -7,6 +7,7 @@ import {
   FIXED_HOSTS,
   IPC_SOURCE,
   DEV_SOURCES,
+  DEV_SCHEME_SOURCES,
 } from "./csp.mjs";
 
 describe("operatorOrigins", () => {
@@ -52,6 +53,15 @@ describe("connectSrc", () => {
     }
   });
 
+  it("adds the bare http/https scheme sources ONLY in dev (runtime custom RPC hosts)", () => {
+    const prod = connectSrc(["http://1.2.3.4:8545"], { dev: false });
+    const dev = connectSrc(["http://1.2.3.4:8545"], { dev: true });
+    for (const s of DEV_SCHEME_SOURCES) {
+      expect(prod).not.toContain(s);
+      expect(dev).toContain(s);
+    }
+  });
+
   it("appends a build-time extra origin (VITE_MONO_RPC_URL) when given", () => {
     expect(connectSrc([], { extra: ["https://custom.example:9000"] })).toContain(
       "https://custom.example:9000",
@@ -83,6 +93,19 @@ describe("prodCsp — tight, and never blocks the http operators", () => {
     expect(csp).not.toContain("block-all-mixed-content");
     expect(csp).toContain("http://1.2.3.4:8545");
   });
+
+  it("carries NO bare scheme source (http:/https:) and NO wildcard in connect-src [19a]", () => {
+    // Assert at the token level: the prod string contains "http://..." operator
+    // origins, so a naive substring check would false-positive — split instead.
+    const sources = connectSrc(["http://1.2.3.4:8545"]); // dev:false
+    expect(sources).not.toContain("http:");
+    expect(sources).not.toContain("https:");
+    expect(sources).not.toContain("*");
+    const connectDirective = prodCsp(sources).split("connect-src ")[1].split(";")[0].split(" ");
+    expect(connectDirective).not.toContain("http:");
+    expect(connectDirective).not.toContain("https:");
+    expect(connectDirective).not.toContain("*");
+  });
 });
 
 describe("devCsp — looser for Vite HMR, still no 'unsafe-eval'", () => {
@@ -99,6 +122,10 @@ describe("devCsp — looser for Vite HMR, still no 'unsafe-eval'", () => {
 
   it("carries the Vite HMR websocket + dev server in connect-src", () => {
     for (const s of DEV_SOURCES) expect(dev).toContain(s);
+  });
+
+  it("carries the bare http/https scheme sources (runtime custom RPC hosts in dev)", () => {
+    for (const s of DEV_SCHEME_SOURCES) expect(dev).toContain(s);
   });
 
   it("keeps the lockables tight (object/frame 'none') and the operator origin", () => {
