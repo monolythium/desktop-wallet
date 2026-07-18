@@ -44,13 +44,11 @@ import {
 import {
   LAYOUTS,
   applyLayout,
-  applyTheme,
   readLayout,
-  readTheme,
   type LayoutId,
 } from "../sdk/theme";
 import { DeveloperModeToggle } from "../components/DeveloperModeToggle";
-import { ThemeGrid } from "../components/ThemeGrid";
+import { PreferencesPanel } from "../components/PreferencesPanel";
 
 interface SettingsProps {
   steleEnabled: boolean;
@@ -200,15 +198,12 @@ export function Settings({ steleEnabled, setSteleEnabled, experimentalEnabled, s
       </div>
 
       <div className="w-card">
-        <div className="w-card__head"><h3>Theme</h3></div>
+        <div className="w-card__head"><h3>Display &amp; Preferences</h3></div>
         <div className="w-card__body">
-          <div className="row-help" style={{ lineHeight: 1.6, marginBottom: 4 }}>
-            Choose the wallet&apos;s colour theme — light, dark, and accent palettes.
-          </div>
           <div className="w-setting-row">
             <div>
-              <div className="row-label">Appearance</div>
-              <div className="row-help">Colour theme and layout.</div>
+              <div className="row-label">Preferences</div>
+              <div className="row-help">Theme, language, display currency, and layout.</div>
             </div>
             <button className="btn btn--sm" onClick={() => setSubPage("appearance")}>
               Customize
@@ -789,13 +784,8 @@ function shortHex(s: string, head = 10, tail = 6): string {
  * native :root palette (no attribute).
  */
 function AppearancePage({ onBack }: { onBack: () => void }) {
-  const [theme, setTheme] = useState<string>(() => readTheme());
   const [layout, setLayout] = useState<LayoutId>(() => readLayout());
 
-  const pickTheme = (id: string) => {
-    applyTheme(id);
-    setTheme(id);
-  };
   const pickLayout = (id: LayoutId) => {
     applyLayout(id);
     setLayout(id);
@@ -811,29 +801,26 @@ function AppearancePage({ onBack }: { onBack: () => void }) {
         >
           ← Settings
         </button>
-        <h1>Appearance</h1>
+        <h1>Display &amp; Preferences</h1>
         <div className="sub">
-          Choose the wallet&apos;s colour theme and layout. Applies across the
-          wallet and persists on this device.
+          {"How the wallet looks and reads — theme, language, display currency, and layout. Applies across the wallet and persists on this device."}
         </div>
       </div>
       <div className="w-card">
         <div className="w-card__body">
-        <div style={{ marginBottom: 14 }}>
-          <div className="row-label">Theme</div>
-          <div className="row-help" style={{ marginBottom: 12 }}>
-            Pick a palette. Applies across the wallet and persists on this
-            device.
+          {/* The SAME component the Welcome screen renders — zero drift. */}
+          <PreferencesPanel />
+          {/* Layout stays outside the shared panel: it is a desktop shell
+              control with no meaning on the pre-shell Welcome screen. */}
+          <div style={{ marginTop: 14 }}>
+            <ChipRow
+              label="Layout"
+              help="Sidebar keeps a vertical rail on the left. Topbar moves navigation above the content."
+              value={layout}
+              options={LAYOUTS}
+              onChange={pickLayout}
+            />
           </div>
-          <ThemeGrid selectedId={theme} onSelect={pickTheme} />
-        </div>
-        <ChipRow
-          label="Layout"
-          help="Sidebar keeps a vertical rail on the left. Topbar moves navigation above the content."
-          value={layout}
-          options={LAYOUTS}
-          onChange={pickLayout}
-        />
         </div>
       </div>
     </div>
