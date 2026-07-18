@@ -35,7 +35,7 @@ import {
 import { classifyRecipientInput, resolveNameQuorum } from "../sdk/name-resolve";
 import { useOperations } from "../operations/context";
 import { useActiveWallet } from "../sdk/active-wallet";
-import { loadReverseName } from "../sdk/reverse-name";
+import { invalidateReverseNameFor, loadReverseName } from "../sdk/reverse-name";
 import {
   mergeMyNames,
   readRegisteredNames,
@@ -757,6 +757,9 @@ function NameChecker({ onRegistered }: { onRegistered?: () => void }) {
         // chain has no enumerate RPC). Best-effort; the reverse read stays
         // authoritative.
         recordRegisteredName(ownerAddress, trimmed);
+        // Drop this address's cached reverse entry so the new name shows
+        // without waiting out the 30-minute TTL. Best-effort.
+        void invalidateReverseNameFor(ownerAddress);
         onRegistered?.();
         return { headline: `Registered ${trimmed}`, detail: r.txHash, txHash: r.txHash, nonce: r.nonce };
       },
