@@ -47,6 +47,7 @@ import {
 import { BalanceFigure } from "../components/BalanceFigure";
 import { HeroChips, type HeroChipId } from "../components/HeroChips";
 import { SetupHealthChip } from "../components/SetupHealthChip";
+import { FeaturesHintBar } from "../components/FeaturesHintBar";
 import { useFitText } from "../components/useFitText";
 import { formatLythFixed } from "../sdk/lyth-display";
 import { loadLastKnownBalance, saveLastKnownBalance } from "../sdk/last-known-balance";
@@ -321,6 +322,9 @@ export function Home({ goto }: Props) {
       {/* Setup health — summary only, non-blocking, dismissible. Renders only
           when an applicable step is actually incomplete. */}
       {walletAddress && <SetupHealthChip address={walletAddress} goto={goto} />}
+      {/* At most ONE hint bar renders; chip and bar may coexist (summary vs
+          next step). */}
+      {walletAddress && <FeaturesHintBar address={walletAddress} goto={goto} />}
 
       {/* Hero */}
       <div className="w-hero">
