@@ -7,12 +7,15 @@
 // identity cards land in later commits.
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { getChainInfo } from "@monolythium/core-sdk";
 import { useDeveloperMode } from "../sdk/developer-mode";
 import { RiskBadgeChip } from "../components/RiskBadgeChip";
-import { currentEndpoint, subscribeEndpoint } from "../sdk/client";
+import { currentEndpoint, setEndpoint, subscribeEndpoint } from "../sdk/client";
 import { listPeers } from "../sdk/peers";
+import { probeOperator, NETWORK_SLUG } from "../sdk/chain-trust";
 import {
   classifyOperatorRisk,
+  operatorConnectBlockReason,
   OPERATOR_RISK_LEGEND,
   type OperatorRiskKind,
 } from "../sdk/operator-risk";
@@ -32,6 +35,7 @@ export function Operators() {
   const [probing, setProbing] = useState(true);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [activeEndpoint, setActiveEndpoint] = useState(() => currentEndpoint());
+  const [connect, setConnect] = useState<ConnectState | null>(null);
   const runId = useRef(0);
 
   const runRound = useCallback(() => {
@@ -56,6 +60,29 @@ export function Operators() {
   const summary = rows ? inspectSummary(rows) : null;
   const sorted = rows ? sortInspectRows(rows) : [];
   const activeInCatalogue = listPeers().find((p) => p.url === activeEndpoint) ?? null;
+  const activeName = activeInCatalogue ? activeInCatalogue.label : hostOf(activeEndpoint);
+
+  // The connect flow's three gates (§12): a UI pre-probe block over the current
+  // row state, then a FRESH trust probe, then — only on a trusted verdict —
+  // setEndpoint. A failed probe changes nothing. The health tick keeps failing
+  // over automatically afterwards; this never re-forces the selection.
+  const runConnect = useCallback(async (row: OperatorInspectRow) => {
+    const name = row.peer.label;
+    const block = operatorConnectBlockReason(toRiskInput(row));
+    if (block) {
+      setConnect({ phase: "result", row, ok: false, message: `Can't connect to ${name} — ${block} Your operator was left unchanged.` });
+      return;
+    }
+    setConnect({ phase: "checking", row });
+    const info = getChainInfo(NETWORK_SLUG);
+    const verdict = await probeOperator(row.peer.url, info.chain_id, info.genesis_hash);
+    if (!verdict.trusted) {
+      setConnect({ phase: "result", row, ok: false, message: `Couldn't connect to ${name} — it's unreachable, on a different chain, or quarantined. Your operator was left unchanged.` });
+      return;
+    }
+    setEndpoint(row.peer.url);
+    setConnect({ phase: "result", row, ok: true, message: `Connected to ${name}.` });
+  }, []);
 
   return (
     <div className="w-page">
@@ -109,6 +136,8 @@ export function Operators() {
                 key={row.peer.url}
                 row={row}
                 devMode={devMode}
+                inUse={row.peer.url === activeEndpoint}
+                onUse={() => setConnect({ phase: "confirm", row })}
                 expanded={expanded === row.peer.url}
                 onToggle={() =>
                   setExpanded((cur) => (cur === row.peer.url ? null : row.peer.url))
@@ -120,6 +149,78 @@ export function Operators() {
       </div>
 
       <RiskLegendCard rows={rows ?? []} devMode={devMode} />
+
+      {connect ? (
+        <ConnectModal
+          state={connect}
+          activeName={activeName}
+          onConfirm={() => void runConnect(connect.row)}
+          onClose={() => setConnect(null)}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+type ConnectState =
+  | { phase: "confirm"; row: OperatorInspectRow }
+  | { phase: "checking"; row: OperatorInspectRow }
+  | { phase: "result"; row: OperatorInspectRow; ok: boolean; message: string };
+
+function ConnectModal({
+  state,
+  activeName,
+  onConfirm,
+  onClose,
+}: {
+  state: ConnectState;
+  activeName: string;
+  onConfirm: () => void;
+  onClose: () => void;
+}) {
+  const name = state.row.peer.label;
+  const dismissable = state.phase !== "checking";
+  return (
+    <div
+      className="w-overlay w-overlay--center"
+      role="presentation"
+      onClick={() => dismissable && onClose()}
+    >
+      <div className="w-card w-confirm" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+        <div className="w-card__body">
+          {state.phase === "confirm" ? (
+            <>
+              <h3 className="w-confirm__title">Connect to this operator?</h3>
+              <p className="row-help" style={{ marginTop: 8 }}>
+                You're on {activeName}. Connect to <strong>{name}</strong>? The wallet runs a
+                health &amp; security check first and won't switch if it fails.
+              </p>
+              <div className="w-confirm__actions">
+                <button type="button" className="btn btn--ghost" onClick={onClose}>Cancel</button>
+                <button type="button" className="btn btn--primary" onClick={onConfirm}>Connect</button>
+              </div>
+            </>
+          ) : state.phase === "checking" ? (
+            <>
+              <h3 className="w-confirm__title">Connect to this operator?</h3>
+              <p className="row-help" style={{ marginTop: 8 }}>
+                Running a health &amp; security check on <strong>{name}</strong>…
+              </p>
+            </>
+          ) : (
+            <>
+              <h3 className="w-confirm__title" style={{ color: state.ok ? "var(--ok)" : "var(--err)" }}>
+                {state.ok ? "Connected" : "Can't connect"}
+              </h3>
+              <p className="row-help" style={{ marginTop: 8 }}>{state.message}</p>
+              <div className="w-confirm__actions">
+                <button type="button" className="btn btn--primary" onClick={onClose}>Done</button>
+                <button type="button" className="btn btn--ghost" onClick={onClose}>Close</button>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -208,14 +309,21 @@ function statusPill(row: OperatorInspectRow): Pill {
   return { label: "Offline", color: "var(--err)" };
 }
 
+const USE_TITLE =
+  "Probe this operator; if it's reachable and verified on the pinned chain, the wallet switches to it. The health probe keeps failing over automatically if it later degrades.";
+
 function OperatorRow({
   row,
   devMode,
+  inUse,
+  onUse,
   expanded,
   onToggle,
 }: {
   row: OperatorInspectRow;
   devMode: boolean;
+  inUse: boolean;
+  onUse: () => void;
   expanded: boolean;
   onToggle: () => void;
 }) {
@@ -223,6 +331,7 @@ function OperatorRow({
   const bad = !verdict.trusted || !probe.reachable;
   const pill = statusPill(row);
   const chips = classifyOperatorRisk(toRiskInput(row));
+  const canUse = verdict.trusted && probe.reachable && !inUse;
 
   const devSegments: string[] = [hostOf(peer.url)];
   if (probe.reachable) {
@@ -257,6 +366,15 @@ function OperatorRow({
             <div className="w-op-row__dev" title={peer.url}>{devSegments.join(" · ")}</div>
           ) : null}
           {expanded ? <OperatorDetail row={row} devMode={devMode} /> : null}
+        </div>
+        <div className="w-op-row__action" onClick={(e) => e.stopPropagation()}>
+          {inUse ? (
+            <span style={{ color: "var(--ok)", fontSize: "var(--fs-11)" }}>→ In use</span>
+          ) : canUse ? (
+            <button type="button" className="w-chip" title={USE_TITLE} onClick={onUse}>
+              Use this operator
+            </button>
+          ) : null}
         </div>
       </div>
     </div>

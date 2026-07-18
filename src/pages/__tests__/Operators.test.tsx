@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import { renderWithProviders } from "../../test/renderWithProviders";
 import { DeveloperModeProvider } from "../../sdk/developer-mode";
+import { markActiveOperatorUntrusted, markActiveOperatorTrusted } from "../../sdk/client";
 import type { OperatorInspectRow } from "../../sdk/operator-inspect";
 import type { Peer, ProbeResult } from "../../sdk/peers";
 import type { OperatorVerdict } from "../../sdk/chain-trust";
@@ -31,6 +32,8 @@ function row(url: string, over: Partial<OperatorInspectRow> = {}): OperatorInspe
 }
 
 const rowsMock = vi.hoisted(() => ({ rows: [] as OperatorInspectRow[] }));
+const setEndpointMock = vi.hoisted(() => ({ fn: vi.fn() }));
+const probeMock = vi.hoisted(() => ({ trusted: true }));
 vi.mock("../../sdk/operator-inspect", async (orig) => ({
   ...(await orig<typeof import("../../sdk/operator-inspect")>()),
   inspectOperators: vi.fn(async () => rowsMock.rows),
@@ -39,7 +42,19 @@ vi.mock("../../sdk/client", async (orig) => ({
   ...(await orig<typeof import("../../sdk/client")>()),
   currentEndpoint: () => "https://rpc.monolythium.com",
   subscribeEndpoint: () => () => {},
+  setEndpoint: setEndpointMock.fn,
 }));
+vi.mock("../../sdk/chain-trust", async (orig) => {
+  const real = await orig<typeof import("../../sdk/chain-trust")>();
+  return {
+    ...real,
+    probeOperator: vi.fn(async (url: string) =>
+      probeMock.trusted
+        ? { ...real.unreachableVerdict(url), trusted: true, height: 1, headId: "0xh" }
+        : real.unreachableVerdict(url),
+    ),
+  };
+});
 
 function renderOperators(devMode: boolean) {
   const control = { enabled: devMode, setEnabled: async () => true };
@@ -53,7 +68,19 @@ function renderOperators(devMode: boolean) {
 describe("Operators screen", () => {
   afterEach(() => {
     rowsMock.rows = [];
+    probeMock.trusted = true;
+    markActiveOperatorTrusted();
     vi.clearAllMocks();
+  });
+
+  it("renders while the wallet is fail-closed (never routes a read through the trust gate)", async () => {
+    // The regenesis degraded state throws from getProvider(); the screen must
+    // still render (its reads use transient clients / the unchecked seam).
+    markActiveOperatorUntrusted("regenesis");
+    rowsMock.rows = [row("http://a", { verdict: verdict("http://a", { genesisMismatch: true }) })];
+    expect(() => renderOperators(false)).not.toThrow();
+    expect(await screen.findByText(/operator\(s\)/)).toBeInTheDocument();
+    expect(screen.getByText("Untrusted")).toBeInTheDocument();
   });
 
   it("shows the probing summary, then the counts", async () => {
@@ -133,5 +160,28 @@ describe("Operators screen", () => {
     rowsMock.rows = [row("http://a", { verdict: verdict("http://a", { trusted: true }) })];
     renderOperators(true);
     expect(await screen.findByText("High latency")).toBeInTheDocument();
+  });
+
+  it("connect flow: a fresh trusted probe switches the endpoint", async () => {
+    probeMock.trusted = true;
+    rowsMock.rows = [row("http://good", { verdict: verdict("http://good", { trusted: true }) })];
+    const { user } = renderOperators(false);
+    await user.click(await screen.findByRole("button", { name: "Use this operator" }));
+    expect(screen.getByRole("dialog")).toHaveTextContent("Connect to this operator?");
+    await user.click(screen.getByRole("button", { name: "Connect" }));
+    expect(await screen.findByText("Connected to http://good.")).toBeInTheDocument();
+    expect(setEndpointMock.fn).toHaveBeenCalledWith("http://good");
+  });
+
+  it("connect flow: a failed fresh probe leaves the endpoint unchanged", async () => {
+    probeMock.trusted = false; // degraded between inspect and click
+    rowsMock.rows = [row("http://good", { verdict: verdict("http://good", { trusted: true }) })];
+    const { user } = renderOperators(false);
+    await user.click(await screen.findByRole("button", { name: "Use this operator" }));
+    await user.click(screen.getByRole("button", { name: "Connect" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog).toHaveTextContent("Can't connect");
+    expect(dialog).toHaveTextContent("Your operator was left unchanged.");
+    expect(setEndpointMock.fn).not.toHaveBeenCalled();
   });
 });
