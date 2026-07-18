@@ -10,7 +10,7 @@
 // We tolerate non-Tauri runtimes (browser preview via `pnpm dev`) by
 // skipping the probe entirely and treating the wallet as already set up.
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { ApprovalOverlay } from "./components/ApprovalOverlay";
 import { Onboarding } from "./components/Onboarding";
 import { PendingTxReconciler } from "./components/PendingTxReconciler";
@@ -57,13 +57,16 @@ import {
   ensureLegacyVaultRegistered,
   loadCatalog,
 } from "./sdk/vaultCatalog";
-import { readDeveloperMode, writeDeveloperMode } from "./sdk/studio-host";
 import {
+  readDeveloperMode,
   readExperimentalEnabled,
   readSteleEnabled,
+  stampDeveloperModeFirstSeenAt,
+  writeDeveloperMode,
   writeExperimentalEnabled,
   writeSteleEnabled,
 } from "./sdk/feature-flags";
+import { DeveloperModeProvider } from "./sdk/developer-mode";
 import "./styles/tokens.css";
 import "./styles/wallet.css";
 // Loaded last so the html[data-theme="…"] palette overrides win over the
@@ -182,8 +185,10 @@ export function App() {
     try { localStorage.setItem(ROUTE_KEY, route); } catch { /* ignore */ }
   }, [route]);
 
+  // Persistence + the firstSeenAt stamp live in the developer-mode control
+  // below (not a write-on-every-render effect). This effect only enforces the
+  // studio route bounce when the flag is off.
   useEffect(() => {
-    writeDeveloperMode(developerModeEnabled);
     if (!developerModeEnabled && route === "studio") {
       setRoute("settings");
     }
@@ -203,9 +208,30 @@ export function App() {
     }
   }, [experimentalEnabled, route]);
 
+  // The guarded developer-mode control (§2). Enabling persists first and only
+  // flips + stamps firstSeenAt on a successful write, resolving false otherwise
+  // so the toggle can surface the failure. Disabling flips immediately and
+  // persists best-effort — turning it off is never blocked on storage.
+  const setDeveloperMode = useCallback(async (enabled: boolean): Promise<boolean> => {
+    if (enabled) {
+      if (!writeDeveloperMode(true)) return false;
+      stampDeveloperModeFirstSeenAt(Date.now());
+      setDeveloperModeEnabledState(true);
+      return true;
+    }
+    writeDeveloperMode(false);
+    setDeveloperModeEnabledState(false);
+    return true;
+  }, []);
+
+  const developerModeControl = useMemo(
+    () => ({ enabled: developerModeEnabled, setEnabled: setDeveloperMode }),
+    [developerModeEnabled, setDeveloperMode],
+  );
+
+  // Legacy sync prop for the pages not yet migrated to useDeveloperModeControl.
   const setDeveloperModeEnabled = (enabled: boolean) => {
-    setDeveloperModeEnabledState(enabled);
-    writeDeveloperMode(enabled);
+    void setDeveloperMode(enabled);
   };
 
   const setSteleEnabled = (enabled: boolean) => {
@@ -245,6 +271,7 @@ export function App() {
   return (
     <LockProvider>
       <LockBoundary locked={<UnlockGate />}>
+      <DeveloperModeProvider value={developerModeControl}>
       <OperationsProvider>
       <ChainHealthProvider>
       <div className="w-app">
@@ -317,6 +344,7 @@ export function App() {
       </div>
       </ChainHealthProvider>
       </OperationsProvider>
+      </DeveloperModeProvider>
       </LockBoundary>
     </LockProvider>
   );
