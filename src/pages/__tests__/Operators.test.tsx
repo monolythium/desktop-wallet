@@ -37,6 +37,7 @@ const probeMock = vi.hoisted(() => ({ trusted: true }));
 vi.mock("../../sdk/operator-inspect", async (orig) => ({
   ...(await orig<typeof import("../../sdk/operator-inspect")>()),
   inspectOperators: vi.fn(async () => rowsMock.rows),
+  readOperatorProvenance: vi.fn(async () => null), // no network on expand
 }));
 vi.mock("../../sdk/client", async (orig) => ({
   ...(await orig<typeof import("../../sdk/client")>()),
@@ -183,5 +184,25 @@ describe("Operators screen", () => {
     expect(dialog).toHaveTextContent("Can't connect");
     expect(dialog).toHaveTextContent("Your operator was left unchanged.");
     expect(setEndpointMock.fn).not.toHaveBeenCalled();
+  });
+
+  it("Reported attributes card is developer-gated and aggregates surfaces", async () => {
+    rowsMock.rows = [
+      row("http://a", { verdict: verdict("http://a", { trusted: true }), capabilities: { indexer_history: { status: "available" } } }),
+      row("http://b", { verdict: verdict("http://b", { trusted: true }), capabilities: { indexer_history: { status: "disabled" } } }),
+    ];
+    const { unmount } = renderOperators(false);
+    await screen.findByText(/operator\(s\)/);
+    expect(screen.queryByText("Reported attributes")).not.toBeInTheDocument();
+    unmount();
+
+    rowsMock.rows = [
+      row("http://a", { verdict: verdict("http://a", { trusted: true }), capabilities: { indexer_history: { status: "available" } } }),
+      row("http://b", { verdict: verdict("http://b", { trusted: true }), capabilities: { indexer_history: { status: "disabled" } } }),
+    ];
+    renderOperators(true);
+    expect(await screen.findByText("Reported attributes")).toBeInTheDocument();
+    expect(screen.getByText("indexer_history")).toBeInTheDocument();
+    expect(screen.getByText("1/2")).toBeInTheDocument(); // 1 of 2 report it available
   });
 });

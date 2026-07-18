@@ -20,12 +20,15 @@ import {
   type OperatorRiskKind,
 } from "../sdk/operator-risk";
 import {
+  aggregateCapabilities,
   inspectOperators,
   inspectSummary,
+  readOperatorProvenance,
   sortInspectRows,
   toRiskInput,
   type OperatorInspectRow,
 } from "../sdk/operator-inspect";
+import type { RuntimeBlock } from "../sdk/about";
 
 const hostOf = (url: string) => url.replace(/^https?:\/\//, "");
 
@@ -149,6 +152,8 @@ export function Operators() {
       </div>
 
       <RiskLegendCard rows={rows ?? []} devMode={devMode} />
+
+      {devMode ? <ReportedAttributesCard rows={rows ?? []} /> : null}
 
       {connect ? (
         <ConnectModal
@@ -294,6 +299,42 @@ function RiskLegendCard({ rows, devMode }: { rows: readonly OperatorInspectRow[]
   );
 }
 
+/** Fleet-wide capability aggregate (dev-gated). Display-only telemetry —
+ *  nothing in the dial/trust path keys on capabilities. */
+function ReportedAttributesCard({ rows }: { rows: readonly OperatorInspectRow[] }) {
+  const agg = aggregateCapabilities(rows);
+  return (
+    <div className="w-card">
+      <div className="w-card__head">
+        <h3>Reported attributes</h3>
+        <div className="w-card__head__spacer" />
+        <span className="w-live-pill is-muted">{agg.length} surfaces</span>
+      </div>
+      <div className="w-card__body">
+        <div className="row-help" style={{ marginBottom: 10 }}>
+          Capability surfaces operators report via <code>lyth_operatorCapabilities</code> — e.g.
+          cluster_directory, cluster_status, indexer_history. The count is how many operators
+          currently serve each surface.
+        </div>
+        {agg.length === 0 ? (
+          <div className="row-help">No operator reported capability surfaces.</div>
+        ) : (
+          agg.map((s) => {
+            const color =
+              s.available === s.total ? "var(--ok)" : s.available === 0 ? "var(--fg-500)" : "var(--fg-300)";
+            return (
+              <div key={s.surface} className="w-op-detail__row">
+                <span className="w-op-detail__k">{s.surface}</span>
+                <span className="w-op-detail__v" style={{ color }}>{s.available}/{s.total}</span>
+              </div>
+            );
+          })
+        )}
+      </div>
+    </div>
+  );
+}
+
 interface Pill {
   label: string;
   color: string;
@@ -386,6 +427,21 @@ function OperatorDetail({ row, devMode }: { row: OperatorInspectRow; devMode: bo
   const chainTitle = devMode
     ? verdict.observedGenesis ?? "operator did not return chain-genesis metadata"
     : undefined;
+
+  // Runtime provenance is fetched LAZILY on expand (one transient-client read per
+  // operator), and rendered only on success — absent rows on failure, never an
+  // error card.
+  const [provenance, setProvenance] = useState<RuntimeBlock | null>(null);
+  useEffect(() => {
+    if (!devMode) return;
+    let cancelled = false;
+    void readOperatorProvenance(row.peer.url).then((block) => {
+      if (!cancelled) setProvenance(block);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [devMode, row.peer.url]);
   return (
     <div className="w-op-detail" onClick={(e) => e.stopPropagation()}>
       <DetailRow k="Chain">
@@ -429,6 +485,23 @@ function OperatorDetail({ row, devMode }: { row: OperatorInspectRow; devMode: bo
                 ? `#${row.indexerCurrentHeight} (${row.indexerLatestHeight - row.indexerCurrentHeight} behind)`
                 : `#${row.indexerCurrentHeight}`}
           </DetailRow>
+          {provenance ? (
+            <>
+              <DetailRow k="Client">{`${provenance.clientName} v${provenance.version}`}</DetailRow>
+              <DetailRow k="Commit">
+                <span title={provenance.gitCommit}>
+                  {provenance.gitCommit.slice(0, 12)}
+                  {provenance.gitDirty ? "-dirty" : ""}
+                </span>
+              </DetailRow>
+              {provenance.p2pProtocolVersion !== null ? (
+                <DetailRow k="P2P">{`v${provenance.p2pProtocolVersion}`}</DetailRow>
+              ) : null}
+              {provenance.latestHeight !== null ? (
+                <DetailRow k="Tip">{`#${provenance.latestHeight}`}</DetailRow>
+              ) : null}
+            </>
+          ) : null}
         </>
       ) : null}
     </div>

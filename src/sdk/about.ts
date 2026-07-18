@@ -8,6 +8,7 @@ import {
   getChainInfo,
   LYTHOSHI_PER_LYTH,
   type ChainInfo,
+  type RuntimeProvenanceResponse,
 } from "@monolythium/core-sdk";
 import {
   readExperimentalEnabled,
@@ -218,22 +219,28 @@ export function runtimeFeatureChips(features: string): string[] {
   return features.split(/[,\s]+/).filter((token) => token.length > 0);
 }
 
+/** Map a `lyth_runtimeProvenance` response to the display block (pure). Shared by
+ *  the About runtime card and the Operators screen's per-operator provenance —
+ *  one field mapping, never duplicated. */
+export function runtimeBlockFromProvenance(prov: RuntimeProvenanceResponse): RuntimeBlock {
+  const rt = prov.runtime;
+  return {
+    clientName: rt.clientName,
+    version: rt.version,
+    gitCommit: rt.gitCommit,
+    gitDirty: rt.gitDirty,
+    p2pProtocolVersion:
+      typeof rt.p2pProtocolVersion === "number" ? rt.p2pProtocolVersion : null,
+    latestHeight: typeof prov.latestHeight === "number" ? prov.latestHeight : null,
+    features: runtimeFeatureChips(rt.features),
+  };
+}
+
 /** Read the connected node's runtime provenance. Returns null on any failure or
  *  on a node that lacks the method — the caller renders an honest absence. */
 export async function loadRuntimeBlock(): Promise<RuntimeBlock | null> {
   try {
-    const prov = await getProvider().rpcClient.lythRuntimeProvenance();
-    const rt = prov.runtime;
-    return {
-      clientName: rt.clientName,
-      version: rt.version,
-      gitCommit: rt.gitCommit,
-      gitDirty: rt.gitDirty,
-      p2pProtocolVersion:
-        typeof rt.p2pProtocolVersion === "number" ? rt.p2pProtocolVersion : null,
-      latestHeight: typeof prov.latestHeight === "number" ? prov.latestHeight : null,
-      features: runtimeFeatureChips(rt.features),
-    };
+    return runtimeBlockFromProvenance(await getProvider().rpcClient.lythRuntimeProvenance());
   } catch {
     return null;
   }

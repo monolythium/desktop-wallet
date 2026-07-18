@@ -13,6 +13,7 @@ import { RpcClient, getChainInfo } from "@monolythium/core-sdk";
 import { rpcClientOptions } from "./http";
 import { listPeers, probePeer, type Peer, type ProbeResult } from "./peers";
 import { probeOperator, unreachableVerdict, NETWORK_SLUG, type OperatorVerdict } from "./chain-trust";
+import { runtimeBlockFromProvenance, type RuntimeBlock } from "./about";
 import type { OperatorRiskInput } from "./operator-risk";
 
 /** Per-operator wall-clock deadline (ms). Every sub-probe races it; on expiry the
@@ -66,6 +67,18 @@ async function readCapabilities(url: string): Promise<Record<string, { status: s
   try {
     const res = await new RpcClient(url, rpcClientOptions()).lythOperatorCapabilities();
     return res.surfaces as Record<string, { status: string }>;
+  } catch {
+    return null;
+  }
+}
+
+/** Per-operator runtime provenance via a transient client (lazy, on expand —
+ *  never part of the round). Null on any failure — the caller renders nothing. */
+export async function readOperatorProvenance(url: string): Promise<RuntimeBlock | null> {
+  try {
+    return runtimeBlockFromProvenance(
+      await new RpcClient(url, rpcClientOptions()).lythRuntimeProvenance(),
+    );
   } catch {
     return null;
   }
@@ -157,6 +170,30 @@ export function sortInspectRows(rows: readonly OperatorInspectRow[]): OperatorIn
     }
     return order(a) - order(b);
   });
+}
+
+export interface CapabilityAggregate {
+  surface: string;
+  /** Operators reporting this surface as available. */
+  available: number;
+  /** Operators whose capabilities probe returned non-null (the denominator —
+   *  a pre-uplift operator that answered nothing never drags it). */
+  total: number;
+}
+
+/** Fleet-wide capability aggregation (pure). Lists only surfaces seen on at
+ *  least one operator; the denominator is the count of operators that reported
+ *  any capabilities at all. */
+export function aggregateCapabilities(rows: readonly OperatorInspectRow[]): CapabilityAggregate[] {
+  const reporting = rows.filter((r) => r.capabilities !== null);
+  const total = reporting.length;
+  const surfaces = new Set<string>();
+  for (const r of reporting) for (const s of Object.keys(r.capabilities!)) surfaces.add(s);
+  return [...surfaces].sort().map((surface) => ({
+    surface,
+    available: reporting.filter((r) => r.capabilities![surface]?.status === "available").length,
+    total,
+  }));
 }
 
 /** Adapt an inspect row to the risk classifier's input (pure). `pendingChange`

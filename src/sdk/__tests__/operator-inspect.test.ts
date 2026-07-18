@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  aggregateCapabilities,
   inspectOperators,
   inspectSummary,
   sortInspectRows,
@@ -97,6 +98,26 @@ describe("sortInspectRows", () => {
     const rows = [row("x", { verdict: verdict("x") }), row("y", { verdict: verdict("y") })];
     sortInspectRows(rows);
     expect(rows.map((r) => r.peer.url)).toEqual(["x", "y"]);
+  });
+});
+
+describe("aggregateCapabilities", () => {
+  it("counts available per surface; pre-uplift (null caps) never drags the denominator", () => {
+    const rows = [
+      row("a", { capabilities: { indexer_history: { status: "available" }, cluster_status: { status: "available" } } }),
+      row("b", { capabilities: { indexer_history: { status: "disabled" } } }),
+      row("c", { capabilities: null }), // pre-uplift — excluded from the denominator
+    ];
+    const agg = aggregateCapabilities(rows);
+    // Only surfaces seen on a reporting operator, sorted; total = 2 (a and b).
+    expect(agg).toEqual([
+      { surface: "cluster_status", available: 1, total: 2 },
+      { surface: "indexer_history", available: 1, total: 2 },
+    ]);
+  });
+
+  it("returns [] when no operator reports capabilities", () => {
+    expect(aggregateCapabilities([row("a", { capabilities: null })])).toEqual([]);
   });
 });
 

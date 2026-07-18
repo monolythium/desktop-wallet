@@ -6,6 +6,7 @@ import {
   computeGenesisDrift,
   operatorsSummary,
   readChainIdentity,
+  runtimeBlockFromProvenance,
   runtimeFeatureChips,
   WALLET_TAGLINE,
   WALLET_TITLE,
@@ -97,6 +98,24 @@ describe("developer-mode chain rows", () => {
       "risc-v",
     ]);
     expect(runtimeFeatureChips("")).toEqual([]);
+  });
+
+  it("maps a runtime provenance response to the display block (shared helper)", () => {
+    const block = runtimeBlockFromProvenance({
+      schemaVersion: 1,
+      chainId: 69420,
+      genesisHash: "0xg",
+      latestHeight: 500,
+      runtime: {
+        clientName: "protocore", version: "v0.4.0", gitCommit: "abcdef0123456789", gitDirty: true,
+        p2pProtocolVersion: 2, features: "native-tokens clob",
+      },
+      upgrade: null,
+    } as unknown as Parameters<typeof runtimeBlockFromProvenance>[0]);
+    expect(block).toEqual({
+      clientName: "protocore", version: "v0.4.0", gitCommit: "abcdef0123456789", gitDirty: true,
+      p2pProtocolVersion: 2, latestHeight: 500, features: ["native-tokens", "clob"],
+    });
   });
 });
 
