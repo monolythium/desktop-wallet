@@ -414,6 +414,18 @@ function PreviewPane({ descriptor }: { descriptor: OperationDescriptor }) {
                       style={line.kind === "warn" ? { color: "var(--warn)" } : undefined}>
                   {line.v}
                 </span>
+                {/* Additive sibling — muted with a colour token, never opacity.
+                    The `.v` span above keeps its class list, styling and text
+                    byte-identical whether or not this renders. */}
+                {line.fiat !== undefined && (
+                  <span
+                    className="v-fiat"
+                    data-testid="diff-fiat"
+                    style={{ color: "var(--fg-400)", fontWeight: 400, marginLeft: 6 }}
+                  >
+                    ({line.fiat})
+                  </span>
+                )}
               </div>
             ))
           )}

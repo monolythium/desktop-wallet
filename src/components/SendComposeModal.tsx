@@ -503,11 +503,14 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
           { k: "From", v: fromBech32m },
           { k: "To", v: toLine },
           { k: "Token", v: token.symbol },
+          // No fiat on the token Amount — token-denominated (§4.5).
           { k: "Amount", v: `${shown} ${token.symbol}` },
           {
             k: "Network fee (max)",
             v: `${formatLyth(tokenQuote.reservationLythoshi.toString(), { includeUnit: false })} LYTH`,
             kind: "fee" as const,
+            // LYTH-denominated, so it does qualify.
+            ...fiatField(tokenQuote.reservationLythoshi),
           },
           { k: "Finality", v: finality.label, kind: "value" },
         ],
@@ -576,13 +579,18 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
         { k: "From", v: fromBech32m },
         { k: "To", v: toLine },
         { k: "Token", v: "LYTH" },
-        { k: "Amount", v: `${amountLyth} LYTH` },
+        { k: "Amount", v: `${amountLyth} LYTH`, ...fiatField(parseLythToLythoshi(amountLyth)) },
         {
           k: `Fee (${tier === "normal" ? "Normal" : "Fast"})`,
           v: `${nativeChargeText} LYTH`,
           kind: "fee" as const,
+          ...fiatField(nativeQuote.chargeLythoshi),
         },
-        { k: "Total (amount + fee)", v: `${nativeTotalText} LYTH` },
+        {
+          k: "Total (amount + fee)",
+          v: `${nativeTotalText} LYTH`,
+          ...fiatField(parseLythToLythoshi(amountLyth) + nativeQuote.chargeLythoshi),
+        },
         { k: "Finality", v: finality.label, kind: "value" },
       ],
       effects: [
@@ -734,6 +742,15 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
   // Token amounts get NO fiat slot — not even the empty form: no token price
   // source exists behind this seam, so a slot there would promise a value that
   // will never arrive. Only LYTH-denominated figures qualify.
+  /** Spreadable `fiat` field for a drawer diff row. Frozen at descriptor-build
+   *  time: the drawer is modal, so the preference cannot change beneath it, and
+   *  the next build picks up the new currency. Yields `{}` — the field stays
+   *  absent — when the amount is unknown. */
+  const fiatField = (lythoshi: bigint | string | null): { fiat?: string } => {
+    const text = fiat(lythoshi);
+    return text === null ? {} : { fiat: text };
+  };
+
   const amountFiat = !isToken ? fiat(amountLythoshi) : null;
   const availableFiat =
     !isToken && !balanceError && balanceLyth !== null ? fiat(balanceLythoshi) : null;

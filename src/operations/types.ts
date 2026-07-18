@@ -19,6 +19,15 @@ export interface OperationDiffLine {
   k: string;
   v: string;
   kind?: "value" | "fee" | "warn";
+  /**
+   * Optional fiat estimate, rendered as a SEPARATE span after `v` — the
+   * additive-sibling law bound at the type level, so `v` stays byte-identical
+   * whether or not this is set. Set it only for LYTH-denominated rows: a
+   * token-denominated amount gets none, since no token price source exists
+   * behind that seam. Omit it when the row's amount is unknown — the absence of
+   * a figure and the absence of a rate are different facts.
+   */
+  fiat?: string;
 }
 
 /**

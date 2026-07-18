@@ -261,6 +261,69 @@ describe("Send compose — canonical-node purity (the F1 collision guard)", () =
   });
 });
 
+describe("Send descriptors — which confirm rows carry fiat (slot 5)", () => {
+  const TO = addressToTypedBech32("user", "0x000000000000000000000000000000000000beef");
+  const row = (d: OperationDescriptor, k: string) => d.diff.find((l) => l.k === k)!;
+
+  it("native: Amount, Fee and Total carry it; From/To/Token/Finality do not", async () => {
+    const { user } = renderWithProviders(<SendComposeModal fromBech32m={FROM} onClose={vi.fn()} />);
+    await user.type(screen.getByLabelText("Recipient typed bech32m address"), TO);
+    await user.type(screen.getByLabelText("Amount in LYTH"), "1.5");
+    await user.click(screen.getByRole("button", { name: "Review" }));
+    await waitFor(() => expect(cap.descriptor).toBeDefined());
+    const d = cap.descriptor!;
+
+    expect(row(d, "Amount").fiat).toBe("$—");
+    expect(row(d, "Fee (Normal)").fiat).toBe("$—");
+    expect(row(d, "Total (amount + fee)").fiat).toBe("$—");
+
+    for (const k of ["From", "To", "Token", "Finality"]) {
+      expect(row(d, k).fiat).toBeUndefined();
+    }
+  });
+
+  it("native: the canonical v strings are untouched by the fiat field", async () => {
+    const { user } = renderWithProviders(<SendComposeModal fromBech32m={FROM} onClose={vi.fn()} />);
+    await user.type(screen.getByLabelText("Recipient typed bech32m address"), TO);
+    await user.type(screen.getByLabelText("Amount in LYTH"), "1.5");
+    await user.click(screen.getByRole("button", { name: "Review" }));
+    await waitFor(() => expect(cap.descriptor).toBeDefined());
+    const d = cap.descriptor!;
+
+    expect(row(d, "Amount").v).toBe("1.5 LYTH");
+    for (const k of ["Amount", "Fee (Normal)", "Total (amount + fee)"]) {
+      expect(row(d, k).v).not.toMatch(FIAT_GLYPHS);
+      expect(row(d, k).v).not.toContain("≈");
+    }
+  });
+
+  it("token: the LYTH fee row carries it, the token Amount row does NOT", async () => {
+    const { user } = renderWithProviders(
+      <SendComposeModal fromBech32m={FROM} token={TOKEN} onClose={vi.fn()} />,
+    );
+    await user.type(screen.getByLabelText("Recipient typed bech32m address"), TO);
+    await user.type(screen.getByLabelText("Amount in USDC"), "1.5");
+    await user.click(screen.getByRole("button", { name: "Review" }));
+    await waitFor(() => expect(cap.descriptor).toBeDefined());
+    const d = cap.descriptor!;
+
+    expect(row(d, "Network fee (max)").fiat).toBe("$—");
+    expect(row(d, "Amount").v).toBe("1.5 USDC");
+    expect(row(d, "Amount").fiat).toBeUndefined();
+  });
+
+  it("the descriptor freezes the currency selected at build time", async () => {
+    localStorage.setItem("wallet.displayCurrency", "EUR");
+    const { user } = renderWithProviders(<SendComposeModal fromBech32m={FROM} onClose={vi.fn()} />);
+    await user.type(screen.getByLabelText("Recipient typed bech32m address"), TO);
+    await user.type(screen.getByLabelText("Amount in LYTH"), "1.5");
+    await user.click(screen.getByRole("button", { name: "Review" }));
+    await waitFor(() => expect(cap.descriptor).toBeDefined());
+
+    expect(row(cap.descriptor!, "Amount").fiat).toBe("€—");
+  });
+});
+
 describe("Send compose — currency reactivity", () => {
   it("every mounted slot follows a currency change in-session", async () => {
     const { user } = renderWithProviders(<SendComposeModal fromBech32m={FROM} onClose={vi.fn()} />);
