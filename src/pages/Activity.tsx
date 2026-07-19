@@ -64,6 +64,7 @@ import {
 } from "../sdk/activity-cache-store";
 import {
   amountUnitLabel,
+  delegationBodyLabel,
   isDelegationKind,
   isZeroAmount,
   notificationTitle,
@@ -832,10 +833,10 @@ function truncCounterparty(s: string): string {
 function pendingRowLabel(tx: PendingTx): string {
   if (isDelegationKind(tx.opKind)) {
     return (
-      tx.clusterName ??
-      (tx.clusterId !== undefined
-        ? `Cluster #${tx.clusterId}`
-        : truncCounterparty(tx.counterparty))
+      delegationBodyLabel(
+        { kind: tx.opKind, ...tx },
+        truncCounterparty(tx.counterparty),
+      ) ?? truncCounterparty(tx.counterparty)
     );
   }
   return tx.counterparty.length > 0
@@ -848,10 +849,8 @@ function pendingRowLabel(tx: PendingTx): string {
 function failedCounterparty(rec: NotificationRecord): string {
   if (isDelegationKind(rec.kind)) {
     return (
-      rec.clusterName ??
-      (rec.clusterId !== undefined
-        ? `Cluster #${rec.clusterId}`
-        : truncCounterparty(rec.counterparty))
+      delegationBodyLabel(rec, truncCounterparty(rec.counterparty)) ??
+      truncCounterparty(rec.counterparty)
     );
   }
   return truncCounterparty(rec.counterparty);

@@ -73,6 +73,9 @@ export async function trackOperationTx(
     counterparty: meta.counterparty,
     clusterId: meta.clusterId,
     clusterName: meta.clusterName,
+    delegationWeightBps: meta.delegationWeightBps,
+    toClusterId: meta.toClusterId,
+    toClusterName: meta.toClusterName,
     // Captured at submit so the reconciler can detect a dropped tx (a later
     // nonce confirmed while this one stayed pending). Absent → time-based only.
     nonce,
@@ -213,6 +216,9 @@ export async function reconcilePendingOnce(
         counterparty: tx.counterparty,
         clusterId: tx.clusterId,
         clusterName: tx.clusterName,
+        delegationWeightBps: tx.delegationWeightBps,
+        toClusterId: tx.toClusterId,
+        toClusterName: tx.toClusterName,
         claimedAmount,
         feeLythoshi,
       });

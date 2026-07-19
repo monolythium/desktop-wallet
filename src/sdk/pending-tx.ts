@@ -56,6 +56,13 @@ export interface PendingTx {
    *  absent on non-delegation txs and on rows written before this field. */
   clusterId?: number;
   clusterName?: string;
+  /** Delegation weight in basis points, captured at submit so the row can name
+   *  the percent. For a redelegate the cluster fields above are the SOURCE and
+   *  the two below the DESTINATION. Optional + additive; display-only — never
+   *  part of the signed calldata. */
+  delegationWeightBps?: number;
+  toClusterId?: number;
+  toClusterName?: string;
   /** In-flight lifecycle, recomputed from `submittedAt` each reconcile tick and
    *  persisted so the feed re-renders the label as it changes. Optional +
    *  backward-compatible: rows written before this field read as `"pending"`. */
@@ -341,6 +348,18 @@ export function asPendingTx(raw: unknown): PendingTx | null {
       ? r.clusterId
       : undefined;
   const clusterName = typeof r.clusterName === "string" ? r.clusterName : undefined;
+  // Additive delegation metadata — each listed explicitly, because a field this
+  // validator does not carry is silently dropped on every store rebuild.
+  const delegationWeightBps =
+    typeof r.delegationWeightBps === "number" && Number.isFinite(r.delegationWeightBps)
+      ? r.delegationWeightBps
+      : undefined;
+  const toClusterId =
+    typeof r.toClusterId === "number" && Number.isFinite(r.toClusterId)
+      ? r.toClusterId
+      : undefined;
+  const toClusterName =
+    typeof r.toClusterName === "string" ? r.toClusterName : undefined;
   const unit = typeof r.unit === "string" && r.unit.length > 0 ? r.unit : undefined;
   const lifecycle = isPendingLifecycle(r.lifecycle) ? r.lifecycle : undefined;
   const confirmedBlockHeight =
@@ -367,6 +386,9 @@ export function asPendingTx(raw: unknown): PendingTx | null {
     counterparty: r.counterparty,
     clusterId,
     clusterName,
+    delegationWeightBps,
+    toClusterId,
+    toClusterName,
     lifecycle,
     confirmedBlockHeight,
     confirmedTxIndex,

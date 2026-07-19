@@ -158,6 +158,11 @@ export interface RecordNotificationInput {
   /** For delegation kinds: the target cluster (optional). */
   clusterId?: number;
   clusterName?: string;
+  /** Delegation weight in bps; for a redelegate the cluster fields above are the
+   *  SOURCE and these two the DESTINATION. All optional. */
+  delegationWeightBps?: number;
+  toClusterId?: number;
+  toClusterName?: string;
   /** For a reward claim: the decoded settled amount (LYTH decimal). Optional. */
   claimedAmount?: string;
   /** The tx's network fee in raw lythoshi, decoded at the confirmed terminal.
@@ -206,6 +211,9 @@ export async function recordNotification(
       counterparty: input.counterparty,
       clusterId: input.clusterId,
       clusterName: input.clusterName,
+      delegationWeightBps: input.delegationWeightBps,
+      toClusterId: input.toClusterId,
+      toClusterName: input.toClusterName,
       claimedAmount: input.claimedAmount,
       feeLythoshi: input.feeLythoshi,
       // Stamp the owning scope so a merged/global read can still attribute the

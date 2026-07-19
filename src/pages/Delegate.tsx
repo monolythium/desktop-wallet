@@ -316,6 +316,7 @@ export function Delegate() {
         counterparty: DELEGATION_PRECOMPILE,
         clusterId,
         clusterName: names.get(clusterId),
+        delegationWeightBps: weightBps,
       },
       execute: async (ctx) => {
         if (!ctx?.vaultSeed) {
@@ -365,6 +366,9 @@ export function Delegate() {
         counterparty: DELEGATION_PRECOMPILE,
         clusterId,
         clusterName: names.get(clusterId),
+        // Undelegate removes the whole row, so the honest percent is the row's
+        // entire existing weight.
+        delegationWeightBps: weightBps,
       },
       execute: async (ctx) => {
         if (!ctx?.vaultSeed) {
@@ -470,8 +474,13 @@ export function Delegate() {
         kind: "redelegate",
         amountDecimal: "0",
         counterparty: DELEGATION_PRECOMPILE,
-        clusterId: toCluster,
-        clusterName: names.get(toCluster),
+        // Source in the cluster fields, destination in the `to` fields, so the
+        // body can render the movement rather than one end of it.
+        clusterId: fromCluster,
+        clusterName: names.get(fromCluster),
+        toClusterId: toCluster,
+        toClusterName: names.get(toCluster),
+        delegationWeightBps: weightBps,
       },
       execute: async (ctx) => {
         if (!ctx?.vaultSeed) {

@@ -100,6 +100,13 @@ export interface OperationNotifyMeta {
    *  name the cluster instead of the bare delegation-module address. Optional. */
   clusterId?: number;
   clusterName?: string;
+  /** Delegation weight in basis points, so the notification body can state the
+   *  percent. For a redelegate the fields above are the SOURCE cluster and the
+   *  two below the DESTINATION. Display metadata only — it never reaches the
+   *  signed calldata, which is built independently in `execute`. */
+  delegationWeightBps?: number;
+  toClusterId?: number;
+  toClusterName?: string;
 }
 
 export interface OperationExecutionContext {

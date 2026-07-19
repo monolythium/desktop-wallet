@@ -105,6 +105,14 @@ export interface NotificationRecord {
    *  backward-compatible — records written before this field simply omit it. */
   clusterId?: number;
   clusterName?: string;
+  /** Delegation weight in basis points, captured at submit so the body can name
+   *  the percent. For a redelegate the cluster fields above are the SOURCE and
+   *  the two below the DESTINATION. All optional + backward-compatible —
+   *  records written before them simply omit them. Display-only: none of these
+   *  ever reach the signed calldata. */
+  delegationWeightBps?: number;
+  toClusterId?: number;
+  toClusterName?: string;
   /** A settled-rewards amount (LYTH decimal) decoded at the confirmed terminal
    *  from the receipt's `Claimed` log (the tx value is 0x0, so the amount lives
    *  in the log, not the value). Written for a `claim` and for a
@@ -278,6 +286,73 @@ export function delegationClusterLabel(record: NotificationRecord): string | nul
   );
 }
 
+/** Character budget for a redelegate's combined `{from} → {to}` label. Past it
+ *  the DESTINATION shows alone: that is the outcome the user cares about, and OS
+ *  toast widths vary by platform with no measurement API to ask. */
+export const REDELEGATE_CLUSTER_BUDGET = 40;
+
+/** A delegation weight as a percent, or null when it isn't a weight we can
+ *  honestly state. Rejects non-integers, zero and out-of-range values rather
+ *  than rendering "0.00%" for an unknown weight — a delegation of zero percent
+ *  is not a thing the user did. Pure. */
+export function delegationPercentLabel(bps: number | undefined): string | null {
+  if (bps === undefined) return null;
+  if (!Number.isInteger(bps) || bps < 1 || bps > 10_000) return null;
+  return `${(bps / 100).toFixed(2)}%`;
+}
+
+/** The delegation metadata a body is assembled from — the shared shape of a
+ *  tracked row and a recorded notification, so both surfaces read identically. */
+export interface DelegationBodyParts {
+  kind: TxOpKind;
+  clusterId?: number;
+  clusterName?: string;
+  toClusterId?: number;
+  toClusterName?: string;
+  delegationWeightBps?: number;
+}
+
+function clusterLabelOf(
+  name: string | undefined,
+  id: number | undefined,
+): string | null {
+  return name ?? (id !== undefined ? `Cluster #${id}` : null);
+}
+
+/** THE delegation body assembler — the single place the cluster and the percent
+ *  are combined, so the OS toast, the in-app row and the failed row can never
+ *  drift apart.
+ *
+ *  `legacyFallback` is the truncated counterparty, used only for records written
+ *  before cluster metadata was captured. Returns null when nothing is known, and
+ *  the caller shows the title alone. Pure. */
+export function delegationBodyLabel(
+  parts: DelegationBodyParts,
+  legacyFallback: string | null = null,
+): string | null {
+  if (!isDelegationKind(parts.kind)) return null;
+  const pct = delegationPercentLabel(parts.delegationWeightBps);
+  const from = clusterLabelOf(parts.clusterName, parts.clusterId);
+
+  let label: string | null;
+  if (parts.kind === "redelegate") {
+    const to = clusterLabelOf(parts.toClusterName, parts.toClusterId);
+    if (from !== null && to !== null) {
+      const combined = `${from} → ${to}`;
+      label = combined.length <= REDELEGATE_CLUSTER_BUDGET ? combined : to;
+    } else {
+      // An unknown destination falls back to the source alone.
+      label = to ?? from;
+    }
+  } else {
+    label = from;
+  }
+  if (label === null) label = legacyFallback;
+
+  if (label !== null && pct !== null) return `${label} · ${pct}`;
+  return label ?? pct;
+}
+
 /** Amount to display for a record: a reward claim's decoded settled amount
  *  ("+<amt> LYTH") when known, else the plain amount ("<amt> LYTH"), else null
  *  for a zero/absent amount (omitted — honest absence). Centralizes the
@@ -349,10 +424,12 @@ export function notificationToast(
     return { title, body: `+${record.claimedAmount} LYTH` };
   }
   // A delegation tx's counterparty is the bare delegation-module precompile;
-  // name the target cluster instead (the same label the in-app row shows),
-  // falling back to the truncated address only when no cluster metadata was
-  // captured (legacy records).
-  const short = delegationClusterLabel(record) ?? shortAddress(record.counterparty);
+  // name the cluster and the weight instead (through the one assembler the
+  // in-app rows use), falling back to the truncated address only when no cluster
+  // metadata was captured (legacy records).
+  const short =
+    delegationBodyLabel(record, shortAddress(record.counterparty)) ??
+    shortAddress(record.counterparty);
   const body = isZeroAmount(record.amountDecimal)
     ? short
     : `${record.amountDecimal} ${amountUnitLabel(record.unit)} · ${short}`;
@@ -416,6 +493,18 @@ function asNotificationRecord(raw: unknown): NotificationRecord | null {
       ? r.clusterId
       : undefined;
   const clusterName = typeof r.clusterName === "string" ? r.clusterName : undefined;
+  // Additive delegation metadata. A field the validator does not explicitly
+  // carry is silently dropped on every store rebuild, so each is listed here.
+  const delegationWeightBps =
+    typeof r.delegationWeightBps === "number" && Number.isFinite(r.delegationWeightBps)
+      ? r.delegationWeightBps
+      : undefined;
+  const toClusterId =
+    typeof r.toClusterId === "number" && Number.isFinite(r.toClusterId)
+      ? r.toClusterId
+      : undefined;
+  const toClusterName =
+    typeof r.toClusterName === "string" ? r.toClusterName : undefined;
   const claimedAmount =
     typeof r.claimedAmount === "string" && r.claimedAmount.length > 0
       ? r.claimedAmount
@@ -437,6 +526,9 @@ function asNotificationRecord(raw: unknown): NotificationRecord | null {
     counterparty: r.counterparty,
     clusterId,
     clusterName,
+    delegationWeightBps,
+    toClusterId,
+    toClusterName,
     claimedAmount,
     feeLythoshi,
     scope,
