@@ -21,6 +21,7 @@ import {
 import { featureLabel } from "./feature-meta";
 import { readDeveloperMode } from "./studio-host";
 import { getProvider } from "./client";
+import { isLive, withChainEnvelope, type ChainOutcome } from "./chain-readiness";
 import { TESTNET_CHAIN_ID, type ProbeResult } from "./peers";
 
 /** The registry network slug the wallet is pinned to. */
@@ -242,12 +243,33 @@ export function runtimeBlockFromProvenance(prov: RuntimeProvenanceResponse): Run
   };
 }
 
+/**
+ * Read the connected node's runtime provenance, inside the readiness envelope.
+ *
+ * The envelope adds a timeout and a typed reason to what was a bare try/catch.
+ * The FIELD MAPPING is untouched — `runtimeBlockFromProvenance` stays the one
+ * shared mapper for both this card and the Operators screen's per-operator
+ * provenance, and it is applied here only on the `live` branch.
+ *
+ * `not-deployed` is the right classification for a thrown error: a node that
+ * lacks `lyth_runtimeProvenance` is a chain gap, not an outage. A timeout still
+ * reports `offline`, by the envelope's own rule.
+ */
+export async function loadRuntimeOutcome(): Promise<ChainOutcome<RuntimeBlock>> {
+  const out = await withChainEnvelope(
+    () => getProvider().rpcClient.lythRuntimeProvenance(),
+    { label: "lyth_runtimeProvenance", notLiveAs: "not-deployed", timeoutMs: 8000 },
+  );
+  if (!isLive(out)) return out;
+  return { ...out, data: runtimeBlockFromProvenance(out.data) };
+}
+
 /** Read the connected node's runtime provenance. Returns null on any failure or
- *  on a node that lacks the method — the caller renders an honest absence. */
+ *  on a node that lacks the method — the caller renders an honest absence.
+ *
+ *  Kept as the narrow accessor for callers that only need "did it answer";
+ *  `loadRuntimeOutcome` is the typed form new consumers should adopt. */
 export async function loadRuntimeBlock(): Promise<RuntimeBlock | null> {
-  try {
-    return runtimeBlockFromProvenance(await getProvider().rpcClient.lythRuntimeProvenance());
-  } catch {
-    return null;
-  }
+  const out = await loadRuntimeOutcome();
+  return isLive(out) ? out.data : null;
 }
