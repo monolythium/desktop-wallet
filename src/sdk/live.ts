@@ -26,6 +26,7 @@ import { requireTypedUserAddress, requireTypedUserAddressHex } from "./address";
 import { selectNativeSpotMarket, type SelectedNativeSpotMarket } from "./market";
 import { walletFetch } from "./http";
 import {
+  earliestRetainedFrom,
   normaliseActivityCoverageKind,
   type ActivityCoverageKind,
 } from "./activity-coverage";
@@ -462,14 +463,27 @@ export function toActivityBaseRow(raw: unknown): LiveAddressActivityRow | null {
  *  empty state. */
 export async function loadAddressActivityKind(
   wallet: string,
-): Promise<ActivityCoverageKind> {
+): Promise<ActivityCoverage> {
   try {
     const typedWallet = requireTypedUserAddress(wallet, "wallet");
-    const res = await getProvider().rpcClient.lythAddressActivityKind(typedWallet);
-    return normaliseActivityCoverageKind(res.kind);
+    const res = (await getProvider().rpcClient.lythAddressActivityKind(
+      typedWallet,
+    )) as unknown as { kind?: unknown };
+    return {
+      kind: normaliseActivityCoverageKind(res.kind as string),
+      earliestRetained: earliestRetainedFrom(res),
+    };
   } catch {
-    return "not_found";
+    // Fail-safe: never alarm on a probe failure.
+    return { kind: "not_found", earliestRetained: null };
   }
+}
+
+/** The coverage probe's answer: why the feed is empty, plus the retention floor
+ *  when the indexer reports one. */
+export interface ActivityCoverage {
+  kind: ActivityCoverageKind;
+  earliestRetained: string | null;
 }
 
 /** Read a block's header timestamp + ordered tx-hash array via the raw

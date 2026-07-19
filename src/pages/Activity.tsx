@@ -28,13 +28,14 @@ import {
 import {
   loadAddressActivityKind,
   loadLiveActivityPage,
+  type ActivityCoverage,
   loadOlderActivityPage,
   type LiveAddressActivityRow,
   type RpcOutcome,
 } from "../sdk/live";
 import {
   emptyActivityCopy,
-  type ActivityCoverageKind,
+  prunedRetentionLine,
 } from "../sdk/activity-coverage";
 import {
   activityCacheKey,
@@ -78,7 +79,7 @@ export function Activity() {
   const [failed, setFailed] = useState<NotificationRecord[]>([]);
   // Indexer coverage for the empty-feed message — only probed (and only used)
   // when the confirmed feed comes back empty, so the user learns WHY it's empty.
-  const [coverage, setCoverage] = useState<ActivityCoverageKind | null>(null);
+  const [coverage, setCoverage] = useState<ActivityCoverage | null>(null);
   const [busy, setBusy] = useState(false);
   // Two detail modals: ActivityDetail for pending/confirmed rows, and the
   // shared NotificationDetail for a failed record (it has the right shape).
@@ -578,11 +579,21 @@ export function Activity() {
                       title: "No matching activity",
                       body: "No rows match the current filter. Clear it to see every transaction for this address.",
                     }
-                  : emptyActivityCopy(coverage ?? "not_found");
+                  : emptyActivityCopy(coverage?.kind ?? "not_found");
+                // Only the pruned kind with a KNOWN floor gets a third line —
+                // a fabricated block number here would read as a specific
+                // claim about what the indexer still holds.
+                const retention = filtersActive
+                  ? null
+                  : prunedRetentionLine(
+                      coverage?.kind ?? "not_found",
+                      coverage?.earliestRetained ?? null,
+                    );
                 return (
                   <>
                     <h4>{copy.title}</h4>
                     <p>{copy.body}</p>
+                    {retention ? <p>{retention}</p> : null}
                   </>
                 );
               })()}

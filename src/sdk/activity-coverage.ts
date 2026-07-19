@@ -66,3 +66,41 @@ export function emptyActivityCopy(kind: ActivityCoverageKind): {
       };
   }
 }
+
+/**
+ * The pruned empty state's optional third line.
+ *
+ * Renders ONLY for the `pruned` kind with a known retention floor. A null value
+ * renders nothing — an honest absence, never a fabricated block number, which
+ * on this surface would read as a specific claim about what the indexer still
+ * holds. Pure.
+ */
+export function prunedRetentionLine(
+  kind: ActivityCoverageKind,
+  earliestRetained: string | null,
+): string | null {
+  if (kind !== "pruned") return null;
+  if (earliestRetained === null || earliestRetained.trim() === "") return null;
+  return `Showing activity from block ${earliestRetained.trim()} onward.`;
+}
+
+/**
+ * Tolerant coercion of the probe envelope's retention floor to a decimal string.
+ * String / number / bigint are accepted; absent, malformed, or a null retention
+ * yields null — the line is then simply omitted. Pure.
+ */
+export function earliestRetainedFrom(raw: unknown): string | null {
+  if (!raw || typeof raw !== "object") return null;
+  const retention = (raw as Record<string, unknown>).retention;
+  if (!retention || typeof retention !== "object") return null;
+  const value = (retention as Record<string, unknown>).earliestRetained;
+  if (typeof value === "bigint") return value >= 0n ? value.toString() : null;
+  if (typeof value === "number") {
+    return Number.isInteger(value) && value >= 0 ? String(value) : null;
+  }
+  if (typeof value === "string") {
+    const t = value.trim();
+    return /^[0-9]+$/.test(t) ? t : null;
+  }
+  return null;
+}
