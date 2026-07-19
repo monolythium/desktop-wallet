@@ -33,7 +33,7 @@ import {
 } from "../sdk/vaultCatalog";
 import { notifyActiveWalletChanged } from "../sdk/active-wallet";
 import { PasswordStrengthMeter } from "./PasswordStrengthMeter";
-import { isPasswordValid, getPasswordStrength } from "../lib/password-validation";
+import { isPasswordValid } from "../lib/password-validation";
 
 interface Props {
   onClose: () => void;
@@ -66,11 +66,11 @@ export function AddVaultModal({ onClose, onAdded }: Props) {
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose, busy]);
 
+  // The one binding gate — the strength meter is visual and blocks nothing.
   const canSubmit =
     !busy &&
     name.trim().length > 0 &&
     isPasswordValid(password) &&
-    getPasswordStrength(password) !== "weak" &&
     password === confirm &&
     (mode === "create" || importDraft.trim().length > 0);
 
@@ -300,7 +300,7 @@ export function AddVaultModal({ onClose, onAdded }: Props) {
               autoComplete="new-password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="At least 12 characters"
+              placeholder="At least 15 characters"
               style={inputStyle}
             />
 

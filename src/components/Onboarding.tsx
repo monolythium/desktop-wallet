@@ -30,7 +30,7 @@ import { VerifyPhrase } from "./VerifyPhrase";
 import { WalletLogo } from "./WalletLogo";
 import { PreferencesPanel } from "./PreferencesPanel";
 import { PasswordStrengthMeter } from "./PasswordStrengthMeter";
-import { isPasswordValid, getPasswordStrength } from "../lib/password-validation";
+import { isPasswordValid } from "../lib/password-validation";
 
 interface Props {
   onDone: () => void;
@@ -57,12 +57,10 @@ export function Onboarding({ onDone }: Props) {
   const [importDraft, setImportDraft] = useState("");
   const [importError, setImportError] = useState<string | null>(null);
 
+  // The one binding gate. The strength meter is visual and blocks nothing —
+  // a band conjunct here would be a second policy hidden behind a progress bar.
   const canSubmit =
-    !busy &&
-    isPasswordValid(password) &&
-    getPasswordStrength(password) !== "weak" &&
-    password === confirm &&
-    acknowledged;
+    !busy && isPasswordValid(password) && password === confirm && acknowledged;
 
   const importWordCount = useMemo(
     () => importDraft.trim().split(/\s+/).filter(Boolean).length,
@@ -388,8 +386,8 @@ export function Onboarding({ onDone }: Props) {
             <p style={{ margin: "0 0 24px", color: "var(--w-text-2)", fontSize: 13 }}>
               The password unwraps a signing key encrypted with Argon2id and
               XChaCha20-Poly1305. We never store the password itself, only the
-              encrypted vault. Use at least 12 characters with a mix of upper
-              and lower case, a number, and a symbol.
+              encrypted vault. Use at least 15 characters — there are no other
+              composition rules.
             </p>
 
             <label className="w-onboarding__field">
