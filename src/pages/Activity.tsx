@@ -45,6 +45,13 @@ import {
   mergeConfirmedRows,
 } from "../sdk/activity-cache";
 import { isNativeLythTokenId, tokenUnitLabel } from "../sdk/lyth-display";
+import { IndexerBanner } from "../components/IndexerBanner";
+import {
+  INDEXER_STATUS_POLL_MS,
+  loadIndexerStatus,
+  QUIET_INDEXER_STATUS,
+  type IndexerStatusView,
+} from "../sdk/indexer-status";
 import {
   loadTxFeedFallback,
   txFeedFallbackEnabled,
@@ -209,6 +216,35 @@ export function Activity() {
     setFallbackRanForScope(null);
     setFallbackPending(false);
   }, [activeScopeKey]);
+
+  // ── Indexer status ────────────────────────────────────────────────────────
+  // Visible-gated 30 s poll. The session method gate lives in the module and is
+  // keyed by the same scope key, so a chain switch asks the new chain's
+  // operators afresh (G4). The banner component is remounted per scope via its
+  // key, which also clears per-class dismissals for the new scope.
+  const [indexerView, setIndexerView] = useState<IndexerStatusView>(QUIET_INDEXER_STATUS);
+
+  useEffect(() => {
+    if (!walletAddress) return;
+    let cancelled = false;
+    const probe = () => {
+      if (document.visibilityState !== "visible") return;
+      void loadIndexerStatus(activeScopeKey).then((view) => {
+        if (!cancelled) setIndexerView(view);
+      });
+    };
+    probe(); // immediate on mount
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") probe();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    const interval = setInterval(probe, INDEXER_STATUS_POLL_MS);
+    return () => {
+      cancelled = true;
+      document.removeEventListener("visibilitychange", onVisibility);
+      clearInterval(interval);
+    };
+  }, [walletAddress, activeScopeKey]);
 
   // Fallback rows render ONLY while there are no real confirmed rows. The
   // moment indexed rows arrive the predicate stops holding and they replace it.
@@ -473,6 +509,10 @@ export function Activity() {
           {activity?.ok === false ? (
             <div className="w-live-error">address activity: {activity.error}</div>
           ) : null}
+          {/* Advisory only — never blocks the feed. Keyed by scope so a chain
+              switch starts with a clean set of per-class dismissals. */}
+          <IndexerBanner key={activeScopeKey} view={indexerView} />
+
           {/* LOAD-BEARING, not decoration: this view shows only native
               transfers, so without a line naming what is absent it would
               silently assert that no delegations ever happened. It renders
