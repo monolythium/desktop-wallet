@@ -27,7 +27,16 @@ const SHIPPED: { rel: string; source: string }[] = Object.entries(RAW)
  *  sanctioned read path for every consumer is the `useDisplayCurrency()` hook,
  *  which is deliberately NOT on this list — a slot reading the hook is fine; a
  *  slot reaching past it into localStorage is not. */
-const ACCESSOR_ALLOWED = ["sdk/display-prefs.ts", "components/PreferencesPanel.tsx"];
+const ACCESSOR_ALLOWED = [
+  "sdk/display-prefs.ts",
+  "components/PreferencesPanel.tsx",
+  // Phase 12's reset sweep. It names the currency and language STORAGE KEYS to
+  // EXEMPT them from deletion — the opposite of consuming the preference. It
+  // never reads a value, so it cannot render an invented figure, which is the
+  // harm P2 exists to prevent. Listed rather than loosening the pattern: the
+  // regex still catches any real consumer.
+  "sdk/wipe-local-state.ts",
+];
 
 /** Modules permitted to read the ISO-4217 table. Phase 07 added the fiat layer:
  *  the formatter resolves per-currency precision as Intl → this table → 2, so it
@@ -56,6 +65,14 @@ describe("P2 — the display-currency preference is read only through sanctioned
       .filter(({ source }) => /ISO_4217_CURRENCIES/.test(source))
       .map(({ rel }) => rel);
     expect(offenders).toEqual([]);
+  });
+
+  it("the allowlisted wipe names keys but reads no VALUE", () => {
+    // The allowlist entry buys exemption from the regex, not from the law. If
+    // the wipe ever starts reading a preference, this catches it.
+    const wipe = SHIPPED.find(({ rel }) => rel === "sdk/wipe-local-state.ts");
+    expect(wipe, "the wipe module must exist to be checked").toBeDefined();
+    expect(wipe!.source).not.toMatch(/readDisplayCurrency|saveDisplayCurrency/);
   });
 
   it("the guard still FAILS for an unlisted consumer (the detector works)", () => {

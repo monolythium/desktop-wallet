@@ -28,6 +28,19 @@
 // failing store must not stop the others, and must not stop the reload.
 
 import { Store } from "@tauri-apps/plugin-store";
+// The survivor keys are imported from their owning modules, never restated: a
+// renamed key must not silently start being wiped. NOTE these are key NAMES —
+// nothing here reads a preference VALUE, which is what the stored-only law
+// protects.
+import {
+  DISPLAY_CURRENCY_STORAGE_KEY,
+  LANGUAGE_STORAGE_KEY,
+} from "./display-prefs";
+import {
+  LAYOUT_STORAGE_KEY,
+  SIDEBAR_STORAGE_KEY,
+  THEME_STORAGE_KEY,
+} from "./theme";
 import { STORE_FILE as ACTIVITY_STORE } from "./activity-cache-store";
 import { STORE_FILE as ADDRESSBOOK_STORE } from "./addressbook";
 import { STORE_FILE as AGENTS_STORE } from "./agent-registry";
@@ -55,11 +68,11 @@ export const WALLET_KEY_PREFIX = "wallet.";
  * user would notice only by finding the app back in the wrong language.
  */
 export const WIPE_EXCEPT_KEYS: readonly string[] = [
-  "wallet.theme",
-  "wallet.layout",
-  "wallet.sidebarCollapsed",
-  "wallet.language",
-  "wallet.displayCurrency",
+  THEME_STORAGE_KEY,
+  LAYOUT_STORAGE_KEY,
+  SIDEBAR_STORAGE_KEY,
+  LANGUAGE_STORAGE_KEY,
+  DISPLAY_CURRENCY_STORAGE_KEY,
 ];
 
 /**
