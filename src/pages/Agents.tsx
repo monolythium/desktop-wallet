@@ -178,6 +178,10 @@ export function Agents() {
    *  principal resolved). Replaces a window.alert. */
   const [pageError, setPageError] = useState<string | null>(null);
 
+  /** The agent whose Forget is awaiting confirmation. Two-step inline, the
+   *  wallet's own pattern — never a native confirm. */
+  const [forgetting, setForgetting] = useState<AgentEntry | null>(null);
+
   const refresh = async () => {
     setBusy(true);
     try {
@@ -584,11 +588,12 @@ export function Agents() {
     });
   };
 
+  /** Two-step in-app confirm. Destructive to local state only — the on-chain
+   *  policy survives, which is exactly why the consequence copy has to be
+   *  read rather than clicked past. */
   const onForget = async (agent: AgentEntry) => {
-    const ok = window.confirm(
-      `Forget ${agent.label} from this device? The on-chain policy is NOT revoked — use Revoke first if you want to disable spend. The agent vault stays in the keychain.`,
-    );
-    if (!ok) return;
+    if (forgetting?.slot !== agent.slot) return;
+    setForgetting(null);
     await removeAgent(agent.slot);
     await refresh();
   };
@@ -781,6 +786,17 @@ export function Agents() {
                     ) : (
                       <div className="row-help">loading policy…</div>
                     )}
+                    {/* The confirm's entire content was this sentence, so it
+                        stays visible while the confirm is pending. A user who
+                        forgets an agent without revoking leaves a live on-chain
+                        spend allowance behind — the one thing they must read. */}
+                    {forgetting?.slot === agent.slot ? (
+                      <div className="w-warn-prominent">
+                        Forget {agent.label} from this device? The on-chain policy is
+                        NOT revoked — use Revoke first if you want to disable spend.
+                        The agent vault stays in the keychain.
+                      </div>
+                    ) : null}
                   </div>
                   <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
                     <button className="btn btn--sm" onClick={() => openFund(agent)}>
@@ -808,13 +824,31 @@ export function Agents() {
                         Enable
                       </button>
                     ) : null}
-                    <button
-                      className="btn btn--sm btn--ghost"
-                      onClick={() => void onForget(agent)}
-                      title="Remove from this device (does not revoke on-chain)"
-                    >
-                      Forget
-                    </button>
+                    {forgetting?.slot === agent.slot ? (
+                      <>
+                        <button
+                          className="btn btn--sm"
+                          onClick={() => setForgetting(null)}
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          className="btn btn--sm"
+                          style={{ color: "var(--err)", borderColor: "var(--err)" }}
+                          onClick={() => void onForget(agent)}
+                        >
+                          Confirm forget
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        className="btn btn--sm btn--ghost"
+                        onClick={() => setForgetting(agent)}
+                        title="Remove from this device (does not revoke on-chain)"
+                      >
+                        Forget
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
@@ -877,7 +911,7 @@ export function Agents() {
                 </span>
                 <PasswordInput
                   autoComplete="current-password"
-                  aria-label="Agent vault password"
+                  ariaLabel="Agent vault password"
                   value={policyForm.input.agentPassword}
                   onChange={(v) =>
                     setPolicyForm({
