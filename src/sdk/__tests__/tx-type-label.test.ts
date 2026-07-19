@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { txTypeLabelForActivity, txTypeLabelForOpKind } from "../tx-type-label";
+import { NOTIFICATION_LABELS, type TxOpKind } from "../notifications";
 
 describe("txTypeLabelForOpKind", () => {
   it("maps every operation kind to a neutral type-noun", () => {
@@ -9,9 +10,20 @@ describe("txTypeLabelForOpKind", () => {
     expect(txTypeLabelForOpKind("undelegate")).toBe("Undelegate");
     expect(txTypeLabelForOpKind("redelegate")).toBe("Redelegate");
     expect(txTypeLabelForOpKind("claim")).toBe("Claim rewards");
+    expect(txTypeLabelForOpKind("set-auto-compound")).toBe("Auto-compound");
     expect(txTypeLabelForOpKind("emergency-key")).toBe("Backup key");
     expect(txTypeLabelForOpKind("agent-policy")).toBe("Agent policy");
     expect(txTypeLabelForOpKind("contract_call")).toBe("Contract call");
+  });
+
+  it("gives EVERY kind its own noun — none falls through to a transfer", () => {
+    // The gap this closes: set-auto-compound used to have no case, so its meta
+    // line read "Outgoing transfer" while its title said the preference changed.
+    const kinds = Object.keys(NOTIFICATION_LABELS) as TxOpKind[];
+    const transferNouns = kinds.filter(
+      (k) => txTypeLabelForOpKind(k) === "Outgoing transfer",
+    );
+    expect(transferNouns).toEqual(["send"]);
   });
 });
 

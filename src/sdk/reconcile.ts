@@ -182,10 +182,16 @@ export async function reconcilePendingOnce(
       if (verdict.kind === "pending") continue;
       // A confirmed reward claim carries its settled amount in the receipt's
       // Claimed log (the tx value is 0x0); decode it so the record shows the
-      // real "+<amount> LYTH". Best-effort — null falls back to the submit-time
-      // claimable amount. Only for confirmed claims (no log on a failed claim).
+      // real "+<amount> LYTH". Null stays undefined — the surfaces then show the
+      // bare title rather than the submit-time claimable, which is a different
+      // quantity measured at a different moment.
+      //
+      // Enabling auto-compound with pending rewards settles them in the same tx,
+      // so that kind emits a Claimed log too and is decoded the same way. A
+      // failed tx emits no log, so only confirmed verdicts are decoded.
       const claimedAmount =
-        verdict.kind === "confirmed" && tx.opKind === "claim"
+        verdict.kind === "confirmed" &&
+        (tx.opKind === "claim" || tx.opKind === "set-auto-compound")
           ? ((await decodeClaimedAmount(tx.txHash)) ?? undefined)
           : undefined;
       // The network fee for any confirmed tx, decoded from lyth_decodeTx.

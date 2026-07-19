@@ -51,6 +51,7 @@ export type TxOpKind =
   | "undelegate"
   | "redelegate"
   | "claim"
+  | "set-auto-compound"
   | "emergency-key"
   | "agent-policy"
   | "contract_call";
@@ -65,6 +66,7 @@ export function isTxOpKind(v: unknown): v is TxOpKind {
     v === "undelegate" ||
     v === "redelegate" ||
     v === "claim" ||
+    v === "set-auto-compound" ||
     v === "emergency-key" ||
     v === "agent-policy" ||
     v === "contract_call"
@@ -103,11 +105,11 @@ export interface NotificationRecord {
    *  backward-compatible — records written before this field simply omit it. */
   clusterId?: number;
   clusterName?: string;
-  /** A reward claim's decoded settled amount (LYTH decimal), captured at the
-   *  confirmed terminal from the receipt's `Claimed` log (the tx value is 0x0,
-   *  so the amount lives in the log, not the value). Claim-only; optional +
-   *  legacy-safe — an absent record or an undecodable log falls back to the
-   *  claimable amount shown at submit. */
+  /** A settled-rewards amount (LYTH decimal) decoded at the confirmed terminal
+   *  from the receipt's `Claimed` log (the tx value is 0x0, so the amount lives
+   *  in the log, not the value). Written for a `claim` and for a
+   *  `set-auto-compound` that settled pending rewards in the same tx. Optional +
+   *  legacy-safe; an undecodable log leaves it absent. */
   claimedAmount?: string;
   /** The tx's network fee in raw lythoshi, decoded from `lyth_decodeTx` at the
    *  confirmed terminal. Optional + legacy-safe — an absent record or an
@@ -239,6 +241,10 @@ export const NOTIFICATION_LABELS: Record<
   undelegate: { confirmed: "Undelegated", failed: "Undelegate failed" },
   redelegate: { confirmed: "Redelegated", failed: "Redelegate failed" },
   claim: { confirmed: "Rewards claimed", failed: "Claim failed" },
+  "set-auto-compound": {
+    confirmed: "Auto-compound updated",
+    failed: "Auto-compound update failed",
+  },
   "emergency-key": {
     confirmed: "Backup key registered",
     failed: "Backup registration failed",
@@ -277,12 +283,11 @@ export function delegationClusterLabel(record: NotificationRecord): string | nul
  *  for a zero/absent amount (omitted — honest absence). Centralizes the
  *  claim-amount rule the toast, the in-app row, and the detail all use. */
 export function notificationAmountLabel(record: NotificationRecord): string | null {
-  if (
-    record.kind === "claim" &&
-    record.claimedAmount &&
-    !isZeroAmount(record.claimedAmount)
-  ) {
-    // Reward claims settle in native LYTH.
+  // Keyed on the FIELD, not the kind: enabling auto-compound with pending
+  // rewards settles them in the same tx and emits the same Claimed log, so any
+  // record carrying a decoded settled amount shows it.
+  if (record.claimedAmount && !isZeroAmount(record.claimedAmount)) {
+    // Settled rewards are paid in native LYTH.
     return `+${record.claimedAmount} LYTH`;
   }
   return isZeroAmount(record.amountDecimal)
@@ -337,13 +342,10 @@ export function notificationToast(
   // the action is surfaced on the OS toast. The in-app record keeps full detail.
   if (!includeDetails) return { title: REDACTED_TOAST_TITLE, body: "" };
   const title = notificationTitle(record.kind, record.status);
-  // A reward claim's tx value is 0x0; its settled amount lives in the Claimed
-  // log, decoded into `claimedAmount`. Show "+<amount> LYTH" when known.
-  if (
-    record.kind === "claim" &&
-    record.claimedAmount &&
-    !isZeroAmount(record.claimedAmount)
-  ) {
+  // A settling tx's value is 0x0; the settled amount lives in the Claimed log,
+  // decoded into `claimedAmount`. Keyed on the field so an auto-compound that
+  // settled pending rewards shows its figure too.
+  if (record.claimedAmount && !isZeroAmount(record.claimedAmount)) {
     return { title, body: `+${record.claimedAmount} LYTH` };
   }
   // A delegation tx's counterparty is the bare delegation-module precompile;
@@ -369,6 +371,7 @@ export const PENDING_OP_LABELS: Record<TxOpKind, string> = {
   undelegate: "Undelegating…",
   redelegate: "Redelegating…",
   claim: "Claiming rewards…",
+  "set-auto-compound": "Updating auto-compound…",
   "emergency-key": "Registering backup key…",
   "agent-policy": "Updating agent policy…",
   contract_call: "Submitting transaction…",

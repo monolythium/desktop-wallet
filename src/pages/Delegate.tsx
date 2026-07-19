@@ -551,9 +551,9 @@ export function Delegate() {
         },
       ],
       notify: {
-        // No dedicated auto-compound op kind in TxOpKind — it is a delegation
-        // precompile call, so it records as a generic contract call.
-        kind: "contract_call",
+        // Metadata only — the signed setAutoCompound(bool) calldata is
+        // unchanged by how the notification is classified.
+        kind: "set-auto-compound",
         amountDecimal: "0",
         counterparty: DELEGATION_PRECOMPILE,
       },

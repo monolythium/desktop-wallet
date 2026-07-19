@@ -22,6 +22,11 @@ export function txTypeLabelForOpKind(kind: TxOpKind): string {
       return "Redelegate";
     case "claim":
       return "Claim rewards";
+    case "set-auto-compound":
+      // Its own noun: this kind used to fall through to "Outgoing transfer",
+      // which described the meta line as a transfer while the title said the
+      // auto-compound preference had changed.
+      return "Auto-compound";
     case "emergency-key":
       return "Backup key";
     case "agent-policy":
