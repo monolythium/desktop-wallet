@@ -26,7 +26,7 @@
 //   - Honest absence: a tx that never reaches a terminal state inside its
 //     tracking window is dropped silently — no record.
 
-import type { TxOpKind } from "./notifications";
+import { isTxOpKind, type TxOpKind } from "./notifications";
 
 /** One tracked transaction the wallet is following to a terminal state.
  *  Persisted by `pending-tx-store.ts`. No secrets — only the canonical hash,
@@ -326,7 +326,11 @@ export function asPendingTx(raw: unknown): PendingTx | null {
   if (typeof r.txHash !== "string") return null;
   if (typeof r.chainIdHex !== "string") return null;
   if (typeof r.addressLower !== "string") return null;
-  if (typeof r.opKind !== "string") return null;
+  // Must be a KNOWN kind, not merely a string: the label tables are keyed by
+  // this literal, so an unrecognised one (a downgraded build's blob, a corrupted
+  // file) would index to undefined and throw while rendering the row. Drop the
+  // row instead — the store heals on the next write.
+  if (!isTxOpKind(r.opKind)) return null;
   if (typeof r.amountDecimal !== "string") return null;
   if (typeof r.counterparty !== "string") return null;
   if (typeof r.submittedAt !== "number" || !Number.isFinite(r.submittedAt)) {
@@ -357,7 +361,7 @@ export function asPendingTx(raw: unknown): PendingTx | null {
     txHash: r.txHash,
     chainIdHex: r.chainIdHex,
     addressLower: r.addressLower,
-    opKind: r.opKind as TxOpKind,
+    opKind: r.opKind,
     amountDecimal: r.amountDecimal,
     unit,
     counterparty: r.counterparty,
