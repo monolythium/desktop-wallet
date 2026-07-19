@@ -180,3 +180,22 @@ export function delegateCapWarning(args: {
 
   return { note, warning: null };
 }
+
+/**
+ * Does this cap state deserve the LOUD warning box?
+ *
+ * The escalation predicate, exported and pure so the boundary is a tested fact
+ * rather than a JSX condition. The rule: the always-on limit NOTE stays quiet;
+ * only an actual boundary — already at the per-cluster cap, over it, or past
+ * the wallet's 100% total — escalates.
+ *
+ * Alarm fatigue is the failure this prevents. A warning shape the user sees on
+ * every visit stops registering, and it is the same shape that has to carry
+ * "this is as far as you can go" when it matters.
+ *
+ * NOTE: escalation is presentational. It never gates — the blocking decision
+ * belongs to the preflight verdict, which is unchanged.
+ */
+export function capWarningEscalates(state: { warning: string | null }): boolean {
+  return state.warning !== null;
+}

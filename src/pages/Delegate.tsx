@@ -1768,13 +1768,16 @@ export function Delegate() {
                       no tokens are escrowed. Your LYTH stays in your wallet and
                       remains spendable; effective weight = balance × weightBps.
                     </div>
+                    {/* ALWAYS ON — stays quiet. A limit note that shouted every
+                        time the form opened would train the eye to skip that
+                        shape, and the shape is the one the boundary warning
+                        below needs to borrow. */}
                     <div className="row-help" style={{ lineHeight: 1.5 }}>
                       {capState.note}
                     </div>
+                    {/* EARNED escalation — only at or over the cap. */}
                     {capState.warning && (
-                      <div className="row-help" style={{ color: "var(--warn)", lineHeight: 1.5 }}>
-                        {capState.warning}
-                      </div>
+                      <div className="w-warn-prominent">{capState.warning}</div>
                     )}
                     {draftError && (
                       <div className="row-help" style={{ color: "var(--err)" }}>
