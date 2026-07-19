@@ -55,6 +55,12 @@ import {
   removeAgent,
   type AgentEntry,
 } from "../sdk/agent-registry";
+import {
+  FUND_DEFAULT_AMOUNT,
+  balanceCheckFailedMessage,
+  insufficientBalanceMessage,
+  validateFundAmount,
+} from "../sdk/agent-forms";
 
 const PRECOMPILE_LABEL = "0x…110c";
 
@@ -123,6 +129,18 @@ export function Agents() {
   // does the operation route through the drawer. `isUpdate` picks the
   // no-claim setPolicy path (existing policy) over setPolicyClaim (fresh).
   const [review, setReview] = useState<PolicyReviewState | null>(null);
+
+  // In-app funding form. Replaces a window.prompt + two window.alerts + a
+  // window.confirm. `unverified` holds the balance-read-failed question: when
+  // set, funding requires a second, deliberate click — the in-app form of the
+  // old confirm, never inferred from the first one.
+  const [fund, setFund] = useState<{
+    agent: AgentEntry;
+    amount: string;
+    error: string | null;
+    unverified: string | null;
+    busy: boolean;
+  } | null>(null);
 
   const refresh = async () => {
     setBusy(true);
@@ -207,53 +225,64 @@ export function Agents() {
     }
   };
 
-  const openFund = async (agent: AgentEntry) => {
-    let amountLyth = "10";
-    // The amount prompt is intentionally minimal: a window.prompt keeps the
-    // funding flow one tap; the OperationsDrawer is the real confirmation.
-    const entered = window.prompt(
-      `Fund ${agent.label} — amount in LYTH to transfer from the principal`,
-      amountLyth,
-    );
-    if (entered === null) return;
-    amountLyth = entered.trim();
-    let amountLythoshi: bigint;
-    try {
-      amountLythoshi = parseLythToLythoshi(amountLyth);
-    } catch {
-      window.alert("Enter a valid LYTH amount.");
+  /** Open the in-app funding form. Nothing is validated or read yet — the
+   *  form is input capture, exactly as the prompt was. */
+  const openFund = (agent: AgentEntry) => {
+    setFund({ agent, amount: FUND_DEFAULT_AMOUNT, error: null, unverified: null, busy: false });
+  };
+
+  /**
+   * Validate and, if it passes, hand off to the drawer.
+   *
+   * Same checks, same order, same wording as the prompt chain — they live in
+   * `validateFundAmount` now so the conversion has something to be measured
+   * against. `acceptUnverified` is the in-app form of the old
+   * "Continue anyway?" confirm: it is set only by an explicit second click,
+   * never inferred.
+   */
+  const submitFund = async (acceptUnverified: boolean) => {
+    if (fund === null) return;
+    const { agent } = fund;
+
+    const verdict = validateFundAmount(fund.amount);
+    if (!verdict.ok) {
+      setFund({ ...fund, error: verdict.error, unverified: null });
       return;
     }
-    if (amountLythoshi <= 0n) {
-      window.alert("Enter a positive LYTH amount.");
-      return;
-    }
+    const { amountLyth, amountLythoshi } = verdict;
 
     // Sufficiency check BEFORE opening the drawer: read the principal's live
     // native balance and refuse to open an execute that the chain would reject
     // for insufficient funds. A balance-read failure (RPC offline) only warns
     // — we don't block the user from trying, since the drawer surfaces the
     // real on-chain error verbatim either way.
-    if (principalBech32m) {
+    if (principalBech32m && !acceptUnverified) {
+      setFund({ ...fund, busy: true, error: null, unverified: null });
       try {
         const bal = await loadLiveWalletBalance(principalBech32m);
         const have = BigInt(bal.balanceLythoshi);
         if (have < amountLythoshi) {
-          window.alert(
-            `Insufficient balance. The principal holds ${bal.balanceLyth} LYTH ` +
-              `but ${amountLyth} LYTH is needed (plus fees). Fund the principal first.`,
-          );
+          setFund({
+            ...fund,
+            busy: false,
+            error: insufficientBalanceMessage(bal.balanceLyth, amountLyth),
+            unverified: null,
+          });
           return;
         }
       } catch (cause) {
-        const proceed = window.confirm(
-          `Could not check the principal's balance (${errorMessage(cause)}). ` +
-            `Continue anyway? The transaction will fail on-chain if funds are short.`,
-        );
-        if (!proceed) return;
+        // Ask, don't refuse — and require a deliberate second action.
+        setFund({
+          ...fund,
+          busy: false,
+          error: null,
+          unverified: balanceCheckFailedMessage(errorMessage(cause)),
+        });
+        return;
       }
     }
 
+    setFund(null);
     ops.open({
       title: `Fund ${agent.label}`,
       subtitle: `Transfer ${amountLyth} LYTH to the agent sub-account`,
@@ -684,7 +713,7 @@ export function Agents() {
                     )}
                   </div>
                   <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
-                    <button className="btn btn--sm" onClick={() => void openFund(agent)}>
+                    <button className="btn btn--sm" onClick={() => openFund(agent)}>
                       Fund
                     </button>
                     <button
@@ -729,6 +758,72 @@ export function Agents() {
           </div>
         </div>
       </div>
+
+      {fund ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={`Fund ${fund.agent.label}`}
+          className="w-card"
+          style={{ position: "fixed", inset: "auto 24px 24px auto", maxWidth: 420, zIndex: 30 }}
+        >
+          <div className="w-card__head">
+            <h3>Fund {fund.agent.label}</h3>
+          </div>
+          <div className="w-card__body">
+            <label className="row-help" htmlFor="fund-amount">
+              Amount in LYTH to transfer from the principal
+            </label>
+            <input
+              id="fund-amount"
+              type="text"
+              inputMode="decimal"
+              autoComplete="off"
+              aria-label="Amount in LYTH to transfer from the principal"
+              value={fund.amount}
+              onChange={(e) =>
+                setFund({ ...fund, amount: e.target.value, error: null, unverified: null })
+              }
+              style={{ ...inputStyle, width: "100%", marginTop: 6 }}
+            />
+
+            {fund.error ? (
+              <div className="row-help" style={{ color: "var(--err)", marginTop: 8 }}>
+                {fund.error}
+              </div>
+            ) : null}
+
+            {/* The balance read failed. The old flow asked the same question in
+                a window.confirm; here it needs a second, deliberate click. */}
+            {fund.unverified ? (
+              <div className="w-warn-prominent">{fund.unverified}</div>
+            ) : null}
+
+            <div style={{ display: "flex", gap: 6, marginTop: 12 }}>
+              <button
+                type="button"
+                className="btn btn--sm"
+                onClick={() => setFund(null)}
+                disabled={fund.busy}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn--sm btn--primary"
+                disabled={fund.busy}
+                onClick={() => void submitFund(fund.unverified !== null)}
+              >
+                {fund.busy
+                  ? "Checking balance…"
+                  : fund.unverified !== null
+                    ? "Continue anyway"
+                    : "Review transfer"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {review ? (
         <PolicyReviewModal

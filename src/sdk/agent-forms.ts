@@ -21,6 +21,10 @@ import { parseLythToLythoshi } from "@monolythium/core-sdk";
 
 // ── Fund flow ────────────────────────────────────────────────────────────────
 
+/** The amount the funding prompt pre-filled. Preserved so the form opens on the
+ *  same proposal the old flow made. */
+export const FUND_DEFAULT_AMOUNT = "10";
+
 /** Verbatim rejection messages from the native-dialog era. */
 export const FUND_INVALID_AMOUNT = "Enter a valid LYTH amount.";
 export const FUND_NON_POSITIVE_AMOUNT = "Enter a positive LYTH amount.";
