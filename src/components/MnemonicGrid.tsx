@@ -305,8 +305,10 @@ function PhraseSafetyNote() {
       style={{
         padding: "11px 13px",
         borderRadius: 10,
-        background: "rgba(242,180,65,0.08)",
-        border: "1px solid rgba(242,180,65,0.4)",
+        // Warn semantics (never share these words), so the warn triplet — and
+        // tokenized, so the tint tracks the active theme.
+        background: "rgba(var(--warn-glow), 0.08)",
+        border: "1px solid rgba(var(--warn-glow), 0.4)",
         color: "var(--fg-100)",
         fontSize: 12,
         lineHeight: 1.55,

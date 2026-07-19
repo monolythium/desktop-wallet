@@ -116,9 +116,11 @@ export function UpdateBanner({
         padding: "10px 14px",
         marginBottom: 16,
         borderRadius: 10,
+        // Accent family — the text is var(--gold), so the tint is the gold
+        // triplet (Law 4.3). Tokenized so it tracks the active theme.
         background:
-          "linear-gradient(90deg, rgba(242,180,65,0.18), rgba(242,180,65,0.04))",
-        border: "1px solid rgba(242,180,65,0.3)",
+          "linear-gradient(90deg, rgba(var(--gold-glow), 0.18), rgba(var(--gold-glow), 0.04))",
+        border: "1px solid rgba(var(--gold-glow), 0.3)",
         color: "var(--gold)",
         fontSize: 13,
       }}

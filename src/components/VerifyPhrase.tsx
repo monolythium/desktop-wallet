@@ -235,10 +235,13 @@ export function VerifyPhrase({
 
           const borderColor =
             isHidden ? "var(--gold)" : "var(--fg-700)";
+          // ACCENT, not warn: the border is var(--gold) and these slots mark
+          // where the user must act, they do not warn. Law 4.3 — the tint
+          // follows the text semantics, so this is the gold triplet.
           const background = isEmpty && isHidden
-            ? "rgba(242,180,65,0.04)"
+            ? "rgba(var(--gold-glow), 0.04)"
             : isHidden
-              ? "rgba(242,180,65,0.10)"
+              ? "rgba(var(--gold-glow), 0.10)"
               : "rgba(0,0,0,0.20)";
 
           return (
@@ -336,8 +339,11 @@ export function VerifyPhrase({
               style={{
                 padding: "7px 12px",
                 borderRadius: 8,
-                border: "1px solid rgba(242,180,65,0.4)",
-                background: "rgba(242,180,65,0.08)",
+                // Accent-tinted word chip — its text IS var(--gold), so it
+                // takes the gold triplet. Tinting an accent control with the
+                // warn colour would be the mixing Law 4.3 forbids.
+                border: "1px solid rgba(var(--gold-glow), 0.4)",
+                background: "rgba(var(--gold-glow), 0.08)",
                 color: "var(--gold)",
                 fontFamily: "var(--f-mono)",
                 fontSize: 12.5,

@@ -1252,8 +1252,10 @@ const cautionBox: React.CSSProperties = {
   fontSize: 12,
   lineHeight: 1.5,
   color: "var(--fg-200)",
-  background: "rgba(244,201,122,0.08)",
-  border: "1px solid rgba(244,201,122,0.4)",
+  // Caution family — warn semantics, so the warn triplet. Tokenized so the
+  // tint follows the active theme instead of the one it was authored against.
+  background: "rgba(var(--warn-glow), 0.08)",
+  border: "1px solid rgba(var(--warn-glow), 0.4)",
   borderRadius: 8,
 };
 
