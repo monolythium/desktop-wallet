@@ -11,10 +11,26 @@ interface MnemonicGridProps {
    *  Default true. Pass false on surfaces that supply their own copy
    *  control. */
   showCopyButton?: boolean;
+  /** Fired once, when the user first uncovers the words.
+   *
+   *  This is the moment a bounded-exposure host starts counting from — not
+   *  mount, and not the password step. Everything before this point shows an
+   *  obscured grid, so there is nothing on screen to time. */
+  onFirstReveal?: () => void;
 }
 
 const CLEAR_AFTER_MS = 30_000;
 const FEEDBACK_RESET_MS = 3_000;
+
+/** How long a POST-SETUP reveal may stay on screen before it hides itself.
+ *
+ *  Deliberately NOT applied to the onboarding and add-wallet show-phrase steps.
+ *  Those are forced-forward backup ceremonies: the user is transcribing 24 words
+ *  before a verification step, nothing is persisted yet, and a countdown that
+ *  cleared the display mid-transcription would cost them the phrase with no way
+ *  back except starting over. The bound exists for the reveal you can return to,
+ *  not the one you only get once. */
+export const REVEAL_AUTO_HIDE_SECONDS = 30;
 
 /**
  * Two-column 24-word grid for recovery phrase display. Splits on
@@ -32,6 +48,7 @@ const FEEDBACK_RESET_MS = 3_000;
 export function MnemonicGrid({
   mnemonic,
   showCopyButton = true,
+  onFirstReveal,
 }: MnemonicGridProps) {
   const words = mnemonic.trim().split(/\s+/);
   const [revealed, setRevealed] = useState(false);
@@ -111,7 +128,11 @@ export function MnemonicGrid({
       ) : (
         <button
           type="button"
-          onClick={() => setRevealed(true)}
+          onClick={() => {
+            setRevealed(true);
+            // Fires once — the button is gone after this render.
+            onFirstReveal?.();
+          }}
           style={{
             display: "flex",
             flexDirection: "column",

@@ -7,6 +7,7 @@ import { CopyableAddress } from "../components/_detailModalParts";
 import { MnemonicGrid } from "../components/MnemonicGrid";
 import { getActiveAccount, revealRecoveryPhrase } from "../sdk/keychain";
 import { PasswordInput } from "../components/PasswordInput";
+import { REVEAL_AUTO_HIDE_SECONDS } from "../components/MnemonicGrid";
 import {
   clearUnlockLockout,
   lockoutRemainingMs,
@@ -588,6 +589,33 @@ function RevealPhrasePage({ onBack }: { onBack: () => void }) {
   const [notStored, setNotStored] = useState(false);
   const [lockoutUntil, setLockoutUntil] = useState(0);
   const [now, setNow] = useState(() => Date.now());
+  // Seconds left before the phrase auto-hides, or null before the first reveal.
+  const [hideInSec, setHideInSec] = useState<number | null>(null);
+
+  // This page pauses the idle auto-lock so a long transcription is not cut off,
+  // which means the usual timeout cannot protect it. A revealed phrase would
+  // otherwise sit on screen indefinitely on a walked-away machine with the lock
+  // deliberately suspended — so the surface imposes its own tighter bound.
+  //
+  // The countdown starts at the FIRST REVEAL, not at mount: before that the
+  // grid is obscured and there is nothing exposed to time.
+  const startHideCountdown = useCallback(() => {
+    setHideInSec((cur) => (cur === null ? REVEAL_AUTO_HIDE_SECONDS : cur));
+  }, []);
+
+  useEffect(() => {
+    if (hideInSec === null) return;
+    if (hideInSec <= 0) {
+      // Exposure window over. Drop the phrase and leave the way "Done" does —
+      // seeing it again costs a fresh password authorization, so the window is
+      // per-authorization rather than per-visit.
+      setMnemonic(null);
+      onBack();
+      return;
+    }
+    const id = window.setTimeout(() => setHideInSec((s) => (s ?? 1) - 1), 1_000);
+    return () => window.clearTimeout(id);
+  }, [hideInSec, onBack]);
 
   // Suspend the idle auto-lock while the phrase may be on screen; resume and
   // drop the phrase from state when leaving.
@@ -677,7 +705,24 @@ function RevealPhrasePage({ onBack }: { onBack: () => void }) {
         <div className="w-card__body">
           {mnemonic ? (
             <>
-              <MnemonicGrid mnemonic={mnemonic} />
+              {hideInSec !== null ? (
+                <div
+                  data-testid="reveal-countdown"
+                  style={{
+                    display: "inline-block",
+                    marginBottom: 12,
+                    padding: "3px 10px",
+                    borderRadius: "var(--r-pill)",
+                    background: "var(--gold-dim, rgba(200,160,60,0.14))",
+                    color: "var(--gold)",
+                    fontSize: "var(--fs-11)",
+                    fontWeight: 600,
+                  }}
+                >
+                  Hides in {hideInSec}s
+                </div>
+              ) : null}
+              <MnemonicGrid mnemonic={mnemonic} onFirstReveal={startHideCountdown} />
               <div style={{ display: "flex", marginTop: 20 }}>
                 <button
                   className="btn btn--primary"
