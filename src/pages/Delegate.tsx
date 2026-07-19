@@ -46,7 +46,7 @@ import {
 import { bpsToPercentLabel } from "../sdk/delegation-summary";
 import {
   activeDelegationsSummary,
-  effectiveWeightLythDisplay,
+  effectiveWeightWholeLyth,
 } from "../sdk/delegation-derive";
 import {
   aprLabelFromBps,
@@ -299,15 +299,20 @@ export function Delegate() {
       message,
     });
   /** Effective-weight label: "<LYTH> (<pct>)" when the balance is known, else a
-   *  bps-only "<pct>" — never a fabricated LYTH figure. */
+   *  bps-only "<pct>" — never a fabricated LYTH figure.
+   *
+   *  The LYTH figure is the chain-exact WHOLE-LYTH weight. A fractional
+   *  remainder earns nothing and casts no vote, so showing it would overstate
+   *  the position by precisely the part that does not count. */
   const effectiveWeightLabel = (bps: number): string => {
-    const lyth = effectiveWeightLythDisplay(balanceLythoshi, bps, 4);
+    const lyth = effectiveWeightWholeLyth(balanceLythoshi, bps);
     const pct = bpsToPercentLabel(bps);
     return lyth === null ? pct : `${lyth} LYTH (${pct})`;
   };
-  /** Per-row effective-weight: derived LYTH, or the bps-only percent fallback. */
+  /** Per-row effective-weight: the chain-exact whole-LYTH figure, or the
+   *  bps-only percent fallback. */
   const rowWeightLabel = (bps: number): string => {
-    const lyth = effectiveWeightLythDisplay(balanceLythoshi, bps, 4);
+    const lyth = effectiveWeightWholeLyth(balanceLythoshi, bps);
     return lyth === null ? bpsToPercentLabel(bps) : `${lyth} LYTH`;
   };
 

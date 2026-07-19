@@ -40,9 +40,35 @@ export function effectiveWeightLythoshi(
   return ((balance * BigInt(weightBps)) / 10_000n).toString();
 }
 
+/** The chain-exact effective weight, as a whole-LYTH decimal string.
+ *
+ *  The chain stores and votes with `floor(balance × bps / 10000 / 10^18)` — a
+ *  WHOLE-LYTH counter. A fractional remainder earns nothing and casts no vote,
+ *  so displaying "530.1 LYTH" where the chain credits 530 overstates the
+ *  position by exactly the part that does not count.
+ *
+ *  This is a different quantity from {@link effectiveWeightLythoshi}, which is
+ *  the precise delegated amount. The wallet never forces them equal and never
+ *  labels the precise figure "effective weight".
+ *
+ *  Null on an absent/undecodable balance or an invalid bps — the caller then
+ *  keeps the bps-only percent rather than a fabricated LYTH figure. Pure. */
+export function effectiveWeightWholeLyth(
+  balanceLythoshi: string | null | undefined,
+  weightBps: number,
+): string | null {
+  const raw = effectiveWeightLythoshi(balanceLythoshi, weightBps);
+  if (raw === null) return null;
+  // Second floor, onto the whole-LYTH grid the chain actually counts.
+  return (BigInt(raw) / 10n ** 18n).toString();
+}
+
 /** Derived effective-weight formatted as display LYTH (default 4 dp, via the
  *  shared exact formatter), or null when the balance is unavailable — the caller
- *  then falls back to the bps-only percent. Pure. */
+ *  then falls back to the bps-only percent. Pure.
+ *
+ *  NOTE: this is the PRECISE delegated amount, not the voting weight. Weight
+ *  labels use {@link effectiveWeightWholeLyth}. */
 export function effectiveWeightLythDisplay(
   balanceLythoshi: string | null | undefined,
   weightBps: number,
