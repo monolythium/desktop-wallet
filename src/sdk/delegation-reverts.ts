@@ -150,3 +150,58 @@ export function isRetryableDelegationRevert(
 ): boolean {
   return matchEntry(typeof reason === "string" ? reason : "", code)?.retryable ?? false;
 }
+
+/** Classify a THROWN delegation failure by walking the whole cause chain and
+ *  testing each level.
+ *
+ *  Deliberately not `extractSendError`, which keeps the OUTERMOST message: a
+ *  wrapper like "submit failed" would then mask an inner "InactiveCluster" and
+ *  the rejection would surface as unclassified. Every level is tried, so the
+ *  revert reason classifies wherever in the chain it sits.
+ *
+ *  Returns null when no level matches — the caller keeps the raw error. Pure. */
+export function classifyDelegationFailure(cause: unknown): string | null {
+  const seen = new Set<unknown>();
+  let cur: unknown = cause;
+  while (cur !== null && cur !== undefined && !seen.has(cur)) {
+    seen.add(cur);
+    if (typeof cur === "string") {
+      const hit = classifyDelegationRevert(cur);
+      if (hit !== null) return hit;
+      return null;
+    }
+    if (typeof cur !== "object") return null;
+    const o = cur as { message?: unknown; code?: unknown; cause?: unknown };
+    const message = typeof o.message === "string" ? o.message : "";
+    const code =
+      typeof o.code === "number" && Number.isFinite(o.code) ? o.code : undefined;
+    const hit = classifyDelegationRevert(message, code);
+    if (hit !== null) return hit;
+    cur = o.cause;
+  }
+  return null;
+}
+
+/** Run a delegation submit, translating a recognised chain rejection into plain
+ *  copy on the way out.
+ *
+ *  Mapped: `onMapped` is notified (the durable rejection signal hooks in here)
+ *  and the error is re-thrown carrying the plain sentence, so the drawer shows
+ *  the same words the banner does.
+ *
+ *  Unmapped: the original error is re-thrown UNTOUCHED. Replacing it with a
+ *  generic sentence would leave a genuine bug with no evidence — the raw node
+ *  reason is the only diagnostic the user can pass on. */
+export async function withDelegationRevertCopy<T>(
+  run: () => Promise<T>,
+  onMapped?: (message: string) => void,
+): Promise<T> {
+  try {
+    return await run();
+  } catch (cause) {
+    const mapped = classifyDelegationFailure(cause);
+    if (mapped === null) throw cause;
+    onMapped?.(mapped);
+    throw new Error(mapped, { cause });
+  }
+}

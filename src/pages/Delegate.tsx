@@ -75,6 +75,7 @@ import {
   normalizeAggregateCapBps,
   preflightDelegationVerdict,
 } from "../sdk/delegation-caps";
+import { withDelegationRevertCopy } from "../sdk/delegation-reverts";
 
 export function Delegate() {
   const ops = useOperations();
@@ -326,10 +327,9 @@ export function Delegate() {
           throw new Error("vault seed unavailable after keychain authorization");
         }
         const calldata = buildDelegateCalldata(clusterId, weightBps);
-        const result = await submitDelegationTx({
-          seed: ctx.vaultSeed,
-          data: calldata,
-        });
+        const result = await withDelegationRevertCopy(() =>
+          submitDelegationTx({ seed: ctx.vaultSeed!, data: calldata }),
+        );
         return {
           headline: `Delegated ${weightLabel} of balance to cluster ${clusterId}`,
           detail: result.txHash,
@@ -378,7 +378,9 @@ export function Delegate() {
           throw new Error("vault seed unavailable after keychain authorization");
         }
         const calldata = buildUndelegateCalldata(clusterId);
-        const result = await submitDelegationTx({ seed: ctx.vaultSeed, data: calldata });
+        const result = await withDelegationRevertCopy(() =>
+          submitDelegationTx({ seed: ctx.vaultSeed!, data: calldata }),
+        );
         return {
           headline: `Undelegated ${weightLabel} from cluster ${clusterId}`,
           detail: result.txHash,
@@ -435,7 +437,9 @@ export function Delegate() {
         let last = { txHash: "", nonce: 0 };
         for (const r of rows) {
           const calldata = buildUndelegateCalldata(r.cluster);
-          last = await submitDelegationTx({ seed: ctx.vaultSeed, data: calldata });
+          last = await withDelegationRevertCopy(() =>
+            submitDelegationTx({ seed: ctx.vaultSeed!, data: calldata }),
+          );
         }
         return {
           headline: `Undelegated all ${rows.length} cluster${rows.length === 1 ? "" : "s"}`,
@@ -490,7 +494,9 @@ export function Delegate() {
           throw new Error("vault seed unavailable after keychain authorization");
         }
         const calldata = buildRedelegateCalldata(fromCluster, toCluster, weightBps);
-        const result = await submitDelegationTx({ seed: ctx.vaultSeed, data: calldata });
+        const result = await withDelegationRevertCopy(() =>
+          submitDelegationTx({ seed: ctx.vaultSeed!, data: calldata }),
+        );
         return {
           headline: `Redelegated ${weightLabel} from cluster ${fromCluster} to ${toCluster}`,
           detail: result.txHash,
@@ -531,7 +537,9 @@ export function Delegate() {
           throw new Error("vault seed unavailable after keychain authorization");
         }
         const calldata = buildClaimRewardsCalldata();
-        const result = await submitDelegationTx({ seed: ctx.vaultSeed, data: calldata });
+        const result = await withDelegationRevertCopy(() =>
+          submitDelegationTx({ seed: ctx.vaultSeed!, data: calldata }),
+        );
         return {
           headline: `Claimed ${totalLyth} LYTH of delegation rewards`,
           detail: result.txHash,
@@ -574,7 +582,9 @@ export function Delegate() {
           throw new Error("vault seed unavailable after keychain authorization");
         }
         const calldata = buildSetAutoCompoundCalldata(next);
-        const result = await submitDelegationTx({ seed: ctx.vaultSeed, data: calldata });
+        const result = await withDelegationRevertCopy(() =>
+          submitDelegationTx({ seed: ctx.vaultSeed!, data: calldata }),
+        );
         return {
           headline: `Auto-compound ${next ? "enabled" : "disabled"}`,
           detail: result.txHash,

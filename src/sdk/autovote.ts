@@ -20,6 +20,7 @@ import { shake256 } from "@noble/hashes/sha3.js";
 import { getProvider } from "./client";
 import { buildDelegateCalldata, submitDelegationTx } from "./delegation";
 import { preflightDelegationVerdict } from "./delegation-caps";
+import { withDelegationRevertCopy } from "./delegation-reverts";
 
 /** Domain tag mixed into the per-user shuffle seed so autovote entropy can't
  *  collide with any other SHAKE256 use of the same address. */
@@ -411,7 +412,11 @@ export async function submitAutovotePlan(
   const txHashes: string[] = [];
   for (const a of plan.allocations) {
     const calldata = buildDelegateCalldata(a.clusterId, a.weightBps);
-    const result = await submitDelegationTx({ seed, data: calldata });
+    // Each batch step classifies too — a plan that trips a cap or the row limit
+    // mid-run must say which wall it hit, not just that a step failed.
+    const result = await withDelegationRevertCopy(() =>
+      submitDelegationTx({ seed, data: calldata }),
+    );
     txHashes.push(result.txHash);
     onProgress?.(txHashes.length, plan.allocations.length);
   }
