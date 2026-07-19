@@ -45,6 +45,11 @@ import {
   mergeConfirmedRows,
 } from "../sdk/activity-cache";
 import { isNativeLythTokenId, tokenUnitLabel } from "../sdk/lyth-display";
+import {
+  loadTxFeedFallback,
+  txFeedFallbackEnabled,
+  TXFEED_DISCLOSURE,
+} from "../sdk/tx-feed";
 import { loadTokenMetaMap, type TokenMeta } from "../sdk/token-metadata";
 import {
   readConfirmedCache,
@@ -158,9 +163,64 @@ export function Activity() {
     }
   };
 
+  // ── Indexer-off fallback ──────────────────────────────────────────────────
+  // A one-shot per (address, chain, enabled) — never per refresh. The guard
+  // holds the SCOPE KEY it ran for, so a chain switch re-arms it without a
+  // separate reset (G4).
+  const [fallbackRows, setFallbackRows] = useState<LiveAddressActivityRow[] | null>(null);
+  const [fallbackRanForScope, setFallbackRanForScope] = useState<string | null>(null);
+  const [fallbackPending, setFallbackPending] = useState(false);
+
+  const fallbackEnabled = txFeedFallbackEnabled({
+    confirmedCount: confirmedRows.length,
+    failedCount: failed.length,
+    // A live-read error ALWAYS wins: the error band owns that state, and a
+    // fallback rendered over an error would present a partial view as the
+    // whole answer.
+    liveReadErrored: activity !== null && !activity.ok,
+    coverageKind: coverage?.kind ?? null,
+  });
+
+  useEffect(() => {
+    if (!fallbackEnabled || !walletAddress) return;
+    if (fallbackRanForScope === activeScopeKey) return; // already ran for this scope
+    let cancelled = false;
+    setFallbackRanForScope(activeScopeKey);
+    setFallbackPending(true);
+    void loadTxFeedFallback(walletAddress)
+      .then((outcome) => {
+        if (cancelled) return;
+        setFallbackRows(outcome.ok ? outcome.value ?? [] : null);
+      })
+      .catch(() => {
+        if (!cancelled) setFallbackRows(null); // honest empty state
+      })
+      .finally(() => {
+        if (!cancelled) setFallbackPending(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [fallbackEnabled, walletAddress, activeScopeKey, fallbackRanForScope]);
+
+  // Scope change clears the fallback result alongside the paging state.
+  useEffect(() => {
+    setFallbackRows(null);
+    setFallbackRanForScope(null);
+    setFallbackPending(false);
+  }, [activeScopeKey]);
+
+  // Fallback rows render ONLY while there are no real confirmed rows. The
+  // moment indexed rows arrive the predicate stops holding and they replace it.
+  const showingFallback =
+    confirmedRows.length === 0 && fallbackEnabled && fallbackRows !== null && fallbackRows.length > 0;
+
   const activityRows = useMemo(
-    () => [...confirmedRows, ...olderRows].sort(compareConfirmedNewestFirst),
-    [confirmedRows, olderRows],
+    () =>
+      showingFallback
+        ? [...(fallbackRows ?? [])].sort(compareConfirmedNewestFirst)
+        : [...confirmedRows, ...olderRows].sort(compareConfirmedNewestFirst),
+    [showingFallback, fallbackRows, confirmedRows, olderRows],
   );
 
   // Counterparty labels for the visible rows. Only USER addresses participate —
@@ -413,6 +473,20 @@ export function Activity() {
           {activity?.ok === false ? (
             <div className="w-live-error">address activity: {activity.error}</div>
           ) : null}
+          {/* LOAD-BEARING, not decoration: this view shows only native
+              transfers, so without a line naming what is absent it would
+              silently assert that no delegations ever happened. It renders
+              exactly while the fallback rows render. */}
+          {showingFallback ? (
+            <div
+              data-testid="txfeed-disclosure"
+              className="row-help"
+              style={{ marginBottom: 10, color: "var(--w-text-3)" }}
+            >
+              {TXFEED_DISCLOSURE}
+            </div>
+          ) : null}
+
           {merged.length > 0 ? (
             merged.map((item) => {
               if (item.tag === "pending") {
@@ -568,7 +642,10 @@ export function Activity() {
             />
           ) : null}
 
-          {merged.length === 0 && activity?.ok ? (
+          {/* While the fallback read is in flight with nothing else to show,
+              hold the loading presentation — the empty copy must not flash
+              before the fallback resolves. */}
+          {merged.length === 0 && activity?.ok && !fallbackPending ? (
             <div className="w-empty">
               {(() => {
                 // Filtered: the rows exist but none match — keep the filter copy.

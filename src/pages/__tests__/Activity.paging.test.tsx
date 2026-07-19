@@ -24,20 +24,50 @@ vi.mock("../../sdk/active-wallet", () => ({
 }));
 
 const rig = vi.hoisted(() => ({
-  page1: { ok: true, value: { rows: [] as unknown[], nextCursor: null as string | null } },
+  page1: { ok: true, value: { rows: [] as unknown[], nextCursor: null as string | null } } as {
+    ok: boolean;
+    value?: { rows: unknown[]; nextCursor: string | null };
+    error?: string;
+  },
+  page1Calls: 0,
   older: [] as { ok: boolean; value?: { rows: unknown[]; nextCursor: string | null }; error?: string }[],
   olderCalls: [] as string[],
   detect: [] as unknown[][],
+  coverage: "not_found" as string,
+  fallback: { ok: true, value: [] as unknown[] } as { ok: boolean; value?: unknown[]; error?: string },
+  fallbackCalls: 0,
+  cacheWrites: [] as unknown[][],
 }));
 
 vi.mock("../../sdk/live", async (orig) => ({
   ...(await orig<typeof import("../../sdk/live")>()),
-  loadLiveActivityPage: vi.fn(async () => rig.page1),
+  loadLiveActivityPage: vi.fn(async () => {
+    rig.page1Calls += 1;
+    return rig.page1;
+  }),
   loadOlderActivityPage: vi.fn(async (_w: string, cursor: string) => {
     rig.olderCalls.push(cursor);
     return rig.older.shift() ?? { ok: true, value: { rows: [], nextCursor: null } };
   }),
-  loadAddressActivityKind: vi.fn(async () => "not_found"),
+  loadAddressActivityKind: vi.fn(async () => ({
+    kind: rig.coverage,
+    earliestRetained: null,
+  })),
+}));
+
+vi.mock("../../sdk/tx-feed", async (orig) => ({
+  ...(await orig<typeof import("../../sdk/tx-feed")>()),
+  loadTxFeedFallback: vi.fn(async () => {
+    rig.fallbackCalls += 1;
+    return rig.fallback;
+  }),
+}));
+
+vi.mock("../../sdk/activity-cache-store", async (orig) => ({
+  ...(await orig<typeof import("../../sdk/activity-cache-store")>()),
+  writeConfirmedCache: vi.fn(async (_k: string, rows: unknown[]) => {
+    rig.cacheWrites.push(rows);
+  }),
 }));
 
 vi.mock("../../sdk/incoming-detect", () => ({
@@ -87,9 +117,14 @@ beforeEach(() => {
   localStorage.clear();
   __resetActivityCacheStoreForTests();
   rig.page1 = { ok: true, value: { rows: [row(100)], nextCursor: "0xcursor1" } };
+  rig.page1Calls = 0;
   rig.older = [];
   rig.olderCalls = [];
   rig.detect = [];
+  rig.coverage = "not_found";
+  rig.fallback = { ok: true, value: [] };
+  rig.fallbackCalls = 0;
+  rig.cacheWrites = [];
 });
 
 describe("the Load more footer", () => {
@@ -187,5 +222,99 @@ describe("older pages never contaminate the newest-window state", () => {
     for (const rows of rig.detect) {
       expect(rows).toHaveLength(1);
     }
+  });
+});
+
+describe("G3 — the indexer-off fallback", () => {
+  const disclosure = () => screen.queryByTestId("txfeed-disclosure");
+
+  it("renders fallback rows WITH the disclosure, together", async () => {
+    rig.page1 = { ok: true, value: { rows: [], nextCursor: null } };
+    rig.coverage = "indexer_disabled";
+    rig.fallback = { ok: true, value: [row(90)] };
+
+    const { container } = renderWithProviders(<Activity />);
+    await waitFor(() => expect(disclosure()).not.toBeNull());
+
+    expect(disclosure()!.textContent).toBe(
+      "Indexer off — showing native LYTH transfers from the public transaction feed. Delegations, claims, and token activity can't be listed here.",
+    );
+    expect(container.querySelectorAll(".w-tx").length).toBe(1);
+  });
+
+  it("the disclosure and the rows DISAPPEAR together when real rows return", async () => {
+    rig.page1 = { ok: true, value: { rows: [], nextCursor: null } };
+    rig.coverage = "indexer_disabled";
+    rig.fallback = { ok: true, value: [row(90)] };
+
+    const { user } = renderWithProviders(<Activity />);
+    await waitFor(() => expect(disclosure()).not.toBeNull());
+
+    // A later refresh returns real indexed rows.
+    rig.page1 = { ok: true, value: { rows: [row(100)], nextCursor: null } };
+    await user.click(screen.getByRole("button", { name: /Refresh/i }));
+
+    await waitFor(() => expect(disclosure()).toBeNull());
+    // …and the fallback row is gone with it.
+    expect(screen.queryByText(/mono1.*bb/)).toBeNull();
+  });
+
+  it("a live-read ERROR wins — no fallback rows, no disclosure", async () => {
+    rig.page1 = { ok: false, error: "indexer unreachable" };
+    rig.coverage = "indexer_disabled";
+    rig.fallback = { ok: true, value: [row(90)] };
+
+    const { container } = renderWithProviders(<Activity />);
+    await waitFor(() => expect(rig.fallbackCalls).toBe(0));
+    expect(disclosure()).toBeNull();
+    expect(container.querySelectorAll(".w-tx").length).toBe(0);
+  });
+
+  it("a fallback read failure keeps the honest empty state", async () => {
+    rig.page1 = { ok: true, value: { rows: [], nextCursor: null } };
+    rig.coverage = "indexer_disabled";
+    rig.fallback = { ok: false, error: "not implemented" };
+
+    renderWithProviders(<Activity />);
+    await screen.findByText("Activity history is unavailable");
+    expect(disclosure()).toBeNull();
+  });
+
+  it("does not fire for a pruned feed (that keeps its own empty state)", async () => {
+    rig.page1 = { ok: true, value: { rows: [], nextCursor: null } };
+    rig.coverage = "pruned";
+    rig.fallback = { ok: true, value: [row(90)] };
+
+    renderWithProviders(<Activity />);
+    await screen.findByText("Older activity has been pruned");
+    expect(rig.fallbackCalls).toBe(0);
+    expect(disclosure()).toBeNull();
+  });
+
+  it("runs ONCE per scope, not per refresh", async () => {
+    rig.page1 = { ok: true, value: { rows: [], nextCursor: null } };
+    rig.coverage = "indexer_disabled";
+    rig.fallback = { ok: true, value: [row(90)] };
+
+    const { user } = renderWithProviders(<Activity />);
+    await waitFor(() => expect(rig.fallbackCalls).toBe(1));
+
+    await user.click(screen.getByRole("button", { name: /Refresh/i }));
+    await waitFor(() => expect(rig.page1Calls).toBeGreaterThan(1));
+    expect(rig.fallbackCalls).toBe(1);
+  });
+
+  it("fallback rows never reach the confirmed cache or incoming detection", async () => {
+    rig.page1 = { ok: true, value: { rows: [], nextCursor: null } };
+    rig.coverage = "indexer_disabled";
+    rig.fallback = { ok: true, value: [row(90)] };
+
+    renderWithProviders(<Activity />);
+    await waitFor(() => expect(disclosure()).not.toBeNull());
+
+    // The cache only ever saw the (empty) page-1 rows.
+    for (const rows of rig.cacheWrites) expect(rows).toHaveLength(0);
+    // Detection likewise.
+    for (const rows of rig.detect) expect(rows).toHaveLength(0);
   });
 });
