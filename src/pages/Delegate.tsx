@@ -79,6 +79,12 @@ import {
 import { withDelegationRevertCopy } from "../sdk/delegation-reverts";
 import { useDelegationRejection } from "../sdk/DelegationRejectionProvider";
 import { claimButtonState } from "../sdk/claim-in-flight";
+import {
+  AC_FLAG_RECHECK_MS,
+  AC_UPDATING_LABEL,
+  autoCompoundRecheckVerdict,
+  autoCompoundUpdating,
+} from "../sdk/auto-compound-recheck";
 import { useInFlightClaim } from "../sdk/use-claim-in-flight";
 import { scopeChainKey } from "../sdk/chains";
 
@@ -108,6 +114,10 @@ export function Delegate() {
   // Pending delegation rewards (lyth_pendingRewards). RpcOutcome so a node
   // failure surfaces the verbatim error rather than a blank/fabricated zero.
   const [rewards, setRewards] = useState<RpcOutcome<PendingRewardsResponse> | null>(null);
+  // The auto-compound value we are waiting for the chain to confirm, or null
+  // when nothing is outstanding. The DISPLAYED flag never comes from here — it
+  // is always the last live read.
+  const [acTarget, setAcTarget] = useState<boolean | null>(null);
   // Open redemption tickets (lyth_redemptionQueue) — READ ONLY. The model is
   // non-custodial: undelegate is instant, so a healthy wallet's queue is empty.
   // Surfaced for transparency over any legacy ticket; there is no settle action
@@ -164,6 +174,37 @@ export function Delegate() {
   const [customOpen, setCustomOpen] = useState(false);
   const [customBps, setCustomBps] = useState<Map<number, string>>(new Map());
 
+  // Bounded re-read after an auto-compound flip. The page is manual-refresh by
+  // design, so this polls only while a flip is genuinely outstanding — and it
+  // stops either way, so the row can never sit on "Updating…" forever.
+  useEffect(() => {
+    if (acTarget === null || !walletAddress) return;
+    let cancelled = false;
+    const startedAt = Date.now();
+    const timer = setInterval(() => {
+      void (async () => {
+        const rew = await capture(() => fetchPendingRewards(walletAddress));
+        if (cancelled) return;
+        setRewards(rew);
+        // A failed read says nothing about the flag, so it keeps waiting.
+        const observed = rew.ok ? (rew.value?.autoCompound ?? null) : null;
+        const verdict = autoCompoundRecheckVerdict({
+          target: acTarget,
+          observed,
+          elapsedMs: Date.now() - startedAt,
+        });
+        // Either outcome drops the label and shows the real read — settled
+        // truthfully, or honestly stale. Never a lie, never a stuck spinner.
+        if (verdict !== "waiting") setAcTarget(null);
+      })();
+    }, AC_FLAG_RECHECK_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+    // Re-armed on a wallet change, which also cancels the previous scope's poll.
+  }, [acTarget, walletAddress]);
+
   const refresh = async () => {
     if (!walletAddress) {
       setStatus(null);
@@ -171,6 +212,7 @@ export function Delegate() {
       setDirectory([]);
       setDirectoryError(null);
       setRewards(null);
+      setAcTarget(null);
       setRedemptions(null);
       setAprBpsMap(new Map());
       setEntities(new Map());
@@ -670,6 +712,9 @@ export function Delegate() {
         const result = await withDelegationRevertCopy(() =>
           submitDelegationTx({ seed: ctx.vaultSeed!, data: calldata }),
         );
+        // Arm the bounded re-read. The displayed flag stays the last live read
+        // until the chain actually reports the new value.
+        setAcTarget(next);
         return {
           headline: `Auto-compound ${next ? "enabled" : "disabled"}`,
           detail: result.txHash,
@@ -993,9 +1038,14 @@ export function Delegate() {
                   <button
                     className="btn btn--sm btn--ghost"
                     data-testid="auto-compound-toggle"
+                    disabled={autoCompoundUpdating(acTarget)}
                     onClick={() => openAutoCompoundToggle(!rewards.value!.autoCompound)}
                   >
-                    {rewards.value.autoCompound ? "Disable auto-compound" : "Enable auto-compound"}
+                    {autoCompoundUpdating(acTarget)
+                      ? AC_UPDATING_LABEL
+                      : rewards.value.autoCompound
+                        ? "Disable auto-compound"
+                        : "Enable auto-compound"}
                   </button>
                   {/* Always visible, not only at confirm: the claim side effect
                       is the part of this setting people do not expect. */}
