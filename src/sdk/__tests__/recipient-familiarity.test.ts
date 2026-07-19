@@ -5,18 +5,22 @@ const FROM = "mono1from";
 const R = "mono1recipient";
 
 describe("classifyRecipient", () => {
-  it("is 'known' for a saved contact (no history needed)", () => {
-    expect(
-      classifyRecipient({ recipientLower: R, fromLower: FROM, isContact: true, rows: null, pending: null }),
-    ).toBe("known");
-  });
+  // The saved-contact case is NOT tested here any more, and that is the point:
+  // a contact never reaches this classifier. The Send surface short-circuits to
+  // "known" before calling it, because a contact is the user's own declaration
+  // rather than chain evidence — this function judges chain evidence.
+  //
+  // The real behaviour is covered where it actually happens:
+  // `components/__tests__/SendComposeModal.test.tsx` — "a saved contact
+  // (matched by address) shows the green box and beats the warning" — which
+  // asserts both halves through the rendered UI. The assertion removed from
+  // here only ever exercised a parameter no production caller passed.
 
   it("is 'known' when a prior OUTGOING confirmed send to the address exists", () => {
     expect(
       classifyRecipient({
         recipientLower: R,
         fromLower: FROM,
-        isContact: false,
         rows: [{ counterparty: "MONO1RECIPIENT", direction: "out" }], // case-insensitive
         pending: [],
       }),
@@ -28,7 +32,6 @@ describe("classifyRecipient", () => {
       classifyRecipient({
         recipientLower: R,
         fromLower: FROM,
-        isContact: false,
         rows: [],
         pending: [{ counterparty: R, addressLower: FROM }],
       }),
@@ -40,7 +43,6 @@ describe("classifyRecipient", () => {
       classifyRecipient({
         recipientLower: R,
         fromLower: FROM,
-        isContact: false,
         rows: [{ counterparty: "mono1someoneelse", direction: "out" }],
         pending: [],
       }),
@@ -52,7 +54,6 @@ describe("classifyRecipient", () => {
       classifyRecipient({
         recipientLower: R,
         fromLower: FROM,
-        isContact: false,
         rows: [{ counterparty: R, direction: "in" }], // received FROM them, never sent TO them
         pending: [],
       }),
@@ -64,7 +65,6 @@ describe("classifyRecipient", () => {
       classifyRecipient({
         recipientLower: R,
         fromLower: FROM,
-        isContact: false,
         rows: [],
         pending: [{ counterparty: R, addressLower: "mono1otheraccount" }],
       }),
@@ -73,7 +73,7 @@ describe("classifyRecipient", () => {
 
   it("is 'unknown' when no history source could be read (no false 'new')", () => {
     expect(
-      classifyRecipient({ recipientLower: R, fromLower: FROM, isContact: false, rows: null, pending: null }),
+      classifyRecipient({ recipientLower: R, fromLower: FROM, rows: null, pending: null }),
     ).toBe("unknown");
   });
 
@@ -81,7 +81,7 @@ describe("classifyRecipient", () => {
     // pending ([]) can't prove "never sent before" — only confirmed history can.
     // A readable-empty pending must NOT upgrade an unreadable history to "new".
     expect(
-      classifyRecipient({ recipientLower: R, fromLower: FROM, isContact: false, rows: null, pending: [] }),
+      classifyRecipient({ recipientLower: R, fromLower: FROM, rows: null, pending: [] }),
     ).toBe("unknown");
   });
 
@@ -90,7 +90,6 @@ describe("classifyRecipient", () => {
       classifyRecipient({
         recipientLower: R,
         fromLower: FROM,
-        isContact: false,
         rows: null,
         pending: [{ counterparty: R, addressLower: FROM }],
       }),
@@ -99,7 +98,7 @@ describe("classifyRecipient", () => {
 
   it("is 'unknown' for an empty/invalid recipient", () => {
     expect(
-      classifyRecipient({ recipientLower: "", fromLower: FROM, isContact: false, rows: [], pending: [] }),
+      classifyRecipient({ recipientLower: "", fromLower: FROM, rows: [], pending: [] }),
     ).toBe("unknown");
   });
 
@@ -108,7 +107,6 @@ describe("classifyRecipient", () => {
       classifyRecipient({
         recipientLower: R,
         fromLower: FROM,
-        isContact: false,
         rows: null,
         pending: null,
         verifiedSentLogHit: true,
@@ -122,7 +120,6 @@ describe("classifyRecipient", () => {
       classifyRecipient({
         recipientLower: R,
         fromLower: FROM,
-        isContact: false,
         rows: null,
         pending: null,
         verifiedSentLogHit: false,
@@ -133,7 +130,6 @@ describe("classifyRecipient", () => {
       classifyRecipient({
         recipientLower: R,
         fromLower: FROM,
-        isContact: false,
         rows: [{ counterparty: "mono1someoneelse", direction: "out" }],
         pending: [],
         verifiedSentLogHit: false,

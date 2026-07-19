@@ -1,11 +1,17 @@
 // First-time-recipient classification for the Send flow.
 //
-// Honest (no fabrication): "known" only when backed by real data — a saved
-// contact, or a prior OUTGOING send to this address from this account (confirmed
-// history or an in-flight pending tx). "new" only when the CONFIRMED send
-// history was readable and shows no such prior send. When the recipient isn't a
-// valid address, or the confirmed history couldn't be read, we return "unknown"
-// and assert nothing.
+// Honest (no fabrication): "known" only when backed by real data — a prior
+// OUTGOING send to this address from this account (confirmed history or an
+// in-flight pending tx), or a verified sent-log entry. "new" only when the
+// CONFIRMED send history was readable and shows no such prior send. When the
+// recipient isn't a valid address, or the confirmed history couldn't be read,
+// we return "unknown" and assert nothing.
+//
+// SCOPE: this classifier judges CHAIN EVIDENCE. A saved contact is not chain
+// evidence — it is the user's own declaration — so it never reaches here: the
+// Send surface short-circuits to "known" before calling this, and the reasoning
+// (plus where a contact-integrity check would belong) is recorded at that seam
+// in `SendComposeModal.tsx`.
 
 export type RecipientFamiliarity = "known" | "new" | "unknown";
 
@@ -23,8 +29,6 @@ export interface ClassifyRecipientArgs {
   recipientLower: string;
   /** Lowercased active sending account. */
   fromLower: string;
-  /** True when the recipient resolves to a saved contact. */
-  isContact: boolean;
   /** Confirmed activity rows (cache ∪ live), or null when none were readable. */
   rows: ReadonlyArray<ActivityLike> | null;
   /** Tracked pending txs, or null when unreadable. */
@@ -62,11 +66,10 @@ function hasPendingSend(
 
 export function classifyRecipient(args: ClassifyRecipientArgs): RecipientFamiliarity {
   if (args.recipientLower === "") return "unknown";
-  // "known" evidence: a contact, a verified sent-log entry, a confirmed outgoing
-  // send, or an in-flight pending send. The sent-log bit only ever ADDS "known" —
-  // its absence falls through to the history logic below (never forces "new").
+  // "known" evidence: a verified sent-log entry, a confirmed outgoing send, or
+  // an in-flight pending send. The sent-log bit only ever ADDS "known" — its
+  // absence falls through to the history logic below (never forces "new").
   if (
-    args.isContact ||
     args.verifiedSentLogHit === true ||
     hasPriorConfirmedSend(args.rows, args.recipientLower) ||
     hasPendingSend(args.pending, args.recipientLower, args.fromLower)

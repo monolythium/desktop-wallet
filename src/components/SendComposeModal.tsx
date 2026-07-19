@@ -235,7 +235,25 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
         : null;
   const recipientUsable = effectiveBech !== null;
   // The contact that labels this recipient: a picked one, else one matched by
-  // address. Feeds the green box (slot 5) and familiarity's `isContact`.
+  // address.
+  //
+  // THIS IS THE CONTACT CHOKEPOINT. Two independent mechanisms read it, and a
+  // saved contact suppresses the first-time warning through EITHER one:
+  //   1. the familiarity short-circuit below (sets "known" without consulting
+  //      `classifyRecipient` — see the note there for why), and
+  //   2. the hint-stack render precedence (slot 5 beats slot 7), which shows
+  //      the green box instead of the amber warning regardless of familiarity.
+  // Disabling (1) alone does NOT restore the warning; (2) still suppresses it.
+  //
+  // WHERE A CONTACT-INTEGRITY CHECK WOULD GO: here, on this line — not at
+  // either consumer. The sent-recipients log is HMAC-bound to a seed-derived
+  // key, so an offline disk edit cannot plant a "you've paid this address
+  // before". The address book carries no such binding, and a planted contact is
+  // the STRONGER attack: it both fills the known-recipient box and asserts an
+  // identity for the address. Binding address-book entries the same way is an
+  // open decision; if it is taken, an unverified contact must resolve to null
+  // HERE, so that both mechanisms above see no contact at all. A check at one
+  // consumer would leave the other still suppressing the warning.
   const recipientContactName = resolvedContactName ?? matchedContactName;
   // A quorum-confirmed FORWARD hit — the name the user actually typed. This (and a
   // contact) is the ONLY thing that fills the green box / suppresses the warning;
@@ -330,6 +348,19 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
       setHistoryUnreadable(false);
       return;
     }
+    // A saved contact short-circuits the classifier deliberately.
+    //
+    // WHY: a contact is not chain evidence — it is the user's own declaration
+    // that they know this address. `classifyRecipient`'s guards (the
+    // rows-readable check, the outgoing-direction filter) exist to judge
+    // whether CHAIN evidence supports "known". Routing user testimony through
+    // them would be the wrong shape, not a stricter one: there is no read to
+    // fail and no direction to filter.
+    //
+    // This short-circuit also saves the reads it would otherwise issue. It is
+    // NOT the sole suppressor — the hint-stack render precedence suppresses the
+    // amber warning independently. An integrity gate belongs at the
+    // `recipientContactName` chokepoint above, which both mechanisms read.
     if (recipientContactName) {
       setFamiliarity("known");
       setHistoryUnreadable(false);
@@ -364,7 +395,7 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
       }).catch(() => false);
       if (cancelled) return;
       setFamiliarity(
-        classifyRecipient({ recipientLower, fromLower, isContact: false, rows, pending, verifiedSentLogHit }),
+        classifyRecipient({ recipientLower, fromLower, rows, pending, verifiedSentLogHit }),
       );
       // The confirmed history (cache ∪ live) is what establishes "never sent
       // before"; if it was unreadable we show the neutral verify caution, not a
