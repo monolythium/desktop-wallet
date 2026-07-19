@@ -39,6 +39,7 @@ import {
   type SendErrorInput,
 } from "../sdk/send-error";
 import { readDeveloperMode } from "../sdk/feature-flags";
+import { PasswordInput } from "../components/PasswordInput";
 import type { Route } from "../components/types";
 import type {
   OperationExecutionContext,
@@ -489,12 +490,15 @@ function AuthPane({
       </div>
       <label className="w-onboarding__field" style={{ marginTop: 12 }}>
         <span className="cap">Password</span>
-        <input
-          type="password"
+        {/* Lockout layer 1 of 3: the field (and the Authorize button) go
+            disabled. Layer 2 is the Enter guard below; layer 3 is the
+            early-return in advanceFromAuth. All three stay, so the drawer can
+            never be used as a way around the unlock screen's lockout. */}
+        <PasswordInput
           autoFocus
           autoComplete="current-password"
           value={password}
-          onChange={(e) => setPassword(e.target.value)}
+          onChange={setPassword}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !busy && !lockedOut && password) onSubmit();
           }}

@@ -30,6 +30,7 @@ import { VerifyPhrase } from "./VerifyPhrase";
 import { WalletLogo } from "./WalletLogo";
 import { PreferencesPanel } from "./PreferencesPanel";
 import { PasswordStrengthMeter } from "./PasswordStrengthMeter";
+import { PasswordInput } from "./PasswordInput";
 import { isPasswordValid } from "../lib/password-validation";
 
 interface Props {
@@ -392,12 +393,11 @@ export function Onboarding({ onDone }: Props) {
 
             <label className="w-onboarding__field">
               <span className="cap">Password</span>
-              <input
-                type="password"
+              <PasswordInput
                 autoFocus
                 autoComplete="new-password"
                 value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                onChange={setPassword}
                 onKeyDown={(e) => {
                   if (e.key === "Enter") void submit();
                 }}
@@ -406,11 +406,10 @@ export function Onboarding({ onDone }: Props) {
 
             <label className="w-onboarding__field">
               <span className="cap">Confirm</span>
-              <input
-                type="password"
+              <PasswordInput
                 autoComplete="new-password"
                 value={confirm}
-                onChange={(e) => setConfirm(e.target.value)}
+                onChange={setConfirm}
                 onKeyDown={(e) => {
                   if (e.key === "Enter") void submit();
                 }}

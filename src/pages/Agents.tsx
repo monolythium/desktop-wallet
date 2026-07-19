@@ -29,6 +29,7 @@ import {
   COMMON_PASSWORD_HINT,
   PasswordStrengthMeter,
 } from "../components/PasswordStrengthMeter";
+import { PasswordInput } from "../components/PasswordInput";
 import {
   MIN_PASSWORD_LENGTH,
   passwordRejectReason,
@@ -594,12 +595,11 @@ export function Agents() {
                 style={inputStyle}
               />
               <label className="cap">Password for the new agent vault</label>
-              <input
-                type="password"
+              <PasswordInput
                 autoComplete="new-password"
                 value={createPassword}
-                onChange={(e) => {
-                  setCreatePassword(e.target.value);
+                onChange={(next) => {
+                  setCreatePassword(next);
                   setCreateError(null);
                 }}
                 style={inputStyle}

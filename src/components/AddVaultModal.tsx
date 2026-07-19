@@ -33,6 +33,7 @@ import {
 } from "../sdk/vaultCatalog";
 import { notifyActiveWalletChanged } from "../sdk/active-wallet";
 import { PasswordStrengthMeter } from "./PasswordStrengthMeter";
+import { PasswordInput } from "./PasswordInput";
 import { isPasswordValid } from "../lib/password-validation";
 
 interface Props {
@@ -295,21 +296,19 @@ export function AddVaultModal({ onClose, onAdded }: Props) {
             />
 
             <label style={{ ...fieldLabel, marginTop: 12 }}>Password</label>
-            <input
-              type="password"
+            <PasswordInput
               autoComplete="new-password"
               value={password}
-              onChange={(e) => setPassword(e.target.value)}
+              onChange={setPassword}
               placeholder="At least 15 characters"
               style={inputStyle}
             />
 
             <label style={{ ...fieldLabel, marginTop: 12 }}>Confirm password</label>
-            <input
-              type="password"
+            <PasswordInput
               autoComplete="new-password"
               value={confirm}
-              onChange={(e) => setConfirm(e.target.value)}
+              onChange={setConfirm}
               style={inputStyle}
             />
 

@@ -6,6 +6,7 @@
 
 import { useEffect, useState } from "react";
 import { WalletLockLogo } from "./WalletLockLogo";
+import { PasswordInput } from "./PasswordInput";
 import {
   KeychainCallError,
   fetchAndUnlockVault,
@@ -224,12 +225,11 @@ export function UnlockGate() {
             </p>
             <label className="w-onboarding__field" style={{ textAlign: "left" }}>
               <span className="cap">Password</span>
-              <input
-                type="password"
+              <PasswordInput
                 autoFocus
                 autoComplete="current-password"
                 value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                onChange={setPassword}
                 onKeyDown={(e) => {
                   if (e.key === "Enter") void submit();
                 }}
