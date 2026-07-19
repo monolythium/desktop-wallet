@@ -8,9 +8,10 @@
 // `lyth_mempoolPending` view is not shown — the durable tracked set is the
 // wallet's own single source of pending.
 //
-// Tracked-pending + failed rows are notification-layer features: the stores
-// that back them are only written while the experimental flag is on, so with it
-// off they are empty and the feed is exactly the indexed confirmed rows.
+// Tracked-pending + failed rows are a default-on part of the feed. Their stores
+// start empty and fill as the wallet broadcasts, so a fresh wallet sees exactly
+// the indexed confirmed rows and these interleave once there is in-flight or
+// failed history.
 
 import { useEffect, useMemo, useState } from "react";
 import { scopeChainKey } from "../sdk/chains";

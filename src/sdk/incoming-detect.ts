@@ -7,10 +7,14 @@
 // is notified, while a large imported history is baselined silently so it never
 // toasts its whole history.
 //
-// Open-surface / unlocked only: it runs after the Activity page loads its
-// indexed rows (a focused window IS the open, unlocked surface), so there is no
-// background/closed-surface polling and the Hybrid address-privacy posture is
-// preserved.
+// Unlocked + visible only. Two callers drive it: the Activity page's refresh,
+// and the app-level `IncomingPoller` (every 2 minutes, from any route). Both
+// require an unlocked wallet and a visible window, so there is still no
+// background or closed-surface polling and the address-privacy posture is
+// unchanged — the reads happen only while the user is present at the app.
+//
+// The two paths need no coordination: they share the per-scope watermark and the
+// `${chainIdHex}:${txHash}` record dedupe, so an overlap records nothing twice.
 //
 // Honest absence: only inbound NATIVE LYTH rows (no MRC-20 token id) become
 // receive notifications; the synthetic id

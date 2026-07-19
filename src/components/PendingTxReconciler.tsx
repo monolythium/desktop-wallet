@@ -8,8 +8,9 @@
 // drawer.
 //
 // Lifecycle:
-//   - Mounted from App.tsx ONLY when the experimental flag is on (flag off ⇒
-//     not mounted ⇒ zero behavior change vs. the pre-poller wallet).
+//   - Always mounted from App.tsx. It costs nothing while idle: with no tracked
+//     txs the loop holds no timer at all and re-arms from the store
+//     subscription below.
 //   - Subscribes to the tracked-tx store so an enqueue (from a fresh broadcast)
 //     wakes the loop immediately, and the loop self-idles the moment the set
 //     empties (no busy-poll when there's nothing to track).
@@ -26,8 +27,9 @@ import { hasPendingTxs, subscribePendingTxs } from "../sdk/pending-tx-store";
 /** Base cadence between reconcile ticks while txs are outstanding. */
 const RECONCILE_BASE_MS = 4_000;
 /** Back-off ceiling — a run of ticks that resolve nothing lengthens the gap up
- *  to here so a stuck tx doesn't hammer the RPC. Stays well under the 5-min
- *  tracking window so a recoverable tx still gets repeated probes. */
+ *  to here so a stuck tx doesn't hammer the RPC. Well under the 45-minute
+ *  absolute cap (and the 60-minute terminal retain that follows it), so a
+ *  recoverable tx still gets many probes before it is ever given up on. */
 const RECONCILE_MAX_MS = 30_000;
 
 export function PendingTxReconciler() {

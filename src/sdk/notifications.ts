@@ -6,9 +6,11 @@
 //
 // No `chrome.*`, no DOM, no Tauri IPC, no module-scope state — every helper
 // here is deterministic and unit-testable in vitest without runtime shims.
-// The Tauri-store round-trip lives in `notifications-store.ts`; the single
-// recording chokepoint (terminal transition of a tracked write) lives in the
-// OperationsDrawer.
+// The Tauri-store round-trip lives in `notifications-store.ts`. Records are
+// written from `reconcile.ts` (the terminal transition of a tracked write),
+// `notifications-record.ts` (a submission that failed synchronously), and
+// `incoming-detect.ts` (an inbound transfer) — all through the single
+// `recordNotification` chokepoint, which dedupes on `${chainIdHex}:${txHash}`.
 //
 // Invariants this module helps uphold:
 //   - Status fidelity: `NotificationRecord.status` is `"confirmed" | "failed"`
