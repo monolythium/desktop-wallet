@@ -61,6 +61,10 @@ export const WALLET_LINK_HOSTS: readonly string[] = [
   "mono-labs.org",
   "monoscan.xyz",
   "github.com",
+  // The community channel. Added precisely — one host, no wildcard — because
+  // the conformance test's value is that it FAILS for anything unlisted, and a
+  // permissive entry would retire the guard rather than extend it.
+  "t.me",
 ];
 
 /** The hostname of a URL, lowercased, or null if it does not parse. */

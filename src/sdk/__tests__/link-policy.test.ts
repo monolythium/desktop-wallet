@@ -31,8 +31,8 @@ import {
 // Named per source so a failure says WHICH catalog broke, and so the
 // non-vacuity check below can prove each source was actually reached.
 const CATALOGS: { name: string; urls: string[]; minRows: number }[] = [
-  { name: "EXTERNAL_LINKS", urls: EXTERNAL_LINKS.map((l) => l.url), minRows: 7 },
-  { name: "HELP_LINKS", urls: HELP_LINKS.map((l) => l.url), minRows: 3 },
+  { name: "EXTERNAL_LINKS", urls: EXTERNAL_LINKS.map((l) => l.url), minRows: 8 },
+  { name: "HELP_LINKS", urls: HELP_LINKS.map((l) => l.url), minRows: 4 },
   {
     name: "monoscan",
     urls: [MONOSCAN_TX_BASE, MONOSCAN_ADDRESS_BASE, MONOSCAN_GET_LYTH_URL],
@@ -85,10 +85,36 @@ describe("every wallet-authored URL resolves to an allowlisted host", () => {
       "https://raw.githubusercontent.com/x", // adjacent but unlisted host
       "https://monoscan.xyz.attacker.test/#/tx/0xabc", // canonical host as a prefix
       "not a url",
+      // The community-channel additions must not have widened the gate.
+      "https://t.me.evil.example/monolythium", // allowlisted host as a prefix
+      "https://discord.gg/monolythium", // NOT shipped — see the report
+      "https://telegram.me/monolythium", // a different host, however familiar
     ];
     for (const url of intruders) {
       expect(isAllowedWalletLink(url), `${url} must be rejected`).toBe(false);
     }
+  });
+
+  it("the allowlist grew by exactly one host", () => {
+    // A wildcard or a broad suffix would retire the guard rather than extend
+    // it, and would do so silently.
+    expect([...WALLET_LINK_HOSTS]).toEqual([
+      "monolythium.com",
+      "mono-labs.org",
+      "monoscan.xyz",
+      "github.com",
+      "t.me",
+    ]);
+    for (const host of WALLET_LINK_HOSTS) {
+      expect(host, "no wildcards").not.toContain("*");
+    }
+  });
+
+  it("the community channel is allowed under the SAME dot-boundary rule", () => {
+    // Not a special case: it passes the identical matcher every other host uses.
+    expect(isAllowedWalletLink("https://t.me/monolythium")).toBe(true);
+    expect(isAllowedWalletLink("https://sub.t.me/x")).toBe(true); // real subdomain
+    expect(isAllowedWalletLink("https://nott.me/x")).toBe(false); // dot boundary holds
   });
 
   it("the pinned catalog values are the ones shipped", () => {
@@ -101,11 +127,13 @@ describe("every wallet-authored URL resolves to an allowlisted host", () => {
       "https://monolythium.com/whitepaper",
       "https://github.com/monolythium/",
       "https://monolythium.com/legal/privacy",
+      "https://t.me/monolythium",
     ]);
     expect(HELP_LINKS.map((l) => l.label)).toEqual([
       "Monolythium",
       "Documentation",
       "GitHub",
+      "Telegram",
     ]);
     expect(BLOG_FEED_URL).toBe("https://monolythium.com/blog/rss.xml");
   });

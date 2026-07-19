@@ -81,11 +81,20 @@ export const HELP_SECTIONS: HelpSection[] = [
   },
 ];
 
-/** Help/support links — filtered from the canonical Resources links, NOT invented.
- *  Documentation and the source repository are the real places to read more or
- *  file an issue. There is intentionally no support email or chat: we surface
- *  only channels the wallet already ships. */
-export const HELP_LINK_LABELS = ["Documentation", "GitHub", "Monolythium"] as const;
+/** Help links — filtered from the canonical Resources links, NOT invented. We
+ *  surface only channels that actually exist.
+ *
+ *  Documentation and the source repository are where to read more or file an
+ *  issue. Telegram is a COMMUNITY channel: other users, no ticket queue, no
+ *  response guarantee, nobody on duty. The Help copy says so, because framing a
+ *  community room as support sets up a stuck user to wait for an answer that
+ *  was never promised — and to trust whoever answers first. */
+export const HELP_LINK_LABELS = [
+  "Documentation",
+  "GitHub",
+  "Monolythium",
+  "Telegram",
+] as const;
 
 export const HELP_LINKS: ExternalLink[] = EXTERNAL_LINKS.filter((l) =>
   (HELP_LINK_LABELS as readonly string[]).includes(l.label),

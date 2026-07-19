@@ -39,16 +39,45 @@ describe("Help page", () => {
     );
     expect(hrefs.length).toBeGreaterThan(0);
     for (const href of hrefs) {
+      // THE property: every link comes from the one catalog. A channel is
+      // allowed here only by being added there, where the allowlist conformance
+      // test also sees it.
       expect(ALLOWED_URLS.has(href!)).toBe(true);
-      // No invented support handles / inboxes.
-      expect(href).not.toMatch(/discord|telegram|t\.me|mailto:|support/i);
+      // Still no support inbox — the wallet ships none, so one appearing would
+      // be invented. (The blanket channel ban this replaces was a proxy for
+      // exactly this, written when no channel existed at all.)
+      expect(href).not.toMatch(/mailto:|\/support|support@/i);
+      // Discord was NOT shipped: it could not be verified as live from the
+      // build environment, and an unverified channel link is the one thing a
+      // stuck user clicks. If it is added later it goes through the catalog.
+      expect(href).not.toMatch(/discord/i);
     }
   });
 
-  it("is honest that there is no live support and no one asks for the phrase", () => {
+  it("frames the community channel as community, never as support", () => {
+    const { container } = render(<Help />);
+    // JSX prose wraps across source lines, so the assertion is about the
+    // SENTENCE, not about where the formatter broke it.
+    const text = (container.textContent ?? "").replace(/\s+/g, " ");
+    expect(text).toMatch(/community channel/i);
+    expect(text).toMatch(/not a support desk/i);
+    expect(text).toMatch(/Nobody is on duty/i);
+    expect(text).toMatch(/no ticket queue or response guarantee/i);
+    // And it must NOT promise what the project hasn't: no SLA language.
+    expect(text).not.toMatch(/we('| wi)ll (respond|reply|get back)/i);
+    expect(text).not.toMatch(/24\/7|response time|support team/i);
+  });
+
+  it("keeps the anti-phishing line, and extends it to community channels", () => {
     render(<Help />);
-    expect(screen.getByText(/no live support chat/i)).toBeInTheDocument();
-    expect(screen.getByText(/ask for your recovery phrase or password/i)).toBeInTheDocument();
+    const warning = screen.getByText(/will\s+ever ask for your recovery phrase or password/i);
+    expect(warning).toBeInTheDocument();
+    // A community server is a primary phishing venue, so the sentence must
+    // cover it explicitly rather than only naming the project.
+    expect(warning.textContent).toMatch(/no one in any community channel/i);
+    // And it must be in the prominent warn family, beside the link — not a
+    // muted footnote below the fold.
+    expect(warning).toHaveClass("w-warn-prominent");
   });
 
   it("offers in-app jumps to reveal and reset when navigation is available", () => {

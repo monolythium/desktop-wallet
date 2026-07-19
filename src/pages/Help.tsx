@@ -123,9 +123,20 @@ export function Help({ goto }: HelpProps) {
               lineHeight: 1.6,
             }}
           >
-            There's no live support chat, and no one from Monolythium will ever
-            ask for your recovery phrase or password. Read the documentation or
-            open an issue on the source repository above.
+            Telegram is a community channel — other users, not a support desk.
+            Nobody is on duty, and there's no ticket queue or response
+            guarantee. For a definite answer, read the documentation or open an
+            issue on the source repository above.
+          </p>
+          {/* Deliberately its own paragraph, in the warn family, sitting
+              directly beneath the channel link. A community server is a primary
+              phishing venue — the people most likely to answer a stuck user
+              first are the ones hunting for exactly this mistake — so the
+              sentence carries more weight here than anywhere else in the app. */}
+          <p className="w-warn-prominent" style={{ marginTop: 10 }}>
+            No one from Monolythium, and no one in any community channel, will
+            ever ask for your recovery phrase or password. Anyone who does is
+            trying to steal your funds.
           </p>
           {goto ? (
             <div style={{ display: "flex", gap: 8, marginTop: 14, flexWrap: "wrap" }}>
