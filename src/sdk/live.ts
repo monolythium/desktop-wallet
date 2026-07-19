@@ -354,8 +354,10 @@ export async function loadLiveActivityPage(
   wallet: string,
   cursor?: string,
 ): Promise<RpcOutcome<ActivityPage>> {
-  const typedWallet = requireTypedUserAddress(wallet, "wallet");
   return capture(async () => {
+    // Validated INSIDE capture: a malformed address is an outcome, not a
+    // rejection — every caller of this reader treats it as a fallible read.
+    const typedWallet = requireTypedUserAddress(wallet, "wallet");
     const client = getProvider().rpcClient;
     // The node returns a paginated envelope ({ activity, nextCursor, ... }); read
     // it tolerantly and enrich here. (We do not call the SDK's enrich helper — it

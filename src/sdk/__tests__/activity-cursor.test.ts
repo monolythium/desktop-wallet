@@ -92,7 +92,7 @@ describe("ConfirmedCacheEntry.nextCursor — additive both ways (G5)", () => {
 
   it("a NEW entry read by a field-blind consumer still yields its rows", () => {
     // The reverse direction: an older parser ignoring `nextCursor` keeps working.
-    const entry: ConfirmedCacheEntry = { ...base, nextCursor: CURSOR };
+    const entry: ConfirmedCacheEntry = { ...base, schemaVersion: 0, nextCursor: CURSOR };
     const { schemaVersion, confirmed, lastFetchedAtMs } = entry;
     expect({ schemaVersion, confirmed, lastFetchedAtMs }).toEqual(base);
   });

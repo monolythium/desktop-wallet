@@ -27,7 +27,8 @@ import {
 } from "../sdk/activity-rows";
 import {
   loadAddressActivityKind,
-  loadLiveAddressActivity,
+  loadLiveActivityPage,
+  loadOlderActivityPage,
   type LiveAddressActivityRow,
   type RpcOutcome,
 } from "../sdk/live";
@@ -38,6 +39,8 @@ import {
 import {
   activityCacheKey,
   applyCapturedClusterNames,
+  compareConfirmedNewestFirst,
+  confirmedRowKey,
   mergeConfirmedRows,
 } from "../sdk/activity-cache";
 import { isNativeLythTokenId, tokenUnitLabel } from "../sdk/lyth-display";
@@ -104,7 +107,60 @@ export function Activity() {
   const [dirFilter, setDirFilter] = useState<"all" | "in" | "out">("all");
   const [tokenFilter, setTokenFilter] = useState<string>("all");
 
-  const activityRows = confirmedRows;
+  // ── Pagination ────────────────────────────────────────────────────────────
+  // Older pages live OUTSIDE the confirmed cache: the cache stays the
+  // newest-window snapshot, so paging back through history never inflates it
+  // and never feeds incoming detection.
+  const [pageOneCursor, setPageOneCursor] = useState<string | null>(null);
+  const [olderRows, setOlderRows] = useState<LiveAddressActivityRow[]>([]);
+  // `undefined` = the user has not paged yet (follow page 1); `null` = paged to
+  // the end; a string = the next page's cursor.
+  const [moreCursor, setMoreCursor] = useState<string | null | undefined>(undefined);
+  const [moreError, setMoreError] = useState<string | null>(null);
+  const [moreBusy, setMoreBusy] = useState(false);
+
+  // Once a page has loaded, the advancing cursor is INSULATED from refresh
+  // churn — a manual Refresh or the cache⊕live merge must not clobber the
+  // user's paging position.
+  const activeCursor = moreCursor === undefined ? pageOneCursor : moreCursor;
+
+  // All paging state resets on a scope change (G4).
+  const activeScopeKey = `${walletAddress.toLowerCase()}:${scopeChainKey()}`;
+  useEffect(() => {
+    setOlderRows([]);
+    setMoreCursor(undefined);
+    setMoreError(null);
+    setMoreBusy(false);
+    setPageOneCursor(null);
+  }, [activeScopeKey]);
+
+  const onLoadMore = async () => {
+    if (activeCursor === null || moreBusy) return;
+    setMoreBusy(true);
+    setMoreError(null);
+    try {
+      const page = await loadOlderActivityPage(walletAddress, activeCursor);
+      if (!page.ok) {
+        // The cursor is NOT advanced — a retry re-uses it. An error is never
+        // masked as "no more pages", which would silently truncate history.
+        setMoreError(page.error ?? "unavailable");
+        return;
+      }
+      const incoming = page.value?.rows ?? [];
+      setOlderRows((prev) => {
+        const seen = new Set([...confirmedRows, ...prev].map(confirmedRowKey));
+        return [...prev, ...incoming.filter((r) => !seen.has(confirmedRowKey(r)))];
+      });
+      setMoreCursor(page.value?.nextCursor ?? null);
+    } finally {
+      setMoreBusy(false);
+    }
+  };
+
+  const activityRows = useMemo(
+    () => [...confirmedRows, ...olderRows].sort(compareConfirmedNewestFirst),
+    [confirmedRows, olderRows],
+  );
 
   // Counterparty labels for the visible rows. Only USER addresses participate —
   // delegation rows already name their cluster, and a precompile is not a
@@ -215,13 +271,19 @@ export function Activity() {
       setConfirmedRows(cached?.rows ?? []);
       // 2. Live read + scoped failed records.
       const [activityOutcome, scopedNotifications] = await Promise.all([
-        loadLiveAddressActivity(walletAddress),
+        loadLiveActivityPage(walletAddress),
         // Active-vault scope only — another vault's failed rows must never
         // appear here (records are owned by the address they were recorded
         // under, which matches the active wallet's lowercased address).
         listForScope(addrLower),
       ]);
-      setActivity(activityOutcome);
+      // The rest of the page still speaks rows; the cursor rides alongside.
+      setActivity(
+        activityOutcome.ok
+          ? { ok: true, value: activityOutcome.value?.rows ?? [] }
+          : { ok: false, error: activityOutcome.error },
+      );
+      setPageOneCursor(activityOutcome.ok ? activityOutcome.value?.nextCursor ?? null : null);
       setFailed(scopedNotifications.filter((r) => r.status === "failed"));
       // 3. Merge live into the cache (live wins; older cached rows retained),
       //    render the merged set, and persist. On a live error we keep the cached
@@ -231,12 +293,17 @@ export function Activity() {
         // Merge live into the cache, then keep captured cluster names sticky
         // across the flip / rebuild (the indexer's name read can lag or fail).
         mergedConfirmed = applyCapturedClusterNames(
-          mergeConfirmedRows(cached?.rows ?? [], activityOutcome.value ?? []),
+          mergeConfirmedRows(cached?.rows ?? [], activityOutcome.value?.rows ?? []),
           cached?.rows ?? [],
           tracked,
         );
         setConfirmedRows(mergedConfirmed);
-        await writeConfirmedCache(scopeKey, mergedConfirmed, Date.now());
+        await writeConfirmedCache(
+          scopeKey,
+          mergedConfirmed,
+          Date.now(),
+          activityOutcome.value?.nextCursor ?? null,
+        );
       }
       // Only when the merged confirmed feed is empty do we probe the indexer's
       // coverage so the empty state can explain the reason.
@@ -249,10 +316,12 @@ export function Activity() {
       // the LIVE rows, not the merged cache. Open, focused surface only; gated by
       // the experimental flag like the rest of the notifications layer.
       if (showExtra && activityOutcome.ok) {
+        // PAGE-1 LIVE ROWS ONLY — older pages never reach detection, or paging
+        // back through history would re-announce ancient transfers.
         void detectAndNotifyIncoming(
           addrLower,
           chainIdHex,
-          activityOutcome.value ?? [],
+          activityOutcome.value?.rows ?? [],
         );
       }
     } finally {
@@ -484,7 +553,21 @@ export function Activity() {
                 />
               );
             })
-          ) : activity?.ok ? (
+          ) : null}
+
+          {/* Older pages. Visible only once at least one confirmed row rendered
+              AND there is either a page to fetch or an error to retry — the
+              error band owns the never-loaded state, the empty state owns the
+              empty feed. */}
+          {activityRows.length > 0 && (activeCursor !== null || moreError !== null) ? (
+            <LoadMoreFooter
+              busy={moreBusy}
+              error={moreError}
+              onClick={() => void onLoadMore()}
+            />
+          ) : null}
+
+          {merged.length === 0 && activity?.ok ? (
             <div className="w-empty">
               {(() => {
                 // Filtered: the rows exist but none match — keep the filter copy.
@@ -516,11 +599,13 @@ export function Activity() {
                 </button>
               ) : null}
             </div>
-          ) : (
+          ) : null}
+
+          {merged.length === 0 && !activity?.ok ? (
             <div style={{ padding: "16px 0", color: "var(--w-text-3)", fontSize: 13 }}>
               {walletAddress ? "Loading indexed activity…" : "No active wallet address."}
             </div>
-          )}
+          ) : null}
         </div>
       </div>
 
@@ -611,4 +696,37 @@ function failedCounterparty(rec: NotificationRecord): string {
     );
   }
   return truncCounterparty(rec.counterparty);
+}
+
+/** Older-page footer. Three states, all copy verbatim per the spec.
+ *
+ *  The error state is deliberately distinct from "no more pages": a transient
+ *  failure that silently hid the button would look identical to reaching the
+ *  end of history, and the user would never know rows were missing. */
+function LoadMoreFooter({
+  busy,
+  error,
+  onClick,
+}: {
+  busy: boolean;
+  error: string | null;
+  onClick: () => void;
+}) {
+  const label = busy ? "Loading…" : error !== null ? "Couldn't load more. Tap to retry." : "Load more";
+  return (
+    <button
+      type="button"
+      data-testid="load-more"
+      className="btn btn--sm btn--ghost"
+      onClick={busy ? undefined : onClick}
+      disabled={busy}
+      style={{
+        width: "100%",
+        marginTop: 10,
+        ...(error !== null && !busy ? { color: "var(--err)" } : {}),
+      }}
+    >
+      {label}
+    </button>
+  );
 }
