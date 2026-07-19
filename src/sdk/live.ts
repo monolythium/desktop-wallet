@@ -732,10 +732,22 @@ export async function loadLiveClusterNames(
   return out;
 }
 
+/** Ceiling above which a decoded claim is not a claim.
+ *
+ *  200,000,000 LYTH is twice the genesis supply, so any single reward
+ *  settlement at or beyond it is a rogue or buggy operator echo rather than
+ *  money that moved. Such a value is treated as UNDECODABLE — never clamped
+ *  down to the ceiling, which would turn a bogus reading into a plausible
+ *  figure and hide the fact that the answer was garbage. */
+export const MAX_PLAUSIBLE_CLAIM_LYTHOSHI = 200_000_000n * 10n ** 18n;
+
 /** Decode the settled reward amount (LYTH decimal) from a confirmed claim tx's
- *  `Claimed` log via `lyth_decodeTx`. Returns null when no Claimed log is present
- *  or any read/decode fails — the caller falls back to the claimable amount
- *  captured at submit (honest absence, never a fabricated number). */
+ *  `Claimed` log via `lyth_decodeTx`.
+ *
+ *  Returns null when there is no Claimed log, the read/decode fails, or the
+ *  amount is implausible. Null means the surfaces show the bare title — the
+ *  submit-time claimable is a DIFFERENT quantity (execution settles further
+ *  rewards) and is never substituted. */
 export async function decodeClaimedAmount(txHash: string): Promise<string | null> {
   try {
     const decoded = await getProvider().rpcClient.lythDecodeTx(txHash);
@@ -743,7 +755,9 @@ export async function decodeClaimedAmount(txHash: string): Promise<string | null
     for (const log of logs) {
       if (log.topics?.[0] === CLAIMED_EVENT_TOPIC0) {
         const event = decodeClaimedEvent(log.topics, log.data);
-        return formatLyth(event.amount.toString(), { includeUnit: false });
+        const amount = event.amount;
+        if (amount > MAX_PLAUSIBLE_CLAIM_LYTHOSHI) return null;
+        return formatLyth(amount.toString(), { includeUnit: false });
       }
     }
     return null;

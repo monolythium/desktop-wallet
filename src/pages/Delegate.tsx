@@ -548,11 +548,15 @@ export function Delegate() {
   const openClaim = (totalLyth: string) => {
     ops.open({
       title: "Claim delegation rewards",
-      subtitle: `Settle and withdraw ${totalLyth} LYTH of pending delegation rewards`,
+      // No asserted figure: what is claimable NOW and what the claim actually
+      // settles are different quantities, because execution settles further
+      // rewards accrued in the meantime.
+      subtitle: "Settle and withdraw your pending delegation rewards",
       auth: "keychain",
       diff: [
         { k: "From", v: selfBech32m },
-        { k: "Claimable", v: `${totalLyth} LYTH` },
+        // Labelled as a live preview, not an outcome.
+        { k: "Claimable (current)", v: `${totalLyth} LYTH` },
         { k: "Precompile", v: "0x…100a" },
       ],
       effects: [
@@ -565,7 +569,10 @@ export function Delegate() {
       ],
       notify: {
         kind: "claim",
-        amountDecimal: totalLyth,
+        // The tx's true value is 0. The claimed figure is unknown until the
+        // receipt's Claimed log decodes, and the submit-time claimable is a
+        // different quantity — storing it here would invite it onto a surface.
+        amountDecimal: "0",
         counterparty: DELEGATION_PRECOMPILE,
       },
       execute: async (ctx) => {
@@ -577,7 +584,9 @@ export function Delegate() {
           submitDelegationTx({ seed: ctx.vaultSeed!, data: calldata }),
         );
         return {
-          headline: `Claimed ${totalLyth} LYTH of delegation rewards`,
+          // Broadcast accepted is not settlement. The settled figure arrives
+          // with the receipt and is announced on the record, not here.
+          headline: "Claim submitted",
           detail: result.txHash,
           txHash: result.txHash,
           nonce: result.nonce,
