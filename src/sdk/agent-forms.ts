@@ -77,6 +77,9 @@ export function balanceCheckFailedMessage(reason: string): string {
 
 // ── Policy / cap form ────────────────────────────────────────────────────────
 
+/** Verbatim, from the alert it replaces. */
+export const NO_PRINCIPAL_MESSAGE = "No active principal wallet address resolved.";
+
 export const POLICY_INVALID_CAPS = "Caps must be valid LYTH amounts.";
 export const POLICY_INVALID_WINDOW = "Time window must be START-END, e.g. 9-17.";
 export const POLICY_INVALID_HOURS = "Hours must be 0-23.";
