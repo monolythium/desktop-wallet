@@ -77,6 +77,9 @@ import {
 } from "../sdk/delegation-caps";
 import { withDelegationRevertCopy } from "../sdk/delegation-reverts";
 import { useDelegationRejection } from "../sdk/DelegationRejectionProvider";
+import { claimButtonState } from "../sdk/claim-in-flight";
+import { useInFlightClaim } from "../sdk/use-claim-in-flight";
+import { scopeChainKey } from "../sdk/chains";
 
 export function Delegate() {
   const ops = useOperations();
@@ -85,6 +88,9 @@ export function Delegate() {
   const rejection = useDelegationRejection();
   const wallet = useActiveWallet();
   const walletAddress = wallet.status === "ready" ? wallet.address : "";
+  // Read from the durable store, so a claim broadcast then app-quit still
+  // guards on relaunch.
+  const claimInFlight = useInFlightClaim(walletAddress.toLowerCase(), scopeChainKey());
   const [status, setStatus] = useState<LiveDelegationStatus | null>(null);
   // Live wallet balance (raw lythoshi) — the basis for every derived LYTH figure
   // on this page. RpcOutcome so a failed read falls back to a bps-only display
@@ -546,6 +552,9 @@ export function Delegate() {
   };
 
   const openClaim = (totalLyth: string) => {
+    // Defense in depth: the button is already disabled, but a stale render or a
+    // keyboard activation must not open a drawer that would double-broadcast.
+    if (claimInFlight) return;
     ops.open({
       title: "Claim delegation rewards",
       // No asserted figure: what is claimable NOW and what the claim actually
@@ -883,22 +892,24 @@ export function Delegate() {
                         4,
                       );
                       const claimable = hasClaimableRewards(r);
+                      const btn = claimButtonState({ inFlight: claimInFlight, claimable });
                       return (
                         <>
                           <div>{pendingLyth} LYTH</div>
-                          <button
-                            className="btn btn--sm btn--primary"
-                            style={{ marginTop: 8 }}
-                            disabled={!claimable}
-                            title={
-                              claimable
-                                ? "Settle and withdraw all pending rewards"
-                                : "Nothing to claim"
-                            }
-                            onClick={() => openClaim(pendingLyth)}
-                          >
-                            Claim all
-                          </button>
+                          {/* The tooltip rides a wrapping span: a native title
+                              on a disabled button is not reliably shown. */}
+                          <span title={btn.tooltip ?? undefined} style={{ display: "inline-block" }}>
+                            <button
+                              className="btn btn--sm btn--primary"
+                              style={{ marginTop: 8 }}
+                              disabled={btn.disabled}
+                              title={btn.title}
+                              data-testid="claim-all"
+                              onClick={() => openClaim(pendingLyth)}
+                            >
+                              {btn.label}
+                            </button>
+                          </span>
                         </>
                       );
                     })()
