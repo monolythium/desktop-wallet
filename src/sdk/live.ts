@@ -317,18 +317,78 @@ export async function loadLiveTradeStatus(): Promise<LiveTradeStatus> {
   };
 }
 
-export async function loadLiveAddressActivity(wallet: string): Promise<RpcOutcome<LiveAddressActivityRow[]>> {
+/** Rows per page — the initial read AND every older page. */
+export const ACTIVITY_PAGE_SIZE = 30;
+
+/** One page of address activity plus the cursor for the next (older) page. */
+export interface ActivityPage {
+  rows: LiveAddressActivityRow[];
+  /** Opaque `0x` keyset string, round-tripped verbatim. Null = no more pages. */
+  nextCursor: string | null;
+}
+
+/**
+ * Pull the next-page cursor out of the activity envelope.
+ *
+ * The cursor is an OPAQUE `0x`-prefixed keyset string — the wallet never parses
+ * or constructs one, it only round-trips it. Tolerant: absent, non-string, or
+ * malformed yields null (treated as "no more pages"), which degrades to today's
+ * single-page behaviour rather than paging into nonsense. Pure.
+ */
+export function activityCursorFrom(raw: unknown): string | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const cursor = (raw as Record<string, unknown>).nextCursor;
+  if (typeof cursor !== "string") return null;
+  const trimmed = cursor.trim();
+  if (trimmed === "" || !trimmed.startsWith("0x")) return null;
+  return trimmed;
+}
+
+/**
+ * One page of activity. `cursor` absent = the newest page.
+ *
+ * Rows are re-sliced to `ACTIVITY_PAGE_SIZE` client-side BEFORE mapping, so a
+ * misbehaving operator cannot grow wallet memory by over-answering.
+ */
+export async function loadLiveActivityPage(
+  wallet: string,
+  cursor?: string,
+): Promise<RpcOutcome<ActivityPage>> {
   const typedWallet = requireTypedUserAddress(wallet, "wallet");
   return capture(async () => {
     const client = getProvider().rpcClient;
     // The node returns a paginated envelope ({ activity, nextCursor, ... }); read
     // it tolerantly and enrich here. (We do not call the SDK's enrich helper — it
     // assumes a bare array and throws on the envelope.)
-    const raw = (await client.lythGetAddressActivity(typedWallet, 30)) as unknown;
-    const entries = activityEntriesFrom(raw);
-    if (entries.length === 0) return [];
-    return enrichActivityEntries(client, entries);
+    const raw = (await (cursor === undefined
+      ? client.lythGetAddressActivity(typedWallet, ACTIVITY_PAGE_SIZE)
+      : client.lythGetAddressActivity(typedWallet, ACTIVITY_PAGE_SIZE, cursor))) as unknown;
+    const entries = activityEntriesFrom(raw).slice(0, ACTIVITY_PAGE_SIZE);
+    const nextCursor = activityCursorFrom(raw);
+    if (entries.length === 0) return { rows: [], nextCursor };
+    return { rows: await enrichActivityEntries(client, entries), nextCursor };
   });
+}
+
+/** The newest page's ROWS only — the long-standing shape every non-paging
+ *  consumer (Send familiarity, Home preview, the incoming poller) still uses.
+ *  A thin wrapper over {@link loadLiveActivityPage}, so there is exactly one
+ *  RPC implementation behind both shapes. */
+export async function loadLiveAddressActivity(wallet: string): Promise<RpcOutcome<LiveAddressActivityRow[]>> {
+  const page = await loadLiveActivityPage(wallet);
+  if (!page.ok) return { ok: false, error: page.error };
+  return { ok: true, value: page.value?.rows ?? [] };
+}
+
+/** An OLDER page. Read-only and additive by contract: no cache write, no
+ *  coverage probe, no incoming detection, no notification write, no pending
+ *  reconcile. A transient error surfaces verbatim — it is NEVER masked as
+ *  "no more pages", which would silently truncate the user's history. */
+export async function loadOlderActivityPage(
+  wallet: string,
+  cursor: string,
+): Promise<RpcOutcome<ActivityPage>> {
+  return loadLiveActivityPage(wallet, cursor);
 }
 
 /** Normalize the node's address-activity response to the raw entry array. The

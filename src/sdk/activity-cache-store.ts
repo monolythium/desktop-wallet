@@ -75,7 +75,7 @@ async function saveState(state: ActivityCacheState): Promise<void> {
  *  fetch). Best-effort. */
 export async function readConfirmedCache(
   scopeKey: string,
-): Promise<{ rows: LiveAddressActivityRow[]; lastFetchedAtMs: number } | null> {
+): Promise<{ rows: LiveAddressActivityRow[]; lastFetchedAtMs: number; nextCursor: string | null } | null> {
   try {
     const state = await loadState();
     const entry = parseConfirmedCacheEntry(state.confirmed[scopeKey]);
@@ -83,6 +83,9 @@ export async function readConfirmedCache(
     return {
       rows: entry.confirmed.map(fromCachedRow),
       lastFetchedAtMs: entry.lastFetchedAtMs,
+      // Absent on a legacy entry — reads as "no more pages" until a live read
+      // re-seeds it.
+      nextCursor: entry.nextCursor ?? null,
     };
   } catch {
     return null;
@@ -96,6 +99,7 @@ export async function writeConfirmedCache(
   scopeKey: string,
   rows: ReadonlyArray<LiveAddressActivityRow>,
   nowMs: number,
+  nextCursor: string | null = null,
 ): Promise<void> {
   try {
     const state = await loadState();
@@ -103,6 +107,7 @@ export async function writeConfirmedCache(
       schemaVersion: 0,
       confirmed: rows.slice(0, ACTIVITY_ROLLING_WINDOW).map(toCachedRow),
       lastFetchedAtMs: nowMs,
+      nextCursor,
     };
     await saveState({
       version: 1,

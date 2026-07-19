@@ -49,6 +49,10 @@ export interface ConfirmedCacheEntry {
   schemaVersion: 0;
   confirmed: CachedConfirmedRow[];
   lastFetchedAtMs: number;
+  /** Page-1 cursor for the NEXT (older) page. Additive: a legacy entry parses
+   *  with it absent, which reads as "no more pages" until the next live read
+   *  re-seeds it — degraded, never wrong. */
+  nextCursor?: string | null;
 }
 
 /** Project a live indexer row onto the JSON-safe cache shape (`bigint`→`number`). */
@@ -220,5 +224,19 @@ export function parseConfirmedCacheEntry(raw: unknown): ConfirmedCacheEntry | nu
     typeof r.lastFetchedAtMs === "number" && Number.isFinite(r.lastFetchedAtMs)
       ? r.lastFetchedAtMs
       : 0;
-  return { schemaVersion: 0, confirmed, lastFetchedAtMs };
+  // Round-trip the cursor; a malformed value drops to absent rather than being
+  // persisted as something the pager would later send to the node.
+  const rawCursor = r.nextCursor;
+  const nextCursor =
+    typeof rawCursor === "string" && rawCursor.trim().startsWith("0x")
+      ? rawCursor.trim()
+      : rawCursor === null
+        ? null
+        : undefined;
+  return {
+    schemaVersion: 0,
+    confirmed,
+    lastFetchedAtMs,
+    ...(nextCursor === undefined ? {} : { nextCursor }),
+  };
 }
