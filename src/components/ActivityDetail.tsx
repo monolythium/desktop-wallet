@@ -17,7 +17,8 @@
 import { useEffect, useState } from "react";
 
 import { activityRelativeTime } from "../sdk/activity-rows";
-import { loadLiveTxConfirmations } from "../sdk/live";
+import { bpsToPercentLabel } from "../sdk/delegation-summary";
+import { decodeTxFeeLythoshi, loadLiveTxConfirmations } from "../sdk/live";
 import {
   formatLythDisplay,
   isNativeLythTokenId,
@@ -121,7 +122,64 @@ function modalTitle(row: DetailRow): string {
     kind: row.activityKind,
     subKind: row.subKind,
     direction: row.direction,
+    tokenId: row.tokenId,
   });
+}
+
+/** Is this indexed row a transaction THIS wallet paid the fee for? Only then may
+ *  a fee line render — a fee is the sender's debit, and showing someone else's
+ *  on an inbound row would assert a charge the user never paid.
+ *
+ *  Self-paid: an outgoing transfer, and the delegation-family / claim rows
+ *  (whose sender is this wallet by construction — they are precompile calls the
+ *  wallet itself signs). An inbound row NEVER is. Pure. */
+export function isSelfPaidIndexedRow(row: {
+  activityKind: string;
+  subKind: string | null;
+  direction: string | null;
+}): boolean {
+  if (row.direction === "in") return false;
+  const label = txTypeLabelForActivity({
+    kind: row.activityKind,
+    subKind: row.subKind,
+    direction: row.direction,
+  });
+  if (
+    label === "Delegate" ||
+    label === "Undelegate" ||
+    label === "Redelegate" ||
+    label === "Claim rewards"
+  ) {
+    return true;
+  }
+  return row.direction === "out";
+}
+
+/** Best-effort network fee for a self-paid indexed row. Shows the CHARGED total
+ *  the chain decoded — never a reservation or an estimate — and renders nothing
+ *  at all until it resolves (no skeleton, no dash: an absent fee is an honest
+ *  absence, and a zero/undecodable fee omits the row entirely).
+ *
+ *  Formatted through `formatLythDisplay` at the same 4 dp the notification
+ *  detail's fee row already uses, so one fee reads identically on both surfaces.
+ *  A fee smaller than the display floor truncates to "0" — and a literal
+ *  "0 LYTH" would be a fabricated figure for a charge the chain reported as
+ *  strictly positive, so that case omits the row instead. */
+function IndexedTxFee({ txHash }: { txHash: string }) {
+  const [feeLythoshi, setFeeLythoshi] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void decodeTxFeeLythoshi(txHash).then((fee) => {
+      if (!cancelled) setFeeLythoshi(fee);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [txHash]);
+  if (feeLythoshi === null) return null;
+  const display = formatLythDisplay(feeLythoshi);
+  if (display === null || isZeroAmount(display)) return null;
+  return <DRow label="Network fee" value={`${display} LYTH`} />;
 }
 
 /** Best-effort confirmation depth for an indexed row that resolved a tx hash.
@@ -250,7 +308,11 @@ function DetailBody({
       {row.amount !== null ? (
         <IndexedAmountRow row={row} tokenMeta={tokenMeta} />
       ) : null}
-      {row.weightBps !== null ? <DRow label="Weight" value={`${row.weightBps} bps`} /> : null}
+      {/* Weight is user-facing, so it reads as a percent — raw bps belongs to
+          Developer-Mode surfaces only. */}
+      {row.weightBps !== null ? (
+        <DRow label="Weight" value={bpsToPercentLabel(row.weightBps)} />
+      ) : null}
       {clusterLabel !== null ? (
         <DRow label="Cluster" value={clusterLabel} />
       ) : null}
@@ -285,6 +347,9 @@ function DetailBody({
           {/* Best-effort: shows the live confirmation depth when the chain
               reports it, otherwise stays silent (status already "Confirmed"). */}
           <IndexedTxConfirmations txHash={row.txHash} />
+          {/* Only for a tx this wallet paid for — an inbound row never fetches
+              a fee at all, let alone renders one. */}
+          {isSelfPaidIndexedRow(row) ? <IndexedTxFee txHash={row.txHash} /> : null}
           <MonoscanTxButton hash={row.txHash} />
         </>
       ) : null}
