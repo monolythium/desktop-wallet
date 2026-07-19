@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   PENDING_ABSOLUTE_CAP_MS,
   PENDING_DROP_GRACE_MS,
+  ADMITTED_INCLUSION_WINDOW_MS,
   PENDING_SLOW_MS,
   PENDING_TERMINAL_RETAIN_MS,
   PENDING_TX_STORE_KEY,
@@ -122,9 +123,22 @@ describe("classifyPending — never synthesizes a verdict (keeps pending)", () =
 describe("classifyStalePending — time-based lifecycle (no committed nonce)", () => {
   const base = tx({ submittedAt: 1_000_000 });
 
-  it("is pending inside the slow threshold", () => {
+  it("is pending inside the inclusion window", () => {
     expect(classifyStalePending(base, null, 1_000_000)).toBe("pending");
-    expect(classifyStalePending(base, null, 1_000_000 + PENDING_SLOW_MS - 1)).toBe("pending");
+    expect(
+      classifyStalePending(base, null, 1_000_000 + ADMITTED_INCLUSION_WINDOW_MS - 1),
+    ).toBe("pending");
+  });
+
+  it("is awaiting-inclusion between the window and the slow threshold", () => {
+    // Inserted between `pending` and `slow`: a broadcast with no inclusion
+    // after 20 s deserves an honest signal rather than looking idle.
+    expect(classifyStalePending(base, null, 1_000_000 + ADMITTED_INCLUSION_WINDOW_MS)).toBe(
+      "awaiting-inclusion",
+    );
+    expect(classifyStalePending(base, null, 1_000_000 + PENDING_SLOW_MS - 1)).toBe(
+      "awaiting-inclusion",
+    );
   });
 
   it("is slow from the slow threshold up to the absolute cap", () => {

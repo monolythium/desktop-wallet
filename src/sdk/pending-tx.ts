@@ -102,12 +102,29 @@ export function scopePendingTxs(
 /** In-flight lifecycle of a tracked tx that hasn't reached a terminal receipt.
  *  `dropped` is the nonce-aware terminal: a later nonce confirmed while this tx
  *  stayed pending. The others are time-based (`pending`/`slow`/`expired`). */
-export type PendingLifecycle = "pending" | "slow" | "dropped" | "expired";
+export type PendingLifecycle =
+  | "pending"
+  | "awaiting-inclusion"
+  | "slow"
+  | "dropped"
+  | "expired";
 
 /** Runtime guard for a persisted lifecycle literal. */
 export function isPendingLifecycle(v: unknown): v is PendingLifecycle {
-  return v === "pending" || v === "slow" || v === "dropped" || v === "expired";
+  return (
+    v === "pending" ||
+    v === "awaiting-inclusion" ||
+    v === "slow" ||
+    v === "dropped" ||
+    v === "expired"
+  );
 }
+
+/** Age past which a broadcast with no inclusion is abnormal. At ~1.3 s/block a
+ *  tx that has not landed in 20 s deserves an honest signal -- "the fleet took
+ *  it, the chain hasn't included it yet" -- rather than silence that looks
+ *  like nothing happened. Non-terminal: the spinner stays. */
+export const ADMITTED_INCLUSION_WINDOW_MS = 20_000;
 
 /** Age past which a still-unconfirmed tx reads as "taking longer than usual". */
 export const PENDING_SLOW_MS = 3 * 60 * 1_000;
@@ -153,6 +170,7 @@ export function classifyStalePending(
   const age = now - tx.submittedAt;
   if (age >= PENDING_ABSOLUTE_CAP_MS) return "expired";
   if (age >= PENDING_SLOW_MS) return "slow";
+  if (age >= ADMITTED_INCLUSION_WINDOW_MS) return "awaiting-inclusion";
   return "pending";
 }
 
@@ -207,6 +225,8 @@ export function transitionPending(
 /** Secondary "eyebrow" note shown beside a pending row's action label. */
 export function pendingLifecycleNote(lifecycle: PendingLifecycle): string {
   switch (lifecycle) {
+    case "awaiting-inclusion":
+      return "broadcast — waiting for inclusion";
     case "slow":
       return "taking longer than usual";
     case "dropped":
