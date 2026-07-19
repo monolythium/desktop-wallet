@@ -71,6 +71,26 @@ export function Wallets() {
   const [renameDraft, setRenameDraft] = useState("");
   const [removingSlot, setRemovingSlot] = useState<string | null>(null);
   const [catalogError, setCatalogError] = useState<string | null>(null);
+  /** Slot whose address was just copied — drives the transient "Copied" label. */
+  const [copiedSlot, setCopiedSlot] = useState<string | null>(null);
+
+  /** Copy a wallet's FULL bech32m. The row displays an ellipsized form; copying
+   *  that would hand the user a string that is not an address. */
+  const onCopyAddress = useCallback(async (slot: string, address: string) => {
+    try {
+      await navigator.clipboard.writeText(address);
+      setCopiedSlot(slot);
+    } catch {
+      // Clipboard denied — silent; the address is still selectable and the
+      // title carries the full string.
+    }
+  }, []);
+
+  useEffect(() => {
+    if (copiedSlot === null) return;
+    const t = setTimeout(() => setCopiedSlot(null), 1500);
+    return () => clearTimeout(t);
+  }, [copiedSlot]);
 
   const refreshCatalog = useCallback(async () => {
     setCatalogError(null);
@@ -455,6 +475,20 @@ export function Wallets() {
                       >
                         Rename
                       </button>
+                      {/* The row's address is ellipsized to keep the row
+                          compact, which is permitted only as an expand
+                          affordance — and an affordance whose copy action is
+                          missing is a dead end. This copies the FULL bech32m,
+                          never the truncated form the row shows. */}
+                      {bech32m ? (
+                        <button
+                          className="btn btn--sm btn--ghost"
+                          aria-label={`Copy address for ${v.name}`}
+                          onClick={() => void onCopyAddress(v.slot, bech32m)}
+                        >
+                          {copiedSlot === v.slot ? "Copied" : "Copy address"}
+                        </button>
+                      ) : null}
                       <button
                         className="btn btn--sm btn--ghost"
                         style={{ color: "var(--err)" }}

@@ -295,7 +295,11 @@ function NotificationRow({
             {title}
             {!record.read ? <span style={unreadDot} aria-label="Unread" /> : null}
           </div>
-          <div className="row-help mono" style={ellipsis}>
+          {/* Compact row, so the counterparty is middle-truncated — permitted
+              ONLY as an expand affordance. The full string is reachable here
+              via the title, and the row's detail modal renders it in full with
+              a copy that writes the whole address. */}
+          <div className="row-help mono" style={ellipsis} title={record.counterparty}>
             {amountLabel !== null
               ? `${typeNoun} · ${amountLabel} · ${short}`
               : `${typeNoun} · ${short}`}
