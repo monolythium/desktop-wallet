@@ -273,6 +273,9 @@ export function Delegate() {
   const delegationRows = delegations?.rows ?? [];
   const totalBps = delegations?.totalBps ?? 0;
   const summary = activeDelegationsSummary(delegationRows, totalBps);
+  // Rows that actually occupy a chain slot. The chain's ten-row limit counts
+  // these, so a zero-weight row must not consume a slot in our preflight.
+  const activeDelegationCount = delegationRows.filter((r) => r.weightBps > 0).length;
   const clusterName = (id: number) => names.get(id) ?? `Cluster #${id}`;
   /** Effective-weight label: "<LYTH> (<pct>)" when the balance is known, else a
    *  bps-only "<pct>" — never a fabricated LYTH figure. */
@@ -629,6 +632,7 @@ export function Delegate() {
       existingWeightByCluster: existing,
       currentTotalBps: totalBps,
       capBps: aggregateCapBps,
+      currentDelegationCount: activeDelegationCount,
     });
     if (!verdict.ok) {
       setAutovoteError(
@@ -1032,6 +1036,7 @@ export function Delegate() {
                                   totalDelegatedBps: totalBps,
                                   moveBps: bps,
                                   capBps: aggregateCapBps,
+                                  currentDelegationCount: activeDelegationCount,
                                 });
                                 if (!verdict.ok) {
                                   setDelegateMoreError(verdict.message);
@@ -1128,6 +1133,10 @@ export function Delegate() {
                                   totalDelegatedBps: totalBps,
                                   moveBps: bps,
                                   capBps: aggregateCapBps,
+                                  // The chain opens the destination row before
+                                  // freeing the source, so a move to an
+                                  // eleventh cluster reverts.
+                                  currentDelegationCount: activeDelegationCount,
                                 });
                                 if (!verdict.ok) {
                                   setRedelegateError(verdict.message);
@@ -1638,6 +1647,7 @@ export function Delegate() {
                             totalDelegatedBps,
                             moveBps: bps,
                             capBps: aggregateCapBps,
+                            currentDelegationCount: activeDelegationCount,
                           });
                           if (!verdict.ok) {
                             setDraftError(verdict.message);

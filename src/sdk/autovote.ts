@@ -365,20 +365,30 @@ export function preflightAutovotePlan(args: {
   existingWeightByCluster: Map<number, number>;
   currentTotalBps: number;
   capBps: number | null;
+  /** Active delegation rows before the plan runs. Omitted → the row-limit check
+   *  is skipped for every allocation. */
+  currentDelegationCount?: number;
 }): AutovotePreflightResult {
   let runningTotal = args.currentTotalBps;
+  // The row count ACCUMULATES across the plan the same way the total does: a
+  // batch that opens three new rows from a base of eight reaches eleven, and the
+  // chain rejects the eleventh even though each allocation looked fine alone.
+  let runningCount = args.currentDelegationCount;
   for (const a of args.allocations) {
+    const dstExistingWeightBps = args.existingWeightByCluster.get(a.clusterId) ?? 0;
     const verdict = preflightDelegationVerdict({
       action: "delegate",
-      dstExistingWeightBps: args.existingWeightByCluster.get(a.clusterId) ?? 0,
+      dstExistingWeightBps,
       totalDelegatedBps: runningTotal,
       moveBps: a.weightBps,
       capBps: args.capBps,
+      currentDelegationCount: runningCount,
     });
     if (!verdict.ok) {
       return { ok: false, clusterId: a.clusterId, message: verdict.message };
     }
     runningTotal += a.weightBps;
+    if (runningCount !== undefined && dstExistingWeightBps === 0) runningCount += 1;
   }
   return { ok: true };
 }

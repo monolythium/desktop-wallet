@@ -19,14 +19,21 @@
 // Pure: no RPC, no DOM, no module state.
 
 import {
+  MAX_DELEGATIONS_PER_WALLET,
   PER_WALLET_CAP_REVERT_MESSAGE,
+  TOO_MANY_DELEGATIONS_MESSAGE,
   WALLET_TOTAL_CAP_REVERT_MESSAGE,
 } from "./delegation-caps";
 
-// The two cap messages are DEFINED in delegation-caps.ts (where the preflight
-// that raises them lives) and re-exported here so the taxonomy is one table with
-// one definition per code — never two copies that drift apart.
-export { PER_WALLET_CAP_REVERT_MESSAGE, WALLET_TOTAL_CAP_REVERT_MESSAGE };
+// The three codes with a local preflight twin are DEFINED in delegation-caps.ts
+// (next to the check that raises them) and re-exported here, so the taxonomy is
+// one table with one definition per code — never two copies that drift apart.
+export {
+  MAX_DELEGATIONS_PER_WALLET,
+  PER_WALLET_CAP_REVERT_MESSAGE,
+  TOO_MANY_DELEGATIONS_MESSAGE,
+  WALLET_TOTAL_CAP_REVERT_MESSAGE,
+};
 
 /** Chain revert code for PerWalletCapExceeded. */
 export const REVERT_PER_WALLET_CAP = 0x0213;
@@ -40,14 +47,6 @@ export const REVERT_INACTIVE_CLUSTER = 0x020b;
 export const REVERT_NO_CLAIMABLE_REWARDS = 0x020d;
 /** Chain revert code for RewardEscrowUnderfunded. */
 export const REVERT_REWARD_ESCROW_UNDERFUNDED = 0x0214;
-
-/** The maximum number of distinct clusters one wallet may delegate to
- *  (mono-core `MAX_DELEGATIONS_PER_WALLET`). Exceeding it reverts 0x0206. */
-export const MAX_DELEGATIONS_PER_WALLET = 10;
-
-/** Copy for 0x0206 TooManyDelegations — also the local preflight's message. */
-export const TOO_MANY_DELEGATIONS_MESSAGE =
-  "You already delegate to the maximum of 10 clusters — undelegate from one before adding another.";
 
 /** Copy for 0x020B InactiveCluster. */
 export const INACTIVE_CLUSTER_MESSAGE =

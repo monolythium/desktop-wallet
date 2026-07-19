@@ -68,18 +68,64 @@ export const PER_WALLET_CAP_REVERT_MESSAGE =
 export const WALLET_TOTAL_CAP_REVERT_MESSAGE =
   "This would exceed your total delegation limit (100%) — reduce the amount.";
 
+/** The maximum number of distinct clusters one wallet may delegate to
+ *  (mono-core `MAX_DELEGATIONS_PER_WALLET`). An 11th NEW row reverts 0x0206. */
+export const MAX_DELEGATIONS_PER_WALLET = 10;
+
+/** Clear message for a chain 0x0206 TooManyDelegations revert / pre-flight. */
+export const TOO_MANY_DELEGATIONS_MESSAGE =
+  "You already delegate to the maximum of 10 clusters — undelegate from one before adding another.";
+
+/** True when this action would open a NEW delegation row and the wallet is
+ *  already at the chain's row limit (→ chain revert 0x0206).
+ *
+ *  The chain counts ROWS, not weight: topping up a cluster the wallet already
+ *  delegates to opens no row and is always allowed, even at ten. Blocking a
+ *  top-up here would deny an action the chain permits.
+ *
+ *  A redelegate counts too — the chain creates the destination row before it
+ *  frees the source, so moving weight to an eleventh cluster reverts. An
+ *  undefined `currentDelegationCount` means the caller could not determine the
+ *  count, so the check is skipped rather than guessed. Pure. */
+export function opensNewDelegationRowAtLimit(
+  dstExistingWeightBps: number,
+  currentDelegationCount: number | undefined,
+): boolean {
+  if (currentDelegationCount === undefined) return false;
+  if (dstExistingWeightBps > 0) return false; // a top-up opens no row
+  return currentDelegationCount >= MAX_DELEGATIONS_PER_WALLET;
+}
+
 /** On-submit pre-flight: block a delegate that would hit a chain cap revert,
  *  so the wallet never signs a guaranteed-revert tx. An undelegate removes
- *  weight → never over-cap. */
+ *  weight → never over-cap.
+ *
+ *  Check order is deliberate and test-pinned: undelegate is unconditionally
+ *  allowed; then the row limit (a structural refusal — no amount would help);
+ *  then the per-cluster cap; then the wallet total, which only a delegate can
+ *  push up (a redelegate moves weight, leaving the total unchanged). */
 export function preflightDelegationVerdict(args: {
   action: "delegate" | "undelegate" | "redelegate";
   dstExistingWeightBps: number;
   totalDelegatedBps: number;
   moveBps: number;
   capBps: number | null;
+  /** Active delegation rows (weight > 0). Omitted → the row-limit check is
+   *  skipped; never assumed. */
+  currentDelegationCount?: number;
 }): { ok: true } | { ok: false; message: string } {
-  const { action, dstExistingWeightBps, totalDelegatedBps, moveBps, capBps } = args;
+  const {
+    action,
+    dstExistingWeightBps,
+    totalDelegatedBps,
+    moveBps,
+    capBps,
+    currentDelegationCount,
+  } = args;
   if (action === "undelegate") return { ok: true };
+  if (opensNewDelegationRowAtLimit(dstExistingWeightBps, currentDelegationCount)) {
+    return { ok: false, message: TOO_MANY_DELEGATIONS_MESSAGE };
+  }
   if (exceedsPerClusterCap(dstExistingWeightBps, moveBps, capBps)) {
     return { ok: false, message: PER_WALLET_CAP_REVERT_MESSAGE };
   }
