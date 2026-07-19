@@ -14,6 +14,14 @@
 import type { Token } from "../data/types";
 import type { LiveTokenStatus } from "./live";
 import { tokenAmountDisplay, type TokenMeta } from "./token-metadata";
+import { formatLythDisplay } from "./lyth-display";
+
+/** The magnitude-picked fractional cap for a native LYTH figure: a large
+ *  balance needs no fourth decimal, a small one does. Shared so the row and the
+ *  detail page pick the same precision for the same balance. */
+export function nativeFracDigits(amount: number): number {
+  return amount >= 100 ? 2 : amount >= 1 ? 3 : 4;
+}
 
 /** Short, human-scannable form of a raw MRC-20 token id (no registry yet). */
 export function shortTokenId(tokenId: string, head = 6, tail = 4): string {
@@ -51,11 +59,23 @@ export function liveTokenStatusToRows(
 ): Token[] {
   const nativeAmount = live?.nativeBalance.ok ? parseDecimalAmount(live.nativeBalance.value) : 0;
 
+  // The native row's DISPLAY comes from the exact lythoshi integer, not from
+  // the float above. A float balance rounds — `99999999999999999999` lythoshi
+  // formats as `100.00` through a rounding formatter, overstating funds across
+  // the boundary. `amount` stays for the numeric consumers (sorting, the
+  // magnitude tiers); `displayAmount` is what a user reads.
+  const nativeDisplay = live?.nativeBalanceLythoshi.ok
+    ? formatLythDisplay(live.nativeBalanceLythoshi.value, nativeFracDigits(nativeAmount))
+    : null;
+
   const rows: Token[] = [
     {
       sym: "LYTH",
       name: "Monolythium",
       amount: nativeAmount,
+      // Null when the exact read hasn't landed — the row then shows the honest
+      // absence its consumer already renders, never a fabricated figure.
+      ...(nativeDisplay === null ? {} : { displayAmount: nativeDisplay }),
       priceUsd: null,
       chg24h: null,
       primary: true,

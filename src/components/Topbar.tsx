@@ -371,7 +371,7 @@ function PeerRow({
               {probe!.latencyMs} ms
             </div>
             {probe!.blockHeight !== undefined ? (
-              <div className="w-peer-row__height">#{probe!.blockHeight.toLocaleString()}</div>
+              <div className="w-peer-row__height">#{probe!.blockHeight.toLocaleString("en-US")}</div>
             ) : null}
           </>
         ) : (

@@ -23,7 +23,7 @@ import {
   notificationTitle,
   type NotificationRecord,
 } from "../sdk/notifications";
-import { formatLythDisplay } from "../sdk/lyth-display";
+import { formatFeeLythDisplay } from "../sdk/lyth-display";
 
 export interface NotificationDetailProps {
   record: NotificationRecord;
@@ -40,9 +40,12 @@ export function NotificationDetail({ record, onClose }: NotificationDetailProps)
   // show the plain amount. Null ⇒ omit the row (zero/absent — honest absence).
   const amountLabel = notificationAmountLabel(record);
   const showBlock = record.blockNumber !== null;
-  // Network fee (display LYTH, 4 dp) decoded at the confirmed terminal; null ⇒
-  // omit the row (undecodable / older record — honest absence, never a fake 0).
-  const feeLabel = formatLythDisplay(record.feeLythoshi);
+  // Network fee decoded at the confirmed terminal. Uses the FEE precision rule,
+  // not the balance one: at 4 dp a floor-priced fee (~0.000042 LYTH) truncates
+  // to the string "0", and this row rendered "0 LYTH" — a wallet stating it
+  // charged nothing for a charge it had decoded. Null ⇒ omit the row (genuinely
+  // zero / undecodable / older record — honest absence, never a fake 0).
+  const feeLabel = formatFeeLythDisplay(record.feeLythoshi);
   // Delegation records name the target cluster in place of the "To" module
   // address; null when no cluster info was captured (older records) → fall back
   // to the address "To" row.

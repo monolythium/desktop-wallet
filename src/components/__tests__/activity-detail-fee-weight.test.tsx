@@ -129,20 +129,34 @@ describe("the Network fee row", () => {
   it("fetches and renders the charged total for an outgoing transfer", async () => {
     render(indexed({ direction: "out" }));
     expect(await screen.findByText("Network fee")).toBeTruthy();
-    // 147000000000000 lythoshi = 0.000147 LYTH, truncated to the wallet's 4 dp
-    // display floor — the same treatment the notification detail's fee row uses.
-    expect(screen.getByText("0.0001 LYTH")).toBeTruthy();
+    // 147000000000000 lythoshi = 0.000147 LYTH, shown EXACTLY.
+    //
+    // Phase 14 §A1 changed this: the row previously inherited the balance
+    // convention's 4 dp and rendered "0.0001 LYTH", understating an actual
+    // charge by a third. A fee now has its own precision rule.
+    expect(screen.getByText("0.000147 LYTH")).toBeTruthy();
     expect(decodeTxFeeLythoshi).toHaveBeenCalledWith("0xfeed");
   });
 
-  it("omits the row for a fee below the display floor — never a fabricated 0", async () => {
-    // The chain reported a strictly positive charge (decodeTxFeeLythoshi returns
-    // null at <= 0), so rendering "0 LYTH" would state a fee the user did not pay.
+  it("shows a sub-floor fee exactly — never a fabricated 0, and never omitted", async () => {
+    // Phase 14 §A1 changed this too. Omitting the row was the Phase 10 fix for
+    // "0 LYTH", and it was right against the 4 dp rule — but a charge the chain
+    // reported is information the user is entitled to, and the fee rule can now
+    // show it. Both failure modes stay forbidden: no zero, no 2.4×-rounded
+    // figure.
     decodeTxFeeLythoshi.mockResolvedValueOnce("50000000000000"); // 0.00005 LYTH
     const { container } = render(indexed({ direction: "out" }));
     await waitFor(() => expect(decodeTxFeeLythoshi).toHaveBeenCalled());
+    expect(await screen.findByText("0.00005 LYTH")).toBeTruthy();
+    expect(container.textContent).not.toContain("0 LYTH·");
+    expect(container.textContent).not.toContain("0.0001 LYTH");
+  });
+
+  it("omits the row only for a genuinely zero fee", async () => {
+    decodeTxFeeLythoshi.mockResolvedValueOnce("0");
+    const { container } = render(indexed({ direction: "out" }));
+    await waitFor(() => expect(decodeTxFeeLythoshi).toHaveBeenCalled());
     expect(container.textContent).not.toContain("Network fee");
-    expect(container.textContent).not.toContain("0 LYTH");
   });
 
   it("NEVER fetches for an inbound row", async () => {

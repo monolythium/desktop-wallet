@@ -144,6 +144,54 @@ export function formatAtomic1e18(
   return n.toString();
 }
 
+/**
+ * A FEE's display string — its own precision rule, deliberately not the
+ * balance convention.
+ *
+ * THE PROBLEM THIS SOLVES. Balances are shown at 4 dp, which is right for a
+ * balance: nobody needs the tenth decimal of their holdings. A fee at today's
+ * floor pricing is on the order of `0.000042 LYTH`, and at 4 dp truncation that
+ * renders as the string `"0"` — a wallet telling the user it charged them
+ * nothing for a charge it decoded and knows is positive. (Rounding instead
+ * would be worse: `0.0001` overstates that fee by roughly 2.4×.) A balance's
+ * precision inherited by a fee is a specific false statement about money that
+ * left the user's account.
+ *
+ * THE RULE: a fee is shown EXACTLY, with trailing zeros trimmed.
+ *
+ * Not capped at all. Capping at the balance's 4 dp fails in both directions —
+ * it prints `0` for a 0.000042 fee, and prints `0.0001` for a 0.000147 one,
+ * understating an actual charge by a third. Rounding instead of truncating
+ * would overstate the first by ~2.4×. There is no cap that is honest for a
+ * quantity whose magnitude spans this range, and a fee is short enough that
+ * exactness costs no readability: `0.000042`, `0.0025`, `1.5`.
+ *
+ * A genuinely zero or undecodable fee returns null — the caller omits the row.
+ * Absence is honest; a zero is a claim.
+ *
+ * This is the one fee-precision rule. The compose surface's figure comes from
+ * the SDK's own full-precision `formatLyth` through the ADR-0039 seam, so the
+ * two agree rather than disagreeing by a factor of anything.
+ */
+export function formatFeeLythDisplay(
+  lythoshi: string | null | undefined,
+): string | null {
+  if (lythoshi === null || lythoshi === undefined || lythoshi.trim() === "") {
+    return null;
+  }
+  let exact: string;
+  try {
+    exact = formatLyth(lythoshi, { includeUnit: false });
+  } catch {
+    return null;
+  }
+  // A real zero — nothing was charged, or nothing is known. Omit the row.
+  if (/^0(\.0+)?$/.test(exact)) return null;
+  // 18 keeps every significant digit a lythoshi value can carry; the helper's
+  // trailing-zero trim is what makes the exact form readable.
+  return truncateDecimals(exact, 18);
+}
+
 /** True when a token id denotes native LYTH — `null`, or an all-zero
  *  (zero-address) id the indexer uses as the native sentinel. Real MRC-20 token
  *  ids (any non-zero hex) return false. Pure. */

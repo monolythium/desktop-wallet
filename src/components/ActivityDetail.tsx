@@ -19,6 +19,7 @@ import { activityRelativeTime } from "../sdk/activity-rows";
 import { bpsToPercentLabel } from "../sdk/delegation-summary";
 import { decodeTxFeeLythoshi, loadLiveTxConfirmations } from "../sdk/live";
 import {
+  formatFeeLythDisplay,
   formatLythDisplay,
   isNativeLythTokenId,
   tokenUnitLabel,
@@ -165,11 +166,11 @@ export function isSelfPaidIndexedRow(row: {
  *  at all until it resolves (no skeleton, no dash: an absent fee is an honest
  *  absence, and a zero/undecodable fee omits the row entirely).
  *
- *  Formatted through `formatLythDisplay` at the same 4 dp the notification
- *  detail's fee row already uses, so one fee reads identically on both surfaces.
- *  A fee smaller than the display floor truncates to "0" — and a literal
- *  "0 LYTH" would be a fabricated figure for a charge the chain reported as
- *  strictly positive, so that case omits the row instead. */
+ *  Formatted through `formatFeeLythDisplay` — the FEE precision rule, which the
+ *  notification detail's fee row also uses, so one fee reads identically on both
+ *  surfaces. A fee below the balance convention's 4 dp shows its exact value
+ *  rather than the "0" that convention would print for a charge the chain
+ *  reported as strictly positive. */
 function IndexedTxFee({ txHash }: { txHash: string }) {
   const [feeLythoshi, setFeeLythoshi] = useState<string | null>(null);
   useEffect(() => {
@@ -182,8 +183,12 @@ function IndexedTxFee({ txHash }: { txHash: string }) {
     };
   }, [txHash]);
   if (feeLythoshi === null) return null;
-  const display = formatLythDisplay(feeLythoshi);
-  if (display === null || isZeroAmount(display)) return null;
+  // A fee has its own precision rule: at the balance's 4 dp a floor-priced fee
+  // renders as "0", which claims the wallet charged nothing for a charge it
+  // decoded. `formatFeeLythDisplay` shows the exact value instead, and returns
+  // null for a genuinely zero one so the row is omitted.
+  const display = formatFeeLythDisplay(feeLythoshi);
+  if (display === null) return null;
   return <DRow label="Network fee" value={`${display} LYTH`} />;
 }
 

@@ -18,11 +18,10 @@ import { ReceiveModal } from "../components/ReceiveModal";
 import { SendComposeModal, type SendTokenContext } from "../components/SendComposeModal";
 import { isSupportedTokenDecimals } from "../sdk/token-send-compose";
 import { TxRow } from "../components/TxRow";
-import { fmt } from "../components/format";
 import type { Route } from "../components/types";
 import { useActiveWallet } from "../sdk/active-wallet";
 import { activityRowToTx } from "../sdk/activity-rows";
-import { isNativeLythTokenId } from "../sdk/lyth-display";
+import { formatLythDisplay, isNativeLythTokenId } from "../sdk/lyth-display";
 import {
   assessRoute,
   fetchBridgeRoutes,
@@ -43,6 +42,7 @@ import { MONOSCAN_GET_LYTH_URL } from "../sdk/monoscan";
 import { ExternalLink } from "../components/ExternalLink";
 import { isNativeRef, readSelectedToken } from "../sdk/selected-token";
 import { selectTokenDetailFacts } from "../sdk/token-detail";
+import { nativeFracDigits } from "../sdk/token-rows";
 import { loadTokenMetaMap, type TokenMeta } from "../sdk/token-metadata";
 
 interface Props {
@@ -112,15 +112,17 @@ export function TokenDetail({ goto }: Props) {
   }, [walletAddress]);
 
   const facts = selectTokenDetailFacts(live, ref, tokenMeta);
-  const fracDigits = facts.balanceAmount >= 100 ? 2 : facts.balanceAmount >= 1 ? 3 : 4;
-  // Native LYTH formats its numeric balance at the magnitude-picked precision;
-  // an MRC-20 row uses its decimals-correct `balanceText` (or "—" when the scale
-  // is unknown), never the raw base-units figure.
+  const fracDigits = nativeFracDigits(facts.balanceAmount);
+  // Native LYTH formats from the EXACT decimal string at the magnitude-picked
+  // precision — not from the parsed float, which rounds: a balance of
+  // 99.999… would render as "100.00" and overstate the funds. An MRC-20 row
+  // uses its decimals-correct `balanceText` (or "—" when the scale is unknown),
+  // never the raw base-units figure.
   const balanceLabel =
     facts.balanceDisplay === null
       ? "—"
       : facts.isNative
-        ? fmt(facts.balanceAmount, fracDigits)
+        ? formatLythDisplay(facts.balanceDisplay, fracDigits) ?? "—"
         : facts.balanceText ?? "—";
 
   // A token is sendable only when it is a fungible MRC-20 (standard mrc20 —
