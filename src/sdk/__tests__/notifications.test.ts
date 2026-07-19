@@ -71,8 +71,11 @@ describe("notificationToast", () => {
   });
 
   it("omits the amount when it is zero (body = short address only)", () => {
+    // The subject here is the zero-amount rule, not the kind. It used to be
+    // written with `claim`, which now suppresses its body outright (§8c), so the
+    // case is expressed with a kind that still renders a counterparty.
     const t = notificationToast(
-      rec({ kind: "claim", status: "confirmed", amountDecimal: "0" }),
+      rec({ kind: "send", status: "confirmed", amountDecimal: "0" }),
     );
     expect(t.body).toBe("mono1qqqqq…qqqqqq");
     expect(t.body).not.toContain("LYTH");
@@ -142,9 +145,14 @@ describe("notificationToast", () => {
     expect(t.body).toBe("+12.3456 LYTH");
   });
 
-  it("falls back to the plain claim body when no reward amount was decoded", () => {
+  it("shows the BARE TITLE for a claim with no decoded reward", () => {
+    // Behaviour change (§8c): this used to fall back to the submit-time
+    // claimable. That figure is measured before execution settles further
+    // rewards, so presenting it as the claimed amount under-reports income.
     const t = notificationToast(rec({ kind: "claim", amountDecimal: "5" }));
-    expect(t.body).toContain("5 LYTH");
+    expect(t.body).toBe("");
+    expect(t.body).not.toContain("5 LYTH");
+    expect(t.title).toBe("Rewards claimed");
   });
 });
 
@@ -160,8 +168,10 @@ describe("notificationAmountLabel", () => {
     expect(notificationAmountLabel(rec({ kind: "send", amountDecimal: "0" }))).toBeNull();
   });
 
-  it("falls back to the plain amount for a claim with no decoded reward", () => {
-    expect(notificationAmountLabel(rec({ kind: "claim", amountDecimal: "5" }))).toBe("5 LYTH");
+  it("shows NO amount for a claim with no decoded reward", () => {
+    // Behaviour change (§8c): the submit-time claimable is never shown as the
+    // claimed amount. See claim-figure-law.test.ts for the full law.
+    expect(notificationAmountLabel(rec({ kind: "claim", amountDecimal: "5" }))).toBeNull();
   });
 
   it("uses the token symbol as the unit for an MRC-20 send (not LYTH)", () => {

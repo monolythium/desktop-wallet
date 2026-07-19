@@ -69,6 +69,7 @@ import {
   isZeroAmount,
   notificationTitle,
   pendingOpLabel,
+  suppressesSubmitTimeAmount,
   type NotificationRecord,
 } from "../sdk/notifications";
 import { listForScope } from "../sdk/notifications-store";
@@ -532,7 +533,12 @@ export function Activity() {
             merged.map((item) => {
               if (item.tag === "pending") {
                 const tx = item.tx;
-                const showAmount = !isZeroAmount(tx.amountDecimal);
+                // A claim's row shows a figure only once the Claimed log is
+                // decoded onto the record — the tracked row still holds the
+                // submit-time claimable, which is a different quantity.
+                const showAmount =
+                  !suppressesSubmitTimeAmount(tx.opKind) &&
+                  !isZeroAmount(tx.amountDecimal);
                 const lifecycle = tx.lifecycle ?? "pending";
                 // Bridged: a real receipt confirmed it ahead of the indexer, so
                 // render it confirmed (a green check + the terminal title) at
@@ -638,7 +644,9 @@ export function Activity() {
               }
               if (item.tag === "failed") {
                 const rec = item.record;
-                const showAmount = !isZeroAmount(rec.amountDecimal);
+                const showAmount =
+                  !suppressesSubmitTimeAmount(rec.kind) &&
+                  !isZeroAmount(rec.amountDecimal);
                 return (
                   <div
                     className="w-tx"

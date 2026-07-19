@@ -24,7 +24,13 @@ import {
   isNativeLythTokenId,
   tokenUnitLabel,
 } from "../sdk/lyth-display";
-import { amountUnitLabel, isZeroAmount, pendingOpLabel, type TxOpKind } from "../sdk/notifications";
+import {
+  amountUnitLabel,
+  isZeroAmount,
+  pendingOpLabel,
+  suppressesSubmitTimeAmount,
+  type TxOpKind,
+} from "../sdk/notifications";
 import type { PendingLifecycle } from "../sdk/pending-tx";
 import { txTypeLabelForActivity } from "../sdk/tx-type-label";
 import { tokenAmountDisplay, type TokenMeta } from "../sdk/token-metadata";
@@ -262,7 +268,11 @@ function DetailBody({
   }
 
   if (row.kind === "tracked") {
-    const showAmount = !isZeroAmount(row.amountDecimal);
+    // A claim's figure comes only from the decoded Claimed log, which does not
+    // exist yet on an in-flight row — the stored amount is the submit-time
+    // claimable, a different quantity.
+    const showAmount =
+      !suppressesSubmitTimeAmount(row.opKind) && !isZeroAmount(row.amountDecimal);
     const showCp = row.counterparty.length > 0;
     return (
       <div>

@@ -286,6 +286,27 @@ export function delegationClusterLabel(record: NotificationRecord): string | nul
   );
 }
 
+/** A claim's figure may come ONLY from the decoded `Claimed` log — the receipt's
+ *  settled truth. The submit-time claimable stored on the row is a DIFFERENT
+ *  quantity measured at a different moment: a claim settles further rewards at
+ *  execution, so the submit-time snapshot understates what actually arrived.
+ *  Showing it as "the claimed amount" would misreport income.
+ *
+ *  So a claim surface suppresses `amountDecimal` outright: with a decoded log it
+ *  shows that figure, and without one it shows the bare title — never the
+ *  submit-time value, never a fabricated 0. Pure. */
+export function suppressesSubmitTimeAmount(kind: TxOpKind): boolean {
+  return kind === "claim";
+}
+
+/** Kinds that call the delegation precompile but name no cluster of their own.
+ *  Their counterparty IS that precompile, and the wallet never shows that
+ *  address on a delegation surface, so with no decoded figure there is simply
+ *  nothing to put in a body — the title carries the whole meaning. */
+function hasNoBodySubject(kind: TxOpKind): boolean {
+  return kind === "claim" || kind === "set-auto-compound";
+}
+
 /** Character budget for a redelegate's combined `{from} → {to}` label. Past it
  *  the DESTINATION shows alone: that is the outcome the user cares about, and OS
  *  toast widths vary by platform with no measurement API to ask. */
@@ -365,6 +386,8 @@ export function notificationAmountLabel(record: NotificationRecord): string | nu
     // Settled rewards are paid in native LYTH.
     return `+${record.claimedAmount} LYTH`;
   }
+  // No decoded log ⇒ no figure at all for a claim.
+  if (suppressesSubmitTimeAmount(record.kind)) return null;
   return isZeroAmount(record.amountDecimal)
     ? null
     : `${record.amountDecimal} ${amountUnitLabel(record.unit)}`;
@@ -423,6 +446,10 @@ export function notificationToast(
   if (record.claimedAmount && !isZeroAmount(record.claimedAmount)) {
     return { title, body: `+${record.claimedAmount} LYTH` };
   }
+  // No decoded log and no cluster to name ⇒ the bare title. The submit-time
+  // claimable is the wrong quantity, and the counterparty is the delegation
+  // precompile the wallet never surfaces.
+  if (hasNoBodySubject(record.kind)) return { title, body: "" };
   // A delegation tx's counterparty is the bare delegation-module precompile;
   // name the cluster and the weight instead (through the one assembler the
   // in-app rows use), falling back to the truncated address only when no cluster
