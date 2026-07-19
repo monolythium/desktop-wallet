@@ -8,6 +8,10 @@ import { useEffect, useState } from "react";
 import type { CSSProperties } from "react";
 import type { Route } from "../components/types";
 import { DRow, truncMiddle } from "../components/_detailModalParts";
+import {
+  KEYSTORE_FACT_ROWS,
+  ZEROIZATION_POSTURE,
+} from "../sdk/keystore-facts";
 import { DeveloperModeToggle } from "../components/DeveloperModeToggle";
 import { useDeveloperMode } from "../sdk/developer-mode";
 import { checkForUpdate } from "../sdk/updater";
@@ -221,6 +225,24 @@ export function About({ goto }: AboutProps) {
         </div>
         <div className="w-card__body">
           <DeveloperModeToggle />
+        </div>
+      </div>
+
+      {/* Vault facts. Not developer-gated: what encrypts your keys is something
+          any user is entitled to read, and every value comes from the register
+          that mirrors the compiled Rust constants. */}
+      <div className="w-card">
+        <div className="w-card__head">
+          <h3>Vault</h3>
+          <span className="w-live-pill is-muted">this build</span>
+        </div>
+        <div className="w-card__body">
+          {KEYSTORE_FACT_ROWS.map((row) => (
+            <DRow key={row.label} label={row.label} value={row.value} />
+          ))}
+          <div className="row-help" style={{ marginTop: 10, lineHeight: 1.6 }}>
+            {ZEROIZATION_POSTURE}
+          </div>
         </div>
       </div>
 
