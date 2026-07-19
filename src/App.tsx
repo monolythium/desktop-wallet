@@ -14,6 +14,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ApprovalOverlay } from "./components/ApprovalOverlay";
 import { Onboarding } from "./components/Onboarding";
 import { PendingTxReconciler } from "./components/PendingTxReconciler";
+import { IncomingPoller } from "./components/IncomingPoller";
 import { ChainHealthBanner } from "./components/ChainHealthBanner";
 import { ErrorBoundary, PageErrorFallback } from "./components/ErrorBoundary";
 import { Sidebar } from "./components/Sidebar";
@@ -318,6 +319,7 @@ export function App() {
         </main>
         {steleEnabled ? <ApprovalOverlay /> : null}
         <PendingTxReconciler />
+        <IncomingPoller />
         {pendingUpdate ? (
           <UpdateBanner
             update={pendingUpdate}
