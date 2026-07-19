@@ -21,6 +21,10 @@ import {
 } from "../sdk/reset";
 import {
   AUTO_LOCK_OPTIONS,
+  AUTO_LOCK_WARNING_TITLE,
+  autoLockConfirmLabel,
+  autoLockIncreaseNeedsConfirm,
+  autoLockWarningParagraphs,
   readAutoLockMinutes,
   writeAutoLockMinutes,
 } from "../sdk/auto-lock-setting";
@@ -73,6 +77,9 @@ export function Settings({ steleEnabled, setSteleEnabled, experimentalEnabled, s
   const wallet = useActiveWallet();
   const [devkitChannel, setDevkitChannel] = useState<NativeDevkitChannel>(() => readDevkitChannel());
   const [autoLockMinutes, setAutoLockMinutes] = useState<number>(() => readAutoLockMinutes());
+  // A lengthening awaiting confirmation. Nothing is written or shown as active
+  // until it is confirmed, so Cancel reverts by construction.
+  const [pendingAutoLock, setPendingAutoLock] = useState<number | null>(null);
   const [subPage, setSubPage] = useState<SettingsSubPage>(initialSubPage ?? "main");
   const { lock } = useAutoLock();
 
@@ -153,6 +160,13 @@ export function Settings({ steleEnabled, setSteleEnabled, experimentalEnabled, s
                   type="button"
                   className={`btn btn--sm${m === autoLockMinutes ? " btn--primary" : ""}`}
                   onClick={() => {
+                    // Weakening asks; strengthening just applies. The chip only
+                    // moves on a confirmed apply, so Cancel reverts by never
+                    // having changed anything.
+                    if (autoLockIncreaseNeedsConfirm(autoLockMinutes, m)) {
+                      setPendingAutoLock(m);
+                      return;
+                    }
                     setAutoLockMinutes(m);
                     writeAutoLockMinutes(m);
                   }}
@@ -162,6 +176,64 @@ export function Settings({ steleEnabled, setSteleEnabled, experimentalEnabled, s
               ))}
             </div>
           </div>
+          {pendingAutoLock !== null ? (
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-label={AUTO_LOCK_WARNING_TITLE}
+              data-testid="auto-lock-warning"
+              style={{
+                position: "fixed",
+                inset: 0,
+                background: "rgba(0,0,0,0.55)",
+                backdropFilter: "blur(6px)",
+                zIndex: 40,
+                display: "grid",
+                placeItems: "center",
+                padding: 24,
+              }}
+            >
+              <div className="w-card" style={{ maxWidth: 460, width: "100%" }}>
+                <div className="w-card__head">
+                  <h3>{AUTO_LOCK_WARNING_TITLE}</h3>
+                </div>
+                <div className="w-card__body">
+                  {autoLockWarningParagraphs(pendingAutoLock).map((p) => (
+                    <p
+                      key={p}
+                      style={{
+                        margin: "0 0 12px",
+                        lineHeight: 1.6,
+                        color: "var(--w-text-2)",
+                        fontSize: 13,
+                      }}
+                    >
+                      {p}
+                    </p>
+                  ))}
+                  <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+                    <button
+                      className="btn"
+                      onClick={() => setPendingAutoLock(null)}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      className="btn btn--primary"
+                      style={{ marginLeft: "auto" }}
+                      onClick={() => {
+                        setAutoLockMinutes(pendingAutoLock);
+                        writeAutoLockMinutes(pendingAutoLock);
+                        setPendingAutoLock(null);
+                      }}
+                    >
+                      {autoLockConfirmLabel(pendingAutoLock)}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : null}
           <div className="w-setting-row">
             <div>
               <div className="row-label">Lock wallet now</div>
