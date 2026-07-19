@@ -117,3 +117,12 @@ export async function downloadAndInstallUpdate(
 export function dismissPendingUpdate(): void {
   pendingUpdate = null;
 }
+
+/** Whether a live `Update` handle is currently held.
+ *
+ *  The verdict outlives the handle: the cache can say "update available" after
+ *  a restart while no handle exists in this process. Install must know the
+ *  difference so it can re-acquire one rather than throwing. */
+export function hasPendingUpdate(): boolean {
+  return pendingUpdate !== null;
+}

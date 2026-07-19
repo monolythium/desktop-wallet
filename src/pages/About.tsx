@@ -14,7 +14,7 @@ import {
 } from "../sdk/keystore-facts";
 import { DeveloperModeToggle } from "../components/DeveloperModeToggle";
 import { useDeveloperMode } from "../sdk/developer-mode";
-import { checkForUpdate } from "../sdk/updater";
+import { syncWalletUpdateState } from "../sdk/update-check";
 import { probePeer } from "../sdk/peers";
 import { activeFleet } from "../sdk/fleet";
 import { fetchLiveTestnetRegistry } from "../sdk/live-registry";
@@ -24,7 +24,6 @@ import {
   activeFeatureChips,
   CHAIN_STATIC_ROWS,
   computeGenesisDrift,
-  isTauriRuntime,
   loadRuntimeBlock,
   operatorsSummary,
   readChainIdentity,
@@ -42,7 +41,7 @@ type UpdateState =
   | { kind: "preview" } // browser preview — no Tauri updater
   | { kind: "current" }
   | { kind: "error" } // the manifest fetch failed — never rendered as "up to date"
-  | { kind: "available"; version: string };
+  | { kind: "available"; version: string | null };
 
 const ROW_BTN: CSSProperties = {
   background: "none",
@@ -80,19 +79,28 @@ export function About({ goto }: AboutProps) {
     };
   }, []);
 
+  // CACHE-FIRST. Opening About no longer fires a check — re-checking on every
+  // page open was the anti-pattern this replaces. A fresh cache (< 12 h)
+  // renders from storage with no network at all; a stale one runs the one
+  // shared check, folded and persisted by `syncWalletUpdateState`.
   useEffect(() => {
     let cancelled = false;
-    if (!isTauriRuntime()) {
-      setUpdate({ kind: "preview" });
-      return;
-    }
-    void checkForUpdate().then((result) => {
+    void (async () => {
+      const version = await readWalletVersion();
       if (cancelled) return;
-      // Honest-absence law: a failed check must NEVER render "up to date".
-      if (result.kind === "available") setUpdate({ kind: "available", version: result.version });
-      else if (result.kind === "error") setUpdate({ kind: "error" });
-      else setUpdate({ kind: "current" });
-    });
+      const state = await syncWalletUpdateState({
+        now: Date.now(),
+        runningVersion: version,
+      });
+      if (cancelled) return;
+      // Honest-absence law, unchanged from Phase 01: a non-answer must NEVER
+      // render "up to date".
+      if (state.preview) setUpdate({ kind: "preview" });
+      else if (state.updateAvailable)
+        setUpdate({ kind: "available", version: state.offeredVersion });
+      else if (state.lastStatus === "no_update") setUpdate({ kind: "current" });
+      else setUpdate({ kind: "error" });
+    })();
     return () => {
       cancelled = true;
     };
@@ -358,14 +366,20 @@ function updateLabel(update: UpdateState): string {
     case "current":
       return "up to date";
     case "error":
-      return "couldn't check for updates";
+      return "couldn't check — will retry later";
     case "available":
-      return `update available → v${update.version}`;
+      return update.version === null
+        ? "update available"
+        : `update available → v${update.version}`;
   }
 }
 
 function updateTitle(update: UpdateState): string | undefined {
-  return update.kind === "error"
-    ? "The update manifest couldn't be fetched. The wallet retries on the next launch."
-    : undefined;
+  if (update.kind === "error") {
+    return "The update manifest couldn't be fetched. The wallet retries on the next launch.";
+  }
+  if (update.kind === "preview") {
+    return "The update check only runs in the installed app, not the browser preview.";
+  }
+  return undefined;
 }

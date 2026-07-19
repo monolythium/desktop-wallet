@@ -3,7 +3,7 @@
 // a resolved no-op here so the tests exercise the page's composition and the
 // developer-mode gating, not the network.
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import type { ChainInfo } from "@monolythium/core-sdk";
 import { renderWithProviders } from "../../test/renderWithProviders";
@@ -125,8 +125,16 @@ describe("About — Chain card genesis + drift banner", () => {
 });
 
 describe("About — version / update / build rows", () => {
+  beforeEach(() => {
+    // The update verdict is now cached (Phase 13 §D). Without this, the first
+    // test's fresh cache closes the 12-hour gate for every test after it and
+    // they would all render the FIRST test's answer.
+    localStorage.clear();
+  });
+
   afterEach(() => {
     updateMock.value = { kind: "none" };
+    localStorage.clear();
     vi.clearAllMocks();
   });
 
@@ -145,7 +153,9 @@ describe("About — version / update / build rows", () => {
   it("renders a failed check honestly — never 'up to date'", async () => {
     updateMock.value = { kind: "error" };
     renderAbout(false);
-    expect(await screen.findByText("couldn't check for updates")).toBeInTheDocument();
+    // Copy updated in Phase 13 §D.6 ("couldn't check for updates" → this). The
+    // property under test is unchanged and is the second assertion.
+    expect(await screen.findByText("couldn't check — will retry later")).toBeInTheDocument();
     expect(screen.queryByText("up to date")).not.toBeInTheDocument();
   });
 

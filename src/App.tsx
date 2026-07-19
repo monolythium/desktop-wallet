@@ -23,7 +23,8 @@ import { Sidebar } from "./components/Sidebar";
 import { Topbar } from "./components/Topbar";
 import { UpdateBanner } from "./components/UpdateBanner";
 import { ChainHealthProvider } from "./sdk/ChainHealthProvider";
-import { checkForUpdate, type UpdateAvailable } from "./sdk/updater";
+import { readWalletVersion } from "./sdk/about";
+import { syncWalletUpdateState, type UpdateSurfaceState } from "./sdk/update-check";
 import { About } from "./pages/About";
 import { Activity } from "./pages/Activity";
 import { Agents } from "./pages/Agents";
@@ -116,20 +117,35 @@ export function App() {
   const [boot, setBoot] = useState<BootState>(() =>
     isTauri() ? { kind: "probing" } : { kind: "ready" },
   );
-  // Pending self-update, if the launch-time check found one. Banner
-  // renders only when set; dismissal clears it until the next launch.
-  const [pendingUpdate, setPendingUpdate] = useState<UpdateAvailable | null>(null);
+  // The folded update verdict, from the shared cache. Null until the boot
+  // orchestration resolves.
+  const [updateState, setUpdateState] = useState<UpdateSurfaceState | null>(null);
+  const [runningVersion, setRunningVersion] = useState<string | null>(null);
+  // "Later" hides the banner for this session only. Deliberately NOT persisted:
+  // the About row still shows the verdict, and the banner returns next launch
+  // while it stands.
+  const [updateHidden, setUpdateHidden] = useState(false);
 
   // Self-update check — fires once the wallet is ready (post-boot,
   // post-onboarding). We don't run it during onboarding so the user
   // never sees an update banner on their first-ever launch screen.
+  //
+  // `syncWalletUpdateState` owns the ordering (reconcile → read → gate →
+  // check → fold → persist) so this surface and the About row cannot grow two
+  // different ones.
   useEffect(() => {
     if (boot.kind !== "ready") return;
     let cancelled = false;
-    void checkForUpdate().then((result) => {
-      if (cancelled || result.kind !== "available") return;
-      setPendingUpdate(result);
-    });
+    void (async () => {
+      const version = await readWalletVersion();
+      if (cancelled) return;
+      setRunningVersion(version);
+      const state = await syncWalletUpdateState({
+        now: Date.now(),
+        runningVersion: version,
+      });
+      if (!cancelled) setUpdateState(state);
+    })();
     return () => {
       cancelled = true;
     };
@@ -287,6 +303,21 @@ export function App() {
               still there after the user navigates away looking for the weight
               that never changed. */}
           <DelegationRejectedBanner />
+          {/* Home route only — the About "Update" row covers the rest of the
+              app, so the banner doesn't follow the user everywhere. */}
+          {route === "home" &&
+          !updateHidden &&
+          updateState?.updateAvailable &&
+          runningVersion !== null ? (
+            <UpdateBanner
+              offeredVersion={updateState.offeredVersion}
+              runningVersion={runningVersion}
+              onLater={() => setUpdateHidden(true)}
+              onVerdictCleared={() =>
+                setUpdateState({ ...updateState, updateAvailable: false, offeredVersion: null })
+              }
+            />
+          ) : null}
           <ErrorBoundary
             resetKey={route}
             fallback={(retry) => (
@@ -327,12 +358,6 @@ export function App() {
         {steleEnabled ? <ApprovalOverlay /> : null}
         <PendingTxReconciler />
         <IncomingPoller />
-        {pendingUpdate ? (
-          <UpdateBanner
-            update={pendingUpdate}
-            onDismiss={() => setPendingUpdate(null)}
-          />
-        ) : null}
       </div>
       </DelegationRejectionProvider>
       </ChainHealthProvider>
