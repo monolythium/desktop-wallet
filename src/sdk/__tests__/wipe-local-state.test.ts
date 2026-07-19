@@ -25,6 +25,7 @@ import {
   walletKeysToWipe,
   wipeAllLocalWalletState,
 } from "../wipe-local-state";
+import { STORAGE_KEY_UPDATE_CHECK } from "../update-check";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -96,6 +97,17 @@ describe("the localStorage sweep", () => {
     // The whole point of sweeping by prefix rather than by enumeration.
     const future = ["wallet.somethingInventedNextYear.v3"];
     expect(walletKeysToWipe(future)).toEqual(future);
+  });
+
+  it("G5 — the update-check cache is swept, and is not an exception", () => {
+    // The first key added since the wipe shipped, so it is the first real test
+    // of the register-or-it-survives discipline. It is device state, not a
+    // display preference: a reset should clear it, at the cost of one extra
+    // update check on the next launch.
+    expect(walletKeysToWipe([STORAGE_KEY_UPDATE_CHECK])).toEqual([
+      STORAGE_KEY_UPDATE_CHECK,
+    ]);
+    expect(WIPE_EXCEPT_KEYS).not.toContain(STORAGE_KEY_UPDATE_CHECK);
   });
 
   it("keeps the display preferences", () => {
