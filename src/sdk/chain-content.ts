@@ -13,8 +13,10 @@ export interface ExternalLink {
   brandColor?: string;
 }
 
-/** The canonical Monolythium resource links. Rendered as external anchors
- *  (`target="_blank" rel="noreferrer noopener"`), scheme-stripped on display. */
+/** The canonical Monolythium resource links. Rendered through the shared
+ *  `ExternalLink` component (which owns the scheme gate, the `noopener
+ *  noreferrer` pair and the "opens externally" glyph), scheme-stripped on
+ *  display. Every URL here is conformance-tested against `WALLET_LINK_HOSTS`. */
 export const EXTERNAL_LINKS: ExternalLink[] = [
   { label: "Monolythium", url: "https://monolythium.com/", brandColor: "#7C5CFC" },
   { label: "Mono Labs", url: "https://mono-labs.org/", brandColor: "#2DD4BF" },

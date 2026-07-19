@@ -40,6 +40,7 @@ import {
 } from "../sdk/live";
 import { NATIVE_LYTH_DECIMALS, formatLyth } from "@monolythium/core-sdk";
 import { MONOSCAN_GET_LYTH_URL } from "../sdk/monoscan";
+import { ExternalLink } from "../components/ExternalLink";
 import { isNativeRef, readSelectedToken } from "../sdk/selected-token";
 import { selectTokenDetailFacts } from "../sdk/token-detail";
 import { loadTokenMetaMap, type TokenMeta } from "../sdk/token-metadata";
@@ -231,15 +232,13 @@ export function TokenDetail({ goto }: Props) {
             Bridge
           </button>
           {facts.isNative ? (
-            <a
+            <ExternalLink
               className="btn"
               href={MONOSCAN_GET_LYTH_URL}
-              target="_blank"
-              rel="noopener noreferrer"
               style={{ textDecoration: "none" }}
             >
               Buy
-            </a>
+            </ExternalLink>
           ) : null}
           <span className="w-card__head__spacer" />
           <button className="btn btn--sm" onClick={() => void refresh()} disabled={busy}>

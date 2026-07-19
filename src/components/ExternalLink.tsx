@@ -94,9 +94,14 @@ export function ExternalLink({
     ...style,
   };
 
+  // `display: contents` rather than a real box: the caller's children become
+  // flex items of THIS container, so multi-column row layouts (label left, URL
+  // right) survive the conversion unchanged and the glyph is simply the last
+  // item. Wrapping them in a box instead would collapse those rows into one
+  // column — a visual regression the conversion is not allowed to introduce.
   const body = (
     <>
-      <span style={{ minWidth: 0 }}>{children}</span>
+      <span style={{ display: "contents" }}>{children}</span>
       <ExternalGlyph />
     </>
   );

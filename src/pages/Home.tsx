@@ -59,6 +59,7 @@ import {
   type DelegationSummaryFacts,
 } from "../sdk/delegation-summary";
 import { MONOSCAN_GET_LYTH_URL } from "../sdk/monoscan";
+import { ExternalLink } from "../components/ExternalLink";
 import {
   fetchPendingRewards,
   formatRewardLyth,
@@ -451,18 +452,16 @@ export function Home({ goto }: Props) {
           {/* No on-ramp primitive exists in the wallet — Buy opens the
               canonical monoscan sale page externally (honest external link,
               not a fake in-app card/bank/exchange on-ramp). */}
-          <a
+          <ExternalLink
             className="w-hbtn"
             href={MONOSCAN_GET_LYTH_URL}
-            target="_blank"
-            rel="noopener noreferrer"
-            style={{ textDecoration: "none" }}
+            style={{ textDecoration: "none", justifyContent: "center" }}
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M12 5v14M5 12h14" />
             </svg>
             <span>Buy</span>
-          </a>
+          </ExternalLink>
         </div>
       </div>
 

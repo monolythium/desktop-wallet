@@ -11,6 +11,7 @@ import type { Route } from "../components/types";
 import { useActiveWallet } from "../sdk/active-wallet";
 import { errorMessage, loadLiveTokenStatus, type LiveTokenStatus } from "../sdk/live";
 import { MONOSCAN_GET_LYTH_URL } from "../sdk/monoscan";
+import { ExternalLink } from "../components/ExternalLink";
 import { NATIVE_TOKEN_REF, writeSelectedToken } from "../sdk/selected-token";
 import { liveTokenStatusToRows } from "../sdk/token-rows";
 import { loadTokenMetaMap, type TokenMeta } from "../sdk/token-metadata";
@@ -93,15 +94,13 @@ export function Tokens({ goto }: Props) {
               the canonical monoscan sale page externally, the same honest link
               the Home hero and the token-detail action bar use. We never ship a
               fake in-app card/bank/exchange on-ramp. */}
-          <a
+          <ExternalLink
             className="btn btn--sm"
             href={MONOSCAN_GET_LYTH_URL}
-            target="_blank"
-            rel="noopener noreferrer"
             style={{ textDecoration: "none" }}
           >
             Buy
-          </a>
+          </ExternalLink>
           <button className="btn btn--sm" onClick={refresh} disabled={busy}>
             {busy ? "Refreshing…" : "Refresh"}
           </button>

@@ -6,6 +6,7 @@
 // the "get help" links come only from the canonical Resources links — this
 // wallet ships no dedicated support inbox or chat, and we don't invent one.
 
+import { ExternalLink } from "../components/ExternalLink";
 import type { Route } from "../components/types";
 import { HELP_LINKS, HELP_SECTIONS } from "../sdk/help-content";
 import { chainHealthHelpEntries } from "../sdk/chain-health-presentation";
@@ -101,17 +102,17 @@ export function Help({ goto }: HelpProps) {
         <div className="w-card__body">
           <div className="w-live-list">
             {HELP_LINKS.map((link) => (
-              <a
+              <ExternalLink
                 className="w-live-row"
                 key={link.url}
                 href={link.url}
-                target="_blank"
-                rel="noreferrer noopener"
                 style={{ textDecoration: "none", color: "inherit" }}
               >
-                <div className="row-label">{link.label}</div>
-                <span className="row-help mono">{stripUrlScheme(link.url)}</span>
-              </a>
+                <span className="row-label">{link.label}</span>
+                <span className="row-help mono" style={{ marginLeft: "auto" }}>
+                  {stripUrlScheme(link.url)}
+                </span>
+              </ExternalLink>
             ))}
           </div>
           <p

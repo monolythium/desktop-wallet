@@ -1,8 +1,9 @@
 // Resources — the canonical Monolythium external links. Each row opens the
-// target in the system browser via a plain external anchor (the registered
-// Tauri opener plugin intercepts target="_blank"), the same pattern the Home
-// page's Buy link uses. No live data — this is static chain-level content.
+// target in the system browser through the shared `ExternalLink` component
+// (which owns the scheme gate and the "opens externally" glyph). No live data —
+// this is static chain-level content.
 
+import { ExternalLink as ExternalLinkView } from "../components/ExternalLink";
 import { EXTERNAL_LINKS, stripUrlScheme, type ExternalLink } from "../sdk/chain-content";
 
 export function Resources() {
@@ -31,14 +32,12 @@ export function Resources() {
 
 function LinkRow({ link }: { link: ExternalLink }) {
   return (
-    <a
+    <ExternalLinkView
       className="w-live-row"
       href={link.url}
-      target="_blank"
-      rel="noreferrer noopener"
       style={{ textDecoration: "none", color: "inherit" }}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+      <span style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
         <span
           aria-hidden="true"
           style={{ color: link.brandColor ?? "var(--fg-300)", display: "inline-flex" }}
@@ -48,9 +47,13 @@ function LinkRow({ link }: { link: ExternalLink }) {
             <path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7" />
           </svg>
         </span>
-        <div className="row-label">{link.label}</div>
-      </div>
-      <span className="row-help mono">{stripUrlScheme(link.url)}</span>
-    </a>
+        <span className="row-label">{link.label}</span>
+      </span>
+      {/* `auto` margin keeps the URL (and the glyph after it) hard right, the
+          layout the row had before the conversion. */}
+      <span className="row-help mono" style={{ marginLeft: "auto" }}>
+        {stripUrlScheme(link.url)}
+      </span>
+    </ExternalLinkView>
   );
 }

@@ -9,6 +9,7 @@ import {
   type BlogFeedItem,
 } from "../sdk/news";
 import { formatOutcome, loadLiveNetworkStatus, type LiveNetworkStatus } from "../sdk/live";
+import { ExternalLink } from "../components/ExternalLink";
 
 export function News() {
   const [status, setStatus] = useState<LiveNetworkStatus | null>(null);
@@ -74,21 +75,25 @@ export function News() {
           {feed && feed.length > 0 ? (
             <div className="w-live-list" style={{ marginTop: 12 }}>
               {feed.slice(0, 8).map((item) => (
-                <a
+                <ExternalLink
                   key={item.link}
                   className="w-live-row"
                   href={item.link}
-                  target="_blank"
-                  rel="noreferrer"
                   style={{ textDecoration: "none", color: "inherit" }}
                 >
-                  <div>
-                    <div className="row-label">{item.title}</div>
-                    <div className="row-help">{item.summary}</div>
-                    <div className="row-help mono">{formatDate(item.publishedAt)}</div>
-                  </div>
-                  {item.category ? <span className="w-live-pill is-muted">{item.category}</span> : null}
-                </a>
+                  {/* `flex: 1` so the pill and the glyph stay hard right whether
+                      or not this item carries a category. */}
+                  <span style={{ flex: 1, minWidth: 0 }}>
+                    <span className="row-label" style={{ display: "block" }}>{item.title}</span>
+                    <span className="row-help" style={{ display: "block" }}>{item.summary}</span>
+                    <span className="row-help mono" style={{ display: "block" }}>{formatDate(item.publishedAt)}</span>
+                  </span>
+                  {item.category ? (
+                    <span className="w-live-pill is-muted" style={{ marginLeft: "auto" }}>
+                      {item.category}
+                    </span>
+                  ) : null}
+                </ExternalLink>
               ))}
             </div>
           ) : null}

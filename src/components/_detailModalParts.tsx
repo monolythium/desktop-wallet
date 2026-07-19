@@ -18,6 +18,7 @@ import {
   REGISTERED_CHIP_TITLE,
 } from "../sdk/address-label";
 import { CategoryBadge, categoryOfName } from "./CategoryBadge";
+import { ExternalLink } from "./ExternalLink";
 
 /** Middle-truncate any string (bech32m address or hash) for compact
  *  display. Pure — never throws. */
@@ -78,15 +79,13 @@ export function DRow({ label, value }: { label: string; value: ReactNode }) {
  *  actually know the canonical hash (honest absence otherwise). */
 export function MonoscanTxButton({ hash }: { hash: string }) {
   return (
-    <a
+    <ExternalLink
       href={monoscanTxUrl(hash)}
-      target="_blank"
-      rel="noopener noreferrer"
       className="btn btn--ghost btn--full"
-      style={{ marginTop: 12, textDecoration: "none" }}
+      style={{ marginTop: 12, textDecoration: "none", justifyContent: "center" }}
     >
       View on Monoscan
-    </a>
+    </ExternalLink>
   );
 }
 
@@ -159,10 +158,8 @@ export function CopyableAddress({
       ) : null}
       <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
         {/* The FULL address — the label annotates, the address stands. */}
-        <a
+        <ExternalLink
           href={monoscanAddressUrl(addr)}
-          target="_blank"
-          rel="noopener noreferrer"
           title={addr}
           style={{
             fontFamily: "var(--f-mono)",
@@ -172,7 +169,7 @@ export function CopyableAddress({
           }}
         >
           {addr}
-        </a>
+        </ExternalLink>
         <button
           type="button"
           onClick={onCopy}
