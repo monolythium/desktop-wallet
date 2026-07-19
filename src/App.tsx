@@ -16,6 +16,8 @@ import { Onboarding } from "./components/Onboarding";
 import { PendingTxReconciler } from "./components/PendingTxReconciler";
 import { IncomingPoller } from "./components/IncomingPoller";
 import { ChainHealthBanner } from "./components/ChainHealthBanner";
+import { DelegationRejectedBanner } from "./components/DelegationRejectedBanner";
+import { DelegationRejectionProvider } from "./sdk/DelegationRejectionProvider";
 import { ErrorBoundary, PageErrorFallback } from "./components/ErrorBoundary";
 import { Sidebar } from "./components/Sidebar";
 import { Topbar } from "./components/Topbar";
@@ -266,6 +268,7 @@ export function App() {
       <DeveloperModeProvider value={developerModeControl}>
       <OperationsProvider onNavigate={setRoute}>
       <ChainHealthProvider>
+      <DelegationRejectionProvider>
       <div className="w-app">
         <Sidebar
           route={route}
@@ -280,6 +283,10 @@ export function App() {
             onReview={() => setRoute("operators")}
             onLearnMore={() => setRoute("help")}
           />
+          {/* Sits above the route body so a rejection raised on Delegate is
+              still there after the user navigates away looking for the weight
+              that never changed. */}
+          <DelegationRejectedBanner />
           <ErrorBoundary
             resetKey={route}
             fallback={(retry) => (
@@ -327,6 +334,7 @@ export function App() {
           />
         ) : null}
       </div>
+      </DelegationRejectionProvider>
       </ChainHealthProvider>
       </OperationsProvider>
       </DeveloperModeProvider>

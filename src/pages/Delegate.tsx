@@ -76,9 +76,13 @@ import {
   preflightDelegationVerdict,
 } from "../sdk/delegation-caps";
 import { withDelegationRevertCopy } from "../sdk/delegation-reverts";
+import { useDelegationRejection } from "../sdk/DelegationRejectionProvider";
 
 export function Delegate() {
   const ops = useOperations();
+  // The durable rejection signal lives above the router, so it is still there
+  // once this page unmounts.
+  const rejection = useDelegationRejection();
   const wallet = useActiveWallet();
   const walletAddress = wallet.status === "ready" ? wallet.address : "";
   const [status, setStatus] = useState<LiveDelegationStatus | null>(null);
@@ -278,6 +282,22 @@ export function Delegate() {
   // these, so a zero-weight row must not consume a slot in our preflight.
   const activeDelegationCount = delegationRows.filter((r) => r.weightBps > 0).length;
   const clusterName = (id: number) => names.get(id) ?? `Cluster #${id}`;
+  /** Raise the durable rejection signal. Only delegate/redelegate raise it: an
+   *  undelegate that fails leaves the user's weight where it was, which the page
+   *  already shows. */
+  const raiseRejection = (
+    clusterId: number,
+    kind: "delegate" | "redelegate",
+    message: string,
+  ) =>
+    rejection.raise({
+      clusterId,
+      // The captured real name when we have one, else null → the banner derives
+      // "cluster #id" rather than inventing a name.
+      clusterName: names.get(clusterId) ?? null,
+      kind,
+      message,
+    });
   /** Effective-weight label: "<LYTH> (<pct>)" when the balance is known, else a
    *  bps-only "<pct>" — never a fabricated LYTH figure. */
   const effectiveWeightLabel = (bps: number): string => {
@@ -327,9 +347,13 @@ export function Delegate() {
           throw new Error("vault seed unavailable after keychain authorization");
         }
         const calldata = buildDelegateCalldata(clusterId, weightBps);
-        const result = await withDelegationRevertCopy(() =>
-          submitDelegationTx({ seed: ctx.vaultSeed!, data: calldata }),
+        const result = await withDelegationRevertCopy(
+          () => submitDelegationTx({ seed: ctx.vaultSeed!, data: calldata }),
+          (message) => raiseRejection(clusterId, "delegate", message),
         );
+        // Broadcast accepted — a stale rejection from an earlier attempt no
+        // longer describes anything.
+        rejection.clear();
         return {
           headline: `Delegated ${weightLabel} of balance to cluster ${clusterId}`,
           detail: result.txHash,
@@ -378,9 +402,13 @@ export function Delegate() {
           throw new Error("vault seed unavailable after keychain authorization");
         }
         const calldata = buildUndelegateCalldata(clusterId);
+        // No raise callback: an undelegate that fails leaves the weight exactly
+        // where the page already shows it, so there is nothing the user would
+        // go looking for afterwards.
         const result = await withDelegationRevertCopy(() =>
           submitDelegationTx({ seed: ctx.vaultSeed!, data: calldata }),
         );
+        rejection.clear();
         return {
           headline: `Undelegated ${weightLabel} from cluster ${clusterId}`,
           detail: result.txHash,
@@ -494,9 +522,12 @@ export function Delegate() {
           throw new Error("vault seed unavailable after keychain authorization");
         }
         const calldata = buildRedelegateCalldata(fromCluster, toCluster, weightBps);
-        const result = await withDelegationRevertCopy(() =>
-          submitDelegationTx({ seed: ctx.vaultSeed!, data: calldata }),
+        const result = await withDelegationRevertCopy(
+          () => submitDelegationTx({ seed: ctx.vaultSeed!, data: calldata }),
+          // The destination is what the user was trying to reach.
+          (message) => raiseRejection(toCluster, "redelegate", message),
         );
+        rejection.clear();
         return {
           headline: `Redelegated ${weightLabel} from cluster ${fromCluster} to ${toCluster}`,
           detail: result.txHash,
@@ -650,6 +681,11 @@ export function Delegate() {
           ? `${clusterName(verdict.clusterId)}: ${verdict.message}`
           : verdict.message ?? "This plan would exceed a delegation cap.",
       );
+      // A blocked batch is a blocked delegation — same durable signal, so the
+      // reason does not die with this card's inline error.
+      if (verdict.clusterId !== undefined && verdict.message !== undefined) {
+        raiseRejection(verdict.clusterId, "delegate", verdict.message);
+      }
       return false;
     }
 
@@ -1050,6 +1086,7 @@ export function Delegate() {
                                 });
                                 if (!verdict.ok) {
                                   setDelegateMoreError(verdict.message);
+                                  raiseRejection(row.cluster, "delegate", verdict.message);
                                   return;
                                 }
                                 setDelegateMoreFor(null);
@@ -1150,6 +1187,7 @@ export function Delegate() {
                                 });
                                 if (!verdict.ok) {
                                   setRedelegateError(verdict.message);
+                                  raiseRejection(to, "redelegate", verdict.message);
                                   return;
                                 }
                                 openRedelegate(row.cluster, to, bps);
@@ -1661,6 +1699,7 @@ export function Delegate() {
                           });
                           if (!verdict.ok) {
                             setDraftError(verdict.message);
+                            raiseRejection(c.clusterId, "delegate", verdict.message);
                             return;
                           }
                           openDelegate(c.clusterId, bps);
