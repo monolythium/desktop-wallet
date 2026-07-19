@@ -61,10 +61,17 @@ export const WALLET_LINK_HOSTS: readonly string[] = [
   "mono-labs.org",
   "monoscan.xyz",
   "github.com",
-  // The community channel. Added precisely — one host, no wildcard — because
-  // the conformance test's value is that it FAILS for anything unlisted, and a
-  // permissive entry would retire the guard rather than extend it.
+  // The community channels. Added precisely — one host each, no wildcard —
+  // because the conformance test's value is that it FAILS for anything
+  // unlisted, and a permissive entry would retire the guard rather than extend
+  // it.
+  //
+  // `discord.com`, not `discord.gg`: the verified invite lives on discord.com,
+  // and this list governs only URLs the WALLET authors, so it never needs to
+  // model every host a brand legitimately owns. (That two-host problem is
+  // exactly why neither channel joins BRAND_HOSTS below.)
   "t.me",
+  "discord.com",
 ];
 
 /** The hostname of a URL, lowercased, or null if it does not parse. */

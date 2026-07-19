@@ -123,13 +123,13 @@ export function Help({ goto }: HelpProps) {
               lineHeight: 1.6,
             }}
           >
-            Telegram is a community channel — other users, not a support desk.
-            Nobody is on duty, and there's no ticket queue or response
-            guarantee. For a definite answer, read the documentation or open an
-            issue on the source repository above.
+            Telegram and Discord are community channels — other users, not a
+            support desk. Nobody is on duty, and there's no ticket queue or
+            response guarantee. For a definite answer, read the documentation or
+            open an issue on the source repository above.
           </p>
           {/* Deliberately its own paragraph, in the warn family, sitting
-              directly beneath the channel link. A community server is a primary
+              directly beneath the channel links. A community server is a primary
               phishing venue — the people most likely to answer a stuck user
               first are the ones hunting for exactly this mistake — so the
               sentence carries more weight here than anywhere else in the app. */}

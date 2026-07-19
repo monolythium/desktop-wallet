@@ -19,16 +19,16 @@ describe("help-content", () => {
       // would be invented. (The blanket channel ban this replaces was written
       // when no community channel existed at all; it was a proxy for this.)
       expect(link.url).not.toMatch(/mailto:|\/support|support@/i);
-      // Discord was not shipped — it could not be verified live from the build
-      // environment. If it is added later it goes through the catalog.
-      expect(link.url).not.toMatch(/discord/i);
     }
   });
 
-  it("the community channel is present, and is the only chat channel", () => {
+  it("carries exactly the two verified community channels", () => {
+    // Both were confirmed to resolve before shipping. The count is pinned so a
+    // third channel cannot arrive without someone deciding it should.
     const urls = HELP_LINKS.map((l) => l.url);
     expect(urls).toContain("https://t.me/monolythium");
-    expect(urls.filter((u) => /t\.me|discord/i.test(u))).toHaveLength(1);
+    expect(urls).toContain("https://discord.com/invite/monolythium");
+    expect(urls.filter((u) => /t\.me|discord/i.test(u))).toHaveLength(2);
   });
 
   it("has at least the documentation and source repository", () => {

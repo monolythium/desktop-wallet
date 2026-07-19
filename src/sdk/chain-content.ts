@@ -25,10 +25,12 @@ export const EXTERNAL_LINKS: ExternalLink[] = [
   { label: "Whitepaper", url: "https://monolythium.com/whitepaper" },
   { label: "GitHub", url: "https://github.com/monolythium/" },
   { label: "Privacy", url: "https://monolythium.com/legal/privacy" },
-  // A COMMUNITY channel, not a support desk — see the Help page copy. The
-  // handle was verified live before it shipped (a dead channel link is worse
-  // than none, because it is the one thing a stuck user clicks).
+  // COMMUNITY channels, not a support desk — see the Help page copy. Each was
+  // verified to resolve before it shipped (a dead channel link is worse than
+  // none, because it is the one thing a stuck user clicks). Discord was held
+  // back one run for exactly that reason, until its invite could be confirmed.
   { label: "Telegram", url: "https://t.me/monolythium", brandColor: "#2AABEE" },
+  { label: "Discord", url: "https://discord.com/invite/monolythium", brandColor: "#5865F2" },
 ];
 
 /** Drop the scheme (and any trailing slash) for the compact mono URL display. */

@@ -94,6 +94,7 @@ export const HELP_LINK_LABELS = [
   "GitHub",
   "Monolythium",
   "Telegram",
+  "Discord",
 ] as const;
 
 export const HELP_LINKS: ExternalLink[] = EXTERNAL_LINKS.filter((l) =>

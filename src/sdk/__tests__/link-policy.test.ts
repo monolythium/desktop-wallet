@@ -31,8 +31,8 @@ import {
 // Named per source so a failure says WHICH catalog broke, and so the
 // non-vacuity check below can prove each source was actually reached.
 const CATALOGS: { name: string; urls: string[]; minRows: number }[] = [
-  { name: "EXTERNAL_LINKS", urls: EXTERNAL_LINKS.map((l) => l.url), minRows: 8 },
-  { name: "HELP_LINKS", urls: HELP_LINKS.map((l) => l.url), minRows: 4 },
+  { name: "EXTERNAL_LINKS", urls: EXTERNAL_LINKS.map((l) => l.url), minRows: 9 },
+  { name: "HELP_LINKS", urls: HELP_LINKS.map((l) => l.url), minRows: 5 },
   {
     name: "monoscan",
     urls: [MONOSCAN_TX_BASE, MONOSCAN_ADDRESS_BASE, MONOSCAN_GET_LYTH_URL],
@@ -87,15 +87,21 @@ describe("every wallet-authored URL resolves to an allowlisted host", () => {
       "not a url",
       // The community-channel additions must not have widened the gate.
       "https://t.me.evil.example/monolythium", // allowlisted host as a prefix
-      "https://discord.gg/monolythium", // NOT shipped — see the report
+      "https://discord.com.evil.example/invite/x", // same, for the other channel
+      // `discord.gg` is Discord's OTHER legitimate host and is still rejected:
+      // this list governs the URLs the wallet AUTHORS, and the wallet authors
+      // the discord.com form. Allowlisting a host we never link would be config
+      // that reads as an oversight later.
+      "https://discord.gg/monolythium",
       "https://telegram.me/monolythium", // a different host, however familiar
+      "https://discordapp.com/invite/x", // a legacy alias the wallet does not use
     ];
     for (const url of intruders) {
       expect(isAllowedWalletLink(url), `${url} must be rejected`).toBe(false);
     }
   });
 
-  it("the allowlist grew by exactly one host", () => {
+  it("the allowlist holds exactly the six authored hosts", () => {
     // A wildcard or a broad suffix would retire the guard rather than extend
     // it, and would do so silently.
     expect([...WALLET_LINK_HOSTS]).toEqual([
@@ -104,17 +110,22 @@ describe("every wallet-authored URL resolves to an allowlisted host", () => {
       "monoscan.xyz",
       "github.com",
       "t.me",
+      "discord.com",
     ]);
     for (const host of WALLET_LINK_HOSTS) {
       expect(host, "no wildcards").not.toContain("*");
     }
   });
 
-  it("the community channel is allowed under the SAME dot-boundary rule", () => {
-    // Not a special case: it passes the identical matcher every other host uses.
+  it("both community channels pass the SAME dot-boundary rule", () => {
+    // Not special cases: they pass the identical matcher every other host uses.
     expect(isAllowedWalletLink("https://t.me/monolythium")).toBe(true);
     expect(isAllowedWalletLink("https://sub.t.me/x")).toBe(true); // real subdomain
     expect(isAllowedWalletLink("https://nott.me/x")).toBe(false); // dot boundary holds
+
+    expect(isAllowedWalletLink("https://discord.com/invite/monolythium")).toBe(true);
+    expect(isAllowedWalletLink("https://support.discord.com/x")).toBe(true); // subdomain
+    expect(isAllowedWalletLink("https://notdiscord.com/x")).toBe(false); // boundary holds
   });
 
   it("the pinned catalog values are the ones shipped", () => {
@@ -128,12 +139,14 @@ describe("every wallet-authored URL resolves to an allowlisted host", () => {
       "https://github.com/monolythium/",
       "https://monolythium.com/legal/privacy",
       "https://t.me/monolythium",
+      "https://discord.com/invite/monolythium",
     ]);
     expect(HELP_LINKS.map((l) => l.label)).toEqual([
       "Monolythium",
       "Documentation",
       "GitHub",
       "Telegram",
+      "Discord",
     ]);
     expect(BLOG_FEED_URL).toBe("https://monolythium.com/blog/rss.xml");
   });

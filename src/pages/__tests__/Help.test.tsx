@@ -47,19 +47,26 @@ describe("Help page", () => {
       // be invented. (The blanket channel ban this replaces was a proxy for
       // exactly this, written when no channel existed at all.)
       expect(href).not.toMatch(/mailto:|\/support|support@/i);
-      // Discord was NOT shipped: it could not be verified as live from the
-      // build environment, and an unverified channel link is the one thing a
-      // stuck user clicks. If it is added later it goes through the catalog.
-      expect(href).not.toMatch(/discord/i);
     }
   });
 
-  it("frames the community channel as community, never as support", () => {
+  it("renders both verified community channels", () => {
+    const { container } = render(<Help />);
+    const hrefs = Array.from(container.querySelectorAll("a[href]")).map((a) =>
+      a.getAttribute("href"),
+    );
+    expect(hrefs).toContain("https://t.me/monolythium");
+    expect(hrefs).toContain("https://discord.com/invite/monolythium");
+  });
+
+  it("frames both channels as community, never as support", () => {
     const { container } = render(<Help />);
     // JSX prose wraps across source lines, so the assertion is about the
     // SENTENCE, not about where the formatter broke it.
     const text = (container.textContent ?? "").replace(/\s+/g, " ");
-    expect(text).toMatch(/community channel/i);
+    // Both are named in the framing sentence — a channel the copy doesn't cover
+    // would be a channel the user has no honest expectation set for.
+    expect(text).toMatch(/Telegram and Discord are community channels/i);
     expect(text).toMatch(/not a support desk/i);
     expect(text).toMatch(/Nobody is on duty/i);
     expect(text).toMatch(/no ticket queue or response guarantee/i);
