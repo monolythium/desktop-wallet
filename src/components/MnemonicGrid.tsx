@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import {
-  cancelClipboardAutoClear,
+  clearClipboardNow,
   copyWithAutoClear,
+  flushClipboardAutoClear,
   formatPhraseForClipboard,
 } from "../lib/clipboard-with-clear";
 
@@ -59,6 +60,9 @@ export function MnemonicGrid({
   // copy that the OS keeps in clipboard history / cloud sync, so the safety
   // promise of the old "auto-clears in 30 s" note was one it couldn't keep.
   const [copyAck, setCopyAck] = useState(false);
+  const [clearState, setClearState] = useState<"idle" | "cleared" | "failed">(
+    "idle",
+  );
 
   useEffect(() => {
     if (copyState === "idle") return;
@@ -69,7 +73,11 @@ export function MnemonicGrid({
     return () => clearTimeout(t);
   }, [copyState]);
 
-  useEffect(() => () => cancelClipboardAutoClear(), []);
+  // FLUSH, not cancel. Leaving the surface should narrow the exposure window,
+  // not widen it — a plain cancel would strand the copied phrase on the OS
+  // clipboard with no timer left to remove it. The flush only clears a
+  // clipboard it can prove is still ours.
+  useEffect(() => () => void flushClipboardAutoClear(), []);
 
   const handleCopy = async () => {
     const text = formatPhraseForClipboard(words);
@@ -79,6 +87,10 @@ export function MnemonicGrid({
     } catch {
       setCopyState("failed");
     }
+  };
+
+  const handleClearClipboard = async () => {
+    setClearState((await clearClipboardNow()) ? "cleared" : "failed");
   };
 
   return (
@@ -225,6 +237,41 @@ export function MnemonicGrid({
               : copyState === "failed"
                 ? "Copy failed — try again"
                 : "Copy to clipboard"}
+          </button>
+          {/* The reliable counterpart to two best-effort paths: a click is
+              always a valid write context, so this clears on demand rather
+              than hoping a timer or an unmount gets there. */}
+          <button
+            type="button"
+            data-testid="clear-clipboard"
+            onClick={() => void handleClearClipboard()}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 8,
+              width: "100%",
+              padding: "8px 12px",
+              borderRadius: 10,
+              border: "1px solid var(--fg-700)",
+              background: "transparent",
+              color:
+                clearState === "cleared"
+                  ? "var(--ok)"
+                  : clearState === "failed"
+                    ? "var(--err)"
+                    : "var(--fg-400)",
+              fontFamily: "var(--f-sans)",
+              fontSize: 12,
+              cursor: "pointer",
+              transition: "all 160ms var(--e-out)",
+            }}
+          >
+            {clearState === "cleared"
+              ? "Clipboard cleared"
+              : clearState === "failed"
+                ? "Couldn't clear — clear manually"
+                : "Clear clipboard"}
           </button>
           <div
             style={{
