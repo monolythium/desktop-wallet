@@ -26,6 +26,14 @@ import { fetchAndUnlockVault } from "../sdk/keychain";
 import { errorMessage, loadLiveWalletBalance } from "../sdk/live";
 import { getActiveVault } from "../sdk/vaultCatalog";
 import {
+  COMMON_PASSWORD_HINT,
+  PasswordStrengthMeter,
+} from "../components/PasswordStrengthMeter";
+import {
+  MIN_PASSWORD_LENGTH,
+  passwordRejectReason,
+} from "../lib/password-validation";
+import {
   createAgentSubAccount,
   fundAgentSubAccount,
   signClaimAsSubAccount,
@@ -157,6 +165,19 @@ export function Agents() {
     }
     if (createPassword.length === 0) {
       setCreateError("Enter a password to protect the new agent vault.");
+      return;
+    }
+    // An agent vault holds spendable funds like any other, so it gets the same
+    // creation policy. (Open question 2: if agent sub-wallets are ever made
+    // deliberately lighter-weight, that has to be an explicit product decision,
+    // not a gap left here.)
+    const reason = passwordRejectReason(createPassword);
+    if (reason !== null) {
+      setCreateError(
+        reason === "too_short"
+          ? `Use at least ${MIN_PASSWORD_LENGTH} characters — there are no other composition rules.`
+          : COMMON_PASSWORD_HINT,
+      );
       return;
     }
     setCreateBusy(true);
@@ -575,6 +596,7 @@ export function Agents() {
               <label className="cap">Password for the new agent vault</label>
               <input
                 type="password"
+                autoComplete="new-password"
                 value={createPassword}
                 onChange={(e) => {
                   setCreatePassword(e.target.value);
@@ -582,6 +604,7 @@ export function Agents() {
                 }}
                 style={inputStyle}
               />
+              <PasswordStrengthMeter password={createPassword} />
               {createError ? (
                 <div className="row-help" style={{ color: "var(--err)" }}>
                   {createError}
