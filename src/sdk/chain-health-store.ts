@@ -18,7 +18,7 @@
 
 import { Store } from "@tauri-apps/plugin-store";
 
-const STORE_FILE = "chain-health.v1.json";
+export const STORE_FILE = "chain-health.v1.json";
 const STATE_KEY = "state";
 
 /** The persisted last-seen head for one (address, chain) scope. */

@@ -37,7 +37,7 @@ import {
   type PendingTxEnvelope,
 } from "./pending-tx";
 
-const STORE_FILE = "pending-tx.v1.json";
+export const STORE_FILE = "pending-tx.v1.json";
 
 let storePromise: Promise<Store> | null = null;
 let cache: PendingTxEnvelope | null = null;

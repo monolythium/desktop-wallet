@@ -18,7 +18,7 @@
 import { Store } from "@tauri-apps/plugin-store";
 import { scopeChainKey } from "./chains";
 
-const STORE_FILE = "names.v1.json";
+export const STORE_FILE = "names.v1.json";
 const STATE_KEY = "state";
 const BROWSER_KEY = "wallet.names.reverse.v1";
 

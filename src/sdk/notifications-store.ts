@@ -44,7 +44,7 @@ import {
   type TxOpKind,
 } from "./notifications";
 
-const STORE_FILE = "notifications.v1.json";
+export const STORE_FILE = "notifications.v1.json";
 const STATE_KEY = "state";
 
 /** On-disk root. `scopes` maps each per-(address, chain) storage key to its

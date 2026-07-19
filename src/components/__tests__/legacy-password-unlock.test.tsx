@@ -37,6 +37,8 @@ vi.mock("../../sdk/reset", () => ({
   resetWalletOnThisDevice,
   resetPhraseProofMatches,
   resetConfirmMatches,
+  NON_CUSTODIAL_RESET_NOTE:
+    "Monolythium is non-custodial: no one — including Monolythium — can recover your wallet, password, or funds for you.",
 }));
 vi.mock("../../sdk/unlock-lockout", () => ({
   readLockoutState,

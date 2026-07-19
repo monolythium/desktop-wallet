@@ -16,6 +16,7 @@ import { isWrongPasswordFailure } from "../sdk/vault";
 import { loadActiveWallet } from "../sdk/active-wallet";
 import { useAutoLock } from "../sdk/auto-lock";
 import {
+  NON_CUSTODIAL_RESET_NOTE,
   resetConfirmMatches,
   resetPhraseProofMatches,
   resetWalletOnThisDevice,
@@ -157,6 +158,14 @@ export function UnlockGate() {
               encrypted vault. <strong>Only the recovery phrase can restore each
               one</strong> — without it, those funds are gone. Your funds on-chain
               are unaffected.
+            </div>
+            {/* The fourth clause of the destructive-copy law — the one a user
+                is most likely to assume is untrue. */}
+            <div
+              className="row-help"
+              style={{ marginTop: 8, lineHeight: 1.6, textAlign: "left" }}
+            >
+              {NON_CUSTODIAL_RESET_NOTE}
             </div>
             <label className="w-onboarding__field" style={{ marginTop: 16, textAlign: "left" }}>
               <span className="cap">Enter this wallet's 24-word recovery phrase</span>

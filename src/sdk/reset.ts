@@ -11,9 +11,17 @@
 
 import { deleteAccount, deriveAddressHexFromMnemonic } from "./keychain";
 import { loadCatalog, removeVaultFromCatalog } from "./vaultCatalog";
+import { wipeAllLocalWalletState } from "./wipe-local-state";
 
 /** The word the user must type to confirm a destructive wallet reset. */
 export const RESET_CONFIRM_WORD = "RESET";
+
+/** The fourth clause of the destructive-copy law, rendered on BOTH reset
+ *  surfaces. The other three — device-scope permanence, funds stay on-chain,
+ *  the phrase is the only way back — are already stated; this one was merely
+ *  implied, and it is the part a user is most likely to assume is untrue. */
+export const NON_CUSTODIAL_RESET_NOTE =
+  "Monolythium is non-custodial: no one — including Monolythium — can recover your wallet, password, or funds for you.";
 
 /** True when `input` matches the reset confirm word, ignoring surrounding
  *  whitespace and case. */
@@ -42,8 +50,15 @@ export function resetPhraseProofMatches(
   return expectedAddressHex ? derived === expectedAddressHex.toLowerCase() : true;
 }
 
-/** Erase every vault from this device, then reload so the boot probe re-runs and
- *  routes to onboarding. On-chain funds are untouched. */
+/** Erase every vault from this device AND every local trace this wallet wrote,
+ *  then reload so the boot probe re-runs and routes to onboarding. On-chain
+ *  funds are untouched.
+ *
+ *  Order matters: vaults first (a keychain failure must abort before a catalog
+ *  row is orphaned), then the residue sweep, then the reload. The sweep is
+ *  best-effort and never throws — by the time it runs the vaults are gone, so
+ *  failing to reach the reload would strand the user in a half-torn-down shell
+ *  with no wallet and no way forward. */
 export async function resetWalletOnThisDevice(): Promise<void> {
   const catalog = await loadCatalog().catch(() => null);
   const slots = catalog ? Object.keys(catalog.vaults) : [];
@@ -52,6 +67,16 @@ export async function resetWalletOnThisDevice(): Promise<void> {
     // failure aborts before we orphan a row.
     await deleteAccount(slot);
     await removeVaultFromCatalog(slot);
+  }
+  // Everything else this wallet wrote locally: every registered store file and
+  // every wallet-owned localStorage key bar the display preferences. Without
+  // this the device stays readable — contacts, who was paid, transaction
+  // history — to whoever uses it next.
+  try {
+    await wipeAllLocalWalletState();
+  } catch {
+    // Defensive: the sweep already swallows its own failures. Even a bug in it
+    // must not cost the reload.
   }
   // Reload so the boot probe re-runs: with no vault left it routes to onboarding
   // (the fresh-install state).

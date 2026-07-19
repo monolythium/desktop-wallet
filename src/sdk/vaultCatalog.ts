@@ -31,7 +31,7 @@
 import { Store } from "@tauri-apps/plugin-store";
 import { purgeVaultScopes } from "./scope-cleanup";
 
-const STORE_FILE = "vaults.v1.json";
+export const STORE_FILE = "vaults.v1.json";
 const STATE_KEY = "state";
 
 export type VaultKind = "local";

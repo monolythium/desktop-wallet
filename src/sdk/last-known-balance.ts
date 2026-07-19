@@ -25,7 +25,7 @@
 import { Store } from "@tauri-apps/plugin-store";
 import { scopeChainKey } from "./chains";
 
-const STORE_FILE = "balance.v1.json";
+export const STORE_FILE = "balance.v1.json";
 const STATE_KEY = "state";
 
 /** The persisted last-known balance for one (address, chain) scope. */

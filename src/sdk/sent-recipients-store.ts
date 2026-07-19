@@ -25,7 +25,7 @@ import {
   verifySentRecipientTag,
 } from "./sent-recipients";
 
-const STORE_FILE = "sent-recipients.v1.json";
+export const STORE_FILE = "sent-recipients.v1.json";
 const STATE_KEY = "state";
 
 /** On-disk root — `scopes` maps each per-(sender, chain) key to its envelope

@@ -16,6 +16,7 @@ import {
 } from "../sdk/unlock-lockout";
 import { VaultCallError } from "../sdk/vault";
 import {
+  NON_CUSTODIAL_RESET_NOTE,
   resetConfirmMatches,
   resetPhraseProofMatches,
   resetWalletOnThisDevice,
@@ -520,6 +521,12 @@ function ResetWalletPage({ onBack }: { onBack: () => void }) {
             encrypted vault. <strong>Only the recovery phrase can restore each
             one</strong> — without it, those funds are gone. Your funds on-chain
             are unaffected.
+          </div>
+          {/* The fourth clause of the destructive-copy law. The other three are
+              above; this one was only implied, and "no one can help you" is
+              exactly the part a user assumes is untrue. */}
+          <div className="row-help" style={{ marginTop: 8, lineHeight: 1.6 }}>
+            {NON_CUSTODIAL_RESET_NOTE}
           </div>
           <label className="w-onboarding__field" style={{ marginTop: 16 }}>
             <span className="cap">Enter this wallet's 24-word recovery phrase</span>

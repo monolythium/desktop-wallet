@@ -18,7 +18,7 @@
 import { Store } from "@tauri-apps/plugin-store";
 import { requireTypedUserAddress } from "./address";
 
-const STORE_FILE = "addressbook.v1.json";
+export const STORE_FILE = "addressbook.v1.json";
 const STATE_KEY = "state";
 const BROWSER_KEY = "wallet.addressbook.v1";
 

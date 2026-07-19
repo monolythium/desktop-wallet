@@ -21,7 +21,7 @@ import {
   type ConfirmedCacheEntry,
 } from "./activity-cache";
 
-const STORE_FILE = "activity.v1.json";
+export const STORE_FILE = "activity.v1.json";
 const STATE_KEY = "state";
 
 /** On-disk root. `confirmed` maps each `activityCacheKey` to its cache entry.
