@@ -35,6 +35,7 @@ import type {
   RedemptionQueueResponse,
 } from "@monolythium/core-sdk";
 import { requireTypedUserAddress, requireTypedUserAddressHex } from "./address";
+import { truncateDecimals } from "./lyth-display";
 import { getProvider } from "./client";
 import { submitNativeTx } from "./submit";
 
@@ -139,6 +140,33 @@ export async function fetchRedemptionQueue(
  * for display. Tolerant of an empty / malformed value — collapses to "0" so a
  * row still renders rather than throwing.
  */
+/** The disclosure shown when ENABLING auto-compound with rewards pending.
+ *
+ *  The chain's `setAutoCompound(true)` does not merely persist a preference: it
+ *  settles and pays out the wallet's entire pending rewards in the same
+ *  transaction. That is a fund movement the user did not ask for by name, and it
+ *  must be visible before signing rather than discovered afterwards in the
+ *  balance.
+ *
+ *  Returns null for every case where nothing is claimed — disabling, enabling
+ *  with nothing pending, or an unreadable amount — so the caller renders no box
+ *  at all rather than an empty one. Pure. */
+export function autoCompoundClaimDisclosure(
+  enabling: boolean,
+  pendingLythoshi: bigint,
+): string | null {
+  if (!enabling) return null;
+  if (pendingLythoshi <= 0n) return null;
+  const amount = truncateDecimals(
+    formatLyth(pendingLythoshi.toString(), { includeUnit: false }),
+    4,
+  );
+  // A truncated display that lands on zero would read as "claims your pending 0
+  // LYTH" — say nothing rather than that.
+  if (amount === "0") return null;
+  return `This also claims your pending ${amount} LYTH now. Turning on auto-compound settles and pays out your current rewards to your balance in the same transaction.`;
+}
+
 export function formatRewardLyth(lythoshiHex: string | null | undefined): string {
   if (!lythoshiHex) return "0";
   try {

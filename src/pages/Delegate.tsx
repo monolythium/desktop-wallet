@@ -28,6 +28,7 @@ import {
   fetchClusterDirectory,
   fetchPendingRewards,
   fetchRedemptionQueue,
+  autoCompoundClaimDisclosure,
   formatRewardLyth,
   hasClaimableRewards,
   submitDelegationTx,
@@ -605,24 +606,54 @@ export function Delegate() {
   };
 
   const openAutoCompoundToggle = (next: boolean) => {
+    // The pending total as of drawer-open. Rewards accrue per block, so this is
+    // a live preview of what enabling would settle — never the settled outcome,
+    // which only the receipt's Claimed log states.
+    const pendingLythoshi = (() => {
+      const raw = rewards?.ok ? rewards.value?.totalAmountLythoshi : undefined;
+      if (raw === undefined || raw === null) return 0n;
+      try {
+        return BigInt(raw);
+      } catch {
+        return 0n;
+      }
+    })();
+    const disclosure = autoCompoundClaimDisclosure(next, pendingLythoshi);
+    const claimsNowLyth =
+      disclosure === null
+        ? null
+        : truncateDecimals(formatRewardLyth(pendingLythoshi.toString()), 4);
     ops.open({
       title: next ? "Enable auto-compound" : "Disable auto-compound",
       subtitle: next
-        ? "Re-delegate settled rewards automatically instead of leaving them claimable"
-        : "Leave settled rewards claimable instead of re-delegating them",
+        ? "Future rewards will be claimed and delegated back automatically."
+        : "Rewards will stop compounding — claim them manually.",
       auth: "keychain",
       diff: [
         { k: "From", v: selfBech32m },
         { k: "Auto-compound", v: next ? "on" : "off" },
+        // The same fact the warning carries, so the signed-diff view is not
+        // missing something the prose says.
+        ...(claimsNowLyth !== null
+          ? [{ k: "Claims now", v: `${claimsNowLyth} LYTH (current pending)` }]
+          : []),
+        // No quote surface exists for a delegation call, so this states that a
+        // fee applies rather than inventing a number.
+        { k: "Network fee (max)", v: "applies (paid in LYTH)" },
         { k: "Precompile", v: "0x…100a" },
       ],
       effects: [
         { text: "Unlocks the local vault for this operation only." },
-        { text: "Encodes setAutoCompound(bool enabled) calldata via @monolythium/core-sdk — persists the preference on-chain for this wallet." },
+        { text: "Encodes setAutoCompound(bool enabled) calldata via @monolythium/core-sdk — persists the preference on-chain for this wallet. Enabling also settles pending rewards in the same transaction." },
         {
           text: "Chain rejects at the precompile gate if delegation is gated off — verbatim error surfaces here.",
           level: "warn",
         },
+        // LAST, immediately above the confirm action: a fund movement the user
+        // did not ask for by name belongs where it is read just before signing.
+        ...(disclosure !== null
+          ? [{ text: disclosure, level: "warn" as const }]
+          : []),
       ],
       notify: {
         // Metadata only — the signed setAutoCompound(bool) calldata is
@@ -961,10 +992,19 @@ export function Delegate() {
                   <span>· Auto-compound {rewards.value.autoCompound ? "on" : "off"}</span>
                   <button
                     className="btn btn--sm btn--ghost"
+                    data-testid="auto-compound-toggle"
                     onClick={() => openAutoCompoundToggle(!rewards.value!.autoCompound)}
                   >
                     {rewards.value.autoCompound ? "Disable auto-compound" : "Enable auto-compound"}
                   </button>
+                  {/* Always visible, not only at confirm: the claim side effect
+                      is the part of this setting people do not expect. */}
+                  <div style={{ flexBasis: "100%", lineHeight: 1.5 }}>
+                    Automatically claim your delegation rewards and delegate them back
+                    instead of claiming by hand — compounding your effective weight over
+                    time.{" "}
+                    <strong>Turning it on also claims your current pending rewards now.</strong>
+                  </div>
                 </div>
               ) : null}
 
