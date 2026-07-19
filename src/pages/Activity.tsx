@@ -73,6 +73,7 @@ import {
   suppressesSubmitTimeAmount,
   type NotificationRecord,
 } from "../sdk/notifications";
+import { truncMiddle } from "../sdk/truncate";
 import { listForScope } from "../sdk/notifications-store";
 import { removePendingTx } from "../sdk/pending-tx-store";
 import { detectAndNotifyIncoming } from "../sdk/incoming-detect";
@@ -830,11 +831,11 @@ function indexedRowToDetail(row: LiveAddressActivityRow): DetailRow {
   };
 }
 
-// Middle-truncate a bech32m counterparty (or tx hash fallback) for the compact
-// row subtitle. Pure slicing — never throws on a malformed value.
-function truncCounterparty(s: string): string {
-  return s.length > 17 ? `${s.slice(0, 10)}…${s.slice(-6)}` : s;
-}
+// The compact row subtitle uses the ONE shared truncation helper. Its previous
+// local copy carried the same head/tail and the same gate — which is precisely
+// why it was worth removing: a duplicate that agrees today is a duplicate that
+// can disagree tomorrow, silently, on a string users compare addresses with.
+const truncCounterparty = truncMiddle;
 
 // Pending-row label: name the cluster for delegation kinds (captured real name,
 // else "Cluster #<id>") instead of the bare delegation-module precompile,

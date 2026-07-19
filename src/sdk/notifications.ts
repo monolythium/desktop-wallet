@@ -22,6 +22,8 @@
 //     blockNumber / kind / amountDecimal / counterparty / createdAtMs / read /
 //     schemaVersion — never a contact name.
 
+import { truncMiddle } from "./truncate";
+
 /** Max notification records retained per (address, chain) — newest-first,
  *  capped via `appendCapped`. 50 covers months of normal use; older records
  *  drop silently on append. */
@@ -410,13 +412,14 @@ export function notificationTitle(
   return NOTIFICATION_LABELS[kind][status];
 }
 
-/** Middle-truncate a typed bech32m address for compact display — identical
- *  head/tail to `_detailModalParts.truncMiddle` so the OS toast body matches
- *  the in-app row's `short` form verbatim. Inlined here (rather than imported)
- *  to keep this module DOM/React-free per its header invariant. */
-function shortAddress(s: string, head = 10, tail = 6): string {
-  return s.length > head + tail + 1 ? `${s.slice(0, head)}…${s.slice(-tail)}` : s;
-}
+/** Middle-truncate a typed bech32m address for compact display.
+ *
+ *  The OS toast body must match the in-app row's short form VERBATIM — the
+ *  same address rendered two ways reads as two addresses. That used to be a
+ *  promise in a comment beside a copied implementation; it is now the same
+ *  function, and `truncate.ts` is DOM-free so importing it does not violate
+ *  this module's no-DOM invariant. */
+const shortAddress = truncMiddle;
 
 /** Friendly title + body for a terminal notification — the SAME wording the
  *  in-app Notifications row renders (title = {@link notificationTitle}; body =

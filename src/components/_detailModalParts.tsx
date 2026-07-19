@@ -20,11 +20,11 @@ import {
 import { CategoryBadge, categoryOfName } from "./CategoryBadge";
 import { ExternalLink } from "./ExternalLink";
 
-/** Middle-truncate any string (bech32m address or hash) for compact
- *  display. Pure — never throws. */
-export function truncMiddle(s: string, head = 10, tail = 6): string {
-  return s.length > head + tail + 1 ? `${s.slice(0, head)}…${s.slice(-tail)}` : s;
-}
+// Re-exported so the existing component-layer importers keep one import site.
+// The implementation lives in `sdk/truncate.ts` because `sdk/notifications.ts`
+// must be able to import it without pulling in React — that constraint is
+// exactly why a duplicate grew there.
+export { truncMiddle } from "../sdk/truncate";
 
 /** Relative timestamp ("Ns / Nm / Nh ago"). Bounded — beyond a few hours the
  *  absolute date is more informative; callers that need finer granularity
