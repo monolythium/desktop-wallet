@@ -39,6 +39,12 @@
   /* Status */
   --ok:    #7ee3c1;
   --warn:  #f4c97a;
+  /* The warn colour as an RGB triplet, so warn-tinted chrome composes with
+     rgba(var(--warn-glow), α) and TRACKS THE ACTIVE THEME. A frozen rgba
+     literal looks correct on whichever theme it was authored against and is
+     silently wrong on the other eleven. The 11 data-theme blocks each carry
+     their own; this is the base block's — which IS the default theme. */
+  --warn-glow: 244, 201, 122;
   --alert: #ff8a9a;
   --err:   #ff8a9a;
   --info:  #7c7fff;

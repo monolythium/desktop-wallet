@@ -49,7 +49,7 @@ describe("CopyableAddress — the detail-modal address", () => {
     // `navigator.clipboard` is getter-only in jsdom, and userEvent installs its
     // own stub at render time — so ours is redefined after the render.
     const { user } = renderWithProviders(<CopyableAddress addr={ADDR} />);
-    const writeText = vi.fn(async () => {});
+    const writeText = vi.fn(async (_text: string) => {});
     Object.defineProperty(navigator, "clipboard", {
       value: { writeText },
       configurable: true,

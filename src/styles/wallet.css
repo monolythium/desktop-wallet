@@ -1112,9 +1112,29 @@ html[data-sidebar="collapsed"]:not([data-layout="topbar"]) .w-nav__item {
   background: var(--w-bg);
   color: var(--fg-200);
 }
-.w-banner.warn  { border-color: rgba(244, 201, 122, 0.35); color: var(--warn); background: rgba(244, 201, 122, 0.08); }
+.w-banner.warn  { border-color: rgba(var(--warn-glow), 0.35); color: var(--warn); background: rgba(var(--warn-glow), 0.08); }
 .w-banner.error { border-color: rgba(255, 138, 154, 0.35); color: var(--alert); background: rgba(255, 138, 154, 0.08); }
 .w-banner.ok    { border-color: rgba(126, 227, 193, 0.35); color: var(--ok); background: rgba(126, 227, 193, 0.08); }
+
+/* ============ Prominent warning ============
+   The ONE loud warning box: limits, clamps, and irreversibility — the moments
+   a user must not skim past.
+
+   Escalation is EARNED. A quiet informational hint that is always on teaches
+   the eye to ignore that shape, so by the time the same shape carries "this
+   is as far as you can go", it is invisible. Informational notes stay muted;
+   only the boundary escalates to this.
+
+   Tinted through --warn-glow so it tracks the active theme rather than
+   matching whichever one it was authored against. */
+.w-warn-prominent {
+  font-family: var(--f-mono); font-size: 12px; font-weight: 600; line-height: 1.4;
+  color: var(--warn);
+  background: rgba(var(--warn-glow), 0.10);
+  border: 1px solid rgba(var(--warn-glow), 0.25);
+  border-radius: 8px; padding: 7px 10px; margin: 6px 0 0;
+  box-shadow: 0 0 12px rgba(var(--warn-glow), 0.25);
+}
 
 /* ============ Chain-health degraded banner ============ */
 .w-chain-banner {
