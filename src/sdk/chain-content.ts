@@ -65,7 +65,7 @@ export const WALLET_PITCH: ChainPillar[] = [
   },
   {
     title: "An open marketplace of operator clusters.",
-    body: "Validation runs on distributed-validator clusters — seven active operators plus three on standby, with a seven-of-ten signing threshold — published openly so you can see who is securing the network. Concentration is capped per operator and per wallet by enforced on-chain limits. (The 100-cluster, 1,000-position scale is a growth target the design is built for, not a number claimed today.)",
+    body: "Validation runs on distributed operator clusters — seven active operators plus three on standby, with a seven-of-ten signing threshold — published openly so you can see who is securing the network. Concentration is capped per operator and per wallet by enforced on-chain limits. (The 100-cluster, 1,000-position scale is a growth target the design is built for, not a number claimed today.)",
   },
   {
     title: "Native token standards.",
