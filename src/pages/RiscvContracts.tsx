@@ -15,6 +15,18 @@ import {
   submitMrvDeployPayloadTransaction,
 } from "../sdk/mrv";
 
+/**
+ * What this console honestly is.
+ *
+ * Exported so the copy is pinned at its source. The final sentence exists
+ * because the page can hand back a transaction hash and an expected contract
+ * address without ever proving execution — there is no receipt poll here, and
+ * Activity owns inclusion tracking. Saying so is cheaper than a user inferring
+ * a guarantee the page never made.
+ */
+export const RISCV_CONSOLE_INTRO =
+  "Build and submit RISC-V (MRV native) deploy and call transactions. Submission signs with ML-DSA-65 and broadcasts over plaintext mesh_submitTx; the wallet reports the transaction hash (and the expected contract address for a deploy), and inclusion shows up in Activity. This console does not prove live RISC-V execution.";
+
 interface RiscvContractsProps {
   goto: (r: Route) => void;
 }
@@ -169,6 +181,13 @@ export function RiscvContracts({ goto }: RiscvContractsProps) {
         </h1>
         <div className="sub">Deploy and call native MRV contracts.</div>
       </div>
+
+      {/* Every clause here matches what this page actually does. The last
+          sentence is the load-bearing one: nothing on this page polls a
+          receipt, so a hash in hand is not proof the contract ran. */}
+      <p className="row-help" style={{ margin: "0 0 16px", maxWidth: "72ch" }}>
+        {RISCV_CONSOLE_INTRO}
+      </p>
 
       {error ? <div className="w-live-error">{error}</div> : null}
 
