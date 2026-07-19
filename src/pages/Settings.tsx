@@ -6,6 +6,13 @@ import { useActiveWallet } from "../sdk/active-wallet";
 import { CopyableAddress } from "../components/_detailModalParts";
 import { MnemonicGrid } from "../components/MnemonicGrid";
 import { getActiveAccount, revealRecoveryPhrase } from "../sdk/keychain";
+import { PasswordInput } from "../components/PasswordInput";
+import {
+  clearUnlockLockout,
+  lockoutRemainingMs,
+  readLockoutState,
+  recordWrongUnlockAttempt,
+} from "../sdk/unlock-lockout";
 import { VaultCallError } from "../sdk/vault";
 import {
   resetConfirmMatches,
@@ -507,6 +514,8 @@ function RevealPhrasePage({ onBack }: { onBack: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const [mnemonic, setMnemonic] = useState<string | null>(null);
   const [notStored, setNotStored] = useState(false);
+  const [lockoutUntil, setLockoutUntil] = useState(0);
+  const [now, setNow] = useState(() => Date.now());
 
   // Suspend the idle auto-lock while the phrase may be on screen; resume and
   // drop the phrase from state when leaving.
@@ -518,13 +527,42 @@ function RevealPhrasePage({ onBack }: { onBack: () => void }) {
     };
   }, [pauseTimer, resumeTimer]);
 
+  // This prompt verifies the WALLET VAULT PASSWORD, so it belongs to the one
+  // shared brute-force budget alongside the unlock gate and the operation
+  // drawer. Without this it was an unthrottled Argon2id oracle for the same
+  // secret — a way to guess without ever meeting a lockout window.
+  //
+  // Password CREATION surfaces are deliberately not members: there is no
+  // existing secret to guess there.
+  useEffect(() => {
+    setLockoutUntil(readLockoutState().lockoutUntil);
+  }, []);
+
+  useEffect(() => {
+    if (lockoutUntil <= Date.now()) return;
+    const id = window.setInterval(() => {
+      const t = Date.now();
+      setNow(t);
+      if (t >= lockoutUntil) window.clearInterval(id);
+    }, 500);
+    return () => window.clearInterval(id);
+  }, [lockoutUntil]);
+
+  const remainingMs = lockoutRemainingMs(lockoutUntil, now);
+  const lockedOut = remainingMs > 0;
+  const remainingSec = Math.ceil(remainingMs / 1000);
+
   const submit = async () => {
-    if (busy || password.length === 0) return;
+    if (busy || password.length === 0 || lockedOut) return;
     setBusy(true);
     setError(null);
     try {
       const out = await revealRecoveryPhrase(getActiveAccount(), password);
       setPassword("");
+      // A correct password clears the shared budget everywhere — the count
+      // resets only on a success, never by waiting a window out.
+      clearUnlockLockout();
+      setLockoutUntil(0);
       if (out.revealable && out.mnemonic) {
         setMnemonic(out.mnemonic);
       } else {
@@ -532,8 +570,17 @@ function RevealPhrasePage({ onBack }: { onBack: () => void }) {
       }
     } catch (cause) {
       if (cause instanceof VaultCallError && cause.cause.code === "wrong_password") {
-        setError("Wrong password. Try again.");
+        const next = recordWrongUnlockAttempt();
+        setLockoutUntil(next.lockoutUntil);
+        setNow(Date.now());
+        const rem = lockoutRemainingMs(next.lockoutUntil, Date.now());
+        setError(
+          rem > 0
+            ? `Wrong password — too many attempts. Locked for ${Math.ceil(rem / 1000)}s.`
+            : "Wrong password. Try again.",
+        );
       } else {
+        // Operational failures are not guesses and never escalate the budget.
         setError((cause as Error)?.message ?? "Could not reveal the phrase.");
       }
     } finally {
@@ -588,19 +635,22 @@ function RevealPhrasePage({ onBack }: { onBack: () => void }) {
               </div>
               <label className="w-onboarding__field" style={{ marginTop: 16 }}>
                 <span className="cap">Password</span>
-                <input
-                  type="password"
+                <PasswordInput
                   autoFocus
                   autoComplete="current-password"
                   value={password}
-                  onChange={(e) => setPassword(e.target.value)}
+                  onChange={setPassword}
                   onKeyDown={(e) => {
-                    if (e.key === "Enter") void submit();
+                    if (e.key === "Enter" && !busy && !lockedOut) void submit();
                   }}
-                  disabled={busy}
+                  disabled={busy || lockedOut}
                 />
               </label>
-              {error ? (
+              {lockedOut ? (
+                <div className="w-banner error" style={{ marginTop: 12 }}>
+                  Too many wrong attempts. Try again in {remainingSec}s.
+                </div>
+              ) : error ? (
                 <div className="w-banner error" style={{ marginTop: 12 }}>{error}</div>
               ) : null}
               <div style={{ display: "flex", gap: 8, marginTop: 20 }}>
@@ -608,10 +658,14 @@ function RevealPhrasePage({ onBack }: { onBack: () => void }) {
                 <button
                   className="btn btn--primary"
                   style={{ marginLeft: "auto" }}
-                  disabled={busy || password.length === 0}
+                  disabled={busy || password.length === 0 || lockedOut}
                   onClick={() => void submit()}
                 >
-                  {busy ? "Revealing…" : "Show phrase"}
+                  {lockedOut
+                    ? `Locked — ${remainingSec}s`
+                    : busy
+                      ? "Revealing…"
+                      : "Show phrase"}
                 </button>
               </div>
             </>
