@@ -368,7 +368,7 @@ function ConvertCard() {
               onChange={(e) => setFromAmount(e.target.value)}
               style={{ ...inputStyle(), flex: 1 }}
             />
-            <span style={{ opacity: 0.6 }}>→</span>
+            <span style={{ color: "var(--fg-500)" }}>→</span>
             <select value={toCurrency} onChange={(e) => setToCurrency(e.target.value)} style={inputStyle()}>
               {CONVERT_CURRENCIES.map((c) => (
                 <option key={c.code} value={c.code}>{c.label}</option>
@@ -1312,7 +1312,7 @@ function NameDetail({
 function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <div className="row-label" style={{ fontSize: 11, opacity: 0.7 }}>{label}</div>
+      <div className="row-label" style={{ fontSize: 11, color: "var(--fg-300)" }}>{label}</div>
       <div style={{ fontFamily: "var(--w-font-mono, ui-monospace, monospace)" }}>{value}</div>
     </div>
   );
@@ -1332,7 +1332,7 @@ function StatWithBadge({
 }) {
   return (
     <div>
-      <div className="row-label" style={{ fontSize: 11, opacity: 0.7 }}>{label}</div>
+      <div className="row-label" style={{ fontSize: 11, color: "var(--fg-300)" }}>{label}</div>
       <div style={{ fontFamily: "var(--w-font-mono, ui-monospace, monospace)" }}>
         {value}
         <CategoryBadge category={category} />

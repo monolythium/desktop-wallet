@@ -404,7 +404,11 @@ function EditChain({
           <div className="w-form-stack">
             <label className="w-field">
               <span>Chain ID (locked)</span>
-              <div className="mono" style={{ cursor: "not-allowed", opacity: 0.7, padding: "8px 10px", border: "1px solid var(--w-line)", borderRadius: 8 }}>
+              {/* A locked value, not a disabled control. The "you cannot edit
+                  this" cue is the border and the cursor; the chain ID itself
+                  stays at full token contrast, because it is the identity the
+                  user is here to verify. */}
+              <div className="mono" style={{ cursor: "not-allowed", color: "var(--fg-200)", padding: "8px 10px", border: "1px solid var(--w-line)", borderRadius: 8 }}>
                 {record.chainId}
               </div>
               <span className="row-help mono">Decimal: {record.chainIdNum}</span>

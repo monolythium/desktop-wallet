@@ -112,7 +112,7 @@ function BookingRequestCard() {
             <div className="row-label">Booking created</div>
             {result.id ? <div>id: <code>{result.id}</code></div> : null}
             {result.tx_hash ? <div>tx: <code>{result.tx_hash}</code></div> : null}
-            <div style={{ fontSize: 11, opacity: 0.7, marginTop: 4 }}>
+            <div style={{ fontSize: 11, color: "var(--fg-300)", marginTop: 4 }}>
               Confirmation came back from <code>booking_request_create</code>.
             </div>
           </div>
@@ -149,7 +149,7 @@ function BookingFieldRow({
 }) {
   return (
     <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-      <div style={{ width: 120, fontSize: 12, opacity: 0.75 }}>{label}</div>
+      <div style={{ width: 120, fontSize: 12, color: "var(--fg-300)" }}>{label}</div>
       <input
         type="text"
         placeholder={placeholder}

@@ -60,7 +60,7 @@ function ExternalGlyph() {
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden="true"
-      style={{ flexShrink: 0, opacity: 0.75 }}
+      style={{ flexShrink: 0 }}
     >
       <path d="M7 17 17 7" />
       <path d="M8 7h9v9" />
