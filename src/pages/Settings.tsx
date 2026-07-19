@@ -41,6 +41,12 @@ import {
   readNotifyWhileLocked,
   writeNotifyWhileLocked,
 } from "../sdk/feature-flags";
+import {
+  FEATURES_INTRO,
+  FEATURES_WHY_BODY,
+  FEATURES_WHY_HEADING,
+  FEATURE_META,
+} from "../sdk/feature-meta";
 import { fetchLiveTestnetRegistry } from "../sdk/live-registry";
 import {
   outboundMcpStart,
@@ -295,24 +301,40 @@ export function Settings({ steleEnabled, setSteleEnabled, experimentalEnabled, s
 
       <ChainRegistryCard />
 
+      {/* ONE Features card over the wallet's own flag store — the Stele and
+          Experimental cards were separate before, which made two lists of
+          product surfaces that could drift apart. Developer mode keeps its own
+          card below: it is not a product feature. */}
       <div className="w-card">
-        <div className="w-card__head"><h3>Stele marketplace</h3><span className="w-todo__pill">early access</span></div>
+        <div className="w-card__head"><h3>Features</h3></div>
         <div className="w-card__body">
-          <div className="w-setting-row">
-            <div>
-              <div className="row-label">Enable Stele marketplace</div>
-              <div className="row-help">
-                Shows the Stele, Inbox, and Provider tabs. Lets the same key that holds your LYTH browse, book, and sell services on-chain. Off by default while the marketplace surface is in early access.
+          <p className="row-help" style={{ margin: "0 0 14px" }}>{FEATURES_INTRO}</p>
+          {FEATURE_META.map((feature) => {
+            const on = feature.id === "stele" ? steleEnabled : experimentalEnabled;
+            const set = feature.id === "stele" ? setSteleEnabled : setExperimentalEnabled;
+            return (
+              <div className="w-setting-row" key={feature.id}>
+                <div>
+                  <div className="row-label">
+                    {feature.label}
+                    <span className="w-todo__pill" style={{ marginLeft: 8 }}>{feature.pill}</span>
+                  </div>
+                  <div className="row-help">{feature.tagline}</div>
+                </div>
+                <button
+                  type="button"
+                  className={`w-chip ${on ? "is-on" : ""}`}
+                  aria-label={`Toggle ${feature.label}`}
+                  onClick={() => set(!on)}
+                >
+                  {on ? "Enabled" : "Disabled"}
+                </button>
               </div>
-            </div>
-            <button
-              type="button"
-              className={`w-chip ${steleEnabled ? "is-on" : ""}`}
-              onClick={() => setSteleEnabled(!steleEnabled)}
-            >
-              {steleEnabled ? "Enabled" : "Disabled"}
-            </button>
-          </div>
+            );
+          })}
+          <div className="w-divider" style={{ margin: "16px 0 12px" }} />
+          <div className="row-label">{FEATURES_WHY_HEADING}</div>
+          <p className="row-help" style={{ margin: "6px 0 0" }}>{FEATURES_WHY_BODY}</p>
         </div>
       </div>
 
@@ -332,27 +354,6 @@ export function Settings({ steleEnabled, setSteleEnabled, experimentalEnabled, s
               writeDevkitChannel(value);
             }}
           />
-        </div>
-      </div>
-
-      <div className="w-card">
-        <div className="w-card__head"><h3>Experimental</h3><span className="w-todo__pill">preview</span></div>
-        <div className="w-card__body">
-          <div className="w-setting-row">
-            <div>
-              <div className="row-label">Enable experimental v5 features</div>
-              <div className="row-help">
-                Shows the Agents page (agent sub-accounts and spending policy), the per-route bridge risk panel, and the Delegate autovote planner. These surfaces are in preview and off by default; turning this off hides them and leaves the wallet on the stable surface.
-              </div>
-            </div>
-            <button
-              type="button"
-              className={`w-chip ${experimentalEnabled ? "is-on" : ""}`}
-              onClick={() => setExperimentalEnabled(!experimentalEnabled)}
-            >
-              {experimentalEnabled ? "Enabled" : "Disabled"}
-            </button>
-          </div>
         </div>
       </div>
 
