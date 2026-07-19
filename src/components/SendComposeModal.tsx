@@ -823,7 +823,21 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
             lineHeight: 1.5,
           }}
         >
-          From <span style={{ fontFamily: "var(--f-mono)" }}>{shortAddr(fromBech32m)}</span>
+          {/* MONEY SURFACE — the full bech32m, never truncated. A head/tail
+              form is exactly what an attacker grinds a lookalike address to
+              match, so the string the user checks their own sender against
+              must be the whole thing. Wraps rather than clipping; 11px is the
+              legibility floor for a monospace address. */}
+          From{" "}
+          <span
+            style={{
+              fontFamily: "var(--f-mono)",
+              fontSize: 11,
+              wordBreak: "break-all",
+            }}
+          >
+            {fromBech32m}
+          </span>
         </p>
 
         <div
@@ -1286,7 +1300,3 @@ const inputStyle: React.CSSProperties = {
   outline: "none",
 };
 
-function shortAddr(s: string): string {
-  if (s.length <= 16) return s;
-  return `${s.slice(0, 10)}…${s.slice(-6)}`;
-}
