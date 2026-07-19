@@ -610,6 +610,27 @@ export function Activity() {
                           <span className="tok">{amountUnitLabel(tx.unit)}</span>
                         </div>
                       ) : null}
+                      {/* TERMINAL ROWS ONLY (`stalled` = dropped/expired and
+                          not bridged). Dismissing a transaction that might
+                          still be moving would remove the user's only
+                          visibility into money in flight, so the button is
+                          structurally unavailable for pending / slow /
+                          awaiting-inclusion / bridged rows. The 60-minute
+                          retain remains the backstop. */}
+                      {stalled ? (
+                        <button
+                          type="button"
+                          data-testid="dismiss-tracked"
+                          className="btn btn--sm btn--ghost"
+                          style={{ marginTop: 4 }}
+                          onClick={(e) => {
+                            e.stopPropagation(); // keep row click = open detail
+                            void removePendingTx(tx.chainIdHex, tx.txHash);
+                          }}
+                        >
+                          Dismiss
+                        </button>
+                      ) : null}
                     </div>
                   </div>
                 );
@@ -742,6 +763,11 @@ export function Activity() {
           row={selected}
           walletAddr={walletAddress}
           tokenMeta={tokenMeta}
+          onDismiss={
+            selected.kind === "tracked" && selected.chainIdHex
+              ? () => void removePendingTx(selected.chainIdHex!, selected.txHash)
+              : undefined
+          }
           onClose={() => setSelected(null)}
         />
       ) : null}
@@ -766,6 +792,11 @@ function trackedRowToDetail(tx: PendingTx): DetailRow {
     amountDecimal: tx.amountDecimal,
     unit: tx.unit,
     counterparty: tx.counterparty,
+    chainIdHex: tx.chainIdHex,
+    lifecycle: tx.lifecycle,
+    // Bridged rows are receipt-confirmed ahead of the indexer and must never
+    // be dismissable.
+    bridged: tx.confirmedBlockHeight !== undefined,
   };
 }
 

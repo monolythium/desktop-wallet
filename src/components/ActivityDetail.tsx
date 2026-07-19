@@ -24,6 +24,7 @@ import {
   tokenUnitLabel,
 } from "../sdk/lyth-display";
 import { amountUnitLabel, isZeroAmount, pendingOpLabel, type TxOpKind } from "../sdk/notifications";
+import type { PendingLifecycle } from "../sdk/pending-tx";
 import { txTypeLabelForActivity } from "../sdk/tx-type-label";
 import { tokenAmountDisplay, type TokenMeta } from "../sdk/token-metadata";
 import { CopyableAddress, DRow, MonoscanTxButton, NamedAddress, truncMiddle } from "./_detailModalParts";
@@ -50,6 +51,22 @@ export interface TrackedDetailRow {
   /** Amount unit — the token symbol for an MRC-20 send; absent ⇒ LYTH. */
   unit?: string;
   counterparty: string;
+  /** Carried so the modal can offer Dismiss for a TERMINAL row only. */
+  chainIdHex?: string;
+  lifecycle?: PendingLifecycle;
+  /** Receipt-confirmed ahead of the indexer — never dismissable. */
+  bridged?: boolean;
+}
+
+/** A tracked row may be dismissed only when it is genuinely terminal:
+ *  `dropped` / `expired` and not bridged. Anything else might still be moving,
+ *  and dismissing it would remove the user's only visibility into it. Pure. */
+export function isDismissableTracked(row: {
+  lifecycle?: PendingLifecycle;
+  bridged?: boolean;
+}): boolean {
+  if (row.bridged === true) return false;
+  return row.lifecycle === "dropped" || row.lifecycle === "expired";
 }
 
 /** Indexed activity row (from the enriched address-activity read). Enrichment
@@ -86,6 +103,9 @@ export interface ActivityDetailProps {
    *  MRC-20 amount renders at its real decimals. Absent → the amount shows an
    *  honest "—" rather than raw base units. */
   tokenMeta?: Map<string, TokenMeta>;
+  /** Offered only for a genuinely terminal tracked row (see
+   *  {@link isDismissableTracked}). */
+  onDismiss?: () => void;
   onClose: () => void;
 }
 
@@ -272,7 +292,7 @@ function DetailBody({
   );
 }
 
-export function ActivityDetail({ row, walletAddr, tokenMeta, onClose }: ActivityDetailProps) {
+export function ActivityDetail({ row, walletAddr, tokenMeta, onDismiss, onClose }: ActivityDetailProps) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -313,6 +333,23 @@ export function ActivityDetail({ row, walletAddr, tokenMeta, onClose }: Activity
         </div>
         <div className="w-card__body">
           <DetailBody row={row} walletAddr={walletAddr} tokenMeta={tokenMeta} />
+          {/* Terminal tracked rows only — a row that might still be live can
+              never be dismissed away from here either. */}
+          {row.kind === "tracked" && isDismissableTracked(row) && onDismiss ? (
+            <div style={{ marginTop: 14 }}>
+              <button
+                type="button"
+                data-testid="dismiss-tracked-detail"
+                className="btn btn--sm btn--ghost"
+                onClick={() => {
+                  onDismiss();
+                  onClose();
+                }}
+              >
+                Dismiss
+              </button>
+            </div>
+          ) : null}
         </div>
       </div>
     </div>

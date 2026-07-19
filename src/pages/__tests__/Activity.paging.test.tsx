@@ -37,6 +37,8 @@ const rig = vi.hoisted(() => ({
   fallback: { ok: true, value: [] as unknown[] } as { ok: boolean; value?: unknown[]; error?: string },
   fallbackCalls: 0,
   cacheWrites: [] as unknown[][],
+  tracked: [] as unknown[],
+  removed: [] as string[][],
 }));
 
 vi.mock("../../sdk/live", async (orig) => ({
@@ -81,7 +83,13 @@ vi.mock("../../sdk/notifications-store", async (orig) => ({
   listForScope: vi.fn(async () => []),
 }));
 vi.mock("../../sdk/token-metadata", () => ({ loadTokenMetaMap: vi.fn(async () => new Map()) }));
-vi.mock("../../sdk/use-pending-tx", () => ({ usePendingTxs: () => [] }));
+vi.mock("../../sdk/use-pending-tx", () => ({ usePendingTxs: () => rig.tracked }));
+vi.mock("../../sdk/pending-tx-store", async (orig) => ({
+  ...(await orig<typeof import("../../sdk/pending-tx-store")>()),
+  removePendingTx: vi.fn(async (chain: string, hash: string) => {
+    rig.removed.push([chain, hash]);
+  }),
+}));
 vi.mock("../../sdk/addressbook", async (orig) => ({
   ...(await orig<typeof import("../../sdk/addressbook")>()),
   addressbookLookup: vi.fn(async () => []),
@@ -125,6 +133,8 @@ beforeEach(() => {
   rig.fallback = { ok: true, value: [] };
   rig.fallbackCalls = 0;
   rig.cacheWrites = [];
+  rig.tracked = [];
+  rig.removed = [];
 });
 
 describe("the Load more footer", () => {
@@ -316,5 +326,57 @@ describe("G3 — the indexer-off fallback", () => {
     for (const rows of rig.cacheWrites) expect(rows).toHaveLength(0);
     // Detection likewise.
     for (const rows of rig.detect) expect(rows).toHaveLength(0);
+  });
+});
+
+describe("G2 — Dismiss in the FEED row", () => {
+  const dismiss = () => screen.queryByTestId("dismiss-tracked");
+  const trackedTx = (lifecycle: string, over: Record<string, unknown> = {}) => ({
+    txHash: "0xabc",
+    chainIdHex: "0x10f2c",
+    addressLower: "mono1test",
+    opKind: "send",
+    amountDecimal: "1.5",
+    counterparty: "mono1peer",
+    submittedAt: Date.now(),
+    lifecycle,
+    ...over,
+  });
+
+  it("appears for each TERMINAL state", async () => {
+    for (const lifecycle of ["dropped", "expired"]) {
+      rig.tracked = [trackedTx(lifecycle)];
+      const { unmount } = renderWithProviders(<Activity />);
+      await waitFor(() => expect(dismiss()).not.toBeNull());
+      unmount();
+    }
+  });
+
+  it("is ABSENT for each non-terminal state", async () => {
+    for (const lifecycle of ["pending", "awaiting-inclusion", "slow"]) {
+      rig.tracked = [trackedTx(lifecycle)];
+      const { unmount } = renderWithProviders(<Activity />);
+      await screen.findAllByText(/mono1peer|To mono1peer/);
+      expect(dismiss()).toBeNull();
+      unmount();
+    }
+  });
+
+  it("is ABSENT for a bridged row (receipt-confirmed, not a failure)", async () => {
+    rig.tracked = [trackedTx("dropped", { confirmedBlockHeight: 50, confirmedTxIndex: 0 })];
+    renderWithProviders(<Activity />);
+    await screen.findAllByText(/mono1peer|To mono1peer/);
+    expect(dismiss()).toBeNull();
+  });
+
+  it("removes the row through the store, without opening the detail", async () => {
+    rig.tracked = [trackedTx("dropped")];
+    const { user } = renderWithProviders(<Activity />);
+    await waitFor(() => expect(dismiss()).not.toBeNull());
+
+    await user.click(dismiss()!);
+    expect(rig.removed).toEqual([["0x10f2c", "0xabc"]]);
+    // The row click (open detail) did not fire.
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 });
