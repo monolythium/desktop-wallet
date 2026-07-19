@@ -3,7 +3,8 @@ import { EXTERNAL_LINKS, stripUrlScheme, WALLET_PITCH } from "../chain-content";
 
 describe("EXTERNAL_LINKS", () => {
   it("exposes the canonical Monolythium links, all https", () => {
-    expect(EXTERNAL_LINKS.length).toBe(7);
+    // 8 since the Telegram community channel joined the catalog.
+    expect(EXTERNAL_LINKS.length).toBe(8);
     for (const link of EXTERNAL_LINKS) {
       expect(link.label.length).toBeGreaterThan(0);
       expect(link.url).toMatch(/^https:\/\//);
