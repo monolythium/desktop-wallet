@@ -21,6 +21,7 @@ import {
 import { VaultCallError, isWrongPasswordFailure } from "../sdk/vault";
 import { captureAddressOnUnlock } from "../sdk/vaultCatalog";
 import { recordOperationFailure } from "../sdk/notifications-record";
+import { rejectedSubmitTxHash } from "../sdk/submit";
 import { trackOperationTx } from "../sdk/reconcile";
 import { useAutoLock } from "../sdk/auto-lock";
 import {
@@ -255,9 +256,12 @@ export function OperationsDrawer({ descriptor, onClose, onNavigate }: Props) {
       setStage("error");
       // Terminal transition: the node / precompile / SDK rejected the
       // submission — a genuine failure, recorded immediately (when a canonical
-      // hash exists to key it on).
+      // hash exists to key it on). On an admission reject the tx was signed +
+      // submitted, so its hash is known locally even though it never landed;
+      // record the refused attempt with its classified reason.
       if (descriptor.notify) {
-        void recordOperationFailure(descriptor.notify, resultTxHash);
+        const hash = resultTxHash ?? rejectedSubmitTxHash(cause);
+        void recordOperationFailure(descriptor.notify, hash, cause);
       }
     } finally {
       ctx.vaultSeed?.fill(0);

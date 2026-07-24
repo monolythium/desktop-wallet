@@ -42,6 +42,11 @@ export function NotificationDetail({ record, onClose }: NotificationDetailProps)
   // show the plain amount. Null ⇒ omit the row (zero/absent — honest absence).
   const amountLabel = notificationAmountLabel(record);
   const showBlock = record.blockNumber !== null;
+  // A failed record with no inclusion block was refused before it ever landed —
+  // an ATTEMPT the network declined, not chain history. Its canonical hash is
+  // real (the wallet signed the tx) but the chain never saw it, so it is shown
+  // as a local reference, never linked to the explorer.
+  const neverIncluded = record.status === "failed" && record.blockNumber === null;
   // Network fee decoded at the confirmed terminal. Uses the FEE precision rule,
   // not the balance one: at 4 dp a floor-priced fee (~0.000042 LYTH) truncates
   // to the string "0", and this row rendered "0 LYTH" — a wallet stating it
@@ -136,10 +141,16 @@ export function NotificationDetail({ record, onClose }: NotificationDetailProps)
           {/* Real on-chain hashes link out; the synthetic incoming id
               (`in:<block>.<txIndex>.<logIndex>:<cp>:<amount>:<seq>`) starts with
               `in:`, never `0x`, so it is never shown or linked. */}
+          {neverIncluded ? (
+            <div className="row-help" style={{ marginTop: 6 }}>
+              Rejected before inclusion — this transaction never reached the
+              chain. Nothing was transferred.
+            </div>
+          ) : null}
           {record.txHash.startsWith("0x") ? (
             <>
               <DRow
-                label="Tx hash"
+                label={neverIncluded ? "Attempt hash" : "Tx hash"}
                 value={
                   <span style={{ fontFamily: "var(--f-mono)" }} title={record.txHash}>
                     {truncMiddle(record.txHash)}
@@ -147,7 +158,8 @@ export function NotificationDetail({ record, onClose }: NotificationDetailProps)
                 }
               />
               <DRow label="When" value={relativeMs(record.createdAtMs)} />
-              <MonoscanTxButton hash={record.txHash} />
+              {/* No explorer link for a refused attempt: its hash is not on chain. */}
+              {neverIncluded ? null : <MonoscanTxButton hash={record.txHash} />}
             </>
           ) : (
             <DRow label="When" value={relativeMs(record.createdAtMs)} />

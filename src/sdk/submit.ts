@@ -30,7 +30,8 @@ import type { ResolvedExecutionFee } from "@monolythium/core-sdk";
 import { postClampResolvedFee } from "./fee-model";
 import {
   MlDsa65Backend,
-  submitTransaction,
+  buildPlaintextSubmission,
+  submitPlaintextTransaction,
 } from "@monolythium/core-sdk/crypto";
 import type { NativeEvmTxFields } from "@monolythium/core-sdk/crypto";
 import { scopeChainKey } from "./chains";
@@ -38,6 +39,36 @@ import { getProvider } from "./client";
 import { rpcClientOptions } from "./http";
 import { getNativeTransactionCount } from "./native-rpc";
 import { nextSendNonce, recordSubmittedNonce } from "./pending-nonce";
+
+/** A transaction that was signed and submitted but REFUSED by the node at
+ *  admission. It carries the canonical hash — known locally, since the wallet
+ *  hashes the signed envelope before submitting — so the refusal can be recorded
+ *  as an attempt the network declined, not chain history. `message` mirrors the
+ *  original cause so {@link extractSendError} still classifies it, and `cause`
+ *  preserves the full chain for the classifier. */
+export class SubmitRejectedError extends Error {
+  readonly txHash: string;
+  constructor(txHash: string, cause: unknown) {
+    super(cause instanceof Error ? cause.message : String(cause), { cause });
+    this.name = "SubmitRejectedError";
+    this.txHash = txHash;
+  }
+}
+
+/** The canonical hash of a REFUSED submission when the thrown error carries one
+ *  (a {@link SubmitRejectedError} anywhere in the cause chain), else undefined.
+ *  Pure. */
+export function rejectedSubmitTxHash(cause: unknown): string | undefined {
+  const seen = new Set<unknown>();
+  let cur: unknown = cause;
+  while (cur && typeof cur === "object" && !seen.has(cur)) {
+    seen.add(cur);
+    const o = cur as { txHash?: unknown; cause?: unknown };
+    if (typeof o.txHash === "string" && o.txHash.length > 0) return o.txHash;
+    cur = o.cause;
+  }
+  return undefined;
+}
 
 /** Fee-resolution class — picks the SDK default execution-unit limit. */
 export type SubmitFeeClass = "transfer" | "registry";
@@ -141,14 +172,36 @@ export async function submitNativeTx(
     input: args.input ?? "0x",
   };
 
-  const txHash = await submitTransaction({
-    client,
-    backend,
-    tx,
-  });
+  // Build + sign locally FIRST — this yields the canonical native tx hash before
+  // the node ever sees it. Then submit. If the node rejects the tx at admission,
+  // its hash is still known, so the failure can be recorded as a refused ATTEMPT
+  // (see SubmitRejectedError) rather than vanishing without a trace.
+  const submission = buildPlaintextSubmission({ backend, tx });
+  const localTxHash = submission.innerTxHashHex;
+  let txHash: string;
+  try {
+    txHash = await submitPlaintextTransaction(
+      client,
+      submission.signedTxWireHex,
+      localTxHash,
+    );
+  } catch (cause) {
+    // Only surface the hash when it is a well-formed canonical hash (defensive:
+    // never trust the SDK's declared shape blindly). Otherwise fall back to a
+    // hashless reject, which records no row — the pre-F3 behaviour.
+    throw isCanonicalHash(localTxHash)
+      ? new SubmitRejectedError(localTxHash, cause)
+      : cause;
+  }
   // Success — advance the local pending nonce so the next submit won't reuse it.
   // Same (address, chain) key the read used, so the record can never drift from it.
   recordSubmittedNonce(fromHex, chainIdHex, nonce);
 
   return { txHash, fromHex, fee, nonce: Number(nonce) };
+}
+
+/** True for a 0x-prefixed 32-byte hex hash — the only shape we treat as a
+ *  usable canonical tx hash. */
+function isCanonicalHash(v: unknown): v is string {
+  return typeof v === "string" && /^0x[0-9a-fA-F]{64}$/.test(v);
 }
