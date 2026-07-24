@@ -10,6 +10,7 @@
 // → delegation precompile call → plaintext mesh_submitTx submit).
 
 import { useEffect, useState } from "react";
+import { RefreshButton } from "../components/RefreshButton";
 import type {
   ClusterDirectoryEntryResponse,
   ClusterDiversityView,
@@ -934,9 +935,7 @@ export function Delegate() {
           <h3>Delegation</h3>
           <span className="w-live-pill">live</span>
           <span className="w-card__head__spacer" />
-          <button className="btn btn--sm" onClick={() => void refresh()} disabled={busy}>
-            {busy ? "Refreshing…" : "Refresh"}
-          </button>
+          <RefreshButton busy={busy} onClick={() => void refresh()} />
         </div>
         <div className="w-card__body">
           {!walletAddress ? (

@@ -29,6 +29,7 @@ import {
   PasswordStrengthMeter,
 } from "../components/PasswordStrengthMeter";
 import { PasswordInput } from "../components/PasswordInput";
+import { RefreshButton } from "../components/RefreshButton";
 import {
   MIN_PASSWORD_LENGTH,
   passwordRejectReason,
@@ -656,13 +657,7 @@ export function Agents() {
         <div className="w-card__head">
           <h3>Agent sub-accounts</h3>
           <span className="w-card__head__spacer" />
-          <button
-            className="btn btn--sm"
-            onClick={() => void refresh()}
-            disabled={busy}
-          >
-            {busy ? "Refreshing…" : "Refresh"}
-          </button>
+          <RefreshButton busy={busy} onClick={() => void refresh()} />
           <button
             className="btn btn--sm btn--primary"
             onClick={() => {

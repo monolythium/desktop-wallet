@@ -18,6 +18,7 @@ import { scopeChainKey } from "../sdk/chains";
 import { ActivityDetail, type DetailRow } from "../components/ActivityDetail";
 import { NotificationDetail } from "../components/NotificationDetail";
 import { TxRow } from "../components/TxRow";
+import { RefreshButton } from "../components/RefreshButton";
 import { useReverseNamesEager } from "../sdk/use-reverse-names";
 import { preferredAddressLabel } from "../sdk/address-label";
 import { addressbookLookup } from "../sdk/addressbook";
@@ -513,9 +514,7 @@ export function Activity() {
               ))}
             </div>
           ) : null}
-          <button className="btn btn--sm" onClick={() => void refresh()} disabled={busy}>
-            {busy ? "Refreshing…" : "Refresh"}
-          </button>
+          <RefreshButton busy={busy} onClick={() => void refresh()} />
         </div>
         <div className="w-card__body">
           {activity?.ok === false ? (

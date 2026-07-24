@@ -4,6 +4,7 @@
 // mesh_submitTx path.
 
 import { useEffect, useState } from "react";
+import { RefreshButton } from "../components/RefreshButton";
 import type {
   ClobOrderBookResponse,
   NativeSpotMarketStateRecord,
@@ -61,9 +62,7 @@ export function Trade() {
           <h3>Native market readiness</h3>
           <span className="w-live-pill">read only</span>
           <span className="w-card__head__spacer" />
-          <button className="btn btn--sm" onClick={refresh} disabled={busy}>
-            {busy ? "Refreshing..." : "Refresh"}
-          </button>
+          <RefreshButton busy={busy} onClick={refresh} />
         </div>
         <div className="w-card__body">
           <div className="w-live-grid">

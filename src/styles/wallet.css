@@ -835,6 +835,24 @@ html[data-sidebar="collapsed"]:not([data-layout="topbar"]) .w-nav__item {
 .btn--primary:hover:not(:disabled) { background: var(--gold-hi); }
 .btn--full { width: 100%; justify-content: center; }
 
+/* ============ Icon-only button (RefreshButton) ============
+   Square-ish so the glyph sits centred rather than in a text-shaped box. The
+   name lives in aria-label/title, never on the face. */
+.w-icon-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  gap: 0;
+  width: 28px; height: 28px;
+  padding: 0;
+  flex: 0 0 auto;
+}
+.w-icon-btn:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+.w-icon-btn__glyph { display: block; }
+.w-icon-btn__glyph.is-spinning { animation: w-spin 900ms linear infinite; }
+@keyframes w-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .w-icon-btn__glyph.is-spinning { animation: none; opacity: 0.55; }
+}
+
 /* ============ OperationsDrawer ============ */
 .w-overlay {
   position: fixed; inset: 0;

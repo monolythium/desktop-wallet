@@ -22,6 +22,7 @@ import type { BridgeRouteDisclosure } from "@monolythium/core-sdk";
 import { getProvider } from "../sdk/client";
 import { formatAtomic1e18 } from "../sdk/lyth-display";
 import { BridgeRiskPanel } from "../components/BridgeRiskPanel";
+import { RefreshButton } from "../components/RefreshButton";
 import {
   assessRoute,
   fetchBridgeHealth,
@@ -101,9 +102,7 @@ function BridgesStableView() {
           <h3>Disclosed routes</h3>
           <span className="w-live-pill">live</span>
           <span className="w-card__head__spacer" />
-          <button className="btn btn--sm" onClick={() => void refresh()} disabled={busy}>
-            {busy ? "Refreshing…" : "Refresh"}
-          </button>
+          <RefreshButton busy={busy} onClick={() => void refresh()} />
         </div>
         <div className="w-card__body">
           {error ? <div className="w-live-error">{error}</div> : null}
@@ -220,13 +219,7 @@ function BridgesRiskView() {
           <h3>Disclosed routes</h3>
           <span className="w-live-pill">live</span>
           <span className="w-card__head__spacer" />
-          <button
-            className="btn btn--sm"
-            onClick={() => void refresh()}
-            disabled={busy}
-          >
-            {busy ? "Refreshing…" : "Refresh"}
-          </button>
+          <RefreshButton busy={busy} onClick={() => void refresh()} />
         </div>
         <div className="w-card__body">
           {error ? <div className="w-live-error">{error}</div> : null}

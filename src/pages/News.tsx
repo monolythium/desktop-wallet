@@ -10,6 +10,7 @@ import {
 } from "../sdk/news";
 import { formatOutcome, loadLiveNetworkStatus, type LiveNetworkStatus } from "../sdk/live";
 import { ExternalLink } from "../components/ExternalLink";
+import { RefreshButton } from "../components/RefreshButton";
 
 export function News() {
   const [status, setStatus] = useState<LiveNetworkStatus | null>(null);
@@ -61,9 +62,7 @@ export function News() {
           <h3>Blog feed</h3>
           <span className="w-live-pill">rss</span>
           <span className="w-card__head__spacer" />
-          <button className="btn btn--sm" onClick={refresh} disabled={busy}>
-            {busy ? "Refreshing…" : "Refresh"}
-          </button>
+          <RefreshButton busy={busy} onClick={refresh} />
         </div>
         <div className="w-card__body">
           <div className="row-help">

@@ -7,6 +7,7 @@
 
 import { useEffect, useState } from "react";
 import { TokenRow } from "../components/TokenRow";
+import { RefreshButton } from "../components/RefreshButton";
 import type { Route } from "../components/types";
 import { useActiveWallet } from "../sdk/active-wallet";
 import { errorMessage, loadLiveTokenStatus, type LiveTokenStatus } from "../sdk/live";
@@ -101,9 +102,7 @@ export function Tokens({ goto }: Props) {
           >
             Buy
           </ExternalLink>
-          <button className="btn btn--sm" onClick={refresh} disabled={busy}>
-            {busy ? "Refreshing…" : "Refresh"}
-          </button>
+          <RefreshButton busy={busy} onClick={refresh} />
         </div>
         <div className="w-card__body">
           {!walletAddress ? (

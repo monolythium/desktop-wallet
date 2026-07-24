@@ -12,6 +12,7 @@ import { useDeveloperMode } from "../sdk/developer-mode";
 import { useChainHealthView } from "../sdk/ChainHealthProvider";
 import { RiskBadgeChip } from "../components/RiskBadgeChip";
 import { ConnectFlowModal } from "../components/ConnectFlowModal";
+import { RefreshButton } from "../components/RefreshButton";
 import { truncMiddle } from "../components/_detailModalParts";
 import { currentEndpoint, setEndpoint, subscribeEndpoint } from "../sdk/client";
 import { activeFleet } from "../sdk/fleet";
@@ -153,14 +154,12 @@ export function Operators({ goto }: { goto: (r: Route) => void }) {
         <div className="w-card__head">
           <h3>Operators</h3>
           <div className="w-card__head__spacer" />
-          <button
-            type="button"
+          <RefreshButton
             className="w-chip"
-            disabled={probing}
+            busy={probing}
+            busyLabel="Probing…"
             onClick={runRound}
-          >
-            {probing ? "Probing…" : "Refresh"}
-          </button>
+          />
         </div>
         <div className="w-card__body">
           {sorted.length === 0 && !probing ? (

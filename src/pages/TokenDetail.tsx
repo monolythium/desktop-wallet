@@ -15,6 +15,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { BridgeRiskPanel } from "../components/BridgeRiskPanel";
 import { ReceiveModal } from "../components/ReceiveModal";
+import { RefreshButton } from "../components/RefreshButton";
 import { SendComposeModal, type SendTokenContext } from "../components/SendComposeModal";
 import { isSupportedTokenDecimals } from "../sdk/token-send-compose";
 import { TxRow } from "../components/TxRow";
@@ -244,9 +245,7 @@ export function TokenDetail({ goto }: Props) {
             </ExternalLink>
           ) : null}
           <span className="w-card__head__spacer" />
-          <button className="btn btn--sm" onClick={() => void refresh()} disabled={busy}>
-            {busy ? "Refreshing…" : "Refresh"}
-          </button>
+          <RefreshButton busy={busy} onClick={() => void refresh()} />
         </div>
       </div>
 
