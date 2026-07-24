@@ -9,6 +9,7 @@
 // when known, else `null` so the surface renders an em-dash. A raw base-units
 // integer is NEVER returned as if it were a human figure (no-mock).
 
+import { subscribeActiveChain } from "./chains";
 import { getProvider } from "./client";
 import { formatTokenAmountDisplay } from "./lyth-display";
 
@@ -38,10 +39,19 @@ export const UNKNOWN_TOKEN_META: TokenMeta = {
 // Session cache keyed by asset id. One successful fetch per token is enough.
 const cache = new Map<string, TokenMeta>();
 
-/** Drop the cache — used on a wallet switch and in tests. */
+/** Drop the cache — on an active-chain switch (below) and in tests. */
 export function clearTokenMetaCache(): void {
   cache.clear();
 }
+
+// Reset-on-change. The cache is keyed by assetId ALONE, and the same assetId can
+// name a different token on a different chain, so an entry cached on chain A must
+// not scale or label chain B's balance. This is a transient session accelerator
+// (re-fetched on demand), so it needs correctness WITHIN a chain, not survival
+// across one — clear it on every active-chain switch rather than scoping the key.
+subscribeActiveChain(() => {
+  clearTokenMetaCache();
+});
 
 /** Cached per-token metadata; fetches `lyth_mrcMetadata` once per asset id. A
  *  failed read or an absent metadata row yields {@link UNKNOWN_TOKEN_META} and

@@ -18,6 +18,7 @@ import {
   setProviderForTest,
   type MonolythiumClient,
 } from "../client";
+import { __resetChainsForTests, addUserChain, setActiveChain } from "../chains";
 import { NETWORK_SLUG } from "../chain-trust";
 import { HEALTH_TICK_MS, STALL_THRESHOLD_MS } from "../chain-health";
 import {
@@ -39,6 +40,10 @@ const warm = vi.hoisted(() => ({
   saveWarmStartHead: vi.fn(),
 }));
 vi.mock("../chain-health-store", () => warm);
+
+// Not hardened, so a custom chain can be activated to exercise the chain-switch
+// view reset. build-mode has no other bearing on the heartbeat.
+vi.mock("../build-mode", () => ({ isHardenedBuild: () => false }));
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -116,6 +121,8 @@ beforeEach(() => {
   warm.saveWarmStartHead.mockReset();
   warm.saveWarmStartHead.mockResolvedValue(undefined);
   __resetChainHealthModuleForTests();
+  localStorage.clear(); // drop any active-chain selection a prior test persisted
+  __resetChainsForTests();
   installFakeClient();
   container = document.createElement("div");
   document.body.appendChild(container);
@@ -149,6 +156,22 @@ describe("useChainHealth heartbeat", () => {
     expect(view!.health.kind).toBe("loading");
     await advance(HEALTH_TICK_MS * 3);
     expect(reads).toBe(0);
+  });
+
+  it("resets the published view to loading on a chain switch (no stale LIVE carryover)", async () => {
+    await mount();
+    expect(view!.health).toEqual({ kind: "live", height: 100 });
+
+    // Make the new chain's head read hang so nothing can flip the view back to
+    // live — isolating the reset. Without the reset, the prior chain's LIVE would
+    // carry over and chainKindNotLive would trust the unverified new chain.
+    statsImpl = () => new Promise<Stats>(() => {});
+    await act(async () => {
+      addUserChain({ chainId: "0x539", name: "Local", rpc: "http://localhost:8545" });
+      expect(setActiveChain("0x539").ok).toBe(true);
+    });
+
+    expect(view!.health.kind).toBe("loading");
   });
 
   it("goes LIVE → STALLED after the threshold, in exactly 3 ticks at the 5 s cadence", async () => {

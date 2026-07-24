@@ -1,12 +1,21 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mock the RPC provider so the metadata fetch + cache are exercised without a
-// live node.
+// live node. Spread the real module so the endpoint constants chains.ts reads at
+// import time (reached transitively now that token-metadata subscribes to chain
+// switches) stay defined; stub the provider + endpoint seams.
 const mrcMetadataFn = vi.fn();
-vi.mock("../client", () => ({
+vi.mock("../build-mode", () => ({ isHardenedBuild: () => false }));
+vi.mock("../client", async (orig) => ({
+  ...(await orig<typeof import("../client")>()),
   getProvider: () => ({ rpcClient: { lythMrcMetadata: mrcMetadataFn } }),
+  currentEndpoint: () => "https://rpc.monolythium.com",
+  setEndpoint: () => {},
+  isKnownEndpoint: () => true,
+  resolveActiveEndpoint: () => "https://rpc.monolythium.com",
 }));
 
+import { addUserChain, setActiveChain } from "../chains";
 import {
   clearTokenMetaCache,
   loadTokenMeta,
@@ -37,6 +46,10 @@ function metaResponse(over: Record<string, unknown> = {}) {
 beforeEach(() => {
   mrcMetadataFn.mockReset();
   clearTokenMetaCache();
+  // Reset the active-chain selection WITHOUT __resetChainsForTests: that clears
+  // the subscriber list, which would drop token-metadata's module-level
+  // clear-on-switch subscription (registered once at import).
+  localStorage.clear();
 });
 
 describe("loadTokenMeta — fetch + cache", () => {
@@ -52,6 +65,21 @@ describe("loadTokenMeta — fetch + cache", () => {
     await loadTokenMeta("0xtoken");
     await loadTokenMeta("0xtoken");
     expect(mrcMetadataFn).toHaveBeenCalledTimes(1);
+  });
+
+  it("re-fetches after an active-chain switch (the cache is cleared, not carried)", async () => {
+    // The invalidation this closes: an assetId cached on one chain must not
+    // scale/label another chain's balance after a switch.
+    mrcMetadataFn.mockResolvedValue(metaResponse());
+    await loadTokenMeta("0xtoken");
+    await loadTokenMeta("0xtoken");
+    expect(mrcMetadataFn).toHaveBeenCalledTimes(1); // cached within the chain
+
+    addUserChain({ chainId: "0x539", name: "Local", rpc: "http://localhost:8545" });
+    expect(setActiveChain("0x539").ok).toBe(true); // fires the cache-clear subscription
+
+    await loadTokenMeta("0xtoken");
+    expect(mrcMetadataFn).toHaveBeenCalledTimes(2); // re-fetched on the new chain
   });
 
   it("returns all-null (→ em-dash) and does NOT cache a failed read (retriable)", async () => {

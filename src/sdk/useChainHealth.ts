@@ -87,7 +87,19 @@ export function useChainHealth(address: string | null): ChainHealthView {
   // Re-run the poll effect on an active-chain switch even when the endpoint URL
   // is unchanged (two chains can share one RPC host), so the machine always
   // restarts under the new chain's scope with a fresh stall baseline.
-  useEffect(() => subscribeActiveChain(() => setEndpointBump((n) => n + 1)), []);
+  useEffect(
+    () =>
+      subscribeActiveChain(() => {
+        setEndpointBump((n) => n + 1);
+        // A chain switch invalidates the previous chain's health verdict. The
+        // poll effect resets its LOCAL machine, but the PUBLISHED view would keep
+        // the prior chain's kind (a stale LIVE) until the first new-chain tick —
+        // and the chainKindNotLive gate would trust it for that round-trip. Drop
+        // to loading now; boot() re-seeds RECONNECTING and the tick resolves it.
+        setView((prev) => (prev.health.kind === "loading" ? prev : IDLE_VIEW));
+      }),
+    [],
+  );
 
   useEffect(() => {
     if (scope === null) {
