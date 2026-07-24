@@ -73,6 +73,30 @@ describe("the six mapped codes", () => {
     );
   });
 
+  // The chain emits the NUMERIC payload — `execution reverted: 0x0214` — not the
+  // Rust variant name. The name-only codes were unreachable on live data until
+  // their hex needle was added; test against the shape the chain actually sends.
+  it("classifies the numeric payload the chain actually emits (name-only codes)", () => {
+    const LIVE: ReadonlyArray<[number, string]> = [
+      [REVERT_REWARD_ESCROW_UNDERFUNDED, REWARD_ESCROW_UNDERFUNDED_MESSAGE],
+      [REVERT_TOO_MANY_DELEGATIONS, TOO_MANY_DELEGATIONS_MESSAGE],
+      [REVERT_INACTIVE_CLUSTER, INACTIVE_CLUSTER_MESSAGE],
+      [REVERT_NO_CLAIMABLE_REWARDS, NO_CLAIMABLE_REWARDS_MESSAGE],
+    ];
+    for (const [code, message] of LIVE) {
+      const hex = "0x" + code.toString(16).padStart(4, "0"); // e.g. 0x0214
+      expect(classifyDelegationRevert(`execution reverted: ${hex}`)).toBe(message);
+      // and flattened through the mempool -32047 wrapper the node serves:
+      expect(
+        classifyDelegationRevert(`upstream unavailable: mempool: execution reverted: ${hex}`),
+      ).toBe(message);
+    }
+  });
+
+  it("still flags the escrow numeric payload as retryable", () => {
+    expect(isRetryableDelegationRevert("execution reverted: 0x0214")).toBe(true);
+  });
+
   it("keeps the two cap codes distinct — neither needle steals the other", () => {
     expect(classifyDelegationRevert("PerWalletCapExceeded")).not.toBe(
       WALLET_TOTAL_CAP_REVERT_MESSAGE,
