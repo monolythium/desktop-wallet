@@ -172,10 +172,19 @@ export async function reconcilePendingOnce(
   let expired = 0;
   let remaining = 0;
   try {
-    // 1. Probe each tracked tx for a terminal verdict FIRST, so a tx that
-    //    reached terminal is always recorded — even an old one — before any
-    //    retention removal in step 2.
-    const txs = await listPendingTxs();
+    // The reconcile pass is scoped to the ACTIVE chain: `probeTx` and the
+    // committed-nonce read below both talk to `getProvider()` — the active
+    // chain's RPC — so a tx broadcast to a different chain must not be probed
+    // here (that RPC never saw its hash, and a `not_found` could mis-read a
+    // live tx as dropped). An off-chain row stays untouched until its own chain
+    // is active again; the poller re-arms on a chain switch to pick it up.
+    const activeChain = scopeChainKey();
+    // 1. Probe each ACTIVE-CHAIN tracked tx for a terminal verdict FIRST, so a
+    //    tx that reached terminal is always recorded — even an old one — before
+    //    any retention removal in step 2.
+    const txs = (await listPendingTxs()).filter(
+      (t) => t.chainIdHex === activeChain,
+    );
     for (const tx of txs) {
       // A bridged row is already confirmed-and-recorded; skip it. The feed
       // retires it once the indexer surfaces the canonical row at its slot.
@@ -248,10 +257,14 @@ export async function reconcilePendingOnce(
       }
       recorded++;
     }
-    // 2. Read each tracking address's committed nonce (read-only) so the
-    //    lifecycle can detect a dropped tx — a later nonce confirmed while this
-    //    one is still pending. A failed read maps to null (inert: never drops).
-    const survivors = await listPendingTxs();
+    // 2. Read each ACTIVE-CHAIN tracking address's committed nonce (read-only,
+    //    from the active chain's RPC) so the lifecycle can detect a dropped tx —
+    //    a later nonce confirmed while this one is still pending. A failed read
+    //    maps to null (inert: never drops). Off-chain rows are excluded: their
+    //    nonce lives on a different chain and must not be compared here.
+    const survivors = (await listPendingTxs()).filter(
+      (t) => t.chainIdHex === activeChain,
+    );
     const client = getProvider().rpcClient;
     const committedNonces = new Map<string, number | null>();
     for (const addressLower of new Set(survivors.map((t) => t.addressLower))) {
@@ -261,13 +274,16 @@ export async function reconcilePendingOnce(
         committedNonces.set(addressLower, null);
       }
     }
-    // 3. Recompute the survivors' lifecycle (so the feed relabels pending →
-    //    slow → dropped/expired) and silently drop rows visible in a terminal
-    //    state past the retention window. Replaces the old blind 5-min silent
-    //    expiry — a slow/expired/dropped tx now stays visible + tracked.
-    const transition = await applyPendingTransition(now, committedNonces);
+    // 3. Recompute the ACTIVE-CHAIN survivors' lifecycle (so the feed relabels
+    //    pending → slow → dropped/expired) and silently drop rows visible in a
+    //    terminal state past the retention window. Off-chain rows pass through
+    //    untouched (frozen until their chain is active). Replaces the old blind
+    //    5-min silent expiry — a slow/expired/dropped tx now stays visible.
+    const transition = await applyPendingTransition(now, committedNonces, activeChain);
     expired = transition.removed;
-    remaining = (await listPendingTxs()).length;
+    remaining = (await listPendingTxs()).filter(
+      (t) => t.chainIdHex === activeChain,
+    ).length;
   } catch {
     // Best-effort — a reconcile failure must never escape the poller.
   }

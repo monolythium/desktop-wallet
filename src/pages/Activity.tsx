@@ -110,9 +110,15 @@ export function Activity() {
   // touches the feed: another vault's in-flight tx must never render, seed a
   // sticky cluster name, or be retired against this wallet's confirmed rows.
   const allTracked = usePendingTxs();
+  // Scope the shared tracked set to the active (wallet, chain): the store holds
+  // every vault's AND every chain's in-flight txs, so a pending row from a chain
+  // the user has switched away from must not render here (its hash lives on the
+  // other chain). The chain key follows the active chain via scopeChainKey(), so
+  // switching chains re-scopes the feed rather than leaking the prior chain's rows.
+  const activeChainKey = scopeChainKey();
   const tracked = useMemo(
-    () => scopePendingTxs(allTracked, walletAddress.toLowerCase()),
-    [allTracked, walletAddress],
+    () => scopePendingTxs(allTracked, walletAddress.toLowerCase(), activeChainKey),
+    [allTracked, walletAddress, activeChainKey],
   );
   // Tracked-pending + failed rows are a default-on part of the feed. The stores
   // are empty until the wallet broadcasts a tx, so a fresh feed is exactly the

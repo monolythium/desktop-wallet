@@ -21,6 +21,7 @@
 //     `reconcilePendingOnce` eventually drops a tx that never resolves.
 
 import { useEffect } from "react";
+import { subscribeActiveChain } from "../sdk/chains";
 import { reconcilePendingOnce } from "../sdk/reconcile";
 import { hasPendingTxs, subscribePendingTxs } from "../sdk/pending-tx-store";
 
@@ -93,6 +94,17 @@ export function PendingTxReconciler() {
       if (timer === null) schedule(RECONCILE_BASE_MS);
     });
 
+    // Re-arm on a chain switch. reconcilePendingOnce only probes the ACTIVE
+    // chain's rows against the active RPC, so switching chains brings a
+    // different set into scope (and takes the previous chain's out). Wake the
+    // loop so the newly-active chain's tracked txs reconcile against their own
+    // chain rather than waiting on the next enqueue or app restart.
+    const unsubscribeChain = subscribeActiveChain(() => {
+      if (cancelled) return;
+      delay = RECONCILE_BASE_MS;
+      if (timer === null) schedule(RECONCILE_BASE_MS);
+    });
+
     // Re-arm at mount for any tx left tracked across an app restart.
     void (async () => {
       if (cancelled) return;
@@ -103,6 +115,7 @@ export function PendingTxReconciler() {
       cancelled = true;
       clear();
       unsubscribe();
+      unsubscribeChain();
     };
   }, []);
 

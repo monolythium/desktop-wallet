@@ -366,6 +366,44 @@ describe("reconcilePendingOnce — mixed batch in one tick", () => {
   });
 });
 
+describe("reconcilePendingOnce — chain scope isolation", () => {
+  // The active chain in this suite is the builtin ("0x10f2c"): no wallet.chain.active
+  // is set, so scopeChainKey() falls back to the builtin. A tracked tx on a
+  // DIFFERENT chain must be left wholly untouched — never probed against the
+  // active RPC (which never saw its hash) and never aged or removed.
+  it("does NOT probe or record a tx on a non-active chain, even if its hash would confirm", async () => {
+    await enqueuePendingTx(tx({ txHash: "0xactive", chainIdHex: "0x10f2c" }));
+    await enqueuePendingTx(tx({ txHash: "0xoffchain", chainIdHex: "0x539" }));
+    // BOTH hashes would confirm if probed — only the active-chain one may be.
+    txStatusScript.set("0xactive", { status: "found", blockNumber: 10 });
+    txStatusScript.set("0xoffchain", { status: "found", blockNumber: 10 });
+
+    const res = await reconcilePendingOnce();
+
+    // Only the active-chain tx was recorded; the off-chain one was never probed.
+    expect(res.recorded).toBe(1);
+    const byHash = Object.fromEntries(
+      (await listAllNotifications()).map((n) => [n.txHash, n.status]),
+    );
+    expect(byHash).toEqual({ "0xactive": "confirmed" });
+    // The off-chain row survives untouched (still tracked, not bridged/relabeled),
+    // to be reconciled when its own chain is active again.
+    const off = (await listPendingTxs()).find((t) => t.txHash === "0xoffchain");
+    expect(off).toBeDefined();
+    expect(off!.confirmedBlockHeight).toBeUndefined();
+    expect(off!.lifecycle).toBeUndefined();
+  });
+
+  it("counts only the active chain's rows as remaining (poller idles per chain)", async () => {
+    await enqueuePendingTx(tx({ txHash: "0xoffchain", chainIdHex: "0x539" }));
+    // Nothing on the active chain: the tick has no active-chain work.
+    const res = await reconcilePendingOnce();
+    expect(res.remaining).toBe(0);
+    // …but the off-chain row is still on disk, awaiting its chain.
+    expect((await listPendingTxs()).map((t) => t.txHash)).toEqual(["0xoffchain"]);
+  });
+});
+
 describe("trackOperationTx — enqueue-on-submit", () => {
   it("enqueues a tx with a hash into the durable store", async () => {
     await trackOperationTx(

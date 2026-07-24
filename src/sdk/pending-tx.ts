@@ -91,19 +91,25 @@ export interface PendingTx {
  *  single-file shape. */
 export const PENDING_TX_STORE_KEY = "mono.pending-tx.v1";
 
-/** Filter tracked txs to a single wallet scope. The durable store holds every
- *  vault's in-flight txs in one blob; a tracked tx belongs to the wallet that
- *  broadcast it (`addressLower`). The Activity feed must show only the ACTIVE
- *  wallet's pending rows — never another vault's — so it scopes through here
- *  before merging. `addressLower` is compared case-folded; an empty scope (no
- *  wallet ready) matches nothing. Pure. */
+/** Filter tracked txs to a single (wallet, chain) scope. The durable store holds
+ *  every vault's AND every chain's in-flight txs in one blob; a tracked tx
+ *  belongs to the wallet that broadcast it (`addressLower`) on the chain it was
+ *  broadcast to (`chainIdHex`). The Activity feed must show only the ACTIVE
+ *  (wallet, chain)'s pending rows — never another vault's, and never a row from a
+ *  chain the user has since switched away from (whose hash the now-active chain's
+ *  RPC never saw). `addressLower` is compared case-folded; `chainIdHex` must be
+ *  the active-chain key from `scopeChainKey()`, so it follows the active chain
+ *  rather than a literal; an empty scope (no wallet ready) matches nothing. Pure. */
 export function scopePendingTxs(
   txs: ReadonlyArray<PendingTx>,
   addressLower: string,
+  chainIdHex: string,
 ): PendingTx[] {
   const scope = addressLower.toLowerCase();
   if (scope.length === 0) return [];
-  return txs.filter((t) => t.addressLower.toLowerCase() === scope);
+  return txs.filter(
+    (t) => t.addressLower.toLowerCase() === scope && t.chainIdHex === chainIdHex,
+  );
 }
 
 /** In-flight lifecycle of a tracked tx that hasn't reached a terminal receipt.
@@ -189,10 +195,20 @@ export function transitionPending(
   txs: ReadonlyArray<PendingTx>,
   committedNonces: ReadonlyMap<string, number | null>,
   now: number,
+  scopeChainIdHex?: string,
 ): { next: PendingTx[]; changed: boolean } {
   let changed = false;
   const next: PendingTx[] = [];
   for (const tx of txs) {
+    // Off-scope this tick: a tx on a chain other than the active one can't be
+    // probed here (the active RPC never saw its hash) and its nonce can't be
+    // compared against the active chain's committed nonce — so leave it wholly
+    // untouched (never age, relabel, or drop it) until its own chain is active
+    // again. Passing no scope transitions every row (the pure default).
+    if (scopeChainIdHex !== undefined && tx.chainIdHex !== scopeChainIdHex) {
+      next.push(tx);
+      continue;
+    }
     // A bridged row (confirmed via receipt ahead of the indexer) renders
     // confirmed and is retired by the feed once the canonical row surfaces —
     // never relabel it or age it out here.

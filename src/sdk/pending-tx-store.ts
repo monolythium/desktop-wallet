@@ -189,11 +189,17 @@ export async function bridgePendingTx(
 export async function applyPendingTransition(
   now: number,
   committedNonces: ReadonlyMap<string, number | null> = new Map(),
+  scopeChainIdHex?: string,
 ): Promise<{ removed: number }> {
   try {
     const env = await loadEnvelope();
     const before = env.txs.length;
-    const { next, changed } = transitionPending(env.txs, committedNonces, now);
+    const { next, changed } = transitionPending(
+      env.txs,
+      committedNonces,
+      now,
+      scopeChainIdHex,
+    );
     if (changed) await saveEnvelope({ schemaVersion: 0, txs: next });
     return { removed: before - next.length };
   } catch {

@@ -338,28 +338,58 @@ describe("store key", () => {
   });
 });
 
-describe("scopePendingTxs — cross-vault isolation", () => {
-  const a = tx({ txHash: "0xa", addressLower: "mono1aaa" });
-  const b = tx({ txHash: "0xb", addressLower: "mono1bbb" });
-  const a2 = tx({ txHash: "0xa2", addressLower: "mono1aaa" });
+describe("scopePendingTxs — cross-(vault, chain) isolation", () => {
+  const CHAIN_A = "0x10f2c"; // builtin
+  const CHAIN_B = "0x539"; // a custom chain
+  const a = tx({ txHash: "0xa", addressLower: "mono1aaa", chainIdHex: CHAIN_A });
+  const b = tx({ txHash: "0xb", addressLower: "mono1bbb", chainIdHex: CHAIN_A });
+  const a2 = tx({ txHash: "0xa2", addressLower: "mono1aaa", chainIdHex: CHAIN_A });
 
-  it("returns only the active wallet's tracked txs", () => {
-    const scoped = scopePendingTxs([a, b, a2], "mono1aaa");
+  it("returns only the active wallet's tracked txs on the active chain", () => {
+    const scoped = scopePendingTxs([a, b, a2], "mono1aaa", CHAIN_A);
     expect(scoped.map((t) => t.txHash)).toEqual(["0xa", "0xa2"]);
   });
 
   it("never leaks another vault's in-flight tx into the active feed", () => {
     // The exact leak this closes: vault B is active, vault A has an in-flight
     // tx; A's row must not appear.
-    expect(scopePendingTxs([a, a2], "mono1bbb")).toEqual([]);
+    expect(scopePendingTxs([a, a2], "mono1bbb", CHAIN_A)).toEqual([]);
+  });
+
+  // Cross-CHAIN isolation, both directions — the scope defect this fix closes:
+  // the same address's row must appear only under the chain it was broadcast to.
+  it("hides a row broadcast on another chain (same wallet, wrong chain active)", () => {
+    const onA = tx({ txHash: "0xona", addressLower: "mono1aaa", chainIdHex: CHAIN_A });
+    // Chain B is active: chain A's row must NOT surface (its hash lives on A).
+    expect(scopePendingTxs([onA], "mono1aaa", CHAIN_B)).toEqual([]);
+  });
+
+  it("shows the row again once its own chain is active (returning to chain A)", () => {
+    const onA = tx({ txHash: "0xona", addressLower: "mono1aaa", chainIdHex: CHAIN_A });
+    expect(scopePendingTxs([onA], "mono1aaa", CHAIN_A).map((t) => t.txHash)).toEqual([
+      "0xona",
+    ]);
+  });
+
+  it("partitions the same wallet's rows by chain", () => {
+    const onA = tx({ txHash: "0xona", addressLower: "mono1aaa", chainIdHex: CHAIN_A });
+    const onB = tx({ txHash: "0xonb", addressLower: "mono1aaa", chainIdHex: CHAIN_B });
+    expect(scopePendingTxs([onA, onB], "mono1aaa", CHAIN_A).map((t) => t.txHash)).toEqual([
+      "0xona",
+    ]);
+    expect(scopePendingTxs([onA, onB], "mono1aaa", CHAIN_B).map((t) => t.txHash)).toEqual([
+      "0xonb",
+    ]);
   });
 
   it("matches address case-insensitively", () => {
-    const upper = tx({ txHash: "0xu", addressLower: "MONO1AAA" });
-    expect(scopePendingTxs([upper], "mono1aaa").map((t) => t.txHash)).toEqual(["0xu"]);
+    const upper = tx({ txHash: "0xu", addressLower: "MONO1AAA", chainIdHex: CHAIN_A });
+    expect(scopePendingTxs([upper], "mono1aaa", CHAIN_A).map((t) => t.txHash)).toEqual([
+      "0xu",
+    ]);
   });
 
   it("matches nothing when no wallet is ready (empty scope)", () => {
-    expect(scopePendingTxs([a, b], "")).toEqual([]);
+    expect(scopePendingTxs([a, b], "", CHAIN_A)).toEqual([]);
   });
 });
