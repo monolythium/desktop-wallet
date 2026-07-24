@@ -124,6 +124,18 @@ export async function submitNativeTx(
   // prior per-seam behaviour (the SDK client is request-scoped, not pooled).
   // Fail-closed: `getProvider` throws when the active operator is untrusted, so
   // the wallet never signs against an unverified chain.
+  //
+  // Chain binding, both directions. The envelope built below signs a fixed
+  // chain variant (`tx.chainId = MONOLYTHIUM_TESTNET_CHAIN_ID`), so the wire is
+  // only meaningful on the chain it names. That wire is handed only to a
+  // transport `getProvider()` already cleared, and the clearance is a SYMMETRIC
+  // identity check — `verdictFromStats` (chain-trust.ts) trusts an operator only
+  // when its chainId AND genesis both equal the pin. Because equality is
+  // symmetric, a divergence either way (the operator ahead of the pinned
+  // identity, or the wire's chain ahead of the operator's) fails the same
+  // comparison. The signed chain variant and the cleared operator therefore
+  // always name one and the same chain; no re-encode can route this wire to a
+  // chain it was not signed for.
   const client = new RpcClient(getProvider().rpcClient.endpoint, rpcClientOptions());
   const fromHex = backend.getAddress();
 
