@@ -1,9 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 
 // Mock the RPC provider so loadNameQuote's formatting + failure paths are
-// exercised without a live node.
+// exercised without a live node. Spread the real module so its other exports
+// (the endpoint constants chains.ts reads at import time, reached transitively
+// via name-registry → submit) stay defined; only getProvider is stubbed.
 const quoteFn = vi.fn();
-vi.mock("../client", () => ({
+vi.mock("../client", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../client")>()),
   getProvider: () => ({ rpcClient: { quoteNameRegistration: quoteFn } }),
 }));
 
