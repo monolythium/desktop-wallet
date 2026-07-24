@@ -227,9 +227,8 @@ export function Agents() {
       return;
     }
     // An agent vault holds spendable funds like any other, so it gets the same
-    // creation policy. (Open question 2: if agent sub-wallets are ever made
-    // deliberately lighter-weight, that has to be an explicit product decision,
-    // not a gap left here.)
+    // creation policy. Making agent sub-wallets deliberately lighter-weight would
+    // have to be an explicit product decision, not a gap left here.
     const reason = passwordRejectReason(createPassword);
     if (reason !== null) {
       setCreateError(

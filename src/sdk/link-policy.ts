@@ -21,8 +21,8 @@
 // is not Monolythium, and substring matching is exactly how a checker would be
 // fooled into thinking it is.
 //
-// Design law inherited from the roadmap: false positives are worse than misses.
-// The register is deliberately short and the lookalike signal is advisory.
+// Design law: false positives are worse than misses. The brand register is
+// deliberately short and the lookalike signal is advisory.
 
 /** One brand and the single host that legitimately represents it. */
 export interface BrandHost {

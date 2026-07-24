@@ -4,13 +4,11 @@
 // visuals are semantics rather than decoration. Two surfaces drawing different
 // glyphs for the same verb is a comprehension bug.
 //
-// SCOPE NOTE (recorded as an open question in the phase report): the shared
-// module below is consumed by the Notifications surface. The Activity feed's
-// `TxRow` renders DIRECTION arrows, not kind glyphs, and its row model
-// (`Tx["kind"]`) carries only three buckets — transfer / reward / delegate —
-// deliberately collapsing undelegate and redelegate into one. Wiring the kind
-// mapping there is therefore a data-model change, not an icon refactor, and it
-// is out of this phase's "changes no labels" remit.
+// SCOPE NOTE: the shared module below is consumed by the Notifications surface.
+// The Activity feed's `TxRow` renders DIRECTION arrows, not kind glyphs, and its
+// row model (`Tx["kind"]`) carries only three buckets — transfer / reward /
+// delegate — deliberately collapsing undelegate and redelegate into one. Wiring
+// the kind mapping there is therefore a data-model change, not an icon refactor.
 
 import { describe, expect, it } from "vitest";
 import { badgeRingColor, iconForKind } from "../activity-icons";

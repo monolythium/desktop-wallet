@@ -13,7 +13,7 @@
 //
 // What this guard CANNOT do is measure a composited contrast ratio. It proves
 // text is not opacity-dimmed; whether the resulting tier passes AA on a given
-// theme is a NEEDS-VISUAL row in the phase report, and honestly marked there.
+// theme is a visual judgment this automated guard does not make.
 
 import { describe, expect, it } from "vitest";
 
