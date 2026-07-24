@@ -34,7 +34,7 @@ import {
   submitTransaction,
 } from "@monolythium/core-sdk/crypto";
 import { getProvider } from "./client";
-import { getExecutionUnitPriceLythoshi, getNativeTransactionCount } from "./native-rpc";
+import { getExecutionUnitQuote, getNativeTransactionCount } from "./native-rpc";
 
 export const MRV_DEFAULT_DEPLOY_EXECUTION_UNIT_LIMIT = 1_000_000n;
 export const MRV_DEFAULT_CALL_EXECUTION_UNIT_LIMIT = 100_000n;
@@ -266,30 +266,34 @@ async function resolveNativeContext(
   maxExecutionFeeLythoshi: string;
   priorityTipLythoshi: string;
 }> {
-  const [chainId, nonce, maxExecutionFeeLythoshi] = await Promise.all([
+  // One live quote covers both defaulted fee fields (single RPC): the max-fee
+  // default reads the summed per-unit price and the tip default reads the live,
+  // height-aware priority-tip floor — so a milestone that raises the floor is
+  // tracked, instead of a hardcoded 1 gwei that only happens to match today.
+  const needsQuote =
+    args.maxExecutionFeeLythoshi === undefined || args.priorityTipLythoshi === undefined;
+  const [chainId, nonce, quote] = await Promise.all([
     args.chainId === undefined
       ? client.ethChainId()
       : Promise.resolve(normalizeU64("chainId", args.chainId)),
     args.nonce === undefined
       ? getNativeTransactionCount(client, fromHex)
       : Promise.resolve(normalizeU64("nonce", args.nonce)),
-    args.maxExecutionFeeLythoshi === undefined
-      ? getExecutionUnitPriceLythoshi(client).then((value) => value.toString())
-      : Promise.resolve(normalizeLythoshi("maxExecutionFeeLythoshi", args.maxExecutionFeeLythoshi)),
+    needsQuote ? getExecutionUnitQuote(client) : Promise.resolve(null),
   ]);
 
   return {
     chainId,
     nonce,
     executionUnitLimit: normalizeU64("executionUnitLimit", args.executionUnitLimit),
-    maxExecutionFeeLythoshi,
-    priorityTipLythoshi: normalizeLythoshi(
-      "priorityTipLythoshi",
-      // Default to the 1 gwei mempool priority-tip floor — a tip of 0n is
-      // rejected at admission with -32047, so MRV deploy/call with no explicit
-      // tip always failed.
-      args.priorityTipLythoshi ?? 1_000_000_000n,
-    ),
+    maxExecutionFeeLythoshi:
+      args.maxExecutionFeeLythoshi === undefined
+        ? quote!.summedLythoshi.toString()
+        : normalizeLythoshi("maxExecutionFeeLythoshi", args.maxExecutionFeeLythoshi),
+    priorityTipLythoshi:
+      args.priorityTipLythoshi === undefined
+        ? quote!.suggestedTipLythoshi.toString()
+        : normalizeLythoshi("priorityTipLythoshi", args.priorityTipLythoshi),
   };
 }
 

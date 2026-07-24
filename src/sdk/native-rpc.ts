@@ -7,21 +7,18 @@ export async function getNativeTransactionCount(
   return client.lythGetTransactionCount(userAddressForRpc(address));
 }
 
-export async function getExecutionUnitPriceLythoshi(client: RpcClient): Promise<bigint> {
-  const quote = await client.lythExecutionUnitPrice();
-  return normalizeRpcQuantity(
-    quote.executionUnitPriceLythoshi,
-    "lyth_executionUnitPrice.executionUnitPriceLythoshi",
-  );
-}
-
 /** Read the live execution-unit quote as the SEPARATE base + suggested tip the
  *  fee model needs (the summed `executionUnitPriceLythoshi` field is not used —
  *  the dual-fee math scales the tip and adds the base independently). A malformed
  *  quantity throws with the field name; the caller renders the honest fee error. */
 export async function getExecutionUnitQuote(
   client: RpcClient,
-): Promise<{ baseLythoshi: bigint; suggestedTipLythoshi: bigint; source: string }> {
+): Promise<{
+  baseLythoshi: bigint;
+  suggestedTipLythoshi: bigint;
+  summedLythoshi: bigint;
+  source: string;
+}> {
   const quote = await client.lythExecutionUnitPrice();
   return {
     baseLythoshi: normalizeRpcQuantity(
@@ -31,6 +28,11 @@ export async function getExecutionUnitQuote(
     suggestedTipLythoshi: normalizeRpcQuantity(
       quote.priorityTipLythoshi,
       "lyth_executionUnitPrice.priorityTipLythoshi",
+    ),
+    // The summed per-unit price (base + tip) the max-fee default uses.
+    summedLythoshi: normalizeRpcQuantity(
+      quote.executionUnitPriceLythoshi,
+      "lyth_executionUnitPrice.executionUnitPriceLythoshi",
     ),
     source: quote.source,
   };
