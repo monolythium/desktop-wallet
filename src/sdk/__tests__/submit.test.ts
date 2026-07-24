@@ -6,6 +6,15 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // removed (DEC-029), so there is no privacy flag and no encryption-key fetch —
 // the SDK no longer exposes either.
 
+// Controls the active chain scopeChainKey() reports, so the nonce-scoping test
+// can submit on two different chains. Hoisted so the vi.mock factory can close
+// over it. Defaults to the builtin so the other tests are unaffected.
+const chainCtl = vi.hoisted(() => ({ current: "0x10f2c" }));
+vi.mock("../chains", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../chains")>();
+  return { ...actual, scopeChainKey: () => chainCtl.current };
+});
+
 // Capture the args every call to the SDK plaintext submit receives.
 interface RecordedSubmitArgs {
   tx: {
@@ -15,6 +24,7 @@ interface RecordedSubmitArgs {
     value: bigint;
     input: string;
     to: string;
+    nonce: bigint;
   };
 }
 const submitTransactionSpy = vi.fn(
@@ -66,6 +76,7 @@ vi.mock("../native-rpc", () => ({
 
 import { resolveExecutionFee } from "@monolythium/core-sdk";
 import { resetProviderForTest, setProviderForTest, type MonolythiumClient } from "../client";
+import { _resetPendingNonces } from "../pending-nonce";
 import { submitNativeTx } from "../submit";
 
 const SEED = new Uint8Array(32).fill(7);
@@ -73,6 +84,8 @@ const TO = "0x000000000000000000000000000000000000dead";
 
 beforeEach(() => {
   submitTransactionSpy.mockClear();
+  chainCtl.current = "0x10f2c";
+  _resetPendingNonces();
   resetProviderForTest();
   setProviderForTest({
     rpcClient: { endpoint: "http://test/rpc" },
@@ -126,5 +139,27 @@ describe("submitNativeTx — plaintext path", () => {
     expect(call.tx.maxPriorityFeePerGas).toBe(1_000_000_000n); // raised to the 10^9 floor
     expect(call.tx.maxPriorityFeePerGas).toBeLessThanOrEqual(call.tx.maxFeePerGas);
     expect(call.tx.value).toBe(42n); // the clamp NEVER touches value
+  });
+});
+
+describe("submitNativeTx — pending nonce is scoped to the active chain", () => {
+  // getNativeTransactionCount is mocked to a constant committed nonce of 3, so
+  // the signed nonce is driven entirely by the local pending-nonce map. The map
+  // must be keyed to the ACTIVE chain (scopeChainKey), not a literal: a nonce
+  // recorded on one chain must never advance the nonce signed on another.
+  it("advances within a chain but stays independent across chains", async () => {
+    chainCtl.current = "0xaaa";
+    await submitNativeTx({ seed: SEED, to: TO, valueLythoshi: 1n });
+    await submitNativeTx({ seed: SEED, to: TO, valueLythoshi: 1n });
+    // Second submit on chain A advances past the first (committed 3 → local 4).
+    expect(submitTransactionSpy.mock.calls[0]![0].tx.nonce).toBe(3n);
+    expect(submitTransactionSpy.mock.calls[1]![0].tx.nonce).toBe(4n);
+
+    // Switch to chain B: its nonce is independent — back to the committed 3, NOT
+    // 5. A literal (fixed) chain key would collide all three under one entry and
+    // sign 5 here, so this assertion is what a regression to a literal breaks.
+    chainCtl.current = "0xbbb";
+    await submitNativeTx({ seed: SEED, to: TO, valueLythoshi: 1n });
+    expect(submitTransactionSpy.mock.calls[2]![0].tx.nonce).toBe(3n);
   });
 });

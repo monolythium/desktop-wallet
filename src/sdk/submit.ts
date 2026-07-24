@@ -33,6 +33,7 @@ import {
   submitTransaction,
 } from "@monolythium/core-sdk/crypto";
 import type { NativeEvmTxFields } from "@monolythium/core-sdk/crypto";
+import { scopeChainKey } from "./chains";
 import { getProvider } from "./client";
 import { rpcClientOptions } from "./http";
 import { getNativeTransactionCount } from "./native-rpc";
@@ -120,7 +121,14 @@ export async function submitNativeTx(
   // before the 1st commits doesn't reuse the nonce (the chain exposes only the
   // committed nonce). Recorded on success below; covers every native submit
   // path (send / register / CLOB / MRV) since they all route through here.
-  const nonce = nextSendNonce(fromHex, MONOLYTHIUM_TESTNET_CHAIN_ID, committedNonce);
+  //
+  // Key the local nonce to the ACTIVE chain — the same chain `committedNonce`
+  // was just read from (`getProvider()` above) — so the two agree by
+  // construction; `recordSubmittedNonce` below reuses this exact key. A fixed
+  // literal here would collide two chains' nonces once the wallet reads a nonce
+  // on a second chain. (The signed `tx.chainId` is a separate axis, unchanged.)
+  const chainIdHex = scopeChainKey();
+  const nonce = nextSendNonce(fromHex, chainIdHex, committedNonce);
 
   const tx: NativeEvmTxFields = {
     chainId: MONOLYTHIUM_TESTNET_CHAIN_ID,
@@ -139,7 +147,8 @@ export async function submitNativeTx(
     tx,
   });
   // Success — advance the local pending nonce so the next submit won't reuse it.
-  recordSubmittedNonce(fromHex, MONOLYTHIUM_TESTNET_CHAIN_ID, nonce);
+  // Same (address, chain) key the read used, so the record can never drift from it.
+  recordSubmittedNonce(fromHex, chainIdHex, nonce);
 
   return { txHash, fromHex, fee, nonce: Number(nonce) };
 }
