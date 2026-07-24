@@ -9,10 +9,17 @@
 //      NOT fabricated chain data; may be stale if a name was later transferred).
 // The UI must state the limitation, never imply a complete list.
 
+import { scopeChainKey } from "./chains";
+
 const STORAGE_PREFIX = "wallet.myNames.";
 
+// Keyed by (owner, chain): a registered name is per-chain registry state (0x110E),
+// so a name registered on one chain must not appear in another chain's list. The
+// chain comes from scopeChainKey(), never a literal. (Legacy unscoped entries from
+// before this change are simply not read — a one-time reset of an advisory,
+// device-local list; the authoritative reverse-latest name still comes from chain.)
 function keyFor(owner: string): string {
-  return `${STORAGE_PREFIX}${owner.trim().toLowerCase()}`;
+  return `${STORAGE_PREFIX}${owner.trim().toLowerCase()}.${scopeChainKey()}`;
 }
 
 /** Names this wallet registered from THIS device for `owner`. Best-effort; a

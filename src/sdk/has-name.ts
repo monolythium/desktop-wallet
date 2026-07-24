@@ -9,6 +9,7 @@
 // missing a nudge, and a wallet that nags on an answer it could not get is
 // nagging about its own connectivity.
 
+import { scopeChainKey } from "./chains";
 import { getProvider } from "./client";
 import { readRegisteredNames } from "./my-names";
 import { pickReverseName } from "./reverse-name";
@@ -20,9 +21,19 @@ export interface NameNudgeState {
 
 export const NAME_NUDGE_SNOOZE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 
-/** Per-address key — one wallet's dismissal never silences another's. */
+// Keyed by (address, chain): "has this account a .mono name?" is a per-chain
+// registry fact, so a dismissal on one chain must not silence the nudge on
+// another where the account may genuinely have no name. The chain comes from
+// scopeChainKey(). (A legacy unscoped dismissal from before this change is not
+// read — at worst the nudge shows once more on one chain after upgrade.)
 export function nameNudgeKey(addressLower: string): string {
-  return `wallet.nameNudge.${addressLower}`;
+  return `wallet.nameNudge.${addressLower}.${scopeChainKey()}`;
+}
+
+/** The (address)-level prefix the per-chain keys share, for the vault-removal
+ *  purge below — a trailing dot so one address never matches a longer one. */
+function nameNudgePrefix(addressLower: string): string {
+  return `wallet.nameNudge.${addressLower}.`;
 }
 
 /**
@@ -108,10 +119,18 @@ export function dismissNameNudgeForever(addressLower: string): void {
   writeState(addressLower, { dismissedForever: true, snoozedUntilMs: null });
 }
 
-/** Drop this address's nudge state — called from the vault-removal cleanup. */
+/** Drop this address's nudge state ACROSS ALL CHAINS — called from the
+ *  vault-removal cleanup. Prefix-scans (the key is now per-chain), so a removed
+ *  vault leaves no dismissal behind on any chain. Best-effort. */
 export function purgeNameNudgeForAddress(addressLower: string): void {
   try {
-    localStorage.removeItem(nameNudgeKey(addressLower));
+    const prefix = nameNudgePrefix(addressLower);
+    const toRemove: string[] = [];
+    for (let i = 0; i < localStorage.length; i += 1) {
+      const k = localStorage.key(i);
+      if (k !== null && k.startsWith(prefix)) toRemove.push(k);
+    }
+    for (const k of toRemove) localStorage.removeItem(k);
   } catch {
     // Best-effort.
   }

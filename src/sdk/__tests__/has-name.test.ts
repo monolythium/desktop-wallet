@@ -35,6 +35,14 @@ vi.mock("../client", async (orig) => ({
   },
 }));
 
+vi.mock("../build-mode", () => ({ isHardenedBuild: () => false }));
+
+import {
+  BUILTIN_CHAIN_ID,
+  __resetChainsForTests,
+  addUserChain,
+  setActiveChain,
+} from "../chains";
 import {
   dismissNameNudgeForever,
   loadHasNameVerdict,
@@ -53,6 +61,7 @@ const NOW = 1_700_000_000_000;
 
 beforeEach(() => {
   localStorage.clear();
+  __resetChainsForTests();
   names.local = [];
   rpc.nameOf = null;
   rpc.throws = false;
@@ -164,5 +173,32 @@ describe("nudge state storage — per address", () => {
     purgeNameNudgeForAddress(A);
     expect(readNameNudgeState(A)).toBeNull();
     expect(readNameNudgeState(B)?.dismissedForever).toBe(true);
+  });
+});
+
+describe("nudge state storage — per chain", () => {
+  it("a dismissal on one chain does not silence the nudge on another", () => {
+    dismissNameNudgeForever(A); // builtin chain
+    expect(readNameNudgeState(A)?.dismissedForever).toBe(true);
+
+    addUserChain({ chainId: "0x539", name: "Local", rpc: "http://localhost:8545" });
+    expect(setActiveChain("0x539").ok).toBe(true);
+    // The custom chain is undismissed — the account may genuinely have no name
+    // there, so the nudge must be free to show.
+    expect(readNameNudgeState(A)).toBeNull();
+    expect(shouldShowNameNudge(readNameNudgeState(A), true, NOW)).toBe(true);
+  });
+
+  it("purge removes the address's dismissal on EVERY chain", () => {
+    dismissNameNudgeForever(A); // builtin
+    addUserChain({ chainId: "0x539", name: "Local", rpc: "http://localhost:8545" });
+    expect(setActiveChain("0x539").ok).toBe(true);
+    snoozeNameNudge(A, NOW); // custom
+
+    purgeNameNudgeForAddress(A);
+
+    expect(readNameNudgeState(A)).toBeNull(); // custom (active) gone
+    expect(setActiveChain(BUILTIN_CHAIN_ID).ok).toBe(true);
+    expect(readNameNudgeState(A)).toBeNull(); // builtin gone too
   });
 });

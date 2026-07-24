@@ -1,4 +1,22 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+// Not hardened + a stubbed endpoint seam so setActiveChain resolves without a
+// node, for the per-chain scoping test below.
+vi.mock("../build-mode", () => ({ isHardenedBuild: () => false }));
+vi.mock("../client", async (orig) => ({
+  ...(await orig<typeof import("../client")>()),
+  currentEndpoint: () => "https://rpc.monolythium.com",
+  setEndpoint: () => {},
+  isKnownEndpoint: () => true,
+  resolveActiveEndpoint: () => "https://rpc.monolythium.com",
+}));
+
+import {
+  BUILTIN_CHAIN_ID,
+  __resetChainsForTests,
+  addUserChain,
+  setActiveChain,
+} from "../chains";
 import {
   mergeMyNames,
   readRegisteredNames,
@@ -44,5 +62,27 @@ describe("my-names device store — records a real action, per owner", () => {
     expect(readRegisteredNames("")).toEqual([]);
     recordRegisteredName("", "x.mono");
     expect(readRegisteredNames("mono1alice")).toEqual([]);
+  });
+});
+
+describe("my-names device store — per-chain isolation", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    __resetChainsForTests();
+  });
+
+  it("a name recorded on one chain does not appear on another (both directions)", () => {
+    recordRegisteredName("mono1alice", "builtin.mono"); // builtin chain
+
+    addUserChain({ chainId: "0x539", name: "Local", rpc: "http://localhost:8545" });
+    expect(setActiveChain("0x539").ok).toBe(true);
+    // Fresh chain: no leak from the builtin.
+    expect(readRegisteredNames("mono1alice")).toEqual([]);
+    recordRegisteredName("mono1alice", "custom.mono");
+    expect(readRegisteredNames("mono1alice")).toEqual(["custom.mono"]);
+
+    // Back to the builtin: its own entry intact, the custom chain's absent.
+    expect(setActiveChain(BUILTIN_CHAIN_ID).ok).toBe(true);
+    expect(readRegisteredNames("mono1alice")).toEqual(["builtin.mono"]);
   });
 });
