@@ -766,6 +766,11 @@ html[data-sidebar="collapsed"]:not([data-layout="topbar"]) .w-nav__item {
   font-family: var(--f-mono); font-size: 10.5px;
   color: var(--fg-400); text-transform: uppercase; letter-spacing: 0.06em;
 }
+.w-asset__std {
+  font-family: var(--f-mono); font-size: 9.5px; font-weight: 600;
+  color: var(--fg-500); border: 1px solid var(--fg-700, var(--fg-500));
+  border-radius: 4px; padding: 0 4px; letter-spacing: 0.04em;
+}
 .w-asset__sub { font-size: 11.5px; color: var(--fg-400); margin-top: 2px; }
 .w-asset__amt { text-align: right; }
 .w-asset__amt .primary { font-size: 13px; }

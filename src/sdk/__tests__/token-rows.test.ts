@@ -131,6 +131,26 @@ describe("liveTokenStatusToRows", () => {
     expect(rows[1]).toMatchObject({ sym: "GOV", displayAmount: "2" });
   });
 
+  it("carries the row's MRC standard so a 721/1155 row is not an unloaded MRC-20", () => {
+    const nft = "0x" + "a1".repeat(32);
+    const fungible = "0x" + "b2".repeat(32);
+    const rows = liveTokenStatusToRows(
+      status({
+        tokenBalances: {
+          ok: true,
+          value: [
+            { tokenId: nft, balance: "1", updatedAtBlock: 1n, mrc: { standard: "mrc721", assetId: nft } },
+            { tokenId: fungible, balance: "5", updatedAtBlock: 1n, mrc: { standard: "mrc20", assetId: fungible } },
+          ],
+        },
+      }),
+    );
+    expect(rows[1]).toMatchObject({ standard: "mrc721" });
+    expect(rows[2]).toMatchObject({ standard: "mrc20" });
+    // Native row never carries a standard.
+    expect(rows[0]?.standard ?? null).toBeNull();
+  });
+
   it("shows '—' when metadata is present but carries no decimals (honest, not raw)", () => {
     const tokenId = "0x" + "cd".repeat(32);
     const meta = new Map<string, TokenMeta>([

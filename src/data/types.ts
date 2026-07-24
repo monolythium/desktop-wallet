@@ -7,6 +7,11 @@ export interface Token {
   // unknown. When set it is authoritative for display — the raw `amount` number
   // is only rendered for native LYTH, which carries no `displayAmount`.
   displayAmount?: string;
+  // MRC standard of the row ("mrc20" / "mrc721" / "mrc1155" / "mrc4626"), from
+  // the balance row's mrc identity. Lets the list mark a non-fungible row so its
+  // "—" amount is not mistaken for a fungible MRC-20 whose metadata hasn't
+  // loaded. Absent for native LYTH.
+  standard?: string | null;
   // No price oracle / token-name registry exists on-chain, so these are
   // nullable. `null` renders as an em-dash ("—") — never a fabricated value.
   priceUsd: number | null;

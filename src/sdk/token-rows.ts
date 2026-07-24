@@ -94,6 +94,9 @@ export function liveTokenStatusToRows(
         // number is never rendered for a token (avoids a base-units float leak).
         amount: 0,
         displayAmount: tokenAmountDisplay(row.balance, meta) ?? "—",
+        // Carry the standard the row already reports so the list can tell a
+        // non-fungible row apart from an MRC-20 whose metadata hasn't loaded.
+        standard: meta?.standard ?? row.mrc?.standard ?? null,
         priceUsd: null,
         chg24h: null,
       });
