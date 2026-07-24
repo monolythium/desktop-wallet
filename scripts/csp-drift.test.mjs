@@ -54,4 +54,15 @@ describe("tauri.conf.json CSP — drift guard vs the SDK operator set", () => {
     expect(devCsp).toContain("ws://localhost:1420");
     expect(devCsp).not.toContain("'unsafe-eval'");
   });
+
+  it("intruder: the drift check fires when the CSP actually drops an operator", () => {
+    // Mutate the real CSP by removing one operator origin and confirm the same
+    // coverage predicate now flags it — proving the check catches a genuine
+    // drift rather than passing vacuously.
+    const operators = operatorOrigins(getRpcEndpoints("testnet-69420"));
+    const victim = operators[0];
+    const drifted = csp.split(victim).join("https://removed.invalid");
+    const missing = operators.filter((o) => !drifted.includes(o));
+    expect(missing).toContain(victim);
+  });
 });

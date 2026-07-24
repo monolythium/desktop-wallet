@@ -111,3 +111,29 @@ describe("chain scope isolation — the last-known BALANCE (H1)", () => {
     expect(await loadLastKnownBalance(ADDR)).toBe(BUILTIN_BALANCE);
   });
 });
+
+// Still-exists half. The behavioural checks above are only meaningful because the
+// protected paths derive the chain from scopeChainKey() on BOTH sides. A
+// regression that hardcoded the id — even same-cased — would make a custom chain
+// reuse the builtin's scope and bring the leaks back, yet a behavioural check
+// might not notice if both sides matched the same literal. So pin the source
+// directly: the scoping call must still be present, and no chain literal may
+// stand in for it.
+const SDK_SRC = import.meta.glob("/src/sdk/*.ts", {
+  query: "?raw",
+  import: "default",
+  eager: true,
+}) as Record<string, string>;
+const sdkSource = (name: string): string =>
+  Object.entries(SDK_SRC).find(([p]) => p.endsWith(`/${name}`))?.[1] ?? "";
+
+describe("chain scope isolation — the scoping call still exists", () => {
+  it("the warm-start and balance paths derive the chain from scopeChainKey(), not a literal", () => {
+    for (const file of ["last-known-balance.ts", "useChainHealth.ts"]) {
+      const src = sdkSource(file);
+      expect(src.length, `${file} not found by the scan`).toBeGreaterThan(0);
+      expect(src, file).toContain("scopeChainKey(");
+      expect(src, file).not.toContain("BUILTIN_CHAIN_ID");
+    }
+  });
+});

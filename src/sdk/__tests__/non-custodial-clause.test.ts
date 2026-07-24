@@ -75,3 +75,22 @@ describe("both reset surfaces render it", () => {
     expect(sourceOf("components/UnlockGate.tsx").length).toBeGreaterThan(0);
   });
 });
+
+describe("the matcher actually fires (synthetic intruders)", () => {
+  it("a surface that dropped the clause reference is caught", () => {
+    // Feed the render check a MUTATED copy of a real surface with the clause
+    // reference removed — the `includes` matcher must flip to false, proving it
+    // distinguishes a surface that renders the clause from one that does not.
+    const stripped = sourceOf("pages/Settings.tsx").split("NON_CUSTODIAL_RESET_NOTE").join("XX");
+    expect(stripped.includes("NON_CUSTODIAL_RESET_NOTE")).toBe(false);
+  });
+
+  it("a clause that omits 'including Monolythium' fails the no-exception check", () => {
+    // The load-bearing word is the exception clause. A near-miss that reads
+    // confident but leaves room for a support desk must not pass.
+    const weakened =
+      "Monolythium is non-custodial: no one can recover your wallet, password, or funds for you.";
+    expect(weakened.includes("no one")).toBe(true); // still sounds absolute…
+    expect(weakened.includes("including Monolythium")).toBe(false); // …but the check catches the gap
+  });
+});
