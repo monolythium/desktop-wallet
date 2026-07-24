@@ -2,10 +2,10 @@
 //
 // A `@tauri-apps/plugin-store`-backed store (its own `activity.v1.json` file)
 // holding a per-(address, chain) map of confirmed-row cache entries, reusing the
-// singleton-store + in-memory-cache pattern of `notifications-store.ts`. It lets
-// the Activity feed paint instantly on open from the last-known confirmed rows
-// and survive an indexer blip, and gives later work a durable surface to thread
-// wallet-captured display fields through.
+// singleton-store + in-memory-cache pattern of `notifications-store.ts`. The
+// root is additionally bound to the live block-0 hash: chain id stays 69420
+// across testnet regenesis, so an old confirmed-row window must not be painted
+// on the new chain.
 //
 // Brand-new store, additive: an absent/empty file simply falls through to the
 // live fetch. Best-effort — every store failure is swallowed so a cache hiccup
@@ -20,6 +20,7 @@ import {
   toCachedRow,
   type ConfirmedCacheEntry,
 } from "./activity-cache";
+import { requireLiveGenesisIdentity } from "./chain-identity";
 
 export const STORE_FILE = "activity.v1.json";
 const STATE_KEY = "state";
@@ -27,7 +28,8 @@ const STATE_KEY = "state";
 /** On-disk root. `confirmed` maps each `activityCacheKey` to its cache entry.
  *  (Later work adds sibling maps here; `version` gates the whole file.) */
 interface ActivityCacheState {
-  version: 1;
+  version: 2;
+  genesisIdentity: string;
   confirmed: Record<string, unknown>;
 }
 
@@ -41,24 +43,35 @@ async function getStore(): Promise<Store> {
   return storePromise;
 }
 
-function normalizeState(raw: unknown): ActivityCacheState {
-  if (!raw || typeof raw !== "object") return { version: 1, confirmed: {} };
+function emptyState(genesisIdentity: string): ActivityCacheState {
+  return { version: 2, genesisIdentity, confirmed: {} };
+}
+
+function normalizeState(
+  raw: unknown,
+  genesisIdentity: string,
+): ActivityCacheState {
+  if (!raw || typeof raw !== "object") return emptyState(genesisIdentity);
   const r = raw as Record<string, unknown>;
+  if (r.version !== 2 || r.genesisIdentity !== genesisIdentity) {
+    return emptyState(genesisIdentity);
+  }
   const confirmed =
     r.confirmed && typeof r.confirmed === "object"
       ? (r.confirmed as Record<string, unknown>)
       : {};
-  return { version: 1, confirmed };
+  return { version: 2, genesisIdentity, confirmed };
 }
 
 async function loadState(): Promise<ActivityCacheState> {
-  if (cache) return cache;
+  const genesisIdentity = await requireLiveGenesisIdentity();
+  if (cache?.genesisIdentity === genesisIdentity) return cache;
   try {
     const store = await getStore();
     const raw = await store.get<ActivityCacheState>(STATE_KEY);
-    cache = normalizeState(raw);
+    cache = normalizeState(raw, genesisIdentity);
   } catch {
-    cache = { version: 1, confirmed: {} };
+    cache = emptyState(genesisIdentity);
   }
   return cache;
 }
@@ -110,7 +123,8 @@ export async function writeConfirmedCache(
       nextCursor,
     };
     await saveState({
-      version: 1,
+      version: 2,
+      genesisIdentity: state.genesisIdentity,
       confirmed: { ...state.confirmed, [scopeKey]: entry },
     });
   } catch {

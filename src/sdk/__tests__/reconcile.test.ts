@@ -51,6 +51,9 @@ import {
   type PendingTx,
 } from "../pending-tx";
 import { reconcilePendingOnce, trackOperationTx } from "../reconcile";
+import { __setGenesisIdentityResolverForTests } from "../chain-identity";
+
+const GENESIS = `0x${"11".repeat(32)}`;
 
 // ── Fake RpcClient ──
 // Per-hash scripted answers for the two methods the reconciler probes. A
@@ -127,6 +130,7 @@ beforeEach(() => {
   (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {};
   backing.clear();
   seedActiveVault();
+  __setGenesisIdentityResolverForTests(async () => GENESIS);
   __resetNotificationsStoreForTests();
   __resetPendingTxStoreForTests();
   txStatusScript = new Map();

@@ -96,7 +96,7 @@ export interface PendingTx {
 /** Single on-disk store key. One blob holds every tracked tx (tiny set — at
  *  most a handful of outstanding sends), mirroring the notifications store's
  *  single-file shape. */
-export const PENDING_TX_STORE_KEY = "mono.pending-tx.v1";
+export const PENDING_TX_STORE_KEY = "mono.pending-tx.v2";
 
 /** Filter tracked txs to a single (wallet, chain) scope. The durable store holds
  *  every vault's AND every chain's in-flight txs in one blob; a tracked tx
