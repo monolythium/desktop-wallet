@@ -30,6 +30,10 @@ interface CollapsibleSectionProps {
   always?: ReactNode;
   /** Open on first render. Per-visit only — nothing here is persisted. */
   defaultOpen?: boolean;
+  /** Drop the card chrome so the section can be a row INSIDE an existing card
+   *  (Help's one-question-per-row accordion). Chrome only: the trigger, the
+   *  keyboard behaviour and the assistive-tech contract are identical. */
+  flush?: boolean;
   children: ReactNode;
 }
 
@@ -38,6 +42,7 @@ export function CollapsibleSection({
   value,
   always,
   defaultOpen = false,
+  flush = false,
   children,
 }: CollapsibleSectionProps) {
   const [open, setOpen] = useState(defaultOpen);
@@ -46,7 +51,7 @@ export function CollapsibleSection({
   const triggerId = `${id}-trigger`;
 
   return (
-    <div className="w-card">
+    <div className={flush ? "w-disclosure--flush" : "w-card"}>
       {/* A real <button> inside the heading: keyboard operation, focus order
           and Enter/Space come from the platform rather than from handlers we
           would have to keep correct on three screens. */}

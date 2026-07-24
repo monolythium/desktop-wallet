@@ -872,6 +872,12 @@ html[data-sidebar="collapsed"]:not([data-layout="topbar"]) .w-nav__item {
 .w-disclosure__always { padding-top: 0; padding-bottom: 0; }
 .w-disclosure__always:not(:empty) { padding-bottom: 12px; }
 
+/* Chrome-less variant — a disclosure row inside an existing card. */
+.w-disclosure--flush + .w-disclosure--flush { border-top: 1px solid var(--fg-700); }
+.w-disclosure--flush .w-disclosure__trigger { padding: 12px 0; }
+.w-disclosure--flush .w-disclosure__title { font-size: 13.5px; }
+.w-disclosure--flush .w-card__body { padding: 0 0 14px; }
+
 /* ============ Icon-only button (RefreshButton) ============
    Square-ish so the glyph sits centred rather than in a text-shaped box. The
    name lives in aria-label/title, never on the face. */

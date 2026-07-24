@@ -7,6 +7,7 @@
 // wallet ships no dedicated support inbox or chat, and we don't invent one.
 
 import { ExternalLink } from "../components/ExternalLink";
+import { CollapsibleSection } from "../components/CollapsibleSection";
 import type { Route } from "../components/types";
 import { HELP_LINKS, HELP_SECTIONS } from "../sdk/help-content";
 import { chainHealthHelpEntries } from "../sdk/chain-health-presentation";
@@ -29,36 +30,9 @@ export function Help({ goto }: HelpProps) {
         </div>
       </div>
 
-      {HELP_SECTIONS.map((section) => (
-        <div className="w-card" key={section.title}>
-          <div className="w-card__head">
-            <h3>{section.title}</h3>
-          </div>
-          <div className="w-card__body">
-            {section.items.map((item) => (
-              <div key={item.q} style={{ marginBottom: 18 }}>
-                <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 6 }}>
-                  {item.q}
-                </div>
-                {item.a.map((para, i) => (
-                  <p
-                    key={i}
-                    style={{
-                      margin: "0 0 8px",
-                      color: "var(--w-text-2)",
-                      fontSize: 13,
-                      lineHeight: 1.6,
-                    }}
-                  >
-                    {para}
-                  </p>
-                ))}
-              </div>
-            ))}
-          </div>
-        </div>
-      ))}
-
+      {/* FIRST, and deliberately not behind a disclosure. The degraded-health
+          banner links straight to this page, so a user who arrives mid-problem
+          lands on the guidance rather than on a list of questions to guess at. */}
       <div className="w-card">
         <div className="w-card__head">
           <h3>Connection status</h3>
@@ -94,6 +68,33 @@ export function Help({ goto }: HelpProps) {
           ))}
         </div>
       </div>
+
+      {HELP_SECTIONS.map((section) => (
+        <div className="w-card" key={section.title}>
+          <div className="w-card__head">
+            <h3>{section.title}</h3>
+          </div>
+          <div className="w-card__body">
+            {section.items.map((item) => (
+              <CollapsibleSection flush key={item.q} title={item.q}>
+                {item.a.map((para, i) => (
+                  <p
+                    key={i}
+                    style={{
+                      margin: "0 0 8px",
+                      color: "var(--w-text-2)",
+                      fontSize: 13,
+                      lineHeight: 1.6,
+                    }}
+                  >
+                    {para}
+                  </p>
+                ))}
+              </CollapsibleSection>
+            ))}
+          </div>
+        </div>
+      ))}
 
       <div className="w-card">
         <div className="w-card__head">
