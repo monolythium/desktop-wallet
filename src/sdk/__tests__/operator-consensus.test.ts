@@ -44,8 +44,32 @@ describe("deriveOperatorRiskTier", () => {
     expect(deriveOperatorRiskTier(risk({ thresholdBps: 400, missRateBps: 0, remainingHeadroomBps: 100 }))).toBe("ok");
   });
 
-  it("reasons present → warn", () => {
+  it("reasons present (with rounds observed) → warn", () => {
     expect(deriveOperatorRiskTier(risk({ reasons: ["slow"] }))).toBe("warn");
+  });
+
+  it("no rounds observed → nodata, not warn (the live idle shape)", () => {
+    // Exactly what the live chain returns for an authority with no measurement:
+    // observedRounds 0, full headroom, only reason "no_observed_rounds".
+    expect(
+      deriveOperatorRiskTier(
+        risk({
+          observedRounds: 0,
+          missRateBps: 0,
+          thresholdBps: 5000,
+          remainingHeadroomBps: 5000,
+          reasons: ["no_observed_rounds"],
+        }),
+      ),
+    ).toBe("nodata");
+  });
+
+  it("no rounds observed but jailed still → err (jail beats no-data)", () => {
+    expect(
+      deriveOperatorRiskTier(
+        risk({ observedRounds: 0, reasons: ["no_observed_rounds"], jailStatus: jailed({ jailed: true }) }),
+      ),
+    ).toBe("err");
   });
 
   it("an absence-shaped jailStatus never influences the tier", () => {

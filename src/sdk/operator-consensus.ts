@@ -22,7 +22,7 @@ export const SIGNING_ACTIVITY_LIMIT = 50;
 /** The chain clamps the window at 1000; 200 is the wallet's request. */
 export const OPERATOR_RISK_WINDOW_ROUNDS = 200;
 
-export type RiskTier = "ok" | "warn" | "err";
+export type RiskTier = "ok" | "warn" | "err" | "nodata";
 
 /** Authority-risk tier (pure, first match wins). An absence-shaped jailStatus
  *  never influences the tier — absence of data is not jail. */
@@ -32,6 +32,11 @@ export function deriveOperatorRiskTier(risk: OperatorRiskResponse): RiskTier {
   if (risk.thresholdBps === 0) return "ok";
   if (risk.missRateBps >= risk.thresholdBps) return "err";
   if (risk.remainingHeadroomBps < risk.thresholdBps / 4) return "warn";
+  // No rounds observed → the metric is unmeasured, not a proximity signal.
+  // "no_observed_rounds" alone must not read as "near threshold". Checked after
+  // the real signals above (jail/miss/headroom) so a genuine problem still wins,
+  // and before the reasons→warn rule so an idle authority reads as no-data.
+  if (risk.observedRounds === 0) return "nodata";
   if (risk.reasons.length > 0) return "warn";
   return "ok";
 }

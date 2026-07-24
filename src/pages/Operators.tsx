@@ -494,6 +494,7 @@ function AuthorityRiskCard({ data }: { data: OperatorRiskResponse }) {
   const tier = deriveOperatorRiskTier(data);
   const badge =
     tier === "ok" ? { label: "Healthy", color: "var(--ok)" }
+    : tier === "nodata" ? { label: "No data", color: "var(--fg-500)" }
     : tier === "warn" ? { label: "Near threshold", color: "var(--warn)" }
     : { label: "At risk", color: "var(--err)" };
   const jail = data.jailStatus;
