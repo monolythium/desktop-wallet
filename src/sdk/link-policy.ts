@@ -95,7 +95,20 @@ export function isHostOrSubdomain(hostname: string, host: string): boolean {
   return h === base || h.endsWith(`.${base}`);
 }
 
-/** True iff the URL's host is on the wallet's outbound allowlist. */
+/**
+ * True iff the URL's host is on the wallet's outbound allowlist.
+ *
+ * NOT dead despite having no render-time caller. This is the predicate the
+ * outbound-link CONFORMANCE GUARD (`link-policy.test.ts`) runs against every URL
+ * the wallet authors (EXTERNAL_LINKS, HELP_LINKS, the monoscan builders, the blog
+ * feed), so the allowlist above is enforced at test/CI time and a URL outside it
+ * fails the suite before a release ships. The wallet composes its links from
+ * static catalogs, so there is no runtime host to check at a render seam — the
+ * enforcement belongs at build time, which is exactly where this runs. Removing
+ * it would either retire that guard or force the test to re-implement
+ * WALLET_LINK_HOSTS + isHostOrSubdomain inline — the second, divergent copy this
+ * module exists to prevent. Keep it as the single handle on the rule.
+ */
 export function isAllowedWalletLink(url: string): boolean {
   const hostname = hostnameOf(url);
   if (hostname === null) return false;
