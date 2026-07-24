@@ -113,12 +113,21 @@ export function postClampResolvedFee(fee: ResolvedExecutionFee): ResolvedExecuti
   };
 }
 
-export function computeNativeFeeQuote(
-  baseLythoshi: bigint,
-  suggestedTipLythoshi: bigint,
-  tier: FeeTier,
-  executionUnitLimit: bigint,
-): NativeFeeQuote {
+/** Named-argument object: baseLythoshi and suggestedTipLythoshi are both `bigint`
+ *  and the math is NOT symmetric in them (only the tip is tier-scaled and
+ *  floor-clamped), so a positional swap would silently misprice a signed tx.
+ *  Naming the fields makes the two fee components impossible to transpose. */
+export function computeNativeFeeQuote({
+  baseLythoshi,
+  suggestedTipLythoshi,
+  tier,
+  executionUnitLimit,
+}: {
+  baseLythoshi: bigint;
+  suggestedTipLythoshi: bigint;
+  tier: FeeTier;
+  executionUnitLimit: bigint;
+}): NativeFeeQuote {
   const tieredTipLythoshi = clampTipToFloor(scaleByBps(suggestedTipLythoshi, FEE_TIER_BPS[tier]));
   const perUnitPriceLythoshi = boundPerUnitPrice(baseLythoshi + tieredTipLythoshi);
   const maxPriorityFeePerGas =

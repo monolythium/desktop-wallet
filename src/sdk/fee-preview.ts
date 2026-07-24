@@ -45,8 +45,8 @@ export async function previewNativeSendFee(
   return {
     quote,
     perTier: {
-      normal: computeNativeFeeQuote(quote.baseLythoshi, quote.suggestedTipLythoshi, "normal", limit),
-      fast: computeNativeFeeQuote(quote.baseLythoshi, quote.suggestedTipLythoshi, "fast", limit),
+      normal: computeNativeFeeQuote({ baseLythoshi: quote.baseLythoshi, suggestedTipLythoshi: quote.suggestedTipLythoshi, tier: "normal", executionUnitLimit: limit }),
+      fast: computeNativeFeeQuote({ baseLythoshi: quote.baseLythoshi, suggestedTipLythoshi: quote.suggestedTipLythoshi, tier: "fast", executionUnitLimit: limit }),
     },
   };
 }

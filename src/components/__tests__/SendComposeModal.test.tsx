@@ -102,8 +102,8 @@ beforeEach(() => {
     return Promise.resolve({
       quote: { baseLythoshi: 1_000_000_000n, suggestedTipLythoshi: 1_000_000_000n, source: "latest_block" },
       perTier: {
-        normal: computeNativeFeeQuote(1_000_000_000n, 1_000_000_000n, "normal", limit),
-        fast: computeNativeFeeQuote(1_000_000_000n, 1_000_000_000n, "fast", limit),
+        normal: computeNativeFeeQuote({ baseLythoshi: 1_000_000_000n, suggestedTipLythoshi: 1_000_000_000n, tier: "normal", executionUnitLimit: limit }),
+        fast: computeNativeFeeQuote({ baseLythoshi: 1_000_000_000n, suggestedTipLythoshi: 1_000_000_000n, tier: "fast", executionUnitLimit: limit }),
       },
     });
   });

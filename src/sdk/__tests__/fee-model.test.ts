@@ -62,13 +62,13 @@ describe("scaleByBps / clampTipToFloor / boundPerUnitPrice", () => {
 
 describe("computeNativeFeeQuote — the dual-fee model", () => {
   it("pins the live-floor reference figures (Normal + Fast)", () => {
-    const normal = computeNativeFeeQuote(BASE, TIP, "normal", NATIVE);
+    const normal = computeNativeFeeQuote({ baseLythoshi: BASE, suggestedTipLythoshi: TIP, tier: "normal", executionUnitLimit: NATIVE });
     expect(normal.perUnitPriceLythoshi).toBe(2_000_000_000n);
     expect(normal.chargeLythoshi).toBe(42_000_000_000_000n);
     expect(normal.reservationLythoshi).toBe(60_000_000_000_000n);
     expect(normal.signedFee).toEqual({ maxFeePerGas: 2_000_000_000n, maxPriorityFeePerGas: 1_000_000_000n, gasLimit: 30_000n });
 
-    const fast = computeNativeFeeQuote(BASE, TIP, "fast", NATIVE);
+    const fast = computeNativeFeeQuote({ baseLythoshi: BASE, suggestedTipLythoshi: TIP, tier: "fast", executionUnitLimit: NATIVE });
     expect(fast.perUnitPriceLythoshi).toBe(3_000_000_000n);
     expect(fast.chargeLythoshi).toBe(63_000_000_000_000n);
     expect(fast.reservationLythoshi).toBe(90_000_000_000_000n);
@@ -82,19 +82,19 @@ describe("computeNativeFeeQuote — the dual-fee model", () => {
     for (const b of bases)
       for (const t of tips)
         for (const tier of tiers) {
-          const q = computeNativeFeeQuote(b, t, tier, NATIVE);
+          const q = computeNativeFeeQuote({ baseLythoshi: b, suggestedTipLythoshi: t, tier, executionUnitLimit: NATIVE });
           expect(q.chargeLythoshi < q.reservationLythoshi).toBe(true);
         }
   });
 
   it("base = 0 → per-unit is the clamped tip (never below the floor)", () => {
-    const q = computeNativeFeeQuote(0n, 0n, "normal", NATIVE);
+    const q = computeNativeFeeQuote({ baseLythoshi: 0n, suggestedTipLythoshi: 0n, tier: "normal", executionUnitLimit: NATIVE });
     expect(q.perUnitPriceLythoshi).toBe(MEMPOOL_PRIORITY_TIP_FLOOR_LYTHOSHI);
     expect(q.signedFee.maxPriorityFeePerGas).toBe(MEMPOOL_PRIORITY_TIP_FLOOR_LYTHOSHI);
   });
 
   it("ceiling engagement: per-unit clamps to 10^15 and the tip never exceeds maxFeePerGas", () => {
-    const q = computeNativeFeeQuote(2_000_000_000_000_000n, 900_000_000_000_000n, "fast", NATIVE);
+    const q = computeNativeFeeQuote({ baseLythoshi: 2_000_000_000_000_000n, suggestedTipLythoshi: 900_000_000_000_000n, tier: "fast", executionUnitLimit: NATIVE });
     expect(q.perUnitPriceLythoshi).toBe(MAX_EXECUTION_UNIT_PRICE_LYTHOSHI);
     expect(q.signedFee.maxPriorityFeePerGas <= q.signedFee.maxFeePerGas).toBe(true);
     // charge + reserve derive from the clamped price
@@ -108,7 +108,7 @@ describe("computeNativeFeeQuote — the dual-fee model", () => {
     expect(scaleByBps(huge, FEE_TIER_BPS.fast)).toBe(18_014_398_509_481_986n);
     // In a full quote the ceiling caps the per-unit price (huge itself already
     // exceeds 10^15), which is the honest bound — not a rounding artifact.
-    const q = computeNativeFeeQuote(huge, huge, "fast", NATIVE);
+    const q = computeNativeFeeQuote({ baseLythoshi: huge, suggestedTipLythoshi: huge, tier: "fast", executionUnitLimit: NATIVE });
     expect(q.perUnitPriceLythoshi).toBe(MAX_EXECUTION_UNIT_PRICE_LYTHOSHI);
   });
 });
