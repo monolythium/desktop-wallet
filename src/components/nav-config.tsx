@@ -240,10 +240,26 @@ const ICON_HELP = () => (
 // them). The Info group carries the About/Resources/Why content pages; Phase 3
 // appends Features/Operators/Networks (Manage) here.
 export const NAV_CATEGORIES: NavCategory[] = [
+  // Home sits alone so Notifications — the other screen a user checks on
+  // arrival — can follow it directly while keeping its own category. Both
+  // groups are headerless, and groups are spaced exactly like the items inside
+  // them, so the split costs nothing visually: the rail reads Home, then
+  // Notifications, then the rest.
+  {
+    id: "home",
+    items: [{ id: "home", label: "Home", icon: ICON_HOME, route: "home" }],
+  },
+  {
+    id: "notifications",
+    // Notifications is a default-on wallet feature: the terminal-transition
+    // records + toasts + Activity lifecycle are all live for every user.
+    items: [
+      { id: "notifications", label: "Notifications", icon: ICON_BELL, route: "notifications" },
+    ],
+  },
   {
     id: "primary",
     items: [
-      { id: "home", label: "Home", icon: ICON_HOME, route: "home" },
       { id: "activity", label: "Activity", icon: ICON_ACTIVITY, route: "activity" },
       { id: "wallets", label: "Wallets", icon: ICON_WALLETS, route: "wallets" },
       { id: "tokens", label: "Tokens", icon: ICON_TOKENS, route: "tokens" },
@@ -257,14 +273,6 @@ export const NAV_CATEGORIES: NavCategory[] = [
       { id: "inbox", label: "Inbox", icon: ICON_INBOX, route: "inbox", steleOnly: true },
       { id: "provider", label: "Provider", icon: ICON_PROVIDER, route: "provider", steleOnly: true },
       { id: "news", label: "News", icon: ICON_NEWS, route: "news" },
-    ],
-  },
-  {
-    id: "notifications",
-    // Notifications is a default-on wallet feature: the terminal-transition
-    // records + toasts + Activity lifecycle are all live for every user.
-    items: [
-      { id: "notifications", label: "Notifications", icon: ICON_BELL, route: "notifications" },
     ],
   },
   {

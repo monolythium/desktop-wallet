@@ -109,6 +109,16 @@ describe("placement laws", () => {
     expect(cat!.items.map((i) => i.id)).toContain("notifications");
   });
 
+  it("Notifications renders SECOND, directly under Home", () => {
+    // Rail order, not category order: the two headerless groups are spaced
+    // exactly like the items inside them, so this is what the user sees.
+    // Checked with every gate off AND on — no flag may push it down the rail.
+    for (const flags of [ALL_OFF, ALL_ON]) {
+      const rail = itemsOf(visibleNav(NAV_CATEGORIES, flags)).map((i) => i.id);
+      expect(rail.slice(0, 2)).toEqual(["home", "notifications"]);
+    }
+  });
+
   it("the recovery entry uses the honest label (no emergency-key claim)", () => {
     const security = NAV_CATEGORIES.find((c) => c.id === "security")!;
     expect(security.items.map((i) => i.label)).toEqual(["Recovery phrase"]);
