@@ -68,6 +68,8 @@ import {
 } from "../sdk/theme";
 import { DeveloperModeToggle } from "../components/DeveloperModeToggle";
 import { PreferencesPanel } from "../components/PreferencesPanel";
+import { CollapsibleSection } from "../components/CollapsibleSection";
+import { useDeveloperMode } from "../sdk/developer-mode";
 
 interface SettingsProps {
   steleEnabled: boolean;
@@ -90,6 +92,9 @@ export function Settings({ steleEnabled, setSteleEnabled, experimentalEnabled, s
   const [pendingAutoLock, setPendingAutoLock] = useState<number | null>(null);
   const [subPage, setSubPage] = useState<SettingsSubPage>(initialSubPage ?? "main");
   const { lock } = useAutoLock();
+  // Read only so the collapsed Developer mode heading can state whether it is
+  // on — a toggle whose state you cannot see is worse than an open section.
+  const devMode = useDeveloperMode();
 
   if (subPage === "notifications") {
     return <ManageNotificationsPage onBack={() => setSubPage("main")} />;
@@ -111,9 +116,15 @@ export function Settings({ steleEnabled, setSteleEnabled, experimentalEnabled, s
         <div className="sub">Customize how your wallet looks and behaves.</div>
       </div>
 
-      <div className="w-card">
-        <div className="w-card__head"><h3>Account</h3></div>
-        <div className="w-card__body">
+      <CollapsibleSection
+        title="Account"
+        value={
+          wallet.status === "ready" || wallet.status === "locked"
+            ? wallet.name
+            : "No active wallet"
+        }
+      >
+        <div>
           <div className="w-setting-row">
             <div>
               <div className="row-label">
@@ -149,11 +160,12 @@ export function Settings({ steleEnabled, setSteleEnabled, experimentalEnabled, s
             </button>
           </div>
         </div>
-      </div>
+      </CollapsibleSection>
 
-      <div className="w-card">
-        <div className="w-card__head"><h3>Security</h3></div>
-        <div className="w-card__body">
+      {/* Auto-lock is the one Security value a user can act wrongly on without
+          seeing it, so it reads from the heading while the section is shut. */}
+      <CollapsibleSection title="Security" value={`Auto-lock ${autoLockMinutes}m`}>
+        <div>
           <div className="w-setting-row">
             <div>
               <div className="row-label">Auto-lock after</div>
@@ -184,64 +196,6 @@ export function Settings({ steleEnabled, setSteleEnabled, experimentalEnabled, s
               ))}
             </div>
           </div>
-          {pendingAutoLock !== null ? (
-            <div
-              role="dialog"
-              aria-modal="true"
-              aria-label={AUTO_LOCK_WARNING_TITLE}
-              data-testid="auto-lock-warning"
-              style={{
-                position: "fixed",
-                inset: 0,
-                background: "rgba(0,0,0,0.55)",
-                backdropFilter: "blur(6px)",
-                zIndex: 40,
-                display: "grid",
-                placeItems: "center",
-                padding: 24,
-              }}
-            >
-              <div className="w-card" style={{ maxWidth: 460, width: "100%" }}>
-                <div className="w-card__head">
-                  <h3>{AUTO_LOCK_WARNING_TITLE}</h3>
-                </div>
-                <div className="w-card__body">
-                  {autoLockWarningParagraphs(pendingAutoLock).map((p) => (
-                    <p
-                      key={p}
-                      style={{
-                        margin: "0 0 12px",
-                        lineHeight: 1.6,
-                        color: "var(--w-text-2)",
-                        fontSize: 13,
-                      }}
-                    >
-                      {p}
-                    </p>
-                  ))}
-                  <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
-                    <button
-                      className="btn"
-                      onClick={() => setPendingAutoLock(null)}
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      className="btn btn--primary"
-                      style={{ marginLeft: "auto" }}
-                      onClick={() => {
-                        setAutoLockMinutes(pendingAutoLock);
-                        writeAutoLockMinutes(pendingAutoLock);
-                        setPendingAutoLock(null);
-                      }}
-                    >
-                      {autoLockConfirmLabel(pendingAutoLock)}
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          ) : null}
           <div className="w-setting-row">
             <div>
               <div className="row-label">Lock wallet now</div>
@@ -261,11 +215,71 @@ export function Settings({ steleEnabled, setSteleEnabled, experimentalEnabled, s
             <button className="btn btn--sm" onClick={() => setSubPage("reset")}>Reset…</button>
           </div>
         </div>
-      </div>
+      </CollapsibleSection>
 
-      <div className="w-card">
-        <div className="w-card__head"><h3>Notifications</h3></div>
-        <div className="w-card__body">
+      {/* Page level, not inside the Security section: it is a fixed overlay, and
+          a collapsed section hides its whole subtree. */}
+      {pendingAutoLock !== null ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={AUTO_LOCK_WARNING_TITLE}
+          data-testid="auto-lock-warning"
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.55)",
+            backdropFilter: "blur(6px)",
+            zIndex: 40,
+            display: "grid",
+            placeItems: "center",
+            padding: 24,
+          }}
+        >
+          <div className="w-card" style={{ maxWidth: 460, width: "100%" }}>
+            <div className="w-card__head">
+              <h3>{AUTO_LOCK_WARNING_TITLE}</h3>
+            </div>
+            <div className="w-card__body">
+              {autoLockWarningParagraphs(pendingAutoLock).map((p) => (
+                <p
+                  key={p}
+                  style={{
+                    margin: "0 0 12px",
+                    lineHeight: 1.6,
+                    color: "var(--w-text-2)",
+                    fontSize: 13,
+                  }}
+                >
+                  {p}
+                </p>
+              ))}
+              <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+                <button
+                  className="btn"
+                  onClick={() => setPendingAutoLock(null)}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="btn btn--primary"
+                  style={{ marginLeft: "auto" }}
+                  onClick={() => {
+                    setAutoLockMinutes(pendingAutoLock);
+                    writeAutoLockMinutes(pendingAutoLock);
+                    setPendingAutoLock(null);
+                  }}
+                >
+                  {autoLockConfirmLabel(pendingAutoLock)}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      <CollapsibleSection title="Notifications">
+        <div>
           <div className="row-help" style={{ lineHeight: 1.6, marginBottom: 4 }}>
             Control system notifications, what details they show, and how they
             behave while the wallet is locked.
@@ -282,22 +296,19 @@ export function Settings({ steleEnabled, setSteleEnabled, experimentalEnabled, s
             </button>
           </div>
         </div>
-      </div>
+      </CollapsibleSection>
 
-      <div className="w-card">
-        <div className="w-card__head"><h3>Display &amp; Preferences</h3></div>
-        <div className="w-card__body">
-          <div className="w-setting-row">
-            <div>
-              <div className="row-label">Preferences</div>
-              <div className="row-help">Theme, language, display currency, and layout.</div>
-            </div>
-            <button className="btn btn--sm" onClick={() => setSubPage("appearance")}>
-              Customize
-            </button>
+      <CollapsibleSection title="Display & Preferences">
+        <div className="w-setting-row">
+          <div>
+            <div className="row-label">Preferences</div>
+            <div className="row-help">Theme, language, display currency, and layout.</div>
           </div>
+          <button className="btn btn--sm" onClick={() => setSubPage("appearance")}>
+            Customize
+          </button>
         </div>
-      </div>
+      </CollapsibleSection>
 
       <ChainRegistryCard />
 
@@ -305,9 +316,16 @@ export function Settings({ steleEnabled, setSteleEnabled, experimentalEnabled, s
           Experimental cards were separate before, which made two lists of
           product surfaces that could drift apart. Developer mode keeps its own
           card below: it is not a product feature. */}
-      <div className="w-card">
-        <div className="w-card__head"><h3>Features</h3></div>
-        <div className="w-card__body">
+      <CollapsibleSection
+        title="Features"
+        // Both switches report from the heading. Collapsing a feature flag out
+        // of sight would leave a user guessing which surfaces are live.
+        value={FEATURE_META.map(
+          (f) =>
+            `${f.label} ${(f.id === "stele" ? steleEnabled : experimentalEnabled) ? "on" : "off"}`,
+        ).join(" · ")}
+      >
+        <div>
           <p className="row-help" style={{ margin: "0 0 14px" }}>{FEATURES_INTRO}</p>
           {FEATURE_META.map((feature) => {
             const on = feature.id === "stele" ? steleEnabled : experimentalEnabled;
@@ -336,13 +354,15 @@ export function Settings({ steleEnabled, setSteleEnabled, experimentalEnabled, s
           <div className="row-label">{FEATURES_WHY_HEADING}</div>
           <p className="row-help" style={{ margin: "6px 0 0" }}>{FEATURES_WHY_BODY}</p>
         </div>
-      </div>
+      </CollapsibleSection>
 
       {steleEnabled ? <OutboundMcpCard /> : null}
 
-      <div className="w-card">
-        <div className="w-card__head"><h3>Developer mode</h3></div>
-        <div className="w-card__body">
+      <CollapsibleSection
+        title="Developer mode"
+        value={`${devMode ? "On" : "Off"} · ${devkitChannel}`}
+      >
+        <div>
           <DeveloperModeToggle />
           <ChipRow
             label="DevKit channel"
@@ -355,19 +375,16 @@ export function Settings({ steleEnabled, setSteleEnabled, experimentalEnabled, s
             }}
           />
         </div>
-      </div>
+      </CollapsibleSection>
 
-      <div className="w-card">
-        <div className="w-card__head"><h3>About</h3></div>
-        <div className="w-card__body">
-          <div className="w-setting-row">
-            <div>
-              <div className="row-label">Wallet</div>
-              <div className="row-help">Monolythium Wallet · Stage 2 (consumer surface).</div>
-            </div>
+      <CollapsibleSection title="About" value="Monolythium Wallet">
+        <div className="w-setting-row">
+          <div>
+            <div className="row-label">Wallet</div>
+            <div className="row-help">Monolythium Wallet · Stage 2 (consumer surface).</div>
           </div>
         </div>
-      </div>
+      </CollapsibleSection>
     </div>
   );
 }
@@ -854,14 +871,15 @@ function OutboundMcpCard() {
   };
 
   return (
-    <div className="w-card">
-      <div className="w-card__head">
-        <h3>Outbound MCP</h3>
+    <CollapsibleSection
+      title="Outbound MCP"
+      value={
         <span className="w-todo__pill">
           {status == null ? "loading" : status.enabled ? "running" : "stopped"}
         </span>
-      </div>
-      <div className="w-card__body">
+      }
+    >
+      <div>
         {error ? (
           <div className="row-help" style={{ color: "var(--w-text-2, #999)", marginBottom: 12 }}>
             {error}
@@ -917,7 +935,7 @@ function OutboundMcpCard() {
           </div>
         ) : null}
       </div>
-    </div>
+    </CollapsibleSection>
   );
 }
 
@@ -1032,12 +1050,11 @@ function ChainRegistryCard() {
   }, []);
 
   return (
-    <div className="w-card">
-      <div className="w-card__head">
-        <h3>Chain registry</h3>
-        <span className="w-live-pill">live</span>
-      </div>
-      <div className="w-card__body">
+    <CollapsibleSection
+      title="Chain registry"
+      value={<span className="w-live-pill">live</span>}
+    >
+      <div>
         <div className="w-kv">
           <span className="k">Network</span>
           <span className="v">{registry?.display_name ?? "testnet-69420"}</span>
@@ -1075,6 +1092,6 @@ function ChainRegistryCard() {
           compile-time; this card is informational.
         </div>
       </div>
-    </div>
+    </CollapsibleSection>
   );
 }

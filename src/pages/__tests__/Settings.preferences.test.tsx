@@ -25,9 +25,13 @@ beforeEach(() => {
 });
 
 describe("Settings hub — Display & Preferences card", () => {
-  it("pins the card, row, help and button copy", () => {
-    renderSettings();
+  it("pins the card, row, help and button copy", async () => {
+    // The hub's groups collapse to their headings, so the group opens before
+    // its controls are reachable — collapsed content leaves the a11y tree.
+    const { user } = renderSettings();
     expect(screen.getByRole("heading", { name: "Display & Preferences" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Customize" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /Display & Preferences/ }));
     expect(screen.getByText("Preferences")).toBeInTheDocument();
     expect(screen.getByText("Theme, language, display currency, and layout.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Customize" })).toBeInTheDocument();
@@ -35,6 +39,7 @@ describe("Settings hub — Display & Preferences card", () => {
 
   it("Customize opens the preferences sub-page", async () => {
     const { user } = renderSettings();
+    await user.click(screen.getByRole("button", { name: /Display & Preferences/ }));
     await user.click(screen.getByRole("button", { name: "Customize" }));
     expect(screen.getByTestId("preferences-panel")).toBeInTheDocument();
   });
