@@ -21,7 +21,7 @@ import {
 
 describe("signed bytes are untouched by notification metadata", () => {
   it("delegate(uint32 clusterId=7, uint16 weightBps=2550)", () => {
-    expect(buildDelegateCalldata(7, 2550)).toBe(
+    expect(buildDelegateCalldata({ clusterId: 7, weightBps: 2550 })).toBe(
       "0x662337de" +
         "0000000000000000000000000000000000000000000000000000000000000007" +
         "00000000000000000000000000000000000000000000000000000000000009f6",
@@ -36,7 +36,7 @@ describe("signed bytes are untouched by notification metadata", () => {
   });
 
   it("redelegate(uint32 from=1, uint32 to=2, uint16 weightBps=2550)", () => {
-    expect(buildRedelegateCalldata(1, 2, 2550)).toBe(
+    expect(buildRedelegateCalldata({ fromCluster: 1, toCluster: 2, weightBps: 2550 })).toBe(
       "0xa06ac18f" +
         "0000000000000000000000000000000000000000000000000000000000000001" +
         "0000000000000000000000000000000000000000000000000000000000000002" +
@@ -62,7 +62,7 @@ describe("signed bytes are untouched by notification metadata", () => {
   it("the weight appears in the calldata exactly once, as the ABI word", () => {
     // 2550 = 0x9f6. A metadata leak would most plausibly show up as a second
     // occurrence or a differently-scaled one.
-    const data = buildDelegateCalldata(7, 2550);
+    const data = buildDelegateCalldata({ clusterId: 7, weightBps: 2550 });
     expect(data.split("9f6").length - 1).toBe(1);
     expect(data).not.toContain("25.50");
   });

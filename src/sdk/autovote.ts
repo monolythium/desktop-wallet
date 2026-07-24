@@ -411,7 +411,7 @@ export async function submitAutovotePlan(
 ): Promise<SubmitAutovotePlanResult> {
   const txHashes: string[] = [];
   for (const a of plan.allocations) {
-    const calldata = buildDelegateCalldata(a.clusterId, a.weightBps);
+    const calldata = buildDelegateCalldata({ clusterId: a.clusterId, weightBps: a.weightBps });
     // Each batch step classifies too — a plan that trips a cap or the row limit
     // mid-run must say which wall it hit, not just that a step failed.
     const result = await withDelegationRevertCopy(() =>

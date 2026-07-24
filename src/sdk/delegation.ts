@@ -62,24 +62,33 @@ export interface SubmitDelegationTxResult {
 
 /** `delegate(uint32 clusterId, uint16 weightBps)` calldata. NON-CUSTODIAL:
  *  submit via `submitDelegationTx` (value = 0). `weightBps` is the fraction of
- *  the caller's live balance to contribute; no principal is escrowed. */
-export function buildDelegateCalldata(
-  clusterId: number,
-  weightBps: number,
-): string {
-  return encodeDelegateCalldata(clusterId, weightBps);
+ *  the caller's live balance to contribute; no principal is escrowed.
+ *
+ *  Named-argument object: clusterId and weightBps are both `number`, and a
+ *  positional swap would silently sign a valid tx that delegates to cluster
+ *  #weightBps — naming the fields makes a mis-assignment visible at the call site. */
+export function buildDelegateCalldata(args: {
+  clusterId: number;
+  weightBps: number;
+}): string {
+  return encodeDelegateCalldata(args.clusterId, args.weightBps);
 }
 
 export function buildUndelegateCalldata(clusterId: number): string {
   return encodeUndelegateCalldata(clusterId);
 }
 
-export function buildRedelegateCalldata(
-  fromCluster: number,
-  toCluster: number,
-  weightBps: number,
-): string {
-  return encodeRedelegateCalldata(fromCluster, toCluster, weightBps);
+/** `redelegate(uint32 fromCluster, uint32 toCluster, uint16 weightBps)` calldata.
+ *  Named-argument object: fromCluster and toCluster are both `number` cluster ids
+ *  with opposite meaning — a positional swap would move weight the WRONG direction
+ *  and the chain would accept the valid tx. Naming makes the swap impossible to
+ *  express by position. */
+export function buildRedelegateCalldata(args: {
+  fromCluster: number;
+  toCluster: number;
+  weightBps: number;
+}): string {
+  return encodeRedelegateCalldata(args.fromCluster, args.toCluster, args.weightBps);
 }
 
 export function buildClaimRewardsCalldata(): string {

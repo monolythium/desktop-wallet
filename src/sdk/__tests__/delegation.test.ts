@@ -37,7 +37,7 @@ describe("delegation precompile target", () => {
 
 describe("delegation calldata selectors", () => {
   it("delegate uses the chain-canonical selector", () => {
-    expect(selectorOf(buildDelegateCalldata(1, 1000))).toBe(DELEGATION_SELECTORS.delegate);
+    expect(selectorOf(buildDelegateCalldata({ clusterId: 1, weightBps: 1000 }))).toBe(DELEGATION_SELECTORS.delegate);
   });
 
   it("undelegate uses the chain-canonical selector", () => {
@@ -45,7 +45,7 @@ describe("delegation calldata selectors", () => {
   });
 
   it("redelegate uses the chain-canonical selector", () => {
-    expect(selectorOf(buildRedelegateCalldata(1, 2, 1000))).toBe(
+    expect(selectorOf(buildRedelegateCalldata({ fromCluster: 1, toCluster: 2, weightBps: 1000 }))).toBe(
       DELEGATION_SELECTORS.redelegate,
     );
   });

@@ -365,7 +365,7 @@ export function Delegate() {
     return lyth === null ? bpsToPercentLabel(bps) : `${lyth} LYTH`;
   };
 
-  const openDelegate = (clusterId: number, weightBps: number) => {
+  const openDelegate = ({ clusterId, weightBps }: { clusterId: number; weightBps: number }) => {
     const weightLabel = `${(weightBps / 100).toFixed(2)}%`;
     ops.open({
       title: `Delegate ${weightLabel} to cluster ${clusterId}`,
@@ -400,7 +400,7 @@ export function Delegate() {
         if (!ctx?.vaultSeed) {
           throw new Error("vault seed unavailable after keychain authorization");
         }
-        const calldata = buildDelegateCalldata(clusterId, weightBps);
+        const calldata = buildDelegateCalldata({ clusterId, weightBps });
         const result = await withDelegationRevertCopy(
           () => submitDelegationTx({ seed: ctx.vaultSeed!, data: calldata }),
           (message) => raiseRejection(clusterId, "delegate", message),
@@ -420,7 +420,7 @@ export function Delegate() {
     setDraftError(null);
   };
 
-  const openUndelegate = (clusterId: number, weightBps: number) => {
+  const openUndelegate = ({ clusterId, weightBps }: { clusterId: number; weightBps: number }) => {
     const weightLabel = `${(weightBps / 100).toFixed(2)}%`;
     ops.open({
       title: `Undelegate from cluster ${clusterId}`,
@@ -533,11 +533,15 @@ export function Delegate() {
     });
   };
 
-  const openRedelegate = (
-    fromCluster: number,
-    toCluster: number,
-    weightBps: number,
-  ) => {
+  const openRedelegate = ({
+    fromCluster,
+    toCluster,
+    weightBps,
+  }: {
+    fromCluster: number;
+    toCluster: number;
+    weightBps: number;
+  }) => {
     const weightLabel = `${(weightBps / 100).toFixed(2)}%`;
     ops.open({
       title: `Redelegate cluster ${fromCluster} → ${toCluster}`,
@@ -575,7 +579,7 @@ export function Delegate() {
         if (!ctx?.vaultSeed) {
           throw new Error("vault seed unavailable after keychain authorization");
         }
-        const calldata = buildRedelegateCalldata(fromCluster, toCluster, weightBps);
+        const calldata = buildRedelegateCalldata({ fromCluster, toCluster, weightBps });
         const result = await withDelegationRevertCopy(
           () => submitDelegationTx({ seed: ctx.vaultSeed!, data: calldata }),
           // The destination is what the user was trying to reach.
@@ -1138,7 +1142,7 @@ export function Delegate() {
                           </button>
                           <button
                             className="btn btn--sm"
-                            onClick={() => openUndelegate(row.cluster, row.weightBps)}
+                            onClick={() => openUndelegate({ clusterId: row.cluster, weightBps: row.weightBps })}
                           >
                             Undelegate
                           </button>
@@ -1205,7 +1209,7 @@ export function Delegate() {
                                   return;
                                 }
                                 setDelegateMoreFor(null);
-                                openDelegate(row.cluster, bps);
+                                openDelegate({ clusterId: row.cluster, weightBps: bps });
                               }}
                               style={{ flex: 1 }}
                             >
@@ -1305,7 +1309,7 @@ export function Delegate() {
                                   raiseRejection(to, "redelegate", verdict.message);
                                   return;
                                 }
-                                openRedelegate(row.cluster, to, bps);
+                                openRedelegate({ fromCluster: row.cluster, toCluster: to, weightBps: bps });
                               }}
                               style={{ flex: 1 }}
                             >
@@ -1820,7 +1824,7 @@ export function Delegate() {
                             raiseRejection(c.clusterId, "delegate", verdict.message);
                             return;
                           }
-                          openDelegate(c.clusterId, bps);
+                          openDelegate({ clusterId: c.clusterId, weightBps: bps });
                         }}
                         style={{ flex: 1 }}
                       >

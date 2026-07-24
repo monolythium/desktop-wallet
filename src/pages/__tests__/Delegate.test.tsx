@@ -153,7 +153,7 @@ describe("Delegate — add-more cap preflight + weight→calldata", () => {
     // signed: the calldata encodes cluster 5 at 1500 bps — exactly what was shown
     await d.execute({ vaultSeed: new Uint8Array(32) });
     expect(del.submitDelegationTx).toHaveBeenCalledWith(
-      expect.objectContaining({ data: buildDelegateCalldata(CLUSTER, 1500) }),
+      expect.objectContaining({ data: buildDelegateCalldata({ clusterId: CLUSTER, weightBps: 1500 }) }),
     );
   });
 });
