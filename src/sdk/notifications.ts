@@ -56,7 +56,6 @@ export type TxOpKind =
   | "redelegate"
   | "claim"
   | "set-auto-compound"
-  | "emergency-key"
   | "agent-policy"
   | "contract_call";
 
@@ -71,7 +70,6 @@ export function isTxOpKind(v: unknown): v is TxOpKind {
     v === "redelegate" ||
     v === "claim" ||
     v === "set-auto-compound" ||
-    v === "emergency-key" ||
     v === "agent-policy" ||
     v === "contract_call"
   );
@@ -303,10 +301,6 @@ export const NOTIFICATION_LABELS: Record<
     confirmed: "Auto-compound updated",
     failed: "Auto-compound update failed",
   },
-  "emergency-key": {
-    confirmed: "Backup key registered",
-    failed: "Backup registration failed",
-  },
   "agent-policy": {
     confirmed: "Agent policy updated",
     failed: "Agent policy failed",
@@ -527,7 +521,6 @@ export const PENDING_OP_LABELS: Record<TxOpKind, string> = {
   redelegate: "Redelegating…",
   claim: "Claiming rewards…",
   "set-auto-compound": "Updating auto-compound…",
-  "emergency-key": "Registering backup key…",
   "agent-policy": "Updating agent policy…",
   contract_call: "Submitting transaction…",
 };

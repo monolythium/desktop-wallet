@@ -27,8 +27,6 @@ export function txTypeLabelForOpKind(kind: TxOpKind): string {
       // which described the meta line as a transfer while the title said the
       // auto-compound preference had changed.
       return "Auto-compound";
-    case "emergency-key":
-      return "Backup key";
     case "agent-policy":
       return "Agent policy";
     case "contract_call":

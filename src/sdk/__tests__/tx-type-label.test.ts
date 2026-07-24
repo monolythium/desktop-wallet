@@ -11,7 +11,6 @@ describe("txTypeLabelForOpKind", () => {
     expect(txTypeLabelForOpKind("redelegate")).toBe("Redelegate");
     expect(txTypeLabelForOpKind("claim")).toBe("Claim rewards");
     expect(txTypeLabelForOpKind("set-auto-compound")).toBe("Auto-compound");
-    expect(txTypeLabelForOpKind("emergency-key")).toBe("Backup key");
     expect(txTypeLabelForOpKind("agent-policy")).toBe("Agent policy");
     expect(txTypeLabelForOpKind("contract_call")).toBe("Contract call");
   });

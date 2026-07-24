@@ -64,11 +64,6 @@ const ICON_REWARD = (
     <path d="M12 8a3 3 0 1 1 4 0M12 8a3 3 0 1 0-4 0" />
   </svg>
 );
-const ICON_SHIELD = (
-  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z" />
-  </svg>
-);
 const ICON_SETTINGS = (
   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <circle cx="12" cy="12" r="3" />
@@ -104,8 +99,6 @@ export function iconForKind(kind: TxOpKind): ReactElement {
       return ICON_REDELEGATE;
     case "claim":
       return ICON_REWARD;
-    case "emergency-key":
-      return ICON_SHIELD;
     case "agent-policy":
       return ICON_SETTINGS;
     case "contract_call":
