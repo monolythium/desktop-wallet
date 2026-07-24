@@ -835,6 +835,43 @@ html[data-sidebar="collapsed"]:not([data-layout="topbar"]) .w-nav__item {
 .btn--primary:hover:not(:disabled) { background: var(--gold-hi); }
 .btn--full { width: 100%; justify-content: center; }
 
+/* ============ Disclosure (CollapsibleSection) ============
+   One pattern for Operators / Settings / Help. The heading IS the trigger; it
+   keeps the card head's metrics so a collapsible card and a plain one line up. */
+.w-disclosure__heading { margin: 0; font-size: inherit; font-weight: inherit; }
+.w-disclosure__trigger {
+  display: flex; align-items: center; gap: 12px;
+  width: 100%;
+  padding: 14px 18px;
+  background: none; border: none;
+  text-align: left; cursor: pointer;
+  color: inherit; font: inherit;
+}
+.w-disclosure__trigger:hover { background: rgba(255,255,255,0.02); }
+.w-disclosure__trigger:focus-visible { outline: 2px solid var(--gold); outline-offset: -2px; }
+.w-disclosure__title { font-size: 14px; font-weight: 600; color: var(--fg-100); }
+.w-disclosure__value {
+  margin-left: auto;
+  display: inline-flex; align-items: center; gap: 6px;
+  min-width: 0;
+  font-size: 12px; font-weight: 450; color: var(--fg-300);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.w-disclosure__chev {
+  display: inline-flex; flex: 0 0 auto;
+  color: var(--fg-400);
+  transition: transform 150ms var(--e-out);
+}
+.w-disclosure__value + .w-disclosure__chev { margin-left: 0; }
+.w-disclosure__trigger > .w-disclosure__chev:nth-child(2) { margin-left: auto; }
+.w-disclosure__chev.is-open { transform: rotate(90deg); }
+@media (prefers-reduced-motion: reduce) {
+  .w-disclosure__chev { transition: none; }
+}
+/* Always-visible slot: sits under the heading, above the collapsible body. */
+.w-disclosure__always { padding-top: 0; padding-bottom: 0; }
+.w-disclosure__always:not(:empty) { padding-bottom: 12px; }
+
 /* ============ Icon-only button (RefreshButton) ============
    Square-ish so the glyph sits centred rather than in a text-shaped box. The
    name lives in aria-label/title, never on the face. */

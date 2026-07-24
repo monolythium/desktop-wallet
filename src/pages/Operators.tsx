@@ -13,6 +13,7 @@ import { useChainHealthView } from "../sdk/ChainHealthProvider";
 import { RiskBadgeChip } from "../components/RiskBadgeChip";
 import { ConnectFlowModal } from "../components/ConnectFlowModal";
 import { RefreshButton } from "../components/RefreshButton";
+import { CollapsibleSection } from "../components/CollapsibleSection";
 import { truncMiddle } from "../components/_detailModalParts";
 import { currentEndpoint, setEndpoint, subscribeEndpoint } from "../sdk/client";
 import { activeFleet } from "../sdk/fleet";
@@ -248,10 +249,12 @@ function RiskLegendCard({ rows, devMode }: { rows: readonly OperatorInspectRow[]
   const affected = affectedByKind(rows);
   const entries = OPERATOR_RISK_LEGEND.filter((e) => devMode || !e.devOnly);
 
+  // Collapsed by default: this card DECODES chips, it does not carry them. Each
+  // chip stays on its operator row with its own severity colour and tooltip, so
+  // nothing a user acts on moves behind this click.
   return (
-    <div className="w-card">
-      <div className="w-card__head"><h3>Risk legend</h3></div>
-      <div className="w-card__body">
+    <CollapsibleSection title="Risk legend">
+      <div>
         <div className="row-help" style={{ marginBottom: 12 }}>
           Each chip on an operator row decodes a signal the wallet collected from its probe
           round-trip. Most are advisory — the wallet's health failover already routes around
@@ -293,7 +296,7 @@ function RiskLegendCard({ rows, devMode }: { rows: readonly OperatorInspectRow[]
           );
         })}
       </div>
-    </div>
+    </CollapsibleSection>
   );
 }
 
@@ -328,24 +331,25 @@ function ChainIdentityCard({ devMode }: { devMode: boolean }) {
   const activeRecord = activeChainRecord();
   // A custom chain has no genesis pin (§15) — never render it as genesis-verified.
   if (!activeRecord.builtin) {
+    // "genesis unpinned" is the whole point of this branch, so it rides in the
+    // heading rather than in a row that a collapse would hide.
     return (
-      <div className="w-card">
-        <div className="w-card__head">
-          <h3>Chain identity</h3>
-          <span className="w-live-pill is-muted">custom</span>
-        </div>
-        <div className="w-card__body">
-          <DetailRow k="Network">{activeRecord.name}</DetailRow>
-          <DetailRow k="Chain ID">{activeRecord.chainIdNum}</DetailRow>
-          <DetailRow k="Genesis">
+      <CollapsibleSection
+        title="Chain identity"
+        value={
+          <>
+            <span className="w-live-pill is-muted">custom</span>
             <span style={{ color: "var(--warn)" }}>genesis unpinned</span>
-          </DetailRow>
-          <div className="row-help" style={{ marginTop: 12 }}>
-            This chain has no genesis pin — the wallet verifies its chain id on every health tick
-            but cannot verify its genesis identity.
-          </div>
+          </>
+        }
+      >
+        <DetailRow k="Network">{activeRecord.name}</DetailRow>
+        <DetailRow k="Chain ID">{activeRecord.chainIdNum}</DetailRow>
+        <div className="row-help" style={{ marginTop: 12 }}>
+          This chain has no genesis pin — the wallet verifies its chain id on every health tick
+          but cannot verify its genesis identity.
         </div>
-      </div>
+      </CollapsibleSection>
     );
   }
   const chain = readChainIdentity();
@@ -361,12 +365,24 @@ function ChainIdentityCard({ devMode }: { devMode: boolean }) {
   }, []);
   const drift = computeGenesisDrift(chain, live);
   return (
-    <div className="w-card">
-      <div className="w-card__head">
-        <h3>Chain identity</h3>
-        <span className="w-live-pill is-muted">registry</span>
-      </div>
-      <div className="w-card__body">
+    <CollapsibleSection
+      title="Chain identity"
+      value={<span className="w-live-pill is-muted">registry</span>}
+      // A genesis drift says this build's trust anchor disagrees with the live
+      // registry. That is exactly the thing a user must not have to open a
+      // section to discover, so it renders outside the collapsible body.
+      always={
+        drift ? (
+          <div className="w-drift-banner" role="status" title={drift.liveGenesisHash}>
+            The live chain registry reports genesis {truncMiddle(drift.liveGenesisHash, 10, 8)} —
+            different from this build's pin. The network may have re-genesised; this build keeps
+            trusting its pinned genesis and will pause reads if the fleet no longer matches it.
+            Update the wallet when a new release is available.
+          </div>
+        ) : null
+      }
+    >
+      <div>
         <DetailRow k="Network">{info.display_name ?? "testnet-69420"}</DetailRow>
         <DetailRow k="Chain ID">{String(chain.chainId)}</DetailRow>
         <DetailRow k="Pinned genesis">
@@ -385,19 +401,11 @@ function ChainIdentityCard({ devMode }: { devMode: boolean }) {
             <DetailRow k="SDK version">{sdkVersion ? `v${sdkVersion}` : "—"}</DetailRow>
           </>
         ) : null}
-        {drift ? (
-          <div className="w-drift-banner" role="status" title={drift.liveGenesisHash} style={{ marginTop: 12 }}>
-            The live chain registry reports genesis {truncMiddle(drift.liveGenesisHash, 10, 8)} —
-            different from this build's pin. The network may have re-genesised; this build keeps
-            trusting its pinned genesis and will pause reads if the fleet no longer matches it.
-            Update the wallet when a new release is available.
-          </div>
-        ) : null}
         <div className="row-help" style={{ marginTop: 12 }}>
           The wallet's pinned trust anchors stay compile-time; this card is informational.
         </div>
       </div>
-    </div>
+    </CollapsibleSection>
   );
 }
 
@@ -406,13 +414,11 @@ function ChainIdentityCard({ devMode }: { devMode: boolean }) {
 function ReportedAttributesCard({ rows }: { rows: readonly OperatorInspectRow[] }) {
   const agg = aggregateCapabilities(rows);
   return (
-    <div className="w-card">
-      <div className="w-card__head">
-        <h3>Reported attributes</h3>
-        <div className="w-card__head__spacer" />
-        <span className="w-live-pill is-muted">{agg.length} surfaces</span>
-      </div>
-      <div className="w-card__body">
+    <CollapsibleSection
+      title="Reported attributes"
+      value={<span className="w-live-pill is-muted">{agg.length} surfaces</span>}
+    >
+      <div>
         <div className="row-help" style={{ marginBottom: 10 }}>
           Capability surfaces operators report via <code>lyth_operatorCapabilities</code> — e.g.
           cluster_directory, cluster_status, indexer_history. The count is how many operators
@@ -433,7 +439,7 @@ function ReportedAttributesCard({ rows }: { rows: readonly OperatorInspectRow[] 
           })
         )}
       </div>
-    </div>
+    </CollapsibleSection>
   );
 }
 
@@ -476,16 +482,12 @@ function SigningCard({ data }: { data: OperatorSigningActivityResponse }) {
     ? data.entries.reduce((a, b) => (b.round > a.round ? b : a))
     : null;
   return (
-    <div className="w-card">
-      <div className="w-card__head">
-        <h3>Chain signing — authority {data.authorityIndex} · round {String(data.currentRound)}</h3>
-        <div className="w-card__head__spacer" />
-        <span className="w-live-pill is-muted">{data.entries.length}/{data.limit}</span>
-      </div>
-      <div className="w-card__body">
-        {highest ? <ConsensusPillView pill={signingPill(highest.status)} /> : <div className="row-help">No signing history.</div>}
-      </div>
-    </div>
+    <CollapsibleSection
+      title={`Chain signing — authority ${data.authorityIndex} · round ${String(data.currentRound)}`}
+      value={<span className="w-live-pill is-muted">{data.entries.length}/{data.limit}</span>}
+    >
+      {highest ? <ConsensusPillView pill={signingPill(highest.status)} /> : <div className="row-help">No signing history.</div>}
+    </CollapsibleSection>
   );
 }
 
@@ -505,14 +507,14 @@ function AuthorityRiskCard({ data }: { data: OperatorRiskResponse }) {
           ? `Jailed until height ${String(jail.jailedUntilHeight)} (${String(jail.unjailCount)} prior unjails).`
           : null
       : null;
+  // The tier badge rides in the heading: "At risk" is the signal, the miss-rate
+  // arithmetic behind it is the detail.
   return (
-    <div className="w-card">
-      <div className="w-card__head">
-        <h3>Authority risk — authority {data.authorityIndex} · height {String(data.dataHeight)}</h3>
-        <div className="w-card__head__spacer" />
-        <ConsensusPillView pill={badge} />
-      </div>
-      <div className="w-card__body">
+    <CollapsibleSection
+      title={`Authority risk — authority ${data.authorityIndex} · height ${String(data.dataHeight)}`}
+      value={<ConsensusPillView pill={badge} />}
+    >
+      <div>
         <div className="row-help">
           miss {bpsPct(data.missRateBps)}% / headroom {bpsPct(data.remainingHeadroomBps)}% (slash {data.thresholdBps / 100}%)
         </div>
@@ -522,7 +524,7 @@ function AuthorityRiskCard({ data }: { data: OperatorRiskResponse }) {
           Sampled over {data.windowRounds} rounds · {data.observedRounds} observed
         </div>
       </div>
-    </div>
+    </CollapsibleSection>
   );
 }
 
@@ -533,17 +535,16 @@ function UpcomingDutiesCard({ data }: { data: UpcomingDutiesResponse }) {
       ? `next round ${String(d.keyRotation.nextRound)} · epoch ${String(d.keyRotation.epochLengthRounds)} rounds`
       : `not scheduled: ${d.keyRotation.reason}`;
   return (
-    <div className="w-card">
-      <div className="w-card__head">
-        <h3>Upcoming duties — authority {data.authorityIndex} · round {String(data.currentRound)}</h3>
-      </div>
-      <div className="w-card__body">
+    <CollapsibleSection
+      title={`Upcoming duties — authority ${data.authorityIndex} · round ${String(data.currentRound)}`}
+    >
+      <div>
         <DutyRow k="Attestation" v={`rounds ${String(d.attestation.startRound)}–${String(d.attestation.endRound)} · ${d.attestation.kind}`} scheduled />
         <DutyRow k="Key rotation" v={keyRotation} scheduled={"nextRound" in d.keyRotation} />
         <DutyRow k="Block production" v={d.blockProduction.reason} />
         <DutyRow k="Sync" v={d.sync.reason} />
       </div>
-    </div>
+    </CollapsibleSection>
   );
 }
 

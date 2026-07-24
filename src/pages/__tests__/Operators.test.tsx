@@ -205,6 +205,11 @@ describe("Operators screen", () => {
     // All-user legend entries present; dev-only ones hidden while off.
     expect(await screen.findByText("Offline / unreachable")).toBeInTheDocument();
     expect(screen.queryByText("High latency")).not.toBeInTheDocument();
+    // The legend is a decoder for chips that stay on the operator rows, so it
+    // sits behind a disclosure. Collapsed, its controls are out of the
+    // accessibility tree entirely — open it before reaching for one.
+    expect(screen.queryByRole("button", { name: "1 affected" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /Risk legend/ }));
     // The unreachable operator drives a "1 affected" badge that expands to its name.
     await user.click(screen.getByRole("button", { name: "1 affected" }));
     expect(screen.getAllByText("http://down").length).toBeGreaterThan(0);
