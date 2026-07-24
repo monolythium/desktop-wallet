@@ -44,9 +44,11 @@ export function Bridges({ experimentalEnabled }: BridgesProps) {
 // surface). Read-only registry, no risk-tier scoring.
 // ---------------------------------------------------------------------------
 
+// Fields of the lyth_bridgeRoutes disclosure envelope (BridgeRouteDisclosure).
+// bridgeId / updatedAtBlock are NOT here — they live on the separate catalogue
+// route shape, which this read never returns — so the table does not claim them.
 interface RouteRow {
   routeId?: string;
-  bridgeId?: string;
   bridge?: string;
   asset?: string;
   feeToken?: string;
@@ -58,7 +60,6 @@ interface RouteRow {
   adminControl?: string;
   circuitBreaker?: string;
   insuranceAtomic?: string;
-  updatedAtBlock?: number;
   lastIncidentDate?: string | null;
   verifier?: { model?: string; participantCount?: number; threshold?: number };
 }
@@ -125,9 +126,7 @@ function BridgesStableView() {
               <div className="w-kv"><span className="k">Verifier</span><span className="v">{row.verifier?.model ?? "—"} ({row.verifier?.threshold ?? "?"}/{row.verifier?.participantCount ?? "?"})</span></div>
               <div className="w-kv"><span className="k">Admin control</span><span className="v">{row.adminControl ?? "—"}</span></div>
               <div className="w-kv"><span className="k">Circuit breaker</span><span className="v">{row.circuitBreaker ?? "—"}</span></div>
-              <div className="w-kv"><span className="k">Bridge id</span><span className="v mono" style={{ fontSize: 11 }}>{row.bridgeId}</span></div>
               <div className="w-kv"><span className="k">Last incident</span><span className="v">{row.lastIncidentDate ?? "none on record"}</span></div>
-              <div className="w-kv"><span className="k">Updated at block</span><span className="v">{row.updatedAtBlock ?? "—"}</span></div>
             </div>
           ))}
           {rows.length > 0 ? (
