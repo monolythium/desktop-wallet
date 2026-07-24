@@ -2,8 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   NOTIFICATION_HISTORY_CAP,
   NOTIFICATION_LABELS,
+  MAX_REASON_LEN,
+  REASON_UNAVAILABLE,
   appendCapped,
   delegationClusterLabel,
+  humanizeReason,
   isTxOpKind,
   isZeroAmount,
   notificationAmountLabel,
@@ -301,6 +304,53 @@ describe("parseHistoryEnvelope", () => {
     expect(withFee?.entries[0]!.feeLythoshi).toBe("2100000000000000");
     const without = parseHistoryEnvelope({ schemaVersion: 0, entries: [rec()] });
     expect(without?.entries[0]!.feeLythoshi).toBeUndefined();
+  });
+
+  it("round-trips reason + reasonCode BOTH ways (a field-blind legacy record parses)", () => {
+    // Forward: a record carrying the new fields survives write -> read.
+    const withReason = parseHistoryEnvelope({
+      schemaVersion: 0,
+      entries: [rec({ status: "failed", reason: "transaction-reverted", reasonCode: -32047 })],
+    });
+    expect(withReason?.entries[0]!.reason).toBe("transaction-reverted");
+    expect(withReason?.entries[0]!.reasonCode).toBe(-32047);
+    // Backward: a legacy record without the fields still parses (undefined).
+    const legacy = parseHistoryEnvelope({ schemaVersion: 0, entries: [rec({ status: "failed" })] });
+    expect(legacy?.entries[0]!.reason).toBeUndefined();
+    expect(legacy?.entries[0]!.reasonCode).toBeUndefined();
+  });
+
+  it("carries the reserved REASON_UNAVAILABLE marker", () => {
+    const parsed = parseHistoryEnvelope({
+      schemaVersion: 0,
+      entries: [rec({ status: "failed", reason: REASON_UNAVAILABLE })],
+    });
+    expect(parsed?.entries[0]!.reason).toBe(REASON_UNAVAILABLE);
+  });
+
+  it("bounds the persisted reason: an over-length token is dropped, not stored", () => {
+    const parsed = parseHistoryEnvelope({
+      schemaVersion: 0,
+      entries: [rec({ status: "failed", reason: "x".repeat(MAX_REASON_LEN + 1) })],
+    });
+    // The record still parses (reason is optional), but the oversized token is
+    // discarded — no unbounded text ever lands in the store.
+    expect(parsed?.entries).toHaveLength(1);
+    expect(parsed?.entries[0]!.reason).toBeUndefined();
+  });
+});
+
+describe("humanizeReason", () => {
+  it("renders a hyphen-case token as a sentence-case phrase", () => {
+    expect(humanizeReason("transaction-reverted")).toBe("Transaction reverted");
+    expect(humanizeReason("insufficient-funds")).toBe("Insufficient funds");
+    expect(humanizeReason(REASON_UNAVAILABLE)).toBe("Reason unavailable");
+  });
+
+  it("returns null for an absent token (the no-reason absence)", () => {
+    expect(humanizeReason(undefined)).toBeNull();
+    expect(humanizeReason(null)).toBeNull();
+    expect(humanizeReason("")).toBeNull();
   });
 
   it("drops malformed entries but keeps the good ones", () => {

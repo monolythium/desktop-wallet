@@ -18,9 +18,11 @@ import {
   truncMiddle,
 } from "./_detailModalParts";
 import {
+  humanizeReason,
   isDelegationKind,
   notificationAmountLabel,
   notificationTitle,
+  REASON_UNAVAILABLE,
   type NotificationRecord,
 } from "../sdk/notifications";
 import { formatFeeLythDisplay } from "../sdk/lyth-display";
@@ -94,6 +96,20 @@ export function NotificationDetail({ record, onClose }: NotificationDetailProps)
         </div>
         <div className="w-card__body">
           <DRow label="Status" value={statusLabel(record.status)} />
+          {/* A failed record's reason: a classified label, or "Unavailable" when
+              the failure IS a revert whose on-chain reason the node reader does
+              not expose. A record with no reason field simply omits this row —
+              so "unavailable" never reads the same as "no reason". */}
+          {record.status === "failed" && record.reason ? (
+            <DRow
+              label="Reason"
+              value={
+                record.reason === REASON_UNAVAILABLE
+                  ? "Unavailable"
+                  : humanizeReason(record.reason) ?? "Unavailable"
+              }
+            />
+          ) : null}
           {amountLabel !== null ? (
             <DRow
               label={record.kind === "claim" ? "Reward" : "Amount"}

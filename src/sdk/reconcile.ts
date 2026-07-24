@@ -26,6 +26,7 @@ import { getProvider } from "./client";
 import { decodeClaimedAmount, decodeTxFeeLythoshi } from "./live";
 import { getNativeTransactionCount } from "./native-rpc";
 import { recordNotification } from "./notifications-store";
+import { REASON_UNAVAILABLE } from "./notifications";
 import { toastTerminalNotification } from "./os-toast";
 import {
   classifyPending,
@@ -231,6 +232,11 @@ export async function reconcilePendingOnce(
         toClusterName: tx.toClusterName,
         claimedAmount,
         feeLythoshi,
+        // A `failed` verdict here is a reverted receipt (status 0). The chain
+        // carries the revert reason, but the pinned SDK's receipt normaliser
+        // drops it — so we record the honest "a reason exists, unread" marker,
+        // distinct from an absent reason. Reading the real text is F4.
+        reason: verdict.kind === "failed" ? REASON_UNAVAILABLE : undefined,
       });
       // Raise an OS toast ONLY for a genuinely-new record (added === true), so
       // the store's `${chainIdHex}:${txHash}` dedupe also dedupes the toast — a

@@ -28,6 +28,7 @@ import { scopeChainKey } from "./chains";
 import { recordNotification } from "./notifications-store";
 import { toastTerminalNotification } from "./os-toast";
 import type { TxOpKind } from "./notifications";
+import { classifySendError, extractSendError } from "./send-error";
 
 /** Lowercased scope address. The wallet's active typed bech32m address is the
  *  notification scope's address dimension (the recipient of every record it
@@ -53,10 +54,24 @@ export interface OperationNotifyContext {
 export async function recordOperationFailure(
   meta: OperationNotifyContext,
   txHash: string | undefined,
+  cause?: unknown,
 ): Promise<void> {
   if (!txHash) return;
   const addressLower = await scopeAddressLower();
   if (!addressLower) return;
+  // Classify the rejection into a BOUNDED token (a SendErrorKind), never the raw
+  // node string — a node error can carry an endpoint, a path, or unbounded text.
+  // The numeric JSON-RPC code is carried when the node supplied one.
+  let reason: string | undefined;
+  let reasonCode: number | undefined;
+  if (cause !== undefined) {
+    const extracted = extractSendError(cause);
+    reason = classifySendError(extracted.message).kind;
+    reasonCode =
+      typeof extracted.code === "number" && Number.isFinite(extracted.code)
+        ? extracted.code
+        : undefined;
+  }
   const { added, record } = await recordNotification({
     addressLower,
     chainIdHex: scopeChainKey(),
@@ -68,6 +83,8 @@ export async function recordOperationFailure(
     counterparty: meta.counterparty,
     clusterId: meta.clusterId,
     clusterName: meta.clusterName,
+    reason,
+    reasonCode,
   });
   // Raise an OS toast ONLY for a genuinely-new record (added === true), reusing
   // the store's `${chainIdHex}:${txHash}` dedupe. Best-effort + flag-gated

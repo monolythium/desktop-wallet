@@ -206,6 +206,10 @@ describe("reconcilePendingOnce — failed path (the fix)", () => {
     expect(notes[0]!.txHash).toBe("0xf1");
     expect(notes[0]!.blockNumber).toBe(12);
     expect(notes[0]!.kind).toBe("delegate");
+    // A reverted receipt's on-chain reason is dropped by the SDK normaliser, so
+    // the record carries the honest "reason exists but unread" marker (F4 reads
+    // the real text) — never a silent absence.
+    expect(notes[0]!.reason).toBe("reason-unavailable");
     expect(await listPendingTxs()).toHaveLength(0);
   });
 });

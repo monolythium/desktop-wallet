@@ -77,6 +77,27 @@ export function isTxOpKind(v: unknown): v is TxOpKind {
   );
 }
 
+/** Reserved {@link NotificationRecord.reason} value: the failure IS a revert,
+ *  but its on-chain reason could not be read (the pinned SDK drops the receipt's
+ *  `revertReason`). Kept DISTINCT from an absent reason so a surface never
+ *  renders "no reason" and "a reason exists but we couldn't read it" the same. */
+export const REASON_UNAVAILABLE = "reason-unavailable";
+
+/** Longest `reason` token we persist — a defensive bound so a classified token
+ *  can never smuggle unbounded text into the store. All real tokens (the
+ *  `SendErrorKind`s and the reserved marker) are well under this. */
+export const MAX_REASON_LEN = 48;
+
+/** Render a stored `reason` token as a short human phrase (hyphen-case →
+ *  Sentence case: "transaction-reverted" → "Transaction reverted",
+ *  "reason-unavailable" → "Reason unavailable"). Pure; null for an absent token. */
+export function humanizeReason(reason: string | undefined | null): string | null {
+  if (!reason) return null;
+  const joined = reason.split("-").filter(Boolean).join(" ");
+  if (joined.length === 0) return null;
+  return joined.charAt(0).toUpperCase() + joined.slice(1);
+}
+
 /** One persisted notification — the row the Notifications page + detail modal
  *  render. */
 export interface NotificationRecord {
@@ -127,6 +148,19 @@ export interface NotificationRecord {
    *  confirmed terminal. Optional + legacy-safe — an absent record or an
    *  undecodable fee omits the fee row (honest absence, never a fabricated 0). */
   feeLythoshi?: string;
+  /** Why a `failed` record failed — a BOUNDED classified token, never the raw
+   *  node string (which can carry an endpoint, a path, or unbounded text). It is
+   *  either a `SendErrorKind` (the classified admission-reject reason, populated
+   *  at submit) or the reserved {@link REASON_UNAVAILABLE}: the failure IS a
+   *  revert whose on-chain reason the wallet could not read (the pinned SDK's
+   *  receipt normaliser drops `revertReason`). Absent ⇒ no reason context — a
+   *  DIFFERENT fact from "a reason exists but could not be read", which is why
+   *  the surfaces render the three states distinctly. Optional + legacy-safe. */
+  reason?: string;
+  /** The JSON-RPC error code accompanying an admission reject, when the node
+   *  supplied one (e.g. an admission-band `-3205x`). Optional + legacy-safe. The
+   *  numeric REVERT code lives in the payload the SDK drops — that is F4. */
+  reasonCode?: number;
   /** Owning scope — the lowercased address this record was recorded under (the
    *  active vault's identity at write time). Optional + backward-compatible:
    *  records written before this field omit it. It lets a merged/global list
@@ -547,6 +581,16 @@ function asNotificationRecord(raw: unknown): NotificationRecord | null {
       : undefined;
   const scope = typeof r.scope === "string" ? r.scope : undefined;
   const unit = typeof r.unit === "string" && r.unit.length > 0 ? r.unit : undefined;
+  // Failure reason: a bounded classified token only. Length-capped so a tampered
+  // or future-oversized value can never persist unbounded text.
+  const reason =
+    typeof r.reason === "string" && r.reason.length > 0 && r.reason.length <= MAX_REASON_LEN
+      ? r.reason
+      : undefined;
+  const reasonCode =
+    typeof r.reasonCode === "number" && Number.isFinite(r.reasonCode)
+      ? r.reasonCode
+      : undefined;
   return {
     id: r.id,
     txHash: r.txHash,
@@ -563,6 +607,8 @@ function asNotificationRecord(raw: unknown): NotificationRecord | null {
     toClusterName,
     claimedAmount,
     feeLythoshi,
+    reason,
+    reasonCode,
     scope,
     createdAtMs: r.createdAtMs,
     read: r.read,

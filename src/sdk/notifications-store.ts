@@ -168,6 +168,11 @@ export interface RecordNotificationInput {
   /** The tx's network fee in raw lythoshi, decoded at the confirmed terminal.
    *  Optional — omitted when undecodable. */
   feeLythoshi?: string;
+  /** Bounded classified failure reason (a `SendErrorKind` or the reserved
+   *  `REASON_UNAVAILABLE`), never the raw node string. Optional. */
+  reason?: string;
+  /** JSON-RPC error code for an admission reject, when present. Optional. */
+  reasonCode?: number;
   /** `true` ⇒ store already-read (no badge bump). Defaults to unread. */
   read?: boolean;
 }
@@ -216,6 +221,8 @@ export async function recordNotification(
       toClusterName: input.toClusterName,
       claimedAmount: input.claimedAmount,
       feeLythoshi: input.feeLythoshi,
+      reason: input.reason,
+      reasonCode: input.reasonCode,
       // Stamp the owning scope so a merged/global read can still attribute the
       // record to its vault. `addressLower` is the same address dimension the
       // history key is built from, so this is the single write chokepoint for
