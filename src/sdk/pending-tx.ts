@@ -82,6 +82,13 @@ export interface PendingTx {
   /** Epoch ms the committed nonce was first observed to have passed this tx's
    *  nonce — anchors the drop grace window. Stamped by `transitionPending`. */
   noncePassedAtMs?: number;
+  /** True once the reconciler has observed this tx INCLUDED (`lyth_txStatus`
+   *  `found`) but could not yet establish its outcome (the receipt was
+   *  unreadable). An included tx consumed its OWN nonce, so the committed nonce
+   *  passing it is expected — it must NOT be read as a dropped/replaced tx. Set
+   *  by `markPendingIncluded`; keeps a possibly-succeeded tx from aging into a
+   *  false "didn't confirm". Optional + additive. */
+  seenIncluded?: boolean;
   /** Epoch ms the tx was enqueued. The lifecycle age is measured from here. */
   submittedAt: number;
 }
@@ -166,10 +173,26 @@ export const PENDING_DROP_GRACE_MS = 30 * 1_000;
  *  Time-based path (nonce unknown or not yet passed): `expired` only after the
  *  absolute cap, `slow` after the slow threshold, else `pending`. */
 export function classifyStalePending(
-  tx: Pick<PendingTx, "submittedAt" | "nonce" | "noncePassedAtMs" | "lifecycle">,
+  tx: Pick<
+    PendingTx,
+    "submittedAt" | "nonce" | "noncePassedAtMs" | "lifecycle" | "seenIncluded"
+  >,
   committedNonce: number | null,
   now: number,
 ): PendingLifecycle {
+  // A tx observed INCLUDED (`found`) but not yet resolved (receipt unreadable)
+  // consumed its OWN nonce, so a passed committed nonce is expected — NOT a
+  // replacement. It must never age into `dropped` ("didn't confirm"), a false
+  // failure for a tx that was included and may have succeeded, nor into
+  // `awaiting-inclusion` ("waiting for inclusion") since it is already included.
+  // It resolves via its receipt on a later tick; if that stays unreadable it
+  // ages to `expired` ("status unknown") — the only honest terminal here.
+  if (tx.seenIncluded) {
+    const age = now - tx.submittedAt;
+    if (age >= PENDING_ABSOLUTE_CAP_MS) return "expired";
+    if (age >= PENDING_SLOW_MS) return "slow";
+    return "pending";
+  }
   if (
     committedNonce !== null &&
     tx.nonce !== undefined &&
@@ -398,6 +421,7 @@ export function asPendingTx(raw: unknown): PendingTx | null {
     typeof r.noncePassedAtMs === "number" && Number.isFinite(r.noncePassedAtMs)
       ? r.noncePassedAtMs
       : undefined;
+  const seenIncluded = r.seenIncluded === true ? true : undefined;
   return {
     txHash: r.txHash,
     chainIdHex: r.chainIdHex,
@@ -416,6 +440,7 @@ export function asPendingTx(raw: unknown): PendingTx | null {
     confirmedTxIndex,
     nonce,
     noncePassedAtMs,
+    seenIncluded,
     submittedAt: r.submittedAt,
   };
 }

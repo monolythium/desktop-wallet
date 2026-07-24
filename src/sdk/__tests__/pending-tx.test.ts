@@ -196,6 +196,28 @@ describe("classifyStalePending — nonce-based dropped detection", () => {
     expect(classifyStalePending(stamped, 6, T0 + PENDING_DROP_GRACE_MS)).toBe("dropped");
   });
 
+  it("an INCLUDED tx is NEVER 'dropped' — it consumed its own nonce (V-A)", () => {
+    // seenIncluded means the reconciler observed this tx in a block. The committed
+    // nonce passing it is expected (it filled the slot), so it must not read as a
+    // dropped/replaced tx — that would be a false "didn't confirm" for a tx that
+    // was included and may have succeeded.
+    const included = tx({ submittedAt: T0, nonce: 5, noncePassedAtMs: T0, seenIncluded: true });
+    expect(classifyStalePending(included, 6, T0 + PENDING_DROP_GRACE_MS * 100)).not.toBe("dropped");
+  });
+
+  it("an INCLUDED tx ages to 'expired' (status unknown), never 'dropped'", () => {
+    const included = tx({ submittedAt: T0, nonce: 5, seenIncluded: true });
+    expect(classifyStalePending(included, 6, T0 + PENDING_ABSOLUTE_CAP_MS)).toBe("expired");
+  });
+
+  it("an INCLUDED tx reads 'pending' while young, never 'awaiting-inclusion'", () => {
+    // It IS included, so "waiting for inclusion" would be wrong too.
+    const included = tx({ submittedAt: T0, nonce: 5, seenIncluded: true });
+    expect(
+      classifyStalePending(included, 6, T0 + ADMITTED_INCLUSION_WINDOW_MS + 1),
+    ).toBe("pending");
+  });
+
   it("a null committed-nonce read never drops, and never un-drops a dropped row", () => {
     expect(classifyStalePending(young, null, T0 + 1)).toBe("pending"); // never advances to dropped
     const droppedRow = tx({ submittedAt: T0, nonce: 5, noncePassedAtMs: T0, lifecycle: "dropped" });

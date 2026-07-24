@@ -38,6 +38,7 @@ import {
   bridgePendingTx,
   enqueuePendingTx,
   listPendingTxs,
+  markPendingIncluded,
   removePendingTx,
 } from "./pending-tx-store";
 import type { OperationNotifyMeta } from "../operations/types";
@@ -193,7 +194,16 @@ export async function reconcilePendingOnce(
       if (tx.confirmedBlockHeight !== undefined) continue;
       const probe = await probeTx(tx.txHash);
       const verdict = classifyPending(probe);
-      if (verdict.kind === "pending") continue;
+      if (verdict.kind === "pending") {
+        // Included but not yet resolved (`found` + an unreadable receipt): mark
+        // it so the time-ladder never ages a possibly-succeeded tx into a false
+        // "didn't confirm" (V-A). It still resolves via its receipt on a later
+        // tick; a persistently-unreadable one ages to "status unknown" instead.
+        if (probe.txStatus.kind === "found" && tx.seenIncluded !== true) {
+          await markPendingIncluded(tx.chainIdHex, tx.txHash);
+        }
+        continue;
+      }
       // A confirmed reward claim carries its settled amount in the receipt's
       // Claimed log (the tx value is 0x0); decode it so the record shows the
       // real "+<amount> LYTH". Null stays undefined — the surfaces then show the

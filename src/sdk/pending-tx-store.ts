@@ -182,6 +182,31 @@ export async function bridgePendingTx(
   }
 }
 
+/** Mark a tracked tx as observed INCLUDED (`lyth_txStatus` `found`) while its
+ *  outcome is still unestablished (the receipt was unreadable). Persisted so the
+ *  time-ladder never ages a possibly-succeeded, included tx into a false
+ *  "didn't confirm" (see `classifyStalePending`). Idempotent — already-flagged
+ *  is a no-op. Best-effort. */
+export async function markPendingIncluded(
+  chainIdHex: string,
+  txHash: string,
+): Promise<{ marked: boolean }> {
+  try {
+    const env = await loadEnvelope();
+    let changed = false;
+    const next = env.txs.map((t) => {
+      if (t.chainIdHex !== chainIdHex || t.txHash !== txHash) return t;
+      if (t.seenIncluded === true) return t;
+      changed = true;
+      return { ...t, seenIncluded: true };
+    });
+    if (changed) await saveEnvelope({ schemaVersion: 0, txs: next });
+    return { marked: changed };
+  } catch {
+    return { marked: false };
+  }
+}
+
 /** Recompute each tracked tx's lifecycle and drop rows past the terminal-
  *  retention window, persisting ONLY when something changed (so a no-op tick is
  *  free and doesn't churn subscribers). Returns the count silently removed.

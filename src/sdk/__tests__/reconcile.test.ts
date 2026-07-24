@@ -236,6 +236,9 @@ describe("reconcilePendingOnce — never synthesizes; keeps tracking", () => {
     expect(t1.recorded).toBe(0);
     expect(t1.remaining).toBe(1);
     expect(await listAllNotifications()).toHaveLength(0);
+    // V-A: it was observed included, so it is flagged — the time-ladder must not
+    // later age it into a false "didn't confirm" when its nonce is passed.
+    expect((await listPendingTxs())[0]!.seenIncluded).toBe(true);
 
     // The receipt lands next tick → the outcome resolves (here: success).
     receiptScript.set("0xinc", { status: 1, block_number: 9n, tx_index: 0 });
