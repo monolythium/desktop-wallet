@@ -67,6 +67,10 @@ type ReceiptAnswer =
 
 let txStatusScript: Map<string, TxStatusAnswer>;
 let receiptScript: Map<string, ReceiptAnswer>;
+// F4 — raw JSON-RPC receipts keyed by hash, carrying the snake_case
+// `revert_reason` the SDK normaliser drops. A missing entry means the raw call
+// returns null (the fail-safe path: reason falls back to the unavailable marker).
+let rawReceiptScript: Map<string, unknown>;
 
 function installFakeClient(): void {
   const rpcClient = {
@@ -90,6 +94,14 @@ function installFakeClient(): void {
       if (a === undefined) return null;
       if (a !== null && "throws" in a) throw new Error("rpc down");
       return a;
+    },
+    async call(method: string, params: unknown[]) {
+      // F4's single documented bypass reads the raw receipt here.
+      if (method === "eth_getTransactionReceipt") {
+        const hash = (params as string[])[0]!;
+        return rawReceiptScript.get(hash) ?? null;
+      }
+      return null;
     },
   };
   setProviderForTest({
@@ -119,6 +131,7 @@ beforeEach(() => {
   __resetPendingTxStoreForTests();
   txStatusScript = new Map();
   receiptScript = new Map();
+  rawReceiptScript = new Map();
   toastSpy.mockClear();
   installFakeClient();
 });
@@ -211,6 +224,52 @@ describe("reconcilePendingOnce — failed path (the fix)", () => {
     // the real text) — never a silent absence.
     expect(notes[0]!.reason).toBe("reason-unavailable");
     expect(await listPendingTxs()).toHaveLength(0);
+  });
+});
+
+describe("reconcilePendingOnce — F4 real revert reason", () => {
+  it("surfaces the chain's classified reason + a bounded detail, not the unavailable marker", async () => {
+    await enqueuePendingTx(tx({ txHash: "0xr1", opKind: "delegate" }));
+    receiptScript.set("0xr1", { status: 0, block_number: 20n });
+    rawReceiptScript.set("0xr1", {
+      status: 0,
+      revert_reason: "precompile call is not payable; attached value rejected",
+    });
+
+    await reconcilePendingOnce();
+    const notes = await listAllNotifications();
+    expect(notes[0]!.status).toBe("failed");
+    // The three-way distinction: a REAL reason was read, so the record must not
+    // carry the "unavailable" marker; the sanitised excerpt is surfaced verbatim.
+    expect(notes[0]!.reason).not.toBe("reason-unavailable");
+    expect(notes[0]!.reasonDetail).toBe(
+      "precompile call is not payable; attached value rejected",
+    );
+  });
+
+  it("a coded revert carries the numeric revert code (0x02NN)", async () => {
+    await enqueuePendingTx(tx({ txHash: "0xr2" }));
+    receiptScript.set("0xr2", { status: 0, block_number: 21n });
+    rawReceiptScript.set("0xr2", { status: 0, revert_reason: "execution reverted: 0x0214" });
+
+    await reconcilePendingOnce();
+    const notes = await listAllNotifications();
+    expect(notes[0]!.reason).toBe("transaction-reverted");
+    expect(notes[0]!.reasonCode).toBe(0x0214);
+  });
+
+  it("falls back to the unavailable marker when the raw read yields nothing (fail-safe)", async () => {
+    await enqueuePendingTx(tx({ txHash: "0xr3" }));
+    receiptScript.set("0xr3", { status: 0, block_number: 22n });
+    // No rawReceiptScript entry → the raw call returns null. The three-way
+    // distinction holds: an honest "unavailable", never a silent absence or guess.
+
+    await reconcilePendingOnce();
+    const notes = await listAllNotifications();
+    expect(notes[0]!.status).toBe("failed");
+    expect(notes[0]!.reason).toBe("reason-unavailable");
+    expect(notes[0]!.reasonDetail).toBeUndefined();
+    expect(notes[0]!.reasonCode).toBeUndefined();
   });
 });
 

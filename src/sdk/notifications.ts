@@ -88,6 +88,11 @@ export const REASON_UNAVAILABLE = "reason-unavailable";
  *  `SendErrorKind`s and the reserved marker) are well under this. */
 export const MAX_REASON_LEN = 48;
 
+/** Longest chain-reason excerpt we persist in {@link NotificationRecord.reasonDetail}.
+ *  A chain-supplied revert reason is still a string from a node, so it is
+ *  sanitised and hard-capped here before it ever reaches the store. */
+export const MAX_REASON_DETAIL_LEN = 80;
+
 /** Render a stored `reason` token as a short human phrase (hyphen-case →
  *  Sentence case: "transaction-reverted" → "Transaction reverted",
  *  "reason-unavailable" → "Reason unavailable"). Pure; null for an absent token. */
@@ -157,10 +162,17 @@ export interface NotificationRecord {
    *  DIFFERENT fact from "a reason exists but could not be read", which is why
    *  the surfaces render the three states distinctly. Optional + legacy-safe. */
   reason?: string;
-  /** The JSON-RPC error code accompanying an admission reject, when the node
-   *  supplied one (e.g. an admission-band `-3205x`). Optional + legacy-safe. The
-   *  numeric REVERT code lives in the payload the SDK drops — that is F4. */
+  /** The numeric code accompanying the failure: a JSON-RPC admission-band code
+   *  (`-3205x`) for a submit reject, or the on-chain revert code (`0x02NN` family)
+   *  read from a reverted receipt (F4). A number is inherently bounded. Optional
+   *  + legacy-safe. */
   reasonCode?: number;
+  /** A BOUNDED, SANITISED excerpt of the chain-supplied revert reason (F4), when
+   *  it adds detail the classified token doesn't carry — e.g. a string revert
+   *  like "precompile call is not payable…". Control chars stripped, whitespace
+   *  collapsed, capped at {@link MAX_REASON_DETAIL_LEN}, and dropped if it smells
+   *  of a path/URL. Rendered verbatim (not humanised). Optional + legacy-safe. */
+  reasonDetail?: string;
   /** Owning scope — the lowercased address this record was recorded under (the
    *  active vault's identity at write time). Optional + backward-compatible:
    *  records written before this field omit it. It lets a merged/global list
@@ -591,6 +603,12 @@ function asNotificationRecord(raw: unknown): NotificationRecord | null {
     typeof r.reasonCode === "number" && Number.isFinite(r.reasonCode)
       ? r.reasonCode
       : undefined;
+  const reasonDetail =
+    typeof r.reasonDetail === "string" &&
+    r.reasonDetail.length > 0 &&
+    r.reasonDetail.length <= MAX_REASON_DETAIL_LEN
+      ? r.reasonDetail
+      : undefined;
   return {
     id: r.id,
     txHash: r.txHash,
@@ -609,6 +627,7 @@ function asNotificationRecord(raw: unknown): NotificationRecord | null {
     feeLythoshi,
     reason,
     reasonCode,
+    reasonDetail,
     scope,
     createdAtMs: r.createdAtMs,
     read: r.read,

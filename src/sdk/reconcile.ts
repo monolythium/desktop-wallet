@@ -27,6 +27,7 @@ import { decodeClaimedAmount, decodeTxFeeLythoshi } from "./live";
 import { getNativeTransactionCount } from "./native-rpc";
 import { recordNotification } from "./notifications-store";
 import { REASON_UNAVAILABLE } from "./notifications";
+import { classifyChainRevert, readRawRevertReason } from "./raw-revert-reason";
 import { toastTerminalNotification } from "./os-toast";
 import {
   classifyPending,
@@ -224,6 +225,23 @@ export async function reconcilePendingOnce(
         verdict.kind === "confirmed"
           ? ((await decodeTxFeeLythoshi(tx.txHash)) ?? undefined)
           : undefined;
+      // F4 — a `failed` verdict is a reverted receipt (status 0). The chain
+      // carries the revert reason, but the pinned SDK normaliser drops it, so
+      // read it via the ONE raw accessor and classify into bounded fields.
+      // Fail-safe: if the raw read fails, fall back to the honest "a reason
+      // exists, unread" marker — never silence, never a guess (the three-way
+      // distinction survives).
+      let reason: string | undefined;
+      let reasonCode: number | undefined;
+      let reasonDetail: string | undefined;
+      if (verdict.kind === "failed") {
+        const rawReason = await readRawRevertReason(getProvider().rpcClient, tx.txHash);
+        if (rawReason !== null) {
+          ({ reason, reasonCode, reasonDetail } = classifyChainRevert(rawReason));
+        } else {
+          reason = REASON_UNAVAILABLE;
+        }
+      }
       // Terminal — record the genuine status verbatim (once; the store dedupes).
       const { added, record } = await recordNotification({
         addressLower: tx.addressLower,
@@ -242,11 +260,9 @@ export async function reconcilePendingOnce(
         toClusterName: tx.toClusterName,
         claimedAmount,
         feeLythoshi,
-        // A `failed` verdict here is a reverted receipt (status 0). The chain
-        // carries the revert reason, but the pinned SDK's receipt normaliser
-        // drops it — so we record the honest "a reason exists, unread" marker,
-        // distinct from an absent reason. Reading the real text is F4.
-        reason: verdict.kind === "failed" ? REASON_UNAVAILABLE : undefined,
+        reason,
+        reasonCode,
+        reasonDetail,
       });
       // Raise an OS toast ONLY for a genuinely-new record (added === true), so
       // the store's `${chainIdHex}:${txHash}` dedupe also dedupes the toast — a

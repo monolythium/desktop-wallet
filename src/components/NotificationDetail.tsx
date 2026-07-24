@@ -36,6 +36,12 @@ function statusLabel(status: "confirmed" | "failed"): string {
   return status === "confirmed" ? "Confirmed" : "Failed";
 }
 
+/** An on-chain revert code (0x02NN family, non-negative) as hex; a JSON-RPC
+ *  admission code (negative) as its decimal. */
+function formatReasonCode(code: number): string {
+  return code >= 0 ? `0x${code.toString(16).padStart(4, "0")}` : String(code);
+}
+
 export function NotificationDetail({ record, onClose }: NotificationDetailProps) {
   const title = notificationTitle(record.kind, record.status);
   // A reward claim shows its decoded settled amount ("+<amt> LYTH"); other kinds
@@ -114,6 +120,14 @@ export function NotificationDetail({ record, onClose }: NotificationDetailProps)
                   : humanizeReason(record.reason) ?? "Unavailable"
               }
             />
+          ) : null}
+          {/* F4 — the chain's own revert reason (bounded, sanitised) and its
+              revert code, when the reverted receipt carried them. */}
+          {record.status === "failed" && record.reasonDetail ? (
+            <DRow label="Details" value={record.reasonDetail} />
+          ) : null}
+          {record.status === "failed" && record.reasonCode !== undefined ? (
+            <DRow label="Code" value={formatReasonCode(record.reasonCode)} />
           ) : null}
           {amountLabel !== null ? (
             <DRow

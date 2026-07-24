@@ -171,8 +171,10 @@ export interface RecordNotificationInput {
   /** Bounded classified failure reason (a `SendErrorKind` or the reserved
    *  `REASON_UNAVAILABLE`), never the raw node string. Optional. */
   reason?: string;
-  /** JSON-RPC error code for an admission reject, when present. Optional. */
+  /** JSON-RPC admission code, or the on-chain revert code (F4). Optional. */
   reasonCode?: number;
+  /** Bounded, sanitised chain-reason excerpt (F4). Optional. */
+  reasonDetail?: string;
   /** `true` ⇒ store already-read (no badge bump). Defaults to unread. */
   read?: boolean;
 }
@@ -223,6 +225,7 @@ export async function recordNotification(
       feeLythoshi: input.feeLythoshi,
       reason: input.reason,
       reasonCode: input.reasonCode,
+      reasonDetail: input.reasonDetail,
       // Stamp the owning scope so a merged/global read can still attribute the
       // record to its vault. `addressLower` is the same address dimension the
       // history key is built from, so this is the single write chokepoint for
