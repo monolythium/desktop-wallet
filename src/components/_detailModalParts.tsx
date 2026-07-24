@@ -241,7 +241,7 @@ export function NamedAddress({ addr }: { addr: string }) {
     };
   }, [addr]);
 
-  const label = preferredAddressLabel(reverseName, contactName);
+  const label = preferredAddressLabel({ reverseName, contactName });
   return (
     <CopyableAddress
       addr={addr}

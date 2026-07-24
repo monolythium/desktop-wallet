@@ -303,8 +303,10 @@ export function Activity() {
   const labelFor = (address: string | null | undefined): string | null => {
     if (typeof address !== "string" || address === "") return null;
     const key = address.toLowerCase();
-    return preferredAddressLabel(reverseNames.get(key) ?? null, contactNames.get(key) ?? null)
-      ?.label ?? null;
+    return preferredAddressLabel({
+      reverseName: reverseNames.get(key) ?? null,
+      contactName: contactNames.get(key) ?? null,
+    })?.label ?? null;
   };
 
   // Native rows carry the zero-address token id, so normalize to the display

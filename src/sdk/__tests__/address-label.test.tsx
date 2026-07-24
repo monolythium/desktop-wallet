@@ -39,31 +39,31 @@ beforeEach(() => {
 
 describe("preferredAddressLabel", () => {
   it("a registered name outranks a contact label", () => {
-    expect(preferredAddressLabel("alice.mono", "My exchange")).toEqual({
+    expect(preferredAddressLabel({ reverseName: "alice.mono", contactName: "My exchange" })).toEqual({
       kind: "registered",
       label: "alice.mono",
     });
   });
 
   it("falls back to the contact label", () => {
-    expect(preferredAddressLabel(null, "My exchange")).toEqual({
+    expect(preferredAddressLabel({ reverseName: null, contactName: "My exchange" })).toEqual({
       kind: "contact",
       label: "My exchange",
     });
   });
 
   it("null when neither exists — the address stands alone", () => {
-    expect(preferredAddressLabel(null, null)).toBeNull();
-    expect(preferredAddressLabel(undefined, undefined)).toBeNull();
+    expect(preferredAddressLabel({ reverseName: null, contactName: null })).toBeNull();
+    expect(preferredAddressLabel({ reverseName: undefined, contactName: undefined })).toBeNull();
   });
 
   it("treats blank strings as absent", () => {
-    expect(preferredAddressLabel("   ", "Contact")).toEqual({ kind: "contact", label: "Contact" });
-    expect(preferredAddressLabel("", "")).toBeNull();
+    expect(preferredAddressLabel({ reverseName: "   ", contactName: "Contact" })).toEqual({ kind: "contact", label: "Contact" });
+    expect(preferredAddressLabel({ reverseName: "", contactName: "" })).toBeNull();
   });
 
   it("trims the label it returns", () => {
-    expect(preferredAddressLabel("  alice.mono  ", null)?.label).toBe("alice.mono");
+    expect(preferredAddressLabel({ reverseName: "  alice.mono  ", contactName: null })?.label).toBe("alice.mono");
   });
 });
 

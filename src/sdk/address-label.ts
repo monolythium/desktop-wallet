@@ -17,11 +17,21 @@ export type AddressLabel =
   | { kind: "contact"; label: string }
   | null;
 
-/** Apply the precedence. Empty/whitespace strings count as absent. Pure. */
-export function preferredAddressLabel(
-  reverseName: string | null | undefined,
-  contactName: string | null | undefined,
-): AddressLabel {
+/** Apply the precedence. Empty/whitespace strings count as absent. Pure.
+ *
+ *  Named-argument object: `reverseName` (the quorum-verified on-chain identity,
+ *  which earns the chip) and `contactName` (the user's own local label, which must
+ *  never) are both `string | null | undefined` with opposite trust semantics. A
+ *  positional swap would stamp a purely-local label with the chain-verified chip —
+ *  exactly the credibility-borrowing this module exists to prevent. Naming the
+ *  fields makes the trust roles impossible to transpose by position. */
+export function preferredAddressLabel({
+  reverseName,
+  contactName,
+}: {
+  reverseName: string | null | undefined;
+  contactName: string | null | undefined;
+}): AddressLabel {
   if (typeof reverseName === "string" && reverseName.trim() !== "") {
     return { kind: "registered", label: reverseName.trim() };
   }
