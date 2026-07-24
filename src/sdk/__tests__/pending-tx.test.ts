@@ -250,6 +250,6 @@ describe("parsers — tolerant of malformed persisted data", () => {
 
 describe("store key", () => {
   it("is the stable single-file key", () => {
-    expect(PENDING_TX_STORE_KEY).toBe("mono.pending-tx.v1");
+    expect(PENDING_TX_STORE_KEY).toBe("mono.pending-tx.v2");
   });
 });

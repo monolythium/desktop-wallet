@@ -27,18 +27,24 @@ vi.mock("@tauri-apps/plugin-store", () => {
 
 import {
   __resetNotificationsStoreForTests,
+  getIncomingWatermark,
   getUnread,
   listAllNotifications,
   listForScope,
   markAllNotificationsRead,
   markNotificationRead,
   recordNotification,
+  setIncomingWatermark,
   subscribeNotifications,
   type RecordNotificationInput,
 } from "../notifications-store";
+import { __setGenesisIdentityResolverForTests } from "../chain-identity";
 
 const CHAIN = "0x10f2c";
 const ADDR = "mono1self";
+const GENESIS_A = `0x${"11".repeat(32)}`;
+const GENESIS_B = `0x${"22".repeat(32)}`;
+let genesisIdentity = GENESIS_A;
 
 function input(over: Partial<RecordNotificationInput> = {}): RecordNotificationInput {
   return {
@@ -56,6 +62,8 @@ function input(over: Partial<RecordNotificationInput> = {}): RecordNotificationI
 
 beforeEach(() => {
   backing.clear();
+  genesisIdentity = GENESIS_A;
+  __setGenesisIdentityResolverForTests(async () => genesisIdentity);
   __resetNotificationsStoreForTests();
 });
 
@@ -135,7 +143,8 @@ describe("scope attribution", () => {
     // Seed a pre-`scope` record directly under scope A's history key.
     const keyA = `mono.notifications.history.mono1aaa.${CHAIN}.v1`;
     backing.set("state", {
-      version: 1,
+      version: 2,
+      genesisIdentity: GENESIS_A,
       scopes: {
         [keyA]: {
           schemaVersion: 0,
@@ -161,6 +170,60 @@ describe("scope attribution", () => {
     // Tolerant parse of the old shape + correct ownership by storage key.
     expect((await listForScope("mono1aaa")).map((r) => r.txHash)).toEqual(["0xleg"]);
     expect(await listForScope("mono1bbb")).toHaveLength(0);
+  });
+});
+
+describe("genesis scoping", () => {
+  it("does not surface pre-regenesis history, dedupe, or incoming watermark state", async () => {
+    await recordNotification(input({ txHash: "0xsame" }));
+    await setIncomingWatermark(ADDR, CHAIN, {
+      blockHeight: 100,
+      txIndex: 2,
+      logIndex: 1,
+    });
+    expect(await listAllNotifications()).toHaveLength(1);
+    expect(await getIncomingWatermark(ADDR, CHAIN)).not.toBeNull();
+
+    genesisIdentity = GENESIS_B;
+
+    expect(await listAllNotifications()).toEqual([]);
+    expect(await getUnread()).toBe(0);
+    expect(await getIncomingWatermark(ADDR, CHAIN)).toBeNull();
+    // The same chain-id/hash can exist on the replacement network. A prior
+    // genesis's dedupe set must not suppress it.
+    expect((await recordNotification(input({ txHash: "0xsame" }))).added).toBe(
+      true,
+    );
+  });
+
+  it("fails closed on the legacy chain-id-only root schema", async () => {
+    const key = `mono.notifications.history.${ADDR}.${CHAIN}.v1`;
+    backing.set("state", {
+      version: 1,
+      scopes: {
+        [key]: {
+          schemaVersion: 0,
+          entries: [
+            {
+              id: `${CHAIN}:0xold`,
+              txHash: "0xold",
+              status: "confirmed",
+              blockNumber: 99,
+              kind: "send",
+              amountDecimal: "1",
+              counterparty: "mono1to",
+              createdAtMs: 1,
+              read: false,
+              schemaVersion: 0,
+            },
+          ],
+        },
+      },
+    });
+    __resetNotificationsStoreForTests();
+
+    expect(await listAllNotifications()).toEqual([]);
+    expect(await getUnread()).toBe(0);
   });
 });
 

@@ -1,9 +1,12 @@
 // Tauri-store-backed durable tracked-tx store.
 //
 // The tracked-tx set is persisted on top of `@tauri-apps/plugin-store` (its own
-// `pending-tx.v1.json` file under `mono.activity.pending.*` keys), reusing the
+// `pending-tx.v1.json` file under a versioned key), reusing the
 // singleton-store + in-memory-cache pattern from `notifications-store.ts`, so a
 // tx that confirms while every surface is closed still notifies.
+// The store root is bound to the live block-0 hash. Chain id alone cannot
+// distinguish two incarnations of testnet-69420, and an old pending hash must
+// never be reconciled against a post-regenesis network.
 //
 // Why durable: the old desktop design polled `lyth_txStatus` inside the
 // OperationsDrawer with a ~15s budget that died the moment the drawer closed,
@@ -36,11 +39,18 @@ import {
   type PendingTx,
   type PendingTxEnvelope,
 } from "./pending-tx";
+import { requireLiveGenesisIdentity } from "./chain-identity";
 
 const STORE_FILE = "pending-tx.v1.json";
 
 let storePromise: Promise<Store> | null = null;
-let cache: PendingTxEnvelope | null = null;
+interface PendingTxStoreState {
+  version: 2;
+  genesisIdentity: string;
+  envelope: PendingTxEnvelope;
+}
+
+let cache: PendingTxStoreState | null = null;
 const subscribers = new Set<() => void>();
 
 // Referentially-stable snapshot of the tracked set for `useSyncExternalStore`.
@@ -61,27 +71,45 @@ async function getStore(): Promise<Store> {
 /** Point the shared snapshot at the cache's current rows. The cache is the
  *  source of truth; the snapshot is the render-safe view of it. */
 function syncSnapshot(): void {
-  snapshot = cache ? cache.txs : [];
+  snapshot = cache ? cache.envelope.txs : [];
 }
 
 async function loadEnvelope(): Promise<PendingTxEnvelope> {
-  if (cache) return cache;
+  const genesisIdentity = await requireLiveGenesisIdentity();
+  if (cache?.genesisIdentity === genesisIdentity) return cache.envelope;
   try {
     const store = await getStore();
-    const raw = await store.get<PendingTxEnvelope>(PENDING_TX_STORE_KEY);
-    cache = parsePendingTxEnvelope(raw) ?? { schemaVersion: 0, txs: [] };
+    const raw = await store.get<unknown>(PENDING_TX_STORE_KEY);
+    const root =
+      raw && typeof raw === "object"
+        ? (raw as Record<string, unknown>)
+        : null;
+    const envelope =
+      root?.version === 2 && root.genesisIdentity === genesisIdentity
+        ? parsePendingTxEnvelope(root.envelope)
+        : null;
+    cache = {
+      version: 2,
+      genesisIdentity,
+      envelope: envelope ?? { schemaVersion: 0, txs: [] },
+    };
   } catch {
-    cache = { schemaVersion: 0, txs: [] };
+    cache = {
+      version: 2,
+      genesisIdentity,
+      envelope: { schemaVersion: 0, txs: [] },
+    };
   }
   syncSnapshot();
-  return cache;
+  return cache.envelope;
 }
 
 async function saveEnvelope(env: PendingTxEnvelope): Promise<void> {
-  cache = env;
+  const genesisIdentity = await requireLiveGenesisIdentity();
+  cache = { version: 2, genesisIdentity, envelope: env };
   syncSnapshot();
   const store = await getStore();
-  await store.set(PENDING_TX_STORE_KEY, env);
+  await store.set(PENDING_TX_STORE_KEY, cache);
   await store.save();
   notifySubscribers();
 }

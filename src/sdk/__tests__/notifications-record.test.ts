@@ -37,11 +37,15 @@ import {
   listAllNotifications,
 } from "../notifications-store";
 import { recordOperationFailure } from "../notifications-record";
+import { __setGenesisIdentityResolverForTests } from "../chain-identity";
+
+const GENESIS = `0x${"11".repeat(32)}`;
 
 beforeEach(() => {
   (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {};
   backing.clear();
   seedActiveVault();
+  __setGenesisIdentityResolverForTests(async () => GENESIS);
   __resetNotificationsStoreForTests();
   toastSpy.mockClear();
 });

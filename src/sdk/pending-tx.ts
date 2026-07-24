@@ -70,7 +70,7 @@ export interface PendingTx {
 /** Single on-disk store key. One blob holds every tracked tx (tiny set — at
  *  most a handful of outstanding sends), mirroring the notifications store's
  *  single-file shape. */
-export const PENDING_TX_STORE_KEY = "mono.pending-tx.v1";
+export const PENDING_TX_STORE_KEY = "mono.pending-tx.v2";
 
 /** In-flight lifecycle of a tracked tx that hasn't reached a terminal receipt.
  *  `dropped` is reserved for a later nonce-aware commit; this module produces

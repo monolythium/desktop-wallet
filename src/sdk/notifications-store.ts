@@ -6,7 +6,9 @@
 //
 // A single JSON store file (`notifications.v1.json`) holds a `scopes` map keyed
 // per (address, chain) by the `mono.notifications.history.<addr>.<chainIdHex>.v1`
-// string, so each scope's dedupe set lives beside its history.
+// string, so each scope's dedupe set lives beside its history. The root also
+// records the live block-0 hash. A testnet regenesis preserves chain id, so
+// history, dedupe sets, and incoming watermarks from another genesis are reset.
 //
 // Public surface:
 //   - `recordNotification(input)` — dedupe-check, append (capped, newest-
@@ -42,6 +44,7 @@ import {
   type NotifiedSetEnvelope,
   type TxOpKind,
 } from "./notifications";
+import { requireLiveGenesisIdentity } from "./chain-identity";
 
 const STORE_FILE = "notifications.v1.json";
 const STATE_KEY = "state";
@@ -49,14 +52,17 @@ const STATE_KEY = "state";
 /** On-disk root. `scopes` maps each per-(address, chain) storage key to its
  *  envelope. */
 interface NotificationsState {
-  version: 1;
+  version: 2;
+  genesisIdentity: string;
   // Per-scope envelopes keyed by the per-(address, chain) storage key. Values
   // are tolerant-parsed at read time (history / notified-set /
   // incoming-watermark), so the map value stays `unknown`.
   scopes: Record<string, unknown>;
 }
 
-const EMPTY_STATE: NotificationsState = { version: 1, scopes: {} };
+function emptyState(genesisIdentity: string): NotificationsState {
+  return { version: 2, genesisIdentity, scopes: {} };
+}
 
 // ── Singleton store + in-memory cache ──
 // The cache lets the bell badge + page read synchronously after a write
@@ -74,24 +80,35 @@ async function getStore(): Promise<Store> {
   return storePromise;
 }
 
-function normalizeState(raw: unknown): NotificationsState {
-  if (!raw || typeof raw !== "object") return { version: 1, scopes: {} };
+function normalizeState(
+  raw: unknown,
+  genesisIdentity: string,
+): NotificationsState {
+  if (!raw || typeof raw !== "object") return emptyState(genesisIdentity);
   const r = raw as Record<string, unknown>;
+  if (r.version !== 2 || r.genesisIdentity !== genesisIdentity) {
+    return emptyState(genesisIdentity);
+  }
   const scopes =
     r.scopes && typeof r.scopes === "object"
       ? (r.scopes as Record<string, unknown>)
       : {};
-  return { version: 1, scopes: scopes as NotificationsState["scopes"] };
+  return {
+    version: 2,
+    genesisIdentity,
+    scopes: scopes as NotificationsState["scopes"],
+  };
 }
 
 async function loadState(): Promise<NotificationsState> {
-  if (cache) return cache;
+  const genesisIdentity = await requireLiveGenesisIdentity();
+  if (cache?.genesisIdentity === genesisIdentity) return cache;
   try {
     const store = await getStore();
     const raw = await store.get<NotificationsState>(STATE_KEY);
-    cache = normalizeState(raw);
+    cache = normalizeState(raw, genesisIdentity);
   } catch {
-    cache = { ...EMPTY_STATE, scopes: {} };
+    cache = emptyState(genesisIdentity);
   }
   return cache;
 }
@@ -218,7 +235,8 @@ export async function recordNotification(
     );
 
     await saveState({
-      version: 1,
+      version: 2,
+      genesisIdentity: state.genesisIdentity,
       scopes: {
         ...state.scopes,
         [historyKey]: { schemaVersion: 0, entries: nextEntries },
@@ -258,7 +276,8 @@ export async function setIncomingWatermark(
   try {
     const state = await loadState();
     await saveState({
-      version: 1,
+      version: 2,
+      genesisIdentity: state.genesisIdentity,
       scopes: {
         ...state.scopes,
         [incomingWatermarkKey(addressLower, chainIdHex)]: watermark,
@@ -337,7 +356,8 @@ export async function markNotificationRead(
       });
       if (flipped) {
         await saveState({
-          version: 1,
+          version: 2,
+          genesisIdentity: state.genesisIdentity,
           scopes: {
             ...state.scopes,
             [k]: { schemaVersion: 0, entries: next },
@@ -375,7 +395,11 @@ export async function markAllNotificationsRead(): Promise<{ flipped: number }> {
       }
     }
     if (flipped > 0) {
-      await saveState({ version: 1, scopes: nextScopes });
+      await saveState({
+        version: 2,
+        genesisIdentity: state.genesisIdentity,
+        scopes: nextScopes,
+      });
     }
     return { flipped };
   } catch {
