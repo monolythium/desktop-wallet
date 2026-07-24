@@ -209,6 +209,29 @@ export async function invalidateReverseName(addressLower: string): Promise<void>
   await saveState({ version: 1, reverse: next });
 }
 
+/** Drop every reverse-name entry owned by `addressLower`, ACROSS ALL CHAINS —
+ *  called from the vault-removal cleanup so a removed vault leaves no resolved
+ *  counterparty names behind. Exact-prefix with a TRAILING DOT, so one address
+ *  never purges another that is a prefix of it (`mono1a` vs `mono1aa`).
+ *  Best-effort. */
+export async function purgeScopesForAddress(addressLower: string): Promise<void> {
+  const scope = addressLower.toLowerCase();
+  if (scope.length === 0) return;
+  const prefix = `mono.name.reverse.${scope}.`;
+  const state = await loadState();
+  const next: Record<string, ReverseNameEntry> = {};
+  let removed = 0;
+  for (const [k, v] of Object.entries(state.reverse)) {
+    if (k.startsWith(prefix)) {
+      removed += 1;
+      continue;
+    }
+    next[k] = v;
+  }
+  if (removed === 0) return;
+  await saveState({ version: 1, reverse: next });
+}
+
 /** Clear everything (tests / dev). */
 export async function clearReverseNameCacheStore(): Promise<void> {
   await saveState({ version: 1, reverse: {} });

@@ -35,6 +35,7 @@ import {
   hydratePendingTxs,
   listPendingTxs,
   pendingTxsSnapshot,
+  purgeScopesForAddress,
   removePendingTx,
   subscribePendingTxs,
 } from "../pending-tx-store";
@@ -157,5 +158,40 @@ describe("subscribePendingTxs — mutation fan-out drives the snapshot", () => {
     expect(hits).toBe(0);
     expect(pendingTxsSnapshot()).toHaveLength(1);
     unsub();
+  });
+});
+
+describe("purgeScopesForAddress — vault-removal cleanup", () => {
+  it("removes every tracked tx for the address across all chains, leaving others", async () => {
+    await enqueuePendingTx(tx({ txHash: "0xa1", addressLower: "mono1gone", chainIdHex: "0x10f2c" }));
+    await enqueuePendingTx(tx({ txHash: "0xa2", addressLower: "mono1gone", chainIdHex: "0x539" }));
+    await enqueuePendingTx(tx({ txHash: "0xb1", addressLower: "mono1keep", chainIdHex: "0x10f2c" }));
+
+    await purgeScopesForAddress("mono1gone");
+
+    // Both of the removed vault's rows are gone (both chains); the other survives.
+    expect((await listPendingTxs()).map((t) => t.txHash)).toEqual(["0xb1"]);
+  });
+
+  it("matches the address case-insensitively", async () => {
+    await enqueuePendingTx(tx({ txHash: "0xu", addressLower: "MONO1GONE" }));
+    await purgeScopesForAddress("mono1gone");
+    expect(await listPendingTxs()).toEqual([]);
+  });
+
+  it("is a no-op (no write) when nothing matches", async () => {
+    await enqueuePendingTx(tx({ txHash: "0xkeep", addressLower: "mono1keep" }));
+    let notified = 0;
+    const unsub = subscribePendingTxs(() => notified++);
+    await purgeScopesForAddress("mono1other");
+    expect(notified).toBe(0);
+    expect((await listPendingTxs()).map((t) => t.txHash)).toEqual(["0xkeep"]);
+    unsub();
+  });
+
+  it("does nothing for an empty scope", async () => {
+    await enqueuePendingTx(tx({ txHash: "0xkeep", addressLower: "mono1keep" }));
+    await purgeScopesForAddress("");
+    expect(await listPendingTxs()).toHaveLength(1);
   });
 });

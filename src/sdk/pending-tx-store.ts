@@ -207,6 +207,23 @@ export async function applyPendingTransition(
   }
 }
 
+/** Drop every tracked tx owned by `addressLower`, ACROSS ALL CHAINS — called
+ *  from the vault-removal cleanup so a removed vault leaves no in-flight tx
+ *  history behind (the same data-hygiene contract the other scoped stores keep).
+ *  Address compared case-folded; a no-op when nothing matches. Best-effort. */
+export async function purgeScopesForAddress(addressLower: string): Promise<void> {
+  const scope = addressLower.toLowerCase();
+  if (scope.length === 0) return;
+  try {
+    const env = await loadEnvelope();
+    const next = env.txs.filter((t) => t.addressLower.toLowerCase() !== scope);
+    if (next.length === env.txs.length) return;
+    await saveEnvelope({ schemaVersion: 0, txs: next });
+  } catch {
+    // Best-effort — a failed purge never blocks vault removal.
+  }
+}
+
 /** Cheap "is the poller needed?" probe — true iff ≥1 tracked tx. */
 export async function hasPendingTxs(): Promise<boolean> {
   try {
