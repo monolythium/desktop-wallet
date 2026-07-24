@@ -95,29 +95,30 @@ async function probeTx(txHash: string): Promise<ChainProbe> {
   let txStatus: ChainProbe["txStatus"];
   try {
     const status = await client.lythTxStatus(txHash);
-    if (status.status === "found") {
-      txStatus = {
-        kind: "found",
-        blockNumber:
-          typeof status.blockNumber === "number" &&
-          Number.isFinite(status.blockNumber)
-            ? status.blockNumber
-            : null,
-        txIndex:
-          typeof status.txIndex === "number" && Number.isFinite(status.txIndex)
-            ? status.txIndex
-            : null,
-      };
-      // Already terminal-confirmed; no need to spend a receipt round-trip.
-      return { txStatus, receipt: { kind: "skipped" } };
-    }
-    txStatus = { kind: "not_found" };
+    txStatus =
+      status.status === "found"
+        ? {
+            kind: "found",
+            blockNumber:
+              typeof status.blockNumber === "number" &&
+              Number.isFinite(status.blockNumber)
+                ? status.blockNumber
+                : null,
+            txIndex:
+              typeof status.txIndex === "number" && Number.isFinite(status.txIndex)
+                ? status.txIndex
+                : null,
+          }
+        : { kind: "not_found" };
   } catch {
     txStatus = { kind: "throw" };
   }
 
-  // Not surfaced by the indexer yet (or the status RPC failed) — ask for the
-  // receipt so a reverted tx still reaches a "failed" verdict.
+  // Always consult the receipt — including for a `found` tx. `lyth_txStatus`
+  // reports INCLUSION, not success (a reverted tx is also "found"), so the
+  // receipt's status bit is the only authority on the outcome. Scoped to the
+  // status bit (F1); the reason text is F4. Uses the sanctioned reader, whose
+  // `status` field is delivered (verified live), unlike `revertReason`.
   let receipt: ChainProbe["receipt"];
   try {
     const r = await client.ethGetTransactionReceipt(txHash);

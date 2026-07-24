@@ -298,33 +298,39 @@ export type PendingVerdict =
 /** Deterministic terminal-state classification for one tracked tx.
  *
  *  The terminal-state classification rules:
- *    1. `lyth_txStatus="found"` → confirmed (the indexer only surfaces
- *       included txs). Carries the inclusion block number when present.
- *    2. Otherwise consult the receipt: `status === 1` → confirmed,
- *       `status === 0` → failed (the genuine on-chain revert — THIS is the
- *       path the bounded fire-and-forget poll could never reach, because the
- *       old design only recorded "failed" on a synchronous submit throw, which
- *       produced no hash to key on).
- *    3. Anything else — `not_found`, a null/throwing receipt, an unparseable
- *       status bit — keeps the tx pending. We NEVER synthesize a verdict; the
- *       window-expiry backstop drops a tx that never resolves.
+ *    1. The receipt's status bit is the ONLY authority on OUTCOME:
+ *       `status === 1` → confirmed, `status === 0` → failed. `lyth_txStatus`
+ *       carries INCLUSION, not success — a reverted tx is also `found` — so it
+ *       is never a confirming signal on its own; it only supplies the inclusion
+ *       slot to fall back on when a success receipt omits its own.
+ *    2. An included tx (`found`) whose outcome is not yet establishable — no
+ *       receipt this round (`null`/`throw`/`skipped`), or an unparseable status
+ *       bit — stays PENDING: neither confirmed nor failed. It resolves on a
+ *       later tick once the receipt lands, and the window-expiry backstop drops
+ *       one that never resolves. Defaulting `found` to confirmed would tell the
+ *       user a reverted tx succeeded; defaulting it to failed would invite a
+ *       double-spend retry of a tx that in fact succeeded — so we do neither.
+ *    3. Everything else (`not_found` with no receipt, both RPCs threw) is the
+ *       ordinary awaiting-inclusion pending state.
  *
  *  Pure: the RPC calls happen in `reconcile.ts`; this only maps their results. */
 export function classifyPending(probe: ChainProbe): PendingVerdict {
-  if (probe.txStatus.kind === "found") {
-    return {
-      kind: "confirmed",
-      blockNumber: probe.txStatus.blockNumber,
-      txIndex: probe.txStatus.txIndex,
-    };
-  }
+  const found = probe.txStatus.kind === "found" ? probe.txStatus : null;
   const r = probe.receipt;
   if (r.kind === "receipt") {
     if (r.status === 1) {
-      return { kind: "confirmed", blockNumber: r.blockNumber, txIndex: r.txIndex };
+      return {
+        kind: "confirmed",
+        blockNumber: r.blockNumber ?? found?.blockNumber ?? null,
+        txIndex: r.txIndex ?? found?.txIndex ?? null,
+      };
     }
-    if (r.status === 0) return { kind: "failed", blockNumber: r.blockNumber };
+    if (r.status === 0) {
+      return { kind: "failed", blockNumber: r.blockNumber ?? found?.blockNumber ?? null };
+    }
   }
+  // Included-but-outcome-unestablished, or plain awaiting-inclusion: keep
+  // tracking and re-probe. Never a synthesized terminal verdict.
   return { kind: "pending" };
 }
 

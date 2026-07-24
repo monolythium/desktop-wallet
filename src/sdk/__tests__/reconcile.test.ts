@@ -142,7 +142,10 @@ function seedActiveVault(): void {
 describe("reconcilePendingOnce — confirmed path (bridge)", () => {
   it("records a confirmed notification on found and BRIDGES (keeps it, stamps the slot)", async () => {
     await enqueuePendingTx(tx({ txHash: "0xc1" }));
-    txStatusScript.set("0xc1", { status: "found", blockNumber: 321 }); // fake found → txIndex 0
+    txStatusScript.set("0xc1", { status: "found", blockNumber: 321 }); // included → txIndex 0
+    // Included + successful: the receipt establishes the outcome ("found" alone
+    // is inclusion, not success, so a success receipt is now required to confirm).
+    receiptScript.set("0xc1", { status: 1, block_number: 321n, tx_index: 0 });
 
     const res = await reconcilePendingOnce();
     expect(res.recorded).toBe(1);
@@ -178,6 +181,7 @@ describe("reconcilePendingOnce — confirmed path (bridge)", () => {
   it("skips a bridged row on later ticks — no re-record, no re-toast", async () => {
     await enqueuePendingTx(tx({ txHash: "0xc3" }));
     txStatusScript.set("0xc3", { status: "found", blockNumber: 5 });
+    receiptScript.set("0xc3", { status: 1, block_number: 5n, tx_index: 0 });
     await reconcilePendingOnce();
     expect(toastSpy).toHaveBeenCalledTimes(1);
 
@@ -218,6 +222,24 @@ describe("reconcilePendingOnce — never synthesizes; keeps tracking", () => {
     expect(await listPendingTxs()).toHaveLength(1);
   });
 
+  it("an INCLUDED tx with no receipt yet stays pending, then resolves next tick", async () => {
+    // "found" is inclusion, not success — with no receipt this round the outcome
+    // is unestablished, so no terminal record fires; the tx keeps tracking.
+    await enqueuePendingTx(tx({ txHash: "0xinc" }));
+    txStatusScript.set("0xinc", { status: "found", blockNumber: 9 });
+
+    const t1 = await reconcilePendingOnce();
+    expect(t1.recorded).toBe(0);
+    expect(t1.remaining).toBe(1);
+    expect(await listAllNotifications()).toHaveLength(0);
+
+    // The receipt lands next tick → the outcome resolves (here: success).
+    receiptScript.set("0xinc", { status: 1, block_number: 9n, tx_index: 0 });
+    const t2 = await reconcilePendingOnce();
+    expect(t2.recorded).toBe(1);
+    expect((await listAllNotifications())[0]!.status).toBe("confirmed");
+  });
+
   it("keeps a tx pending when both RPCs throw", async () => {
     await enqueuePendingTx(tx({ txHash: "0xp2" }));
     txStatusScript.set("0xp2", { throws: true });
@@ -240,6 +262,7 @@ describe("reconcilePendingOnce — lifecycle retention (honest absence)", () => 
       tx({ txHash: "0xs1", submittedAt: now - PENDING_SLOW_MS - 1_000 }),
     );
     txStatusScript.set("0xs1", { status: "found", blockNumber: 5 });
+    receiptScript.set("0xs1", { status: 1, block_number: 5n, tx_index: 0 });
 
     const res = await reconcilePendingOnce(now);
     expect(res.recorded).toBe(1);
@@ -271,6 +294,7 @@ describe("reconcilePendingOnce — dedupe across ticks", () => {
   it("a re-enqueued terminal hash never produces a second notification", async () => {
     await enqueuePendingTx(tx({ txHash: "0xd1" }));
     txStatusScript.set("0xd1", { status: "found", blockNumber: 1 });
+    receiptScript.set("0xd1", { status: 1, block_number: 1n, tx_index: 0 });
     await reconcilePendingOnce();
     expect(await listAllNotifications()).toHaveLength(1);
 
@@ -288,6 +312,7 @@ describe("reconcilePendingOnce — OS toast fires once per new record", () => {
   it("fires the OS toast exactly once for a newly-recorded confirmed tx", async () => {
     await enqueuePendingTx(tx({ txHash: "0xt1" }));
     txStatusScript.set("0xt1", { status: "found", blockNumber: 7 });
+    receiptScript.set("0xt1", { status: 1, block_number: 7n, tx_index: 0 });
 
     await reconcilePendingOnce();
     expect(toastSpy).toHaveBeenCalledTimes(1);
@@ -311,6 +336,7 @@ describe("reconcilePendingOnce — OS toast fires once per new record", () => {
   it("does NOT re-toast a re-observed (deduped) terminal hash", async () => {
     await enqueuePendingTx(tx({ txHash: "0xt3" }));
     txStatusScript.set("0xt3", { status: "found", blockNumber: 1 });
+    receiptScript.set("0xt3", { status: 1, block_number: 1n, tx_index: 0 });
     await reconcilePendingOnce();
     expect(toastSpy).toHaveBeenCalledTimes(1);
 
@@ -349,6 +375,7 @@ describe("reconcilePendingOnce — mixed batch in one tick", () => {
       tx({ txHash: "0xold", submittedAt: now - PENDING_TERMINAL_RETAIN_MS - 1 }),
     );
     txStatusScript.set("0xok", { status: "found", blockNumber: 10 });
+    receiptScript.set("0xok", { status: 1, block_number: 10n, tx_index: 0 });
     receiptScript.set("0xrevert", { status: 0, block_number: 11n });
 
     const res = await reconcilePendingOnce(now);
@@ -376,6 +403,7 @@ describe("reconcilePendingOnce — chain scope isolation", () => {
     await enqueuePendingTx(tx({ txHash: "0xoffchain", chainIdHex: "0x539" }));
     // BOTH hashes would confirm if probed — only the active-chain one may be.
     txStatusScript.set("0xactive", { status: "found", blockNumber: 10 });
+    receiptScript.set("0xactive", { status: 1, block_number: 10n, tx_index: 0 });
     txStatusScript.set("0xoffchain", { status: "found", blockNumber: 10 });
 
     const res = await reconcilePendingOnce();

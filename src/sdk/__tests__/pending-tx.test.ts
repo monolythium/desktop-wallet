@@ -40,22 +40,44 @@ function probe(over: Partial<ChainProbe> = {}): ChainProbe {
 }
 
 describe("classifyPending — terminal detection (status fidelity)", () => {
-  it("confirms on lyth_txStatus=found, carrying the inclusion slot (block + txIndex)", () => {
+  it("confirms a found tx once its receipt shows success, carrying the inclusion slot", () => {
     const v = classifyPending(
-      probe({ txStatus: { kind: "found", blockNumber: 4242, txIndex: 7 } }),
+      probe({
+        txStatus: { kind: "found", blockNumber: 4242, txIndex: 7 },
+        receipt: { kind: "receipt", status: 1, blockNumber: 4242, txIndex: 7 },
+      }),
     );
     expect(v.kind).toBe("confirmed");
     expect(v.kind === "confirmed" && v.blockNumber).toBe(4242);
     expect(v.kind === "confirmed" && v.txIndex).toBe(7);
   });
 
-  it("confirms on found even when block/txIndex are absent (null)", () => {
+  it("falls back to the found txStatus slot when a success receipt omits it", () => {
     const v = classifyPending(
-      probe({ txStatus: { kind: "found", blockNumber: null, txIndex: null } }),
+      probe({
+        txStatus: { kind: "found", blockNumber: 4242, txIndex: 7 },
+        receipt: { kind: "receipt", status: 1, blockNumber: null, txIndex: null },
+      }),
     );
     expect(v.kind).toBe("confirmed");
-    expect(v.kind === "confirmed" && v.blockNumber).toBeNull();
-    expect(v.kind === "confirmed" && v.txIndex).toBeNull();
+    expect(v.kind === "confirmed" && v.blockNumber).toBe(4242);
+    expect(v.kind === "confirmed" && v.txIndex).toBe(7);
+  });
+
+  it("an included tx whose receipt is not yet available stays PENDING, never confirmed", () => {
+    // "found" is inclusion, not success — a reverted tx is also found. Until the
+    // receipt establishes the outcome, the honest verdict is neither terminal.
+    expect(
+      classifyPending(probe({ txStatus: { kind: "found", blockNumber: 4242, txIndex: 7 } })).kind,
+    ).toBe("pending");
+  });
+
+  it("an included tx whose receipt read threw stays PENDING (never a default verdict)", () => {
+    expect(
+      classifyPending(
+        probe({ txStatus: { kind: "found", blockNumber: 5, txIndex: 1 }, receipt: { kind: "throw" } }),
+      ).kind,
+    ).toBe("pending");
   });
 
   it("confirms on a receipt status===1 (with its slot) when txStatus has not surfaced", () => {
@@ -81,12 +103,13 @@ describe("classifyPending — terminal detection (status fidelity)", () => {
     expect(v.kind === "failed" && v.blockNumber).toBe(7);
   });
 
-  it("found short-circuits a (hypothetical) reverted receipt — indexer inclusion wins", () => {
+  it("a found tx with a reverted receipt is FAILED — inclusion is not success", () => {
     const v = classifyPending({
       txStatus: { kind: "found", blockNumber: 5, txIndex: 1 },
       receipt: { kind: "receipt", status: 0, blockNumber: 5, txIndex: 1 },
     });
-    expect(v.kind).toBe("confirmed");
+    expect(v.kind).toBe("failed");
+    expect(v.kind === "failed" && v.blockNumber).toBe(5);
   });
 });
 
