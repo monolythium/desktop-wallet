@@ -142,7 +142,7 @@ describe("MRU ordering", () => {
 describe("rename / edit-note / remove", () => {
   it("rename mutates only the name", async () => {
     await addressbookAdd({ name: "Alice", address: A, note: "keep me" });
-    expect(await addressbookRename(A, "Alicia")).toEqual({ renamed: true });
+    expect(await addressbookRename({ address: A, name: "Alicia" })).toEqual({ renamed: true });
     const r = await addressbookGetByAddress(A);
     expect(r?.name).toBe("Alicia");
     expect(r?.note).toBe("keep me");
@@ -150,23 +150,23 @@ describe("rename / edit-note / remove", () => {
 
   it("editNote mutates only the note, and blanks remove it", async () => {
     await addressbookAdd({ name: "Alice", address: A, note: "first" });
-    await addressbookEditNote(A, "second");
+    await addressbookEditNote({ address: A, note: "second" });
     expect((await addressbookGetByAddress(A))?.note).toBe("second");
-    await addressbookEditNote(A, "  ");
+    await addressbookEditNote({ address: A, note: "  " });
     const r = await addressbookGetByAddress(A);
     expect(r?.note).toBeNull();
     expect(r?.name).toBe("Alice");
   });
 
   it("rename and editNote are no-ops for an unknown address", async () => {
-    expect(await addressbookRename(C, "Nobody")).toEqual({ renamed: false });
-    expect(await addressbookEditNote(C, "x")).toEqual({ edited: false });
+    expect(await addressbookRename({ address: C, name: "Nobody" })).toEqual({ renamed: false });
+    expect(await addressbookEditNote({ address: C, note: "x" })).toEqual({ edited: false });
   });
 
   it("rename enforces the same name rules", async () => {
     await addressbookAdd({ name: "Alice", address: A });
-    await expect(addressbookRename(A, "  ")).rejects.toThrow("Name is required.");
-    await expect(addressbookRename(A, "x".repeat(65))).rejects.toThrow(
+    await expect(addressbookRename({ address: A, name: "  " })).rejects.toThrow("Name is required.");
+    await expect(addressbookRename({ address: A, name: "x".repeat(65) })).rejects.toThrow(
       "Name must be 64 characters or fewer.",
     );
   });

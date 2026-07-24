@@ -332,8 +332,8 @@ function ContactRow({
     try {
       // The ADDRESS is never editable — a different address is a different
       // contact (remove + add), not a rename.
-      await addressbookRename(entry.address, draftName);
-      await addressbookEditNote(entry.address, draftNote);
+      await addressbookRename({ address: entry.address, name: draftName });
+      await addressbookEditNote({ address: entry.address, note: draftNote });
       setEditing(false);
       onSaved();
     } catch (cause) {

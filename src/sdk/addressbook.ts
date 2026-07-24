@@ -325,10 +325,15 @@ export async function addressbookAdd(input: AddressBookAddInput): Promise<Contac
   return record;
 }
 
-/** Rename a contact. Mutates only `name`; a missing key is a silent no-op. */
+/** Rename a contact. Mutates only `name`; a missing key is a silent no-op.
+ *
+ *  Named-argument object: `address` (the lowercased-bech32m lookup KEY) and
+ *  `name` (the new VALUE) are both `string`. This is the exact shape of the
+ *  removal bug that already shipped in this module family — a positional swap
+ *  computes key(name), matches nothing, and returns { renamed: false } silently.
+ *  Naming the fields makes the key/value transposition a compile error. */
 export async function addressbookRename(
-  address: string,
-  name: string,
+  { address, name }: { address: string; name: string },
 ): Promise<{ renamed: boolean }> {
   const trimmed = name.trim();
   if (trimmed === "") throw new AddressBookCallError("Name is required.");
@@ -345,10 +350,10 @@ export async function addressbookRename(
   return { renamed: true };
 }
 
-/** Edit a contact's note. An empty note removes the field. */
+/** Edit a contact's note. An empty note removes the field. Named-argument object
+ *  for the same key/value reason as `addressbookRename` above. */
 export async function addressbookEditNote(
-  address: string,
-  note: string,
+  { address, note }: { address: string; note: string },
 ): Promise<{ edited: boolean }> {
   const trimmed = note.trim();
   if (trimmed.length > MAX_NOTE_LEN) {
