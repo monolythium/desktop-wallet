@@ -30,6 +30,7 @@ import {
   normaliseActivityCoverageKind,
   type ActivityCoverageKind,
 } from "./activity-coverage";
+import { NATIVE_LYTH_TOKEN_ID } from "./lyth-display";
 
 export interface RpcOutcome<T> {
   ok: boolean;
@@ -241,7 +242,11 @@ export async function loadLiveTokenStatus(wallet: string): Promise<LiveTokenStat
     }),
     capture(() => client.lythGetTokenBalances(typedWallet)),
     capture(() => client.lythGetAddressLabel(typedWallet)),
-    capture(() => client.lythGetAssetPolicy("LYTH") as Promise<Record<string, unknown>>),
+    // The chain keys the asset-policy read by 32-byte token id, not the ticker;
+    // native LYTH is the all-zero id. Passing "LYTH" -32602s on every call.
+    capture(
+      () => client.lythGetAssetPolicy(NATIVE_LYTH_TOKEN_ID) as Promise<Record<string, unknown>>,
+    ),
   ]);
   // Formatted (full-precision) LYTH for existing consumers, derived from the
   // raw lythoshi so both share the one `eth_getBalance` read and can't diverge.

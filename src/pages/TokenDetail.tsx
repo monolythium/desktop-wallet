@@ -41,6 +41,7 @@ import { NATIVE_LYTH_DECIMALS, formatLyth } from "@monolythium/core-sdk";
 import { MONOSCAN_GET_LYTH_URL } from "../sdk/monoscan";
 import { ExternalLink } from "../components/ExternalLink";
 import { isNativeRef, readSelectedToken } from "../sdk/selected-token";
+import { useDeveloperMode } from "../sdk/developer-mode";
 import { selectTokenDetailFacts } from "../sdk/token-detail";
 import { nativeFracDigits } from "../sdk/token-rows";
 import { loadTokenMetaMap, type TokenMeta } from "../sdk/token-metadata";
@@ -376,6 +377,7 @@ function InfoTab({
   endpoint: string;
   supply: LiveSupplyStatus | null;
 }) {
+  const devMode = useDeveloperMode();
   // Asset policy fields are only available for native LYTH (the live read
   // queries the LYTH policy). MRC rows show "—" rather than a fabricated
   // policy. There is no decimals read for an MRC row either, so native shows
@@ -433,6 +435,13 @@ function InfoTab({
           <div className="row-help" style={{ marginTop: 10 }}>
             No price, supply, holder, or per-asset policy oracle is exposed for
             MRC-20 rows yet — those fields read as "—".
+          </div>
+        ) : null}
+        {devMode && facts.isNative && facts.assetPolicyError !== null ? (
+          // A failed policy read must not read as an honest absence: in developer
+          // mode show the raw error so a broken call is visible, not a bare "—".
+          <div className="w-live-error" style={{ marginTop: 10 }}>
+            asset policy read failed: {facts.assetPolicyError}
           </div>
         ) : null}
         <div className="row-help" style={{ marginTop: 10 }}>

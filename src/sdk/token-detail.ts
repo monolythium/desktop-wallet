@@ -44,6 +44,11 @@ export interface TokenDetailFacts {
   updatedAtBlock: bigint | null;
   /** The asset policy record for native LYTH, when the read succeeded. */
   assetPolicy: Record<string, unknown> | null;
+  /** The asset-policy read's error when it FAILED, else null. Lets a broken
+   *  call be told apart from a genuinely empty policy (both leave `assetPolicy`
+   *  null) — surfaced in developer mode so a failed read never reads as an
+   *  honest absence. Null for MRC rows (no per-MRC policy read is wired). */
+  assetPolicyError: string | null;
   /** True when the selected MRC-20 ref was not found in the balance list. */
   notFound: boolean;
 }
@@ -75,6 +80,8 @@ export function selectTokenDetailFacts(
       tokenId: null,
       updatedAtBlock: null,
       assetPolicy: live?.assetPolicy.ok ? live.assetPolicy.value ?? null : null,
+      // A failed read carries its error (distinct from an ok-but-empty policy).
+      assetPolicyError: live && !live.assetPolicy.ok ? live.assetPolicy.error ?? "read failed" : null,
       notFound: false,
     };
   }
@@ -106,6 +113,7 @@ export function selectTokenDetailFacts(
     // No per-MRC asset-policy read is wired (loadLiveTokenStatus queries the
     // native LYTH policy only), so MRC rows carry none — the page shows "—".
     assetPolicy: null,
+    assetPolicyError: null,
     notFound: live?.tokenBalances.ok === true && row === undefined,
   };
 }

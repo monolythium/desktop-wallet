@@ -4,9 +4,23 @@ import {
   formatLythDisplay,
   formatTokenAmountDisplay,
   isNativeLythTokenId,
+  NATIVE_LYTH_TOKEN_ID,
   tokenUnitLabel,
   truncateDecimals,
 } from "../lyth-display";
+
+describe("NATIVE_LYTH_TOKEN_ID — the id chain reads (`lyth_getAssetPolicy`) require", () => {
+  it("is a 0x-prefixed 32-byte hex id (66 chars), never the ticker", () => {
+    expect(NATIVE_LYTH_TOKEN_ID).toMatch(/^0x[0-9a-f]{64}$/);
+    expect(NATIVE_LYTH_TOKEN_ID).not.toBe("LYTH");
+  });
+
+  it("is the all-zero native sentinel the wallet already recognizes", () => {
+    // mono-core: `NATIVE_LYTH_TOKEN_ID: Hash = Hash::ZERO` (schema.rs:62).
+    expect(NATIVE_LYTH_TOKEN_ID).toBe("0x" + "00".repeat(32));
+    expect(isNativeLythTokenId(NATIVE_LYTH_TOKEN_ID)).toBe(true);
+  });
+});
 
 describe("truncateDecimals", () => {
   it("truncates (not rounds) to N fractional digits and trims trailing zeros", () => {

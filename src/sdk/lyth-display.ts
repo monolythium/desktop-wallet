@@ -192,6 +192,12 @@ export function formatFeeLythDisplay(
   return truncateDecimals(exact, 18);
 }
 
+/** The native LYTH token id — the all-zero 32-byte hash the chain uses as the
+ *  native sentinel (`mono-core` `NATIVE_LYTH_TOKEN_ID: Hash = Hash::ZERO`,
+ *  schema.rs:62). Chain reads keyed by token id (e.g. `lyth_getAssetPolicy`)
+ *  require this 32-byte hex form, never the "LYTH" ticker. */
+export const NATIVE_LYTH_TOKEN_ID = "0x" + "00".repeat(32);
+
 /** True when a token id denotes native LYTH — `null`, or an all-zero
  *  (zero-address) id the indexer uses as the native sentinel. Real MRC-20 token
  *  ids (any non-zero hex) return false. Pure. */

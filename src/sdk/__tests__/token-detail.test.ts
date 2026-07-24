@@ -43,6 +43,26 @@ describe("selectTokenDetailFacts — native LYTH", () => {
       NATIVE_TOKEN_REF,
     );
     expect(facts.assetPolicy).toEqual({ mode: "open", allowTransparent: true });
+    expect(facts.assetPolicyError).toBeNull();
+  });
+
+  it("G1: a FAILED asset-policy read is distinguishable from an EMPTY one", () => {
+    // Empty (ok, no policy fields): null policy, no error — an honest absence.
+    const empty = selectTokenDetailFacts(
+      status({ assetPolicy: { ok: true, value: {} } }),
+      NATIVE_TOKEN_REF,
+    );
+    expect(empty.assetPolicy).toEqual({});
+    expect(empty.assetPolicyError).toBeNull();
+
+    // Failed read: null policy BUT the error is carried, so a broken call can
+    // never masquerade as "the chain has nothing for you".
+    const failed = selectTokenDetailFacts(
+      status({ assetPolicy: { ok: false, error: "invalid params: token id must be 32 bytes" } }),
+      NATIVE_TOKEN_REF,
+    );
+    expect(failed.assetPolicy).toBeNull();
+    expect(failed.assetPolicyError).toBe("invalid params: token id must be 32 bytes");
   });
 
   it("defaults to native facts when live status is null", () => {
@@ -50,6 +70,7 @@ describe("selectTokenDetailFacts — native LYTH", () => {
     expect(facts.isNative).toBe(true);
     expect(facts.balanceDisplay).toBeNull();
     expect(facts.assetPolicy).toBeNull();
+    expect(facts.assetPolicyError).toBeNull();
   });
 });
 
