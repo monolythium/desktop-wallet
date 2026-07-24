@@ -16,7 +16,7 @@
 // resolvers (`resolveExecutionFee` / `resolveRegistryExecutionFee`) read the live
 // `lyth_executionUnitPrice` quote, apply the safety multiplier, and default the
 // execution-unit limit per write class (the installed SDK transfer default is
-// 500_000n; registry/register ~250k) — and their output is then bounded by the
+// 500_000n; registry/register 1_000_000n) — and their output is then bounded by the
 // shared floor + ceiling (`postClampResolvedFee`), so every signed write is fee-
 // bounded whether or not it supplies its own fee.
 
@@ -54,7 +54,7 @@ export interface SubmitNativeTxArgs {
   /**
    * Override the SDK default execution-unit limit for this write. Leave
    * unset to take the sane per-class default (SDK transfer default 500_000n /
-   * registry ~250k). Ignored when `resolvedFee` is supplied (its gasLimit wins).
+   * registry 1_000_000n). Ignored when `resolvedFee` is supplied (its gasLimit wins).
    */
   executionUnitLimit?: bigint;
   /** Fee-resolution class. `transfer` (default) vs `registry`/`register`. */

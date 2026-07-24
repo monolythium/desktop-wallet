@@ -79,8 +79,9 @@ export async function createVault(password: string): Promise<Uint8Array> {
 }
 
 /**
- * Seal a caller-provided 32-byte seed. New wallet creation uses this after
- * deriving the seed from a BIP-39 mnemonic in the TypeScript SDK.
+ * Seal a caller-provided 32-byte seed. This function only seals; the seed is
+ * derived upstream from a BIP-39 mnemonic by the TypeScript SDK crypto module
+ * (`mnemonicToMlDsa65Seed`), never here.
  */
 export async function createVaultFromSeed(password: string, seed: Uint8Array): Promise<Uint8Array> {
   if (!password) {

@@ -4,10 +4,13 @@
 //  - a per-cluster 50% (5000 bps) per-wallet cap (chain revert 0x0213), and
 //  - a global 100% (10000 bps) total-delegation cap (chain revert 0x0205).
 //
-// The 50% per-cluster value is a FIXED protocol floor the chain always enforces;
-// no RPC exposes a live per-wallet cap, so it is hardcoded. A configurable
-// cluster-aggregate cap (lyth_getDelegationCap) only TIGHTENS it when present —
-// a disabled/unread aggregate cap (null) never lifts the floor (fail-closed).
+// The 50% per-cluster value is the compiled protocol default. It is not truly
+// FIXED — a foundation-signed milestone can only TIGHTEN it (a one-way
+// constitutional ratchet), and no RPC exposes the live per-wallet cap, so a
+// tightening milestone is undetectable client-side and the wallet hardcodes the
+// default. A configurable cluster-aggregate cap (lyth_getDelegationCap) only
+// TIGHTENS further when present — a disabled/unread aggregate cap (null) never
+// lifts the floor (fail-closed).
 
 /** Per-cluster per-wallet delegation cap floor, in basis points (5000 = 50%). */
 export const DELEGATION_PER_WALLET_CAP_BPS = 5000;

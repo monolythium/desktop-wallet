@@ -245,15 +245,11 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
   //      the green box instead of the amber warning regardless of familiarity.
   // Disabling (1) alone does NOT restore the warning; (2) still suppresses it.
   //
-  // WHERE A CONTACT-INTEGRITY CHECK WOULD GO: here, on this line — not at
-  // either consumer. The sent-recipients log is HMAC-bound to a seed-derived
-  // key, so an offline disk edit cannot plant a "you've paid this address
-  // before". The address book carries no such binding, and a planted contact is
-  // the STRONGER attack: it both fills the known-recipient box and asserts an
-  // identity for the address. Binding address-book entries the same way is an
-  // open decision; if it is taken, an unverified contact must resolve to null
-  // HERE, so that both mechanisms above see no contact at all. A check at one
-  // consumer would leave the other still suppressing the warning.
+  // WHERE A CONTACT-INTEGRITY CHECK WOULD GO: here, on this derivation — not at
+  // either consumer. Both mechanisms above read this one value, so any gate on
+  // contact data must live here: an unverified contact would resolve to null
+  // HERE, so both mechanisms see no contact at all. A check at one consumer
+  // alone would leave the other still suppressing the warning.
   const recipientContactName = resolvedContactName ?? matchedContactName;
   // A quorum-confirmed FORWARD hit — the name the user actually typed. This (and a
   // contact) is the ONLY thing that fills the green box / suppresses the warning;

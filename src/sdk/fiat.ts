@@ -13,9 +13,13 @@
 // bridging a pair name to a feed id. What does NOT exist is a registered
 // LYTH/USD feed: `OracleGenesisBundle` carries only `admin` + `writers` (there
 // is no feeds field, so genesis seeds who may write, never what feeds exist),
-// and no LYTH/USD feed name appears anywhere in mono-core. A read today would
-// return `round: 0, finalized: false, median: null`. So no LYTH→fiat rate is
-// obtainable and this module fabricates none. Wiring the oracle is a separate
+// and no LYTH/USD feed name appears anywhere in mono-core. A read today does not
+// return an unfinalized round — it ERRORS: `eth_call latestPrice` reverts with
+// `0x0104` FeedNotFound, and `lythOracleLatestPrice` returns `-32090 not found:
+// oracle feed … is not registered`. (`round: 0, finalized: false, median: null`
+// is the shape only AFTER a feed is registered but before its first round
+// finalizes.) So no LYTH→fiat rate is obtainable and this module fabricates
+// none. Wiring the oracle is a separate
 // decision with its own honesty questions (staleness vs `heartbeatSeconds`,
 // writer-roster disclosure, the unfinalized/indexer-unavailable posture) — it is
 // deliberately NOT taken here.

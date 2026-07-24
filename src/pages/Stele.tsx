@@ -1022,9 +1022,9 @@ function AcceptTransfer({ onAccepted }: { onAccepted?: () => void }) {
           </div>
         )}
         <div className="row-help" style={{ marginTop: 10, lineHeight: 1.5 }}>
-          The chain doesn't let the wallet list pending transfers to you or
-          pre-confirm one, so a wrong name or no live proposal is rejected on
-          submit. (A pending-transfers read would be a nice-to-have.)
+          No chain read exposes pending transfers to you, or lets the wallet
+          pre-confirm a specific one, so a wrong name or no live proposal is
+          rejected on submit. (A pending-transfers read would be a nice-to-have.)
         </div>
       </div>
     </div>
@@ -1128,7 +1128,7 @@ function MyNames({ refreshKey }: { refreshKey: number }) {
         ...(human
           ? [
               {
-                text: `Transferring this human name PERMANENTLY DELETES all its agent sub-names when accepted${children.length ? ` (known here: ${children.join(", ")})` : ""}. The chain can't enumerate them, so any not listed are deleted too.`,
+                text: `Transferring this human name PERMANENTLY DELETES all its agent sub-names when accepted${children.length ? ` (known here: ${children.join(", ")})` : ""}. No chain read exposes them, so any not listed are deleted too.`,
                 level: "warn" as const,
               },
             ]
@@ -1223,7 +1223,7 @@ function MyNames({ refreshKey }: { refreshKey: number }) {
                         {knownAgentChildren(localNames, e.name).length > 0
                           ? ` Known here: ${knownAgentChildren(localNames, e.name).join(", ")}.`
                           : ""}{" "}
-                        The chain can't enumerate them, so any not listed are deleted too.
+                        No chain read exposes them, so any not listed are deleted too.
                         <label style={{ display: "block", marginTop: 8 }}>
                           <input
                             type="checkbox"

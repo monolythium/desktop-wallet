@@ -12,12 +12,7 @@
 //     bound by an HMAC under a key derived from the vault SEED (never on disk).
 //   - Does NOT defend against an attacker who can read process memory during a
 //     session (nothing advisory could).
-//   - Does NOT cover the address book — a planted contact would also suppress the
-//     warning (and assert an identity). The asymmetry is deliberate: this log is
-//     invisible/unmanaged (a planted row is undetectable), while the address book
-//     is visible/user-managed (a fabricated contact is inspectable). Whether the
-//     address book should carry the same binding is an open question for the
-//     contacts phase — not decided here.
+//   - Scope: the binding covers this log only; other local stores are outside it.
 //
 // The sub-key is HKDF-SHA256(seed) with a dedicated domain label, cached in memory
 // for the session (keyed by the vault's 0x address), zeroized on lock / vault
