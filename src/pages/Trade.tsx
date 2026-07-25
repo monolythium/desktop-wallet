@@ -10,7 +10,7 @@ import type {
   NativeSpotMarketStateRecord,
   SpotLimitOrderSide,
 } from "@monolythium/core-sdk";
-import { findOrderBookStreamTopic } from "../sdk/market";
+import { findOrderBookStreamTopic, marketListingKnowledge } from "../sdk/market";
 import { formatOutcome, loadLiveTradeStatus, type LiveTradeStatus } from "../sdk/live";
 import { cancelClobOrder, placeClobLimitOrder } from "../sdk/clob-trade";
 import {
@@ -49,6 +49,14 @@ export function Trade() {
   const nativeState = status?.nativeMarketState.ok ? status.nativeMarketState.value ?? null : null;
   const marketRows = nativeState?.spotMarkets ?? [];
   const orderRows = nativeState?.spotOrders ?? [];
+  // What the wallet KNOWS about whether anything is listed — a successful zero
+  // and an unreadable list are different facts and are rendered differently.
+  const listing = marketListingKnowledge({
+    loaded: status !== null,
+    nativeOk: status?.nativeMarketState.ok === true,
+    indexedOk: status?.clobMarkets.ok === true,
+    selected: selected !== null,
+  });
 
   return (
     <div className="w-page">
@@ -57,10 +65,20 @@ export function Trade() {
         {/* The page is NOT read-only: it places and cancels limit orders below,
             and cancelling needs only an order id, so it works with no market
             listed. Saying "read-only" and then showing a submit button teaches
-            the user to distrust every other label on the screen. */}
+            the user to distrust every other label on the screen.
+
+            The second clause is conditional for the same reason. "No market is
+            listed" is a claim about the CHAIN and may only be made when both
+            market reads actually succeeded; when one failed the wallet does not
+            know what is listed and says so instead of reporting a confident
+            zero it did not observe. */}
         <div className="sub">
-          Native spot CLOB. Place and cancel limit orders; no market is listed yet, so
-          there is nothing to trade against.
+          Native spot CLOB. Place and cancel limit orders
+          {listing === "none"
+            ? "; no market is listed yet, so there is nothing to trade against."
+            : listing === "unknown"
+              ? "; the market list could not be read, so what is listed is unknown."
+              : "."}
         </div>
       </div>
 
@@ -79,7 +97,13 @@ export function Trade() {
             />
             <LiveCell label="Spot markets" value={status ? formatOutcome(status.nativeMarketState, (state) => state.spotMarkets.length.toString()) : "loading"} />
             <LiveCell label="Indexed markets" value={status ? formatOutcome(status.clobMarkets, (rows) => rows.markets.length.toString()) : "loading"} />
-            <LiveCell label="Selected market" value={selected?.label ?? (status ? "none" : "loading")} />
+            {/* "none" is a confident answer and is reserved for the case where
+                both market reads succeeded. An unreadable list reports
+                "unknown" — the wallet has nothing to report, not zero. */}
+            <LiveCell
+              label="Selected market"
+              value={selected?.label ?? (listing === "loading" ? "loading" : listing)}
+            />
           </div>
           {status ? <div className="row-help">JSON-RPC endpoint: <span className="mono">{status.endpoint}</span></div> : null}
           {status ? <div className="row-help">REST endpoint: <span className="mono">{status.apiBaseUrl}</span></div> : null}

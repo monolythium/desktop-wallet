@@ -41,6 +41,36 @@ export function selectNativeSpotMarket(
   return null;
 }
 
+/**
+ * What the wallet actually KNOWS about whether any market is listed.
+ *
+ * "No market is listed" and "the market list could not be read" are different
+ * facts, and only the first is a statement about the chain. A failed read is an
+ * absence of knowledge, so it resolves to `unknown` and callers must not render
+ * it as a confident zero.
+ *
+ * `none` therefore requires BOTH market reads to have succeeded — the selection
+ * draws on the native state and the indexed summaries, so either one failing
+ * leaves a listed market possible. A resolved selection is direct proof and
+ * wins regardless of read outcomes.
+ */
+export type MarketListingKnowledge = "loading" | "listed" | "none" | "unknown";
+
+export function marketListingKnowledge(args: {
+  /** The first status load has resolved. */
+  loaded: boolean;
+  /** `lyth_*` native market state read succeeded. */
+  nativeOk: boolean;
+  /** Indexed market summary read succeeded. */
+  indexedOk: boolean;
+  /** A market was actually resolved. */
+  selected: boolean;
+}): MarketListingKnowledge {
+  if (args.selected) return "listed";
+  if (!args.loaded) return "loading";
+  return args.nativeOk && args.indexedOk ? "none" : "unknown";
+}
+
 export function spotMarketLabel(market: Pick<NativeSpotMarketStateRecord, "baseAssetId" | "quoteAssetId">): string {
   return `${compactAssetId(market.baseAssetId)}/${compactAssetId(market.quoteAssetId)}`;
 }

@@ -199,6 +199,41 @@ describe("Trade with no market listed", () => {
   });
 });
 
+// ── an empty market list vs an unreadable one ───────────────────────────────
+
+describe("Trade market-list honesty", () => {
+  it("states plainly that nothing is listed when both reads succeeded", async () => {
+    await renderTrade(status([]));
+    expect(await screen.findByText(/no market is listed yet/)).toBeInTheDocument();
+    expect(screen.queryByText(/could not be read/)).toBeNull();
+  });
+
+  it("does not claim zero markets when the market read failed", async () => {
+    // The wallet did not observe an empty chain; it failed to look. Reporting
+    // "no market is listed" here would be asserting a fact it does not have.
+    const s = status([]);
+    (s as { nativeMarketState: unknown }).nativeMarketState = { ok: false, error: "HTTP 502" };
+    await renderTrade(s);
+    expect(await screen.findByText(/the market list could not be read/)).toBeInTheDocument();
+    expect(screen.queryByText(/no market is listed yet/)).toBeNull();
+  });
+
+  it("distinguishes the selected-market cell between a known none and an unknown", async () => {
+    // Scoped to the cell: "none" also appears as the market-card status pill,
+    // so a bare text query would not prove which one changed.
+    const cellValue = () => screen.getByText("Selected market").parentElement?.textContent ?? "";
+
+    const { unmount } = await renderTrade(status([]));
+    await waitFor(() => expect(cellValue()).toBe("Selected marketnone"));
+    unmount();
+
+    const s = status([]);
+    (s as { clobMarkets: unknown }).clobMarkets = { ok: false, error: "HTTP 502" };
+    await renderTrade(s);
+    await waitFor(() => expect(cellValue()).toBe("Selected marketunknown"));
+  });
+});
+
 // ── place-limit-order path ──────────────────────────────────────────────────
 
 describe("Trade place-limit-order", () => {

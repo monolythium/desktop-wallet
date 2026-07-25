@@ -1,9 +1,10 @@
-import { describe, expect, it } from "vitest";
+﻿import { describe, expect, it } from "vitest";
 import type { ApiStreamTopicMetadata, NativeMarketStateResponse } from "@monolythium/core-sdk";
 import {
   compactAssetId,
   compactMarketId,
   findOrderBookStreamTopic,
+  marketListingKnowledge,
   selectNativeSpotMarket,
   spotMarketLabel,
 } from "../market";
@@ -86,5 +87,44 @@ describe("native market helpers", () => {
 
     expect(findOrderBookStreamTopic(topics)?.retention?.replay).toBe(true);
     expect(findOrderBookStreamTopic([])).toBeNull();
+  });
+});
+
+describe("market listing knowledge", () => {
+  // "no market is listed" and "we could not read the market list" are
+  // different facts. The wallet may state the first only when it actually
+  // knows it; a failed read is an absence of knowledge and must never be
+  // rendered as a confident zero.
+  const both = { nativeOk: true, indexedOk: true };
+
+  it("is loading before the first read resolves", () => {
+    expect(marketListingKnowledge({ loaded: false, ...both, selected: false })).toBe("loading");
+  });
+
+  it("is listed when a market was selected", () => {
+    expect(marketListingKnowledge({ loaded: true, ...both, selected: true })).toBe("listed");
+  });
+
+  it("is a confident none only when BOTH market reads succeeded", () => {
+    expect(marketListingKnowledge({ loaded: true, ...both, selected: false })).toBe("none");
+  });
+
+  it("is unknown when the native market read failed", () => {
+    expect(
+      marketListingKnowledge({ loaded: true, nativeOk: false, indexedOk: true, selected: false }),
+    ).toBe("unknown");
+  });
+
+  it("is unknown when the indexed market read failed", () => {
+    expect(
+      marketListingKnowledge({ loaded: true, nativeOk: true, indexedOk: false, selected: false }),
+    ).toBe("unknown");
+  });
+
+  it("reports listed even if a read failed, because a selected market is proof", () => {
+    // One read failing does not unmake a market we actually resolved.
+    expect(
+      marketListingKnowledge({ loaded: true, nativeOk: false, indexedOk: false, selected: true }),
+    ).toBe("listed");
   });
 });
