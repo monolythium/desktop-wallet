@@ -108,7 +108,12 @@ function intOrNull(value: unknown): number | null {
  * dropped — never mislabelled — which is precisely why delegations, claims and
  * token transfers are structurally absent from this view.
  *
- * A self-send maps to a SINGLE "out" leg. Never throws: a malformed entry drops.
+ * A self-send maps to TWO legs, one "out" and one "in" — the shape the indexer
+ * serves. Its `address_activity` view selects the inbound arm on `to_addr` and
+ * the outbound arm on `from_addr` from the same `transfers` row, so a transfer
+ * whose sender and recipient match is served twice. Emitting one leg here made
+ * the same transaction render once or twice depending only on whether the
+ * indexer was up. Never throws: a malformed entry drops.
  */
 export function mapTxFeedToRows(
   transactions: unknown,
@@ -135,11 +140,6 @@ export function mapTxFeedToRows(
       const isIn = to === wallet;
       if (!isOut && !isIn) continue; // a third party's tx
 
-      // A self-send is ONE leg, not two.
-      const direction = isOut ? "out" : "in";
-      const counterparty = isOut ? to : from;
-      if (counterparty === null) continue;
-
       const blockHeight = intOrNull(e.blockNumber);
       const txIndex = intOrNull(e.txIndex);
       if (blockHeight === null || txIndex === null) continue;
@@ -147,24 +147,36 @@ export function mapTxFeedToRows(
       const txHash = typeof e.txHash === "string" && e.txHash.trim() !== "" ? e.txHash.trim() : null;
       const ts = intOrNull(e.blockTimestamp);
 
-      rows.push({
-        blockHeight: BigInt(blockHeight),
-        txIndex,
-        logIndex: NATIVE_TRANSFER_LOG_INDEX,
-        kind: "transfer",
-        subKind: null,
-        direction,
-        counterparty,
-        tokenId: null,
-        amount: String(e.value),
-        cluster: null,
-        weightBps: null,
-        blockTimestampSeconds: ts === null ? null : BigInt(ts),
-        // A real chain-served hash — never synthesized — so the detail modal
-        // may link it out.
-        txHash,
-        clusterName: null,
-      });
+      // One leg per side this wallet is on, each carrying the OPPOSITE column as
+      // its counterparty — the projection the indexer's two arms perform. An
+      // ordinary transfer matches one side and yields one row; a self-send
+      // matches both and yields two, at the same anchor.
+      const legs: Array<{ direction: "out" | "in"; counterparty: string | null }> = [];
+      if (isOut) legs.push({ direction: "out", counterparty: to });
+      if (isIn) legs.push({ direction: "in", counterparty: from });
+
+      for (const leg of legs) {
+        // An address we cannot canonicalise is never rendered.
+        if (leg.counterparty === null) continue;
+        rows.push({
+          blockHeight: BigInt(blockHeight),
+          txIndex,
+          logIndex: NATIVE_TRANSFER_LOG_INDEX,
+          kind: "transfer",
+          subKind: null,
+          direction: leg.direction,
+          counterparty: leg.counterparty,
+          tokenId: null,
+          amount: String(e.value),
+          cluster: null,
+          weightBps: null,
+          blockTimestampSeconds: ts === null ? null : BigInt(ts),
+          // A real chain-served hash — never synthesized — so the detail modal
+          // may link it out.
+          txHash,
+          clusterName: null,
+        });
+      }
     } catch {
       continue; // a malformed entry is dropped, never partially rendered
     }

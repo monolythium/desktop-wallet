@@ -108,10 +108,38 @@ describe("mapTxFeedToRows — conservative by design", () => {
     expect(rows[0]!.direction).toBe("in");
   });
 
-  it("maps a SELF-SEND to a single out leg", () => {
+  it("maps a SELF-SEND to TWO legs, one out and one in", () => {
+    // Chain canon: `address_activity` (mono-core
+    // crates/core/indexer/migrations/00027_delegation_claimed_events.sql:36-65)
+    // selects the inbound arm on `t.to_addr` and the outbound arm on
+    // `t.from_addr` from the same `transfers` row, so a transfer whose sender
+    // and recipient match is served TWICE. This fallback must present the same
+    // shape, or one transaction renders once or twice depending only on whether
+    // the indexer happens to be up.
     const rows = mapTxFeedToRows([entry({ from: WALLET, to: WALLET_HEX })], WALLET);
-    expect(rows).toHaveLength(1);
-    expect(rows[0]!.direction).toBe("out");
+    expect(rows).toHaveLength(2);
+    expect(rows.map((r) => r.direction).sort()).toEqual(["in", "out"]);
+    // Both legs name the wallet itself as the counterparty — that is what the
+    // view's opposite-column projection yields when both columns are equal.
+    expect(rows.every((r) => r.counterparty === WALLET)).toBe(true);
+    // Same anchor on both, exactly as the indexer serves it.
+    expect(rows[0]!.blockHeight).toBe(rows[1]!.blockHeight);
+    expect(rows[0]!.txIndex).toBe(rows[1]!.txIndex);
+    expect(rows[0]!.logIndex).toBe(rows[1]!.logIndex);
+  });
+
+  it("still maps an ordinary transfer between two DIFFERENT addresses to one row", () => {
+    // The two-leg rule is specific to sender == recipient. A normal send and a
+    // normal receive must each stay a single row.
+    const sent = mapTxFeedToRows([entry({ from: WALLET, to: PEER_HEX })], WALLET);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.direction).toBe("out");
+    expect(sent[0]!.counterparty).toBe(PEER);
+
+    const received = mapTxFeedToRows([entry({ from: PEER_HEX, to: WALLET })], WALLET);
+    expect(received).toHaveLength(1);
+    expect(received[0]!.direction).toBe("in");
+    expect(received[0]!.counterparty).toBe(PEER);
   });
 
   it("DROPS a contract call rather than mislabelling it", () => {
