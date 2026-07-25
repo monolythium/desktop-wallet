@@ -94,12 +94,13 @@ let _client: MonolythiumClient | null = null;
 let _clientOptions: RpcClientOptions = {};
 const _endpointSubscribers = new Set<(endpoint: string) => void>();
 
-// Trust gate for the active operator. `null` = trusted (or not yet checked — the
-// pinned genesis is compile-time correct, so the seam is optimistic until the
-// first health tick, which runs at mount). A non-null cause means the health
-// poll proved the active operator is NOT on the pinned chain/genesis (or is
-// quarantined/unreachable): every read + broadcast through `getProvider` then
-// fails-closed.
+// Trust gate for the active operator, and ONLY for the operator `_client` is
+// currently bound to — `setEndpoint` drops it, so a verdict can never outlive
+// the operator that earned it. `null` = verified (or, at boot only, not yet
+// checked: the seam is optimistic until the first health tick, which runs at
+// mount). A non-null cause means the active operator is not usable — proven off
+// the pinned chain/genesis, quarantined, or not yet reached — and every read +
+// broadcast through `getProvider` fails closed until a tick clears it.
 let _activeTrust: DegradedCause | null = null;
 
 /** Mark the active operator trusted (a genesis + chain-id check passed). */
@@ -163,11 +164,27 @@ export function currentEndpoint(): string {
  * subscribers. The new client reuses the options the provider was first created
  * with so the fetch shim and any caller config carry over. No-op when `url`
  * already matches the active endpoint.
+ *
+ * Switching DROPS the trust verdict (fail-closed). `_activeTrust` records what
+ * one operator proved; it says nothing about the next one, and carrying it
+ * across a switch is what let a hand-picked operator serve reads — and admit a
+ * broadcast — on the previous operator's clearance.
+ *
+ * Fail-closed is the right direction here under this wallet's own rule (a guard
+ * fails closed only when the chain will not catch its failure) because the chain
+ * cannot catch this one: the dangerous operator is a fork that reports OUR chain
+ * id, so it answers a balance read from its own ledger and admits a signed tx
+ * whose `tx.chainId` names the chain it claims to be. Nothing downstream
+ * notices. The cost is one health tick of refusal after a deliberate switch —
+ * and a switch re-runs the poll effect immediately, so it is one bounded
+ * round-trip, not a full period. `unreachable` is the honest cause: this
+ * operator has not been reached yet, not proven wrong.
  */
 export function setEndpoint(url: string): void {
   if (_client !== null && _client.endpoint === url) return;
   const rpcClient = new RpcClient(url, rpcClientOptions(_clientOptions));
   _client = { rpcClient, endpoint: rpcClient.endpoint };
+  _activeTrust = "unreachable";
   writePersistedEndpoint(_client.endpoint);
   for (const subscriber of _endpointSubscribers) subscriber(_client.endpoint);
 }

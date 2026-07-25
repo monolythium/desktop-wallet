@@ -1,14 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   MONOLYTHIUM_TESTNET_RPC_GATEWAY,
+  activeOperatorTrust,
   currentEndpoint,
+  getProvider,
   isKnownEndpoint,
+  markActiveOperatorTrusted,
   resetProviderForTest,
   resolveActiveEndpoint,
   resolveDefaultEndpoint,
   sdkTestnetRpcEndpoints,
   setEndpoint,
+  setProviderForTest,
   subscribeEndpoint,
+  type MonolythiumClient,
 } from "../client";
 import { RPC_ENDPOINT_KEY } from "../peers";
 
@@ -98,5 +103,47 @@ describe("setEndpoint / subscribeEndpoint / currentEndpoint", () => {
     setEndpoint(target);
     expect(seen).toEqual([]);
     unsubscribe();
+  });
+});
+
+describe("a trust verdict belongs to the operator that earned it", () => {
+  afterEach(() => resetProviderForTest());
+
+  function installTrusted(endpoint: string): void {
+    setProviderForTest({ rpcClient: {} as MonolythiumClient["rpcClient"], endpoint });
+    markActiveOperatorTrusted();
+  }
+
+  it("switching operators drops the previous operator's clearance", () => {
+    installTrusted("http://a");
+    expect(() => getProvider()).not.toThrow();
+
+    setEndpoint("http://b");
+
+    // The verdict was earned by http://a. http://b has proven nothing yet, and
+    // the chain cannot catch the dangerous case for us — a fork sharing our
+    // chain id accepts a signed tx and answers a balance read from its own
+    // ledger — so the seam refuses until the next tick verdicts this operator.
+    expect(() => getProvider()).toThrow(/untrusted operator/);
+    expect(activeOperatorTrust()).toBe("unreachable");
+  });
+
+  it("re-selecting the SAME operator is a no-op and keeps its verdict", () => {
+    // The failover path calls setEndpoint only on a genuine change; pinning this
+    // keeps a redundant call from flapping a healthy wallet into a refusal.
+    installTrusted("http://a");
+    setEndpoint("http://a");
+    expect(() => getProvider()).not.toThrow();
+    expect(activeOperatorTrust()).toBeNull();
+  });
+
+  it("the health tick's failover re-grants trust in the same turn it switches", () => {
+    // useChainHealth does `setEndpoint(res.url)` then `markActiveOperatorTrusted()`
+    // — the operator it switches TO is the one it just verified, so the drop must
+    // not survive the re-grant.
+    installTrusted("http://a");
+    setEndpoint("http://b");
+    markActiveOperatorTrusted();
+    expect(() => getProvider()).not.toThrow();
   });
 });
