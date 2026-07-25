@@ -154,6 +154,27 @@ describe("Delegate — the per-cluster reward figure the chain cannot complete",
     expect(screen.queryByText(/LYTH unsettled/i)).toBeNull();
   });
 
+  it("shows one wallet-level pending figure and no accounting split", async () => {
+    renderWithProviders(<Delegate />);
+
+    // The one number: totalAmountLythoshi, which claim() actually pays out.
+    await waitFor(() => {
+      expect(screen.getByText("7 LYTH")).toBeInTheDocument();
+    });
+
+    // Neither jargon term survives anywhere on the page. /settled/i catches
+    // "Unsettled" too, so this is one assertion for both words.
+    expect(screen.queryByText(/settled/i)).toBeNull();
+  });
+
+  it("explains pending rewards in words a first-time user can act on", async () => {
+    renderWithProviders(<Delegate />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/earned from delegating/i)).toBeInTheDocument();
+    });
+  });
+
   it("says why there is no per-cluster figure, so the absence reads as deliberate", async () => {
     const user = userEvent.setup();
     renderWithProviders(<Delegate />);

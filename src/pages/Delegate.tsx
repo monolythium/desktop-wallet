@@ -1434,6 +1434,17 @@ export function Delegate() {
                       return (
                         <>
                           <div>{pendingLyth} LYTH</div>
+                          {/* The figure above is `totalAmountLythoshi`, which is
+                              exactly what claim() pays out: it settles the
+                              per-cluster deltas first, then transfers the
+                              combined pot in one transaction. The chain's own
+                              settled/unsettled split is a storage boundary the
+                              user cannot act on either side of, so it is not
+                              shown. This says what the number IS instead. */}
+                          <div className="row-help" style={{ marginTop: 4, lineHeight: 1.5 }}>
+                            Earned from delegating. Claim to move it into your spendable
+                            balance.
+                          </div>
                           {/* The tooltip rides a wrapping span: a native title
                               on a disabled button is not reliably shown. */}
                           <span title={btn.tooltip ?? undefined} style={{ display: "inline-block" }}>
@@ -1488,15 +1499,7 @@ export function Delegate() {
                     alignItems: "center",
                   }}
                 >
-                  <span>
-                    Settled{" "}
-                    {truncateDecimals(formatRewardLyth(rewards.value.settledPendingLythoshi), 4)} LYTH
-                  </span>
-                  <span>
-                    · Unsettled{" "}
-                    {truncateDecimals(formatRewardLyth(rewards.value.unsettledAmountLythoshi), 4)} LYTH
-                  </span>
-                  <span>· Auto-compound {rewards.value.autoCompound ? "on" : "off"}</span>
+                  <span>Auto-compound {rewards.value.autoCompound ? "on" : "off"}</span>
                   <button
                     className="btn btn--sm btn--ghost"
                     data-testid="auto-compound-toggle"
