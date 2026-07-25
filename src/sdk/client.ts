@@ -94,14 +94,35 @@ let _client: MonolythiumClient | null = null;
 let _clientOptions: RpcClientOptions = {};
 const _endpointSubscribers = new Set<(endpoint: string) => void>();
 
+/**
+ * The state a cold module load starts in: nothing has been verified yet.
+ *
+ * The seam used to open optimistic here, on the grounds that the pinned genesis
+ * is compile-time correct. That justification does not survive: the pin being
+ * right says nothing about the OPERATOR, and the operator this build will dial
+ * comes from persistence (see `resolveActiveEndpoint`) — it was cleared in an
+ * EARLIER session, against a node nobody has re-verified since. That is the
+ * same stale clearance `setEndpoint` already drops on every switch, arriving
+ * through a different door, and the chain catches it no better here: a fork
+ * reporting our chain id answers a balance read from its own ledger and admits
+ * a signed tx whose `tx.chainId` matches.
+ *
+ * `unreachable` is the honest cause — not reached yet, not proven wrong — and it
+ * costs the user nothing visible: at boot the health machine is `loading`, which
+ * `chainKindNotLive` is false for, so the balance ladder falls to its existing
+ * skeleton (or the labelled last-known figure) rather than to a hidden state.
+ * The first tick clears it in one bounded round-trip.
+ */
+const UNVERIFIED_AT_BOOT: DegradedCause = "unreachable";
+
 // Trust gate for the active operator, and ONLY for the operator `_client` is
 // currently bound to — `setEndpoint` drops it, so a verdict can never outlive
-// the operator that earned it. `null` = verified (or, at boot only, not yet
-// checked: the seam is optimistic until the first health tick, which runs at
-// mount). A non-null cause means the active operator is not usable — proven off
-// the pinned chain/genesis, quarantined, or not yet reached — and every read +
-// broadcast through `getProvider` fails closed until a tick clears it.
-let _activeTrust: DegradedCause | null = null;
+// the operator that earned it. `null` = verified by a health tick, and nothing
+// else grants it. A non-null cause means the active operator is not usable —
+// proven off the pinned chain/genesis, quarantined, or not yet reached — and
+// every read + broadcast through `getProvider` fails closed until a tick clears
+// it. There is no longer any state in which the seam is open on an assumption.
+let _activeTrust: DegradedCause | null = UNVERIFIED_AT_BOOT;
 
 /** Mark the active operator trusted (a genesis + chain-id check passed). */
 export function markActiveOperatorTrusted(): void {
@@ -202,11 +223,16 @@ export function resetProviderForTest(): void {
   _client = null;
   _clientOptions = {};
   _endpointSubscribers.clear();
-  _activeTrust = null;
+  _activeTrust = UNVERIFIED_AT_BOOT; // the production cold-start state, not an open seam
 }
 
+/** Install a working provider for a test. Grants trust as well as binding the
+ *  client, because that is the pair production always has together: a client
+ *  exists via `ensureClient`, and a health tick is what clears the seam. A test
+ *  that wants the unverified boot state calls {@link resetProviderForTest}. */
 export function setProviderForTest(client: MonolythiumClient): void {
   _client = client;
+  _activeTrust = null;
 }
 
 export type ChainSnapshot = {

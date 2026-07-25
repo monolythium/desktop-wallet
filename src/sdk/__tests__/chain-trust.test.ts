@@ -329,7 +329,10 @@ describe("fail-closed seam — getProvider refuses an untrusted operator", () =>
   it("returns the provider when trusted, throws once marked untrusted, recovers when re-trusted", () => {
     setProviderForTest({ rpcClient: {} as MonolythiumClient["rpcClient"], endpoint: "http://op" });
 
-    // Default (not yet checked) is optimistic — the pin is compile-time correct.
+    // Open because setProviderForTest installs a VERIFIED operator — the pair
+    // production only ever has together. There is no longer a state in which the
+    // seam is open on an assumption; the unverified cold start is its own case,
+    // covered in client.test.ts.
     expect(() => getProvider()).not.toThrow();
 
     markActiveOperatorUntrusted("regenesis");

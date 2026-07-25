@@ -4,6 +4,8 @@ import {
   activeOperatorTrust,
   currentEndpoint,
   getProvider,
+  getProviderUnchecked,
+  markActiveOperatorUntrusted,
   isKnownEndpoint,
   markActiveOperatorTrusted,
   resetProviderForTest,
@@ -145,5 +147,40 @@ describe("a trust verdict belongs to the operator that earned it", () => {
     setEndpoint("http://b");
     markActiveOperatorTrusted();
     expect(() => getProvider()).not.toThrow();
+  });
+});
+
+describe("the boot window — no verdict yet is not the same as a good verdict", () => {
+  afterEach(() => resetProviderForTest());
+
+  it("refuses reads before the first tick has verified anything", () => {
+    // A cold module load has proved nothing about any operator. The endpoint it
+    // will dial comes from persistence — cleared in an EARLIER session, against
+    // an operator nobody has re-verified since — which is the same stale
+    // clearance the seam already drops on every switch, arriving by another door.
+    resetProviderForTest();
+    expect(activeOperatorTrust()).toBe("unreachable");
+    expect(() => getProvider()).toThrow(/untrusted operator/);
+  });
+
+  it("the first verdict opens it, and a later one can close it again", () => {
+    resetProviderForTest();
+    setProviderForTest({ rpcClient: {} as MonolythiumClient["rpcClient"], endpoint: "http://a" });
+
+    markActiveOperatorTrusted();
+    expect(() => getProvider()).not.toThrow();
+
+    markActiveOperatorUntrusted("regenesis");
+    expect(() => getProvider()).toThrow(/chain regenesis/);
+  });
+
+  it("the endpoint accessor stays usable while unverified, so the UI can still show and switch", () => {
+    // getProviderUnchecked is the health probe's door and the operator UI's; the
+    // boot refusal must not blind either of them.
+    resetProviderForTest();
+    setProviderForTest({ rpcClient: {} as MonolythiumClient["rpcClient"], endpoint: "http://a" });
+    resetProviderForTest();
+    expect(() => getProviderUnchecked()).not.toThrow();
+    expect(typeof currentEndpoint()).toBe("string");
   });
 });
