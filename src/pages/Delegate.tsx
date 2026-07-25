@@ -9,7 +9,7 @@
 // Every write routes through the OperationsDrawer (password unlock → vault seed
 // → delegation precompile call → plaintext mesh_submitTx submit).
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { RefreshButton } from "../components/RefreshButton";
 import type {
   ClusterDirectoryEntryResponse,
@@ -152,6 +152,12 @@ export function Delegate() {
   // (the chain removed completeRedemption — calling it now reverts). RpcOutcome
   // so a node failure shows the verbatim error rather than a fabricated empty.
   const [redemptions, setRedemptions] = useState<RpcOutcome<RedemptionQueueResponse> | null>(null);
+  // Which (wallet, chain) the redemption result belongs to. The legacy queue is a
+  // historical artifact that does not change between refreshes, so it is read
+  // ONCE per scope rather than on every load — a healthy wallet's queue is
+  // always empty, and paying a round trip for that on every refresh bought
+  // nothing. Scope-keyed so a ticket can never be shown against another wallet.
+  const redemptionScope = useRef<string | null>(null);
   const [openForm, setOpenForm] = useState<number | null>(null);
   // Redelegate draft: which source delegation row is open, plus the
   // destination cluster + weight to move. Distinct from the delegate form.
@@ -239,6 +245,7 @@ export function Delegate() {
   }, [acTarget, walletAddress]);
 
   const refresh = async () => {
+    const redemptionKey = `${walletAddress.toLowerCase()}:${scopeChainKey()}`;
     if (!walletAddress) {
       setStatus(null);
       setBalance(null);
@@ -246,7 +253,7 @@ export function Delegate() {
       setDirectoryError(null);
       setRewards(null);
       setAcTarget(null);
-      setRedemptions(null);
+      if (redemptionScope.current !== redemptionKey) setRedemptions(null);
       setAprBpsMap(new Map());
       setEntities(new Map());
       setExpandedDetail(null);
@@ -267,7 +274,9 @@ export function Delegate() {
           return null;
         }),
         capture(() => fetchPendingRewards(walletAddress)),
-        capture(() => fetchRedemptionQueue(walletAddress)),
+        redemptionScope.current === redemptionKey
+          ? Promise.resolve(null)
+          : capture(() => fetchRedemptionQueue(walletAddress)),
         // The affordability basis and comparand. Both resolve to null rather
         // than throwing, and null means "cannot tell" — never zero.
         loadDelegationFeeBasis(walletAddress),
@@ -282,7 +291,10 @@ export function Delegate() {
       setStatus(s);
       setBalance(bal);
       setRewards(rew);
-      setRedemptions(red);
+      if (red !== null) {
+        setRedemptions(red);
+        redemptionScope.current = redemptionKey;
+      }
       if (dir) {
         setDirectory(dir.clusters);
         setDirectoryError(null);
@@ -1756,21 +1768,16 @@ export function Delegate() {
                 </div>
               );
             })()
-          : redemptions.ok === false
-            ? (
-                <div className="w-card">
-                  <div className="w-card__head">
-                    <h3>Redemptions</h3>
-                    <span className="w-card__head__spacer" />
-                  </div>
-                  <div className="w-card__body">
-                    <div className="w-live-error">
-                      redemption queue: {redemptions.error}
-                    </div>
-                  </div>
-                </div>
-              )
-            : null
+          : // FAIL SILENT. This read is vestigial: undelegation is instant and a
+            // healthy wallet's queue is always empty, so the success branch
+            // above renders only when the node actually reports a legacy ticket.
+            // The failure branch had no such condition, so an operator that does
+            // not implement the method — or any transient failure — materialised
+            // a card headed "Redemptions" about a mechanism that does not apply
+            // to the current model. For most people that was the ONLY time the
+            // word would ever appear, teaching a concept the rest of this flow
+            // spends its copy denying. An unreadable vestigial queue is not news.
+            null
         : null}
 
       <div className="w-card">
