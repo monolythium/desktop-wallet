@@ -616,6 +616,7 @@ export function Delegate() {
         const result = await withDelegationRevertCopy(
           () => submitDelegationTx({ seed: ctx.vaultSeed!, data: calldata }),
           (message) => raiseRejection(clusterId, "delegate", message),
+          aggregateCapBps,
         );
         // Broadcast accepted — a stale rejection from an earlier attempt no
         // longer describes anything.
@@ -809,6 +810,7 @@ export function Delegate() {
           () => submitDelegationTx({ seed: ctx.vaultSeed!, data: calldata }),
           // The destination is what the user was trying to reach.
           (message) => raiseRejection(toCluster, "redelegate", message),
+          aggregateCapBps,
         );
         rejection.clear();
         return {
@@ -967,7 +969,7 @@ export function Delegate() {
 
     const capBps = autovoteBudgetBps(autoCapBps);
     if (capBps === null) {
-      setAutovoteError("Weight budget must be 1-10000 basis points (0.01% – 100%).");
+      setAutovoteError("Weight budget must be 1–10000 basis points (0.01% – 100%).");
       setAutovoteMode(null);
       setAutovotePlan(null);
       return;
@@ -1181,12 +1183,12 @@ export function Delegate() {
     const firstInvalid = invalid[0];
     if (firstInvalid !== undefined) {
       setAutovoteError(
-        `${clusterName(firstInvalid)}: enter a whole number of basis points (1-10000).`,
+        `${clusterName(firstInvalid)}: enter a whole number of basis points (1–10000).`,
       );
       return;
     }
     if (autovoteBudgetBps(autoCapBps) === null) {
-      setAutovoteError("Weight budget must be 1-10000 basis points (0.01% – 100%).");
+      setAutovoteError("Weight budget must be 1–10000 basis points (0.01% – 100%).");
       return;
     }
     if (allocations.length === 0) {
@@ -1195,7 +1197,7 @@ export function Delegate() {
     }
     for (const a of allocations) {
       if (a.weightBps > 10_000) {
-        setAutovoteError(`${clusterName(a.clusterId)}: weight must be 1-10000 bps.`);
+        setAutovoteError(`${clusterName(a.clusterId)}: weight must be 1–10000 bps.`);
         return;
       }
     }
@@ -2173,7 +2175,7 @@ export function Delegate() {
                           const bps = parseExactNonNegativeInteger(draftWeightBps);
                           if (bps === null || bps <= 0 || bps > 10_000) {
                             setDraftError(
-                              "Weight must be 1-10000 basis points (0.01% – 100%).",
+                              "Weight must be 1–10000 basis points (0.01% – 100%).",
                             );
                             return;
                           }

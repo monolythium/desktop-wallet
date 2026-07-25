@@ -35,13 +35,13 @@ describe("delegateCapWarning", () => {
 
   it("below cap → only the always-on note, no warning", () => {
     const r = delegateCapWarning({ ...base, existingWeightBps: 0, additionalBps: 1000 });
-    expect(r.note).toBe("Per-wallet limit: 50% to any one cluster.");
+    expect(r.note).toBe("Per-wallet cap: 50% to any one cluster.");
     expect(r.warning).toBeNull();
   });
 
   it("already at the per-cluster cap → cap-reached warning (any amount)", () => {
     const r = delegateCapWarning({ ...base, existingWeightBps: 5000, additionalBps: 100 });
-    expect(r.warning).toMatch(/already delegated the 50% per-cluster maximum/);
+    expect(r.warning).toMatch(/already at the 50% per-wallet cap/);
   });
 
   it("over the per-cluster cap → overage warning with the exact excess", () => {

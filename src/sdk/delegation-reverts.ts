@@ -23,6 +23,7 @@ import {
   PER_WALLET_CAP_REVERT_MESSAGE,
   TOO_MANY_DELEGATIONS_MESSAGE,
   WALLET_TOTAL_CAP_REVERT_MESSAGE,
+  perWalletCapRevertMessage,
 } from "./delegation-caps";
 import { ClassifiedWalletError } from "./send-error";
 
@@ -136,9 +137,16 @@ function matchEntry(reason: string, code?: number): RevertEntry | null {
 export function classifyDelegationRevert(
   reason: string,
   code?: number,
+  /** The live aggregate cap, so the per-wallet-cap copy quotes the number that
+   *  actually binds rather than the floor. Absent → the floor. */
+  aggregateCapBps?: number | null,
 ): string | null {
   if (typeof reason !== "string" && code === undefined) return null;
-  return matchEntry(typeof reason === "string" ? reason : "", code)?.message ?? null;
+  const entry = matchEntry(typeof reason === "string" ? reason : "", code);
+  if (entry === null) return null;
+  return entry.code === REVERT_PER_WALLET_CAP
+    ? perWalletCapRevertMessage(aggregateCapBps ?? null)
+    : entry.message;
 }
 
 /** True only for the escrow-underfunded tripwire: the chain is momentarily out
@@ -161,13 +169,16 @@ export function isRetryableDelegationRevert(
  *  revert reason classifies wherever in the chain it sits.
  *
  *  Returns null when no level matches — the caller keeps the raw error. Pure. */
-export function classifyDelegationFailure(cause: unknown): string | null {
+export function classifyDelegationFailure(
+  cause: unknown,
+  aggregateCapBps?: number | null,
+): string | null {
   const seen = new Set<unknown>();
   let cur: unknown = cause;
   while (cur !== null && cur !== undefined && !seen.has(cur)) {
     seen.add(cur);
     if (typeof cur === "string") {
-      const hit = classifyDelegationRevert(cur);
+      const hit = classifyDelegationRevert(cur, undefined, aggregateCapBps);
       if (hit !== null) return hit;
       return null;
     }
@@ -176,7 +187,7 @@ export function classifyDelegationFailure(cause: unknown): string | null {
     const message = typeof o.message === "string" ? o.message : "";
     const code =
       typeof o.code === "number" && Number.isFinite(o.code) ? o.code : undefined;
-    const hit = classifyDelegationRevert(message, code);
+    const hit = classifyDelegationRevert(message, code, aggregateCapBps);
     if (hit !== null) return hit;
     cur = o.cause;
   }
@@ -196,11 +207,14 @@ export function classifyDelegationFailure(cause: unknown): string | null {
 export async function withDelegationRevertCopy<T>(
   run: () => Promise<T>,
   onMapped?: (message: string) => void,
+  /** The live aggregate cap, so a per-wallet-cap revert quotes the binding
+   *  number rather than the protocol floor. */
+  aggregateCapBps?: number | null,
 ): Promise<T> {
   try {
     return await run();
   } catch (cause) {
-    const mapped = classifyDelegationFailure(cause);
+    const mapped = classifyDelegationFailure(cause, aggregateCapBps);
     if (mapped === null) throw cause;
     onMapped?.(mapped);
     // ClassifiedWalletError, not a bare Error: this sentence IS the copy to

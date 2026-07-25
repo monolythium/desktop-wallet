@@ -39,7 +39,7 @@ describe("quiet below the boundary", () => {
     expect(s.warning).toBeNull();
     expect(capWarningEscalates(s)).toBe(false);
     // The note is ALWAYS present — it is information, not an alarm.
-    expect(s.note).toContain("Per-wallet limit");
+    expect(s.note).toContain("Per-wallet cap");
   });
 
   it("a comfortable amount → note only", () => {
@@ -58,7 +58,7 @@ describe("loud at the boundary", () => {
   it("already at the per-cluster cap → escalates", () => {
     const s = state({ existingWeightBps: CAP, additionalBps: null });
     expect(capWarningEscalates(s)).toBe(true);
-    expect(s.warning).toContain("already delegated");
+    expect(s.warning).toContain("already at the");
   });
 
   it("one basis point over the cap → escalates", () => {
@@ -76,7 +76,7 @@ describe("loud at the boundary", () => {
   it("the note still renders beside the loud warning", () => {
     // Escalating must not swallow the information the user needs to act.
     const s = state({ existingWeightBps: CAP });
-    expect(s.note).toContain("Per-wallet limit");
+    expect(s.note).toContain("Per-wallet cap");
     expect(s.warning).not.toBeNull();
   });
 });

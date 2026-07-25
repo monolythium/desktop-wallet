@@ -63,9 +63,21 @@ export function walletTotalHeadroomBps(totalDelegatedBps: number): number {
   return Math.max(0, WALLET_TOTAL_CAP_BPS - totalDelegatedBps);
 }
 
-/** Clear message for a chain 0x0213 PerWalletCapExceeded revert / pre-flight. */
-export const PER_WALLET_CAP_REVERT_MESSAGE =
-  "This cluster is already at the 50% per-wallet cap — reduce the amount or choose another cluster.";
+/** Message for a chain 0x0213 PerWalletCapExceeded revert / pre-flight, stating
+ *  the cap that actually binds.
+ *
+ *  It used to hard-code 50% while every form warning interpolated the binding
+ *  cap, so a tightened aggregate cap made the form say 30% and this say 50% in
+ *  one session. The number comes from the same resolver the warnings use, so the
+ *  two cannot disagree again; with no live cap in hand it falls back to the
+ *  protocol floor, which is what the resolver returns anyway. Pure. */
+export function perWalletCapRevertMessage(aggregateCapBps: number | null = null): string {
+  const binding = bindingPerClusterCapBps(aggregateCapBps);
+  return `This cluster is already at the ${(binding / 100).toFixed(0)}% per-wallet cap — reduce the amount or choose another cluster.`;
+}
+
+/** The floor-default wording, for callers with no live cap to interpolate. */
+export const PER_WALLET_CAP_REVERT_MESSAGE = perWalletCapRevertMessage();
 
 /** Clear message for a chain 0x0205 WalletTotalExceeded revert / pre-flight. */
 export const WALLET_TOTAL_CAP_REVERT_MESSAGE =
@@ -149,7 +161,7 @@ export function preflightDelegationVerdict(args: {
     return { ok: false, message: TOO_MANY_DELEGATIONS_MESSAGE };
   }
   if (exceedsPerClusterCap(dstExistingWeightBps, moveBps, capBps)) {
-    return { ok: false, message: PER_WALLET_CAP_REVERT_MESSAGE };
+    return { ok: false, message: perWalletCapRevertMessage(capBps) };
   }
   if (action === "delegate" && totalDelegatedBps + moveBps > WALLET_TOTAL_CAP_BPS) {
     return { ok: false, message: WALLET_TOTAL_CAP_REVERT_MESSAGE };
@@ -168,13 +180,13 @@ export function delegateCapWarning(args: {
   aggregateCapBps: number | null;
 }): { note: string; warning: string | null } {
   const binding = bindingPerClusterCapBps(args.aggregateCapBps);
-  const note = `Per-wallet limit: ${(binding / 100).toFixed(0)}% to any one cluster.`;
+  const note = `Per-wallet cap: ${(binding / 100).toFixed(0)}% to any one cluster.`;
 
   // Already at the per-cluster cap — independent of the entered amount.
   if (destinationAtPerClusterCap(args.existingWeightBps, args.aggregateCapBps)) {
     return {
       note,
-      warning: `You've already delegated the ${(binding / 100).toFixed(0)}% per-cluster maximum to this cluster — choose another cluster to delegate more.`,
+      warning: `You're already at the ${(binding / 100).toFixed(0)}% per-wallet cap for this cluster — choose another cluster to delegate more.`,
     };
   }
 
