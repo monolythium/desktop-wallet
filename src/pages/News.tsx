@@ -24,11 +24,11 @@ export function News() {
     setBusy(true);
     setFeedError(null);
     try {
-      const items = await loadBlogFeed().catch((cause: unknown) => {
+      const loaded = await loadBlogFeed().catch((cause: unknown) => {
         setFeedError((cause as Error)?.message ?? String(cause));
         return null;
       });
-      if (items) setFeed(items);
+      if (loaded) setFeed(loaded.items);
     } finally {
       setBusy(false);
     }
@@ -72,12 +72,12 @@ export function News() {
                       or not this item carries a category. */}
                   <span style={{ flex: 1, minWidth: 0 }}>
                     <span className="row-label" style={{ display: "block" }}>{item.title}</span>
-                    <span className="row-help" style={{ display: "block" }}>{item.summary}</span>
+                    <span className="row-help" style={{ display: "block" }}>{item.summary ?? ""}</span>
                     <span className="row-help mono" style={{ display: "block" }}>{formatDate(item.publishedAt)}</span>
                   </span>
-                  {item.category ? (
+                  {item.categories.length > 0 ? (
                     <span className="w-live-pill is-muted" style={{ marginLeft: "auto" }}>
-                      {item.category}
+                      {item.categories[0]}
                     </span>
                   ) : null}
                 </ExternalLink>
