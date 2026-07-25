@@ -1336,6 +1336,18 @@ html[data-sidebar="collapsed"]:not([data-layout="topbar"]) .w-nav__item {
   display: flex; align-items: center; gap: 12px;
   margin-bottom: 14px;
 }
+/* OPAQUE, because this banner is STICKY.
+   `.w-banner.error` tints at 8% alpha, which is right for an error box sitting
+   ON a card — the surface underneath it is already solid. Here it is not: the
+   page scrolls beneath this banner, so at 8% the moving content reads straight
+   through the message. The tone still comes from the `.w-banner` variant's
+   border and text colour; only the surface is made solid, so no variant is
+   redefined and the ~20 in-card users of `.w-banner.error` are untouched.
+   Two class names because `.w-banner.error` is equally specific — this wins on
+   source order, which is why it must stay below it. */
+.w-chain-banner.w-banner {
+  background: var(--ink-200);
+}
 .w-chain-banner__text { flex: 1; min-width: 0; }
 .w-chain-banner__title { font-weight: 600; font-size: 12.5px; letter-spacing: 0.02em; }
 .w-chain-banner__body { margin-top: 3px; font-size: 11.5px; color: var(--fg-300); line-height: 1.5; }
