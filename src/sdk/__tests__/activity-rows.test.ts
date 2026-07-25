@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { LiveAddressActivityRow } from "../live";
 import {
   activityCounterparty,
-  activityDirection,
+  activityRowDirection,
   activityKindToTxKind,
   activityRelativeTime,
   activityRowToTx,
@@ -54,12 +54,18 @@ describe("activityKindToTxKind", () => {
   });
 });
 
-describe("activityDirection", () => {
-  it("maps in/out and defaults null to out", () => {
-    expect(activityDirection("in")).toBe("in");
-    expect(activityDirection("out")).toBe("out");
-    expect(activityDirection(null)).toBe("out");
-    expect(activityDirection("weird")).toBe("out");
+describe("activityRowDirection", () => {
+  // Replaces the old `activityDirection`, which read the raw field and defaulted
+  // an absent direction to "out". The direction is now derived from the
+  // classified kind, and an unreported movement stays unreported.
+  it("maps in/out for a native transfer", () => {
+    expect(activityRowDirection({ kind: "transfer", direction: "in" })).toBe("in");
+    expect(activityRowDirection({ kind: "transfer", direction: "out" })).toBe("out");
+  });
+
+  it("no longer invents 'out' for an absent or unusable direction", () => {
+    expect(activityRowDirection({ kind: "transfer", direction: null })).toBe("none");
+    expect(activityRowDirection({ kind: "transfer", direction: "weird" })).toBe("none");
   });
 });
 
@@ -118,6 +124,46 @@ describe("activityCounterparty", () => {
 
   it("renders an em-dash when nothing is present (no fabrication)", () => {
     expect(activityCounterparty(row({ counterparty: null, cluster: null }))).toBe("—");
+  });
+});
+
+describe("activityRowToTx — direction comes from the kind", () => {
+  it("claims NO direction for a token movement the chain gave none for", () => {
+    // The old behaviour defaulted an absent direction to "out", so this row drew
+    // an outgoing arrow and a minus sign — the wallet asserting the user sent
+    // funds it has no evidence they sent.
+    const tx = activityRowToTx(
+      row({ kind: "transfer", direction: null, tokenId: "0xdeadbeef", amount: "5" }),
+    );
+    expect(tx.kind).toBe("token_transfer");
+    expect(tx.direction).toBe("none");
+  });
+
+  it("forces a claim incoming — a reward moves TO the wallet", () => {
+    const tx = activityRowToTx(row({ kind: "reward", direction: null, amount: "1" }));
+    expect(tx.kind).toBe("claim");
+    expect(tx.direction).toBe("in");
+  });
+
+  it("styles the delegation operations outgoing, and leaves their figure unsigned", () => {
+    // The row is a zero-value INSTRUCTION carrying a weight, not an amount, so
+    // there is no signed figure to be wrong about either way.
+    for (const kind of ["delegation", "undelegate", "redelegate"]) {
+      const tx = activityRowToTx(row({ kind, direction: null, weightBps: 5000 }));
+      expect(tx.direction).toBe("out");
+      expect(tx.signed).toBe(false);
+    }
+  });
+
+  it("claims NO direction for a row it could not classify", () => {
+    const tx = activityRowToTx(row({ kind: "some-future-kind", direction: null }));
+    expect(tx.kind).toBe("unclassified");
+    expect(tx.direction).toBe("none");
+  });
+
+  it("still reports the chain's OWN direction when it supplied one", () => {
+    expect(activityRowToTx(row({ kind: "transfer", direction: "in" })).direction).toBe("in");
+    expect(activityRowToTx(row({ kind: "transfer", direction: "out" })).direction).toBe("out");
   });
 });
 

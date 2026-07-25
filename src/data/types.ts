@@ -1,4 +1,4 @@
-import type { ActivityKind } from "../sdk/activity-kind";
+import type { ActivityDirection, ActivityKind } from "../sdk/activity-kind";
 
 /** The coarse three-way category some call sites want. Derived from
  *  {@link ActivityKind} by `txBucketOf` — never classified independently. */
@@ -38,7 +38,10 @@ export interface Tx {
   /** Prefix the amount with the +/− direction sign. Value transfers/rewards are
    *  signed; a weight figure is not. */
   signed: boolean;
-  direction: "in" | "out";
+  /** Which way the value moved, derived from {@link Tx.kind}. `"none"` is a
+   *  real answer — a row the chain reported no movement direction for renders
+   *  directionless rather than being assumed outgoing. */
+  direction: ActivityDirection;
   counterparty: string;
   memo: string;
   /** The classified operation — the taxonomy value, from `activity-kind.ts`.

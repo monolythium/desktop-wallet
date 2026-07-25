@@ -18,8 +18,10 @@
 import type { Tx, TxBucket } from "../data/types";
 import type { LiveAddressActivityRow } from "./live";
 import {
+  activityDirectionOf,
   activityKindIsUnsigned,
   activityKindOf,
+  type ActivityDirection,
   type ActivityKind,
 } from "./activity-kind";
 import {
@@ -62,10 +64,18 @@ export function txBucketOf(kind: ActivityKind): TxBucket {
   }
 }
 
-/** Direction from the indexer row, defaulting to "out" when absent (the icon
- *  has only two states; the eyebrow carries the precise kind regardless). */
-export function activityDirection(direction: string | null): Tx["direction"] {
-  return direction === "in" ? "in" : "out";
+/** Direction for an indexed row — classified, then derived from the kind.
+ *
+ *  Replaces the old field-reading helper that defaulted an ABSENT direction to
+ *  "out". That default was the wallet asserting a fund movement the chain never
+ *  stated; a row with no reported movement now renders directionless. */
+export function activityRowDirection(row: {
+  kind: string;
+  subKind?: string | null;
+  direction?: string | null;
+  tokenId?: string | null;
+}): ActivityDirection {
+  return activityDirectionOf(activityKindOf(row), row.direction ?? null);
 }
 
 /** Relative time from a block-header UNIX-second timestamp. Returns a human
@@ -154,7 +164,7 @@ export function activityRowToTx(
     // A delegation figure is a WEIGHT, not a token amount — it renders unsigned,
     // because a sign there would claim a fund movement the row does not carry.
     signed: !activityKindIsUnsigned(kind),
-    direction: activityDirection(row.direction),
+    direction: activityDirectionOf(kind, row.direction),
     kind,
     bucket,
     counterparty: activityCounterparty(row),

@@ -23,7 +23,7 @@ import { useReverseNamesEager } from "../sdk/use-reverse-names";
 import { preferredAddressLabel } from "../sdk/address-label";
 import { addressbookLookup } from "../sdk/addressbook";
 import {
-  activityDirection,
+  activityRowDirection,
   activityRowToTx,
   mergeActivityNewestFirst,
 } from "../sdk/activity-rows";
@@ -322,7 +322,11 @@ export function Activity() {
   const filteredRows = useMemo(
     () =>
       activityRows.filter((row) => {
-        if (dirFilter !== "all" && activityDirection(row.direction) !== dirFilter) {
+        // Filters on the DERIVED direction, so the filter agrees with the arrow
+        // the row draws. A directionless row matches neither "in" nor "out" and
+        // is excluded whenever a direction filter is active — correct: it is not
+        // known to be either, and putting it in both buckets would be a guess.
+        if (dirFilter !== "all" && activityRowDirection(row) !== dirFilter) {
           return false;
         }
         if (tokenFilter !== "all" && tokenUnitLabel(row.tokenId) !== tokenFilter) {

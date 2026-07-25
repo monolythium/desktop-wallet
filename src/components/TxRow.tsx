@@ -24,9 +24,15 @@ export function TxRow({ tx, onClick, counterpartyLabel }: Props) {
   const memo = tx.memo;
   const tok = tx.unit || "LYTH";
   // `amountText` is already unit-converted (lythoshi→LYTH) + decimal-capped by
-  // activityRowToTx; the sign is direction-driven for value rows, omitted for
-  // unsigned (e.g. weight) figures.
-  const sign = tx.signed ? (tx.direction === "in" ? "+" : "−") : "";
+  // activityRowToTx. The sign is direction-driven for value rows, omitted for
+  // unsigned (weight) figures — and omitted for a DIRECTIONLESS row, because a
+  // "+" or "−" there would assert a movement the chain never reported.
+  //
+  // The minus is the ASCII hyphen-minus U+002D, not the typographic U+2212 it
+  // used to be: the two are near-identical on screen but only one survives a
+  // copy-paste into anything that parses a number.
+  const sign =
+    tx.signed && tx.direction !== "none" ? (tx.direction === "in" ? "+" : "-") : "";
 
   return (
     <div className="w-tx" onClick={onClick} role={onClick ? "button" : undefined}>
@@ -35,9 +41,15 @@ export function TxRow({ tx, onClick, counterpartyLabel }: Props) {
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M7 17 17 7M17 7H9M17 7v8" />
           </svg>
-        ) : (
+        ) : tx.direction === "out" ? (
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M17 7 7 17M7 17h8M7 17V9" />
+          </svg>
+        ) : (
+          // Directionless: a neutral dot. An arrow — either arrow — would be the
+          // wallet answering a question the chain did not.
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="3.5" />
           </svg>
         )}
       </div>

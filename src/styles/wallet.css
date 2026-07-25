@@ -795,6 +795,10 @@ html[data-sidebar="collapsed"]:not([data-layout="topbar"]) .w-nav__item {
 }
 .w-tx__dir.in  { color: var(--ok); }
 .w-tx__dir.out { color: var(--alert); }
+/* Directionless — the chain reported no movement direction for this row. Muted
+   and deliberately colourless: green or red here would be the wallet answering
+   a question the chain did not. */
+.w-tx__dir.none { color: var(--fg-400); }
 /* Outgoing + confirmed gets the brand accent on the icon only; the amount
    keeps its directional colour. Incoming/failed/pending are untouched. */
 .w-tx__dir.out.sent-ok { color: var(--gold); }
@@ -810,6 +814,8 @@ html[data-sidebar="collapsed"]:not([data-layout="topbar"]) .w-nav__item {
 .w-tx__amt { font-size: 13px; }
 .w-tx__amt.in  { color: var(--ok); }
 .w-tx__amt.out { color: var(--alert); }
+/* Directionless figure — neutral, matching its badge. */
+.w-tx__amt.none { color: var(--fg-100); }
 .w-tx__amt.private { color: var(--fg-300); font-style: italic; }
 .w-tx__amt .tok { margin-left: 4px; font-size: 10.5px; color: var(--fg-400); }
 .w-tx__usd { font-size: 11px; color: var(--fg-400); margin-top: 2px; }
