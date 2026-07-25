@@ -100,6 +100,16 @@ function tokenBlockMessage(reason: TokenSendBlockReason, symbol: string): string
   }
 }
 
+/** Disclosed before signing when the recipient is this wallet's own address.
+ *  Two facts only — whose address it is, and what the fee buys. No advice and no
+ *  second confirmation: the chain accepts the transfer, so this is a
+ *  consequence, not an objection. Declared once and used by BOTH descriptors so
+ *  the native and token paths cannot drift apart. */
+const SELF_SEND_EFFECT = {
+  text: "The recipient is this wallet's own address. The network fee is spent with no net movement of funds.",
+  level: "warn" as const,
+};
+
 export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
   const ops = useOperations();
   // Phase 01 gate — read live (never cached at mount) so one flip re-renders the
@@ -483,11 +493,16 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
       return;
     }
 
-    // Self-send guard on the RESOLVED address (a name could resolve to self).
-    if (toBech32m.toLowerCase() === fromBech32m.toLowerCase()) {
-      setError("Recipient cannot be the wallet's own address.");
-      return;
-    }
+    // A transfer to this wallet's own address used to be REFUSED here. The chain
+    // accepts it: nothing in the transfer path rejects sender == recipient, so it
+    // is included, the amount returns to the same account, and the fee is
+    // consumed — it succeeds, and therefore gives the user no failure to tell
+    // them anything was wrong. That is precisely why it is now disclosed before
+    // signing instead of blocked.
+    //
+    // Evaluated on the RESOLVED address, for the same reason the refusal was: a
+    // `.mono` name is not recognisable as self until the quorum has answered.
+    const isSelfSend = toBech32m.toLowerCase() === fromBech32m.toLowerCase();
 
     setReviewing(true);
 
@@ -550,6 +565,7 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
         ],
         effects: [
           { text: "Transactions are irreversible. Confirm the recipient and amount carefully." },
+          ...(isSelfSend ? [SELF_SEND_EFFECT] : []),
           { text: `The network fee is paid in LYTH, not ${token.symbol}.` },
           {
             // Honest disclosure: the wallet reads only the native LYTH asset
@@ -629,6 +645,7 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
       ],
       effects: [
         { text: "Transactions are irreversible. Confirm the recipient and amount carefully." },
+        ...(isSelfSend ? [SELF_SEND_EFFECT] : []),
         { text: "Unlocks the local vault for this operation only." },
         { text: "Derives an ML-DSA-65 signer with @monolythium/core-sdk/crypto." },
         {

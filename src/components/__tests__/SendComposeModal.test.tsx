@@ -149,6 +149,85 @@ describe("SendComposeModal — shown == signed", () => {
   });
 });
 
+describe("SendComposeModal — a transfer to this wallet's own address", () => {
+  // The chain accepts a self-transfer: nothing in the transfer path rejects
+  // sender == recipient, so it is included, the amount returns to the same
+  // account, and the fee is consumed. It succeeds, which is exactly why the user
+  // gets no failure to tell them something was wrong — hence a warning rather
+  // than a refusal.
+  function selfWarning(d: OperationDescriptor) {
+    return d.effects.find((e) => e.level === "warn" && e.text.includes("own address"));
+  }
+
+  it("proceeds to review instead of refusing", async () => {
+    const { user } = renderWithProviders(<SendComposeModal fromBech32m={FROM} onClose={vi.fn()} />);
+    await user.type(screen.getByLabelText("Recipient typed bech32m address"), FROM);
+    await user.type(screen.getByLabelText("Amount in LYTH"), "1");
+    await user.click(screen.getByRole("button", { name: "Review" }));
+
+    await waitFor(() => expect(cap.descriptor).toBeDefined());
+    expect(toLine(cap.descriptor!)).toContain(FROM);
+    // The old refusal copy must be gone from the surface entirely.
+    expect(screen.queryByText(/Recipient cannot be the wallet/i)).not.toBeInTheDocument();
+  });
+
+  it("warns at review, stating both facts and nothing more", async () => {
+    const { user } = renderWithProviders(<SendComposeModal fromBech32m={FROM} onClose={vi.fn()} />);
+    await user.type(screen.getByLabelText("Recipient typed bech32m address"), FROM);
+    await user.type(screen.getByLabelText("Amount in LYTH"), "1");
+    await user.click(screen.getByRole("button", { name: "Review" }));
+
+    await waitFor(() => expect(cap.descriptor).toBeDefined());
+    const w = selfWarning(cap.descriptor!);
+    expect(w).toBeDefined();
+    expect(w!.text).toContain("own address");
+    expect(w!.text).toContain("no net movement");
+  });
+
+  it("warns for a .mono name that RESOLVES to the wallet's own address", async () => {
+    // The guard this replaces ran on the resolved address for this reason: a
+    // name is not recognisable as self until the quorum has answered.
+    nameResolve.resolveNameQuorum.mockResolvedValue({ ok: true, address: FROM });
+    const { user } = renderWithProviders(<SendComposeModal fromBech32m={FROM} onClose={vi.fn()} />);
+    await user.type(screen.getByLabelText("Recipient typed bech32m address"), "me.mono");
+    await user.type(screen.getByLabelText("Amount in LYTH"), "1");
+    // The modal already prints the sender's address, and here the RESOLVED
+    // target is that same address — so wait for a SECOND occurrence, which is
+    // the inline hit hint appearing once the quorum has answered.
+    await waitFor(() => expect(screen.getAllByText(FROM).length).toBeGreaterThan(1));
+    await user.click(screen.getByRole("button", { name: "Review" }));
+
+    await waitFor(() => expect(cap.descriptor).toBeDefined());
+    expect(selfWarning(cap.descriptor!)).toBeDefined();
+  });
+
+  it("does NOT warn on an ordinary send to someone else", async () => {
+    const { user } = renderWithProviders(<SendComposeModal fromBech32m={FROM} onClose={vi.fn()} />);
+    await user.type(screen.getByLabelText("Recipient typed bech32m address"), TO);
+    await user.type(screen.getByLabelText("Amount in LYTH"), "1");
+    await user.click(screen.getByRole("button", { name: "Review" }));
+
+    await waitFor(() => expect(cap.descriptor).toBeDefined());
+    expect(selfWarning(cap.descriptor!)).toBeUndefined();
+  });
+
+  it("signs exactly what an ordinary send signs — the warning changes nothing", async () => {
+    const { user } = renderWithProviders(<SendComposeModal fromBech32m={FROM} onClose={vi.fn()} />);
+    await user.type(screen.getByLabelText("Recipient typed bech32m address"), FROM);
+    await user.type(screen.getByLabelText("Amount in LYTH"), "1.5");
+    await user.click(screen.getByRole("button", { name: "Review" }));
+
+    await waitFor(() => expect(cap.descriptor).toBeDefined());
+    const d = cap.descriptor!;
+    // Amount and fee lines are untouched by the warning.
+    expect(amountLine(d)).toBe("1.5 LYTH");
+    await d.execute({ vaultSeed: new Uint8Array(32) });
+    expect(send.sendNativeLyth).toHaveBeenCalledWith(
+      expect.objectContaining({ to: FROM, amountLyth: "1.5" }),
+    );
+  });
+});
+
 describe("SendComposeModal — Max leaves the fee reservation", () => {
   it("Max fills the balance minus the active-tier reservation (never overspends)", async () => {
     const { user } = renderWithProviders(<SendComposeModal fromBech32m={FROM} onClose={vi.fn()} />);
