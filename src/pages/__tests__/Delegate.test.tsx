@@ -126,23 +126,23 @@ describe("Delegate — add-more cap preflight + weight→calldata", () => {
     const { user } = renderWithProviders(<Delegate />);
     await screen.findByText("Active delegations"); // row list loaded
     await user.click(screen.getByRole("button", { name: "Delegate" })); // opens the add-more form
-    // The label now leads with the unit that is actually typed.
-    await screen.findByText(/additional weight in basis points/i); // form is open
-    // the bps input defaults to "1000"; pick it among any number inputs.
+    // The label names the unit that is actually typed: a percent of balance.
+    await screen.findByText(/additional weight \(% of your balance\)/i); // form is open
+    // the percent input defaults to "10"; pick it among any number inputs.
     const input =
-      screen.getAllByRole("spinbutton").find((el) => (el as HTMLInputElement).value === "1000") ??
+      screen.getAllByRole("spinbutton").find((el) => (el as HTMLInputElement).value === "10") ??
       screen.getAllByRole("spinbutton")[0];
     return { user, input: input as HTMLElement };
   }
 
   it("BLOCKS an add-more the preflight refuses, before signing", async () => {
-    // 1000 on top of the fixture's 3000 stays inside the 5000 cap, so the form
-    // gate passes and the click reaches the handler — which is what this test is
-    // about. The gate's own behaviour is covered separately below.
+    // 10% (1000 bps) on top of the fixture's 30% stays inside the 50% cap, so
+    // the form gate passes and the click reaches the handler — which is what
+    // this test is about. The gate's own behaviour is covered separately below.
     caps.preflightDelegationVerdict.mockReturnValue({ ok: false, message: "would exceed the delegation cap" });
     const { user, input } = await openAddMoreForm();
     await user.clear(input);
-    await user.type(input, "1000");
+    await user.type(input, "10");
     await user.click(screen.getByRole("button", { name: "Review" }));
 
     expect(caps.preflightDelegationVerdict).toHaveBeenCalled();
@@ -151,12 +151,12 @@ describe("Delegate — add-more cap preflight + weight→calldata", () => {
   });
 
   it("disables the action on a definite cap breach, and says what to do", async () => {
-    // 3000 on top of the fixture's 3000 exceeds the 5000 cap. The user learns
+    // 30% on top of the fixture's 30% exceeds the 50% cap. The user learns
     // this from the control itself rather than from a post-click error.
     caps.preflightDelegationVerdict.mockReturnValue({ ok: true });
     const { user, input } = await openAddMoreForm();
     await user.clear(input);
-    await user.type(input, "3000");
+    await user.type(input, "30");
 
     const action = screen.getByRole("button", { name: "Reduce to the cap" });
     expect(action).toBeDisabled();
@@ -166,16 +166,16 @@ describe("Delegate — add-more cap preflight + weight→calldata", () => {
   });
 
   it("shows a weight that would credit nothing, and disables the action", async () => {
-    // At a 2 LYTH balance a 4999 bps weight credits 0.9998 LYTH, which the chain
-    // floors to zero — accepted, earning nothing, costing a fee. The echo says so
-    // while it is typed and the control refuses to be pressed, so this never
-    // reaches the pre-flight. (The handler's own inert guard remains pinned in
-    // sdk/__tests__/delegation-inert.test.ts.)
+    // At a 2 LYTH balance a 49.99% (4999 bps) weight credits 0.9998 LYTH, which
+    // the chain floors to zero — accepted, earning nothing, costing a fee. The
+    // echo says so while it is typed and the control refuses to be pressed, so
+    // this never reaches the pre-flight. (The handler's own inert guard remains
+    // pinned in sdk/__tests__/delegation-inert.test.ts.)
     live.loadNativeBalanceLythoshi.mockResolvedValue("2000000000000000000");
     caps.preflightDelegationVerdict.mockReturnValue({ ok: true });
     const { user, input } = await openAddMoreForm();
     await user.clear(input);
-    await user.type(input, "4999");
+    await user.type(input, "49.99");
 
     expect(screen.getByText(/credits 0 LYTH/i)).toBeInTheDocument();
     const action = screen.getByRole("button", { name: "Too small to credit" });
@@ -185,11 +185,11 @@ describe("Delegate — add-more cap preflight + weight→calldata", () => {
     expect(cap.descriptor).toBeUndefined(); // nothing opened, nothing signed
   });
 
-  it("encodes exactly the shown weight when the preflight passes (shown bps == calldata)", async () => {
+  it("encodes exactly the shown weight when the preflight passes (shown percent == calldata bps)", async () => {
     caps.preflightDelegationVerdict.mockReturnValue({ ok: true });
     const { user, input } = await openAddMoreForm();
     await user.clear(input);
-    await user.type(input, "1500"); // +15%
+    await user.type(input, "15"); // 15% → 1500 bps on the wire
     await user.click(screen.getByRole("button", { name: "Review" }));
 
     await waitFor(() => expect(cap.descriptor).toBeDefined());
@@ -205,10 +205,10 @@ describe("Delegate — add-more cap preflight + weight→calldata", () => {
 });
 
 // The three weight forms echo what a typed number MEANS while it is being
-// typed, because the fields take basis points and every limit beside them is
-// stated in percent. The custom autovote fields take the same basis points and
-// were the one surface left without that line — and the one most likely to
-// drift, because it had grown its own percent derivation.
+// typed. The fields take a percent, so the echo confirms the NORMALISED reading
+// and adds the credited LYTH, which needs the live balance. The custom autovote
+// fields share that helper — they are the surface most likely to drift, having
+// previously grown their own percent derivation.
 describe("Delegate — the custom autovote fields echo what was typed", () => {
   async function openCustomPanel() {
     del.fetchClusterDirectory.mockResolvedValue({
@@ -217,15 +217,31 @@ describe("Delegate — the custom autovote fields echo what was typed", () => {
     const { user } = renderWithProviders(<Delegate />);
     await screen.findByText("Autovote");
     await user.click(screen.getByRole("button", { name: "Custom" }));
-    const field = await screen.findByPlaceholderText("bps");
+    const field = await screen.findByPlaceholderText("%");
     return { user, field };
   }
 
   it("states the percent and the credited LYTH the shared helper derives", async () => {
-    // 1000 LYTH (the fixture): 2500 bps credits 250 LYTH.
+    // 1000 LYTH (the fixture): 25% (2500 bps) credits 250 LYTH.
     const { user, field } = await openCustomPanel();
-    await user.type(field, "2500");
-    expect(screen.getByText(/2500 bps = 25\.00% of balance · credits 250 LYTH/)).toBeInTheDocument();
+    await user.type(field, "25");
+    expect(screen.getByText(/25\.00% of balance · credits 250 LYTH/)).toBeInTheDocument();
+  });
+
+  it("reads a fractional percent exactly — 0.29% is 29 bps, never 28", async () => {
+    // The float trap, at the surface the user actually types into.
+    const { user, field } = await openCustomPanel();
+    await user.type(field, "0.29");
+    expect(screen.getByText(/0\.29% of balance/)).toBeInTheDocument();
+  });
+
+  it("refuses a third decimal rather than rounding it into a different weight", async () => {
+    const { field } = await openCustomPanel();
+    fireEvent.change(field, { target: { value: "12.999" } });
+    // Not representable in whole bps ⇒ nothing readable was typed ⇒ no echo.
+    expect(document.body.textContent).not.toContain("of balance · credits");
+    expect(screen.queryByText(/13\.00% of balance/)).toBeNull();
+    expect(screen.queryByText(/12\.99% of balance/)).toBeNull();
   });
 
   it("reads a browser-legal exponent as unreadable rather than as a smaller weight", async () => {
@@ -239,14 +255,14 @@ describe("Delegate — the custom autovote fields echo what was typed", () => {
     // Read through textContent: a derived percent rendered beside its own "%"
     // sits in two text nodes, which a text matcher would miss entirely.
     expect(document.body.textContent).not.toContain("0.01%");
-    expect(screen.queryByText(/bps =/)).toBeNull();
+    expect(screen.queryByText(/of balance/)).toBeNull();
   });
 
   it("omits the credit clause when the balance cannot be read — never a zero", async () => {
     live.loadNativeBalanceLythoshi.mockRejectedValue(new Error("node down"));
     const { user, field } = await openCustomPanel();
-    await user.type(field, "2500");
-    expect(screen.getByText(/2500 bps = 25\.00% of balance/)).toBeInTheDocument();
+    await user.type(field, "25");
+    expect(screen.getByText(/25\.00% of balance/)).toBeInTheDocument();
     expect(screen.queryByText(/credits/)).toBeNull();
   });
 });

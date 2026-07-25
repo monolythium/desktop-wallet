@@ -283,13 +283,27 @@ describe("allocationsEligibilityVerdict", () => {
 // silent reinterpretation of a fund-relevant field.
 describe("customAllocationsFrom", () => {
   it("reads well-formed per-cluster weights", () => {
+    // Fields take a PERCENT; allocations carry the bps the encoder signs.
     const r = customAllocationsFrom([
-      [1, "1000"],
-      [2, "2500"],
+      [1, "10"],
+      [2, "25"],
     ]);
     expect(r.allocations).toEqual([
       { clusterId: 1, weightBps: 1000 },
       { clusterId: 2, weightBps: 2500 },
+    ]);
+    expect(r.invalid).toEqual([]);
+  });
+
+  it("reads a fractional percent exactly, without a float round trip", () => {
+    // 0.29% is the documented float trap: 0.29 * 100 === 28.999999999999996.
+    const r = customAllocationsFrom([
+      [1, "0.29"],
+      [2, "12.5"],
+    ]);
+    expect(r.allocations).toEqual([
+      { clusterId: 1, weightBps: 29 },
+      { clusterId: 2, weightBps: 1250 },
     ]);
     expect(r.invalid).toEqual([]);
   });
@@ -301,9 +315,11 @@ describe("customAllocationsFrom", () => {
   });
 
   it("reports every unreadable entry, not just the first", () => {
+    // "12.999" carries a third decimal — not representable in whole bps, so it
+    // is refused rather than rounded to 1300 or floored to 1299.
     const r = customAllocationsFrom([
-      [1, "1000"],
-      [2, "12.9"],
+      [1, "10"],
+      [2, "12.999"],
       [3, "50abc"],
     ]);
     expect(r.allocations).toEqual([{ clusterId: 1, weightBps: 1000 }]);
@@ -328,23 +344,23 @@ describe("customAllocationsFrom", () => {
 });
 
 describe("autovoteBudgetBps", () => {
-  it("reads a well-formed budget", () => {
-    expect(autovoteBudgetBps("5000")).toBe(5000);
-    expect(autovoteBudgetBps("1")).toBe(1);
-    expect(autovoteBudgetBps("10000")).toBe(10000);
+  it("reads a well-formed budget — percent in, basis points out", () => {
+    expect(autovoteBudgetBps("50")).toBe(5000);
+    expect(autovoteBudgetBps("0.01")).toBe(1); // the smallest weight the chain takes
+    expect(autovoteBudgetBps("100")).toBe(10000); // the full share
   });
 
-  it("refuses the hazardous forms rather than reading a 1000x smaller budget", () => {
+  it("refuses the hazardous forms rather than reading a smaller budget", () => {
     expect(autovoteBudgetBps("1e3")).toBeNull();
     expect(autovoteBudgetBps("1e1")).toBeNull();
-    expect(autovoteBudgetBps("12.9")).toBeNull();
+    expect(autovoteBudgetBps("12.999")).toBeNull(); // third decimal, not representable
     expect(autovoteBudgetBps("50abc")).toBeNull();
   });
 
-  it("refuses a budget outside the basis-point range, and does not clamp it", () => {
+  it("refuses a budget outside the chain's range, and does not clamp it", () => {
     expect(autovoteBudgetBps("0")).toBeNull();
-    expect(autovoteBudgetBps("10001")).toBeNull();
-    expect(autovoteBudgetBps("50000")).toBeNull();
+    expect(autovoteBudgetBps("100.01")).toBeNull(); // 10001 bps
+    expect(autovoteBudgetBps("500")).toBeNull(); // 50000 bps
   });
 
   it("refuses an absent budget", () => {

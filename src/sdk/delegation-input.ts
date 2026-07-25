@@ -52,6 +52,65 @@ export function parseExactNonNegativeInteger(
 const MAX_WEIGHT_BPS = 10_000;
 
 /**
+ * A typed PERCENT converted to whole basis points, or null when it cannot be
+ * represented exactly.
+ *
+ * THE WIRE UNIT IS STILL BPS. `delegate(uint32, uint16)` decodes the weight with
+ * `abi::decode_u16` and `validate_weight` accepts 1..=10000. Percent is what the
+ * user types and reads; nothing below this function carries one.
+ *
+ * NEVER MULTIPLIES BY 100. Percent → bps looks like arithmetic and in IEEE-754
+ * it is not: `0.29 * 100 === 28.999999999999996`, which `Math.floor` turns into
+ * 28 — a weight one bps below what was typed, on 1146 of the 10000 legal values.
+ * `Math.round` happens to recover them all, but rounding is the wrong instrument
+ * here: it REPAIRS input, and this module exists to refuse input rather than
+ * reinterpret it. So the value is assembled from the STRING — integer part times
+ * 100, plus the fractional part padded to hundredths — and no float is ever
+ * constructed.
+ *
+ * TWO DECIMAL PLACES IS THE LIMIT, and it is the chain's limit rather than a
+ * display choice: one bps IS one hundredth of a percent, so a third decimal
+ * names a weight the wire cannot carry. Such input is REFUSED, not rounded —
+ * rounding a weight is a fund-relevant reinterpretation, and the caller can
+ * explain a refusal.
+ *
+ * DOES NOT RANGE-CHECK. `parsePercentToBps("500")` is 50000, faithfully. Range
+ * is the caller's refusal to make, with a message, exactly as
+ * {@link autovoteBudgetBps} does — silently clamping would build against a
+ * weight nobody set. Pure.
+ */
+export function parsePercentToBps(raw: string | null | undefined): number | null {
+  if (typeof raw !== "string") return null;
+  const trimmed = raw.trim();
+  // Anchored: at least one leading digit, then at most two decimal places.
+  // Refuses "1e1", ".5", "1.", "-1", "+1", "50%", "1,5", "" and " " alike.
+  const parts = /^(\d+)(?:\.(\d{1,2}))?$/.exec(trimmed);
+  if (parts === null) return null;
+  const hundredths = (parts[2] ?? "").padEnd(2, "0");
+  const value = Number(parts[1]) * 100 + Number(hundredths);
+  // Past the safe-integer range the assembled value no longer equals what was
+  // typed, which is the very failure this function exists to prevent.
+  return Number.isSafeInteger(value) ? value : null;
+}
+
+/**
+ * Whole basis points rendered as the percent string an input should hold —
+ * minimal, exact, and re-readable by {@link parsePercentToBps}.
+ *
+ * Trailing hundredth zeros are dropped (2950 → "29.5", not "29.50") because this
+ * feeds an editable field rather than a label; a user extending "29.5" should
+ * not have to delete a zero first. `bpsToPercentLabel` remains the display form.
+ * Pure.
+ */
+export function formatBpsAsPercentInput(bps: number): string {
+  const whole = Math.trunc(bps / 100);
+  const hundredths = Math.abs(bps % 100);
+  if (hundredths === 0) return String(whole);
+  const padded = String(hundredths).padStart(2, "0");
+  return padded.endsWith("0") ? `${whole}.${padded[0]}` : `${whole}.${padded}`;
+}
+
+/**
  * The custom autovote allocations a user has typed, split into what could be
  * read and what could not.
  *
@@ -71,7 +130,9 @@ export function customAllocationsFrom(
   const invalid: number[] = [];
   for (const [clusterId, raw] of entries) {
     if (typeof raw !== "string" || raw.trim() === "") continue;
-    const weightBps = parseExactNonNegativeInteger(raw);
+    // The field takes a PERCENT; the allocation carries bps, because that is
+    // what the encoder signs.
+    const weightBps = parsePercentToBps(raw);
     if (weightBps === null) {
       invalid.push(clusterId);
       continue;
@@ -81,13 +142,13 @@ export function customAllocationsFrom(
   return { allocations, invalid };
 }
 
-/** The typed autovote weight budget in basis points, or null when the field
- *  cannot be read or falls outside 1–10000.
+/** The typed autovote weight budget — a PERCENT in, basis points out, or null
+ *  when the field cannot be read exactly or falls outside 0.01%–100%.
  *
- *  Out of range is a refusal, not a clamp: silently lowering a typed 50000 to
+ *  Out of range is a refusal, not a clamp: silently lowering a typed 500% to
  *  100% would build a plan against a budget the user never set. Pure. */
 export function autovoteBudgetBps(raw: string | null | undefined): number | null {
-  const value = parseExactNonNegativeInteger(raw);
+  const value = parsePercentToBps(raw);
   if (value === null || value <= 0 || value > MAX_WEIGHT_BPS) return null;
   return value;
 }
@@ -95,11 +156,11 @@ export function autovoteBudgetBps(raw: string | null | undefined): number | null
 /**
  * What the typed weight actually means, echoed live beneath the field.
  *
- * The forms take integer basis points while every cap beside them is stated in
- * percent, so a user who reads "50%" and types 50 signs 0.50%. Renaming the
- * field is necessary but not sufficient — someone who has learned to type 50
- * keeps typing it. This is the control that makes the label checkable, because
- * it shows the meaning of the number while it is still being typed.
+ * The fields now take a percent, so the unit confusion this line was built for
+ * is gone. It still earns its place twice: it shows the NORMALISED reading of
+ * what was typed (a typed `0.5` echoes `0.50%`, confirming the parse landed
+ * where the user meant), and it states the LYTH the weight would actually
+ * credit — which no label can derive, because it needs the live balance.
  *
  * NEVER FABRICATES. The percentage is pure arithmetic on the typed value and is
  * always available; the credited amount needs the balance, and when that cannot
@@ -118,9 +179,9 @@ export function weightEchoLine(
   raw: string | null | undefined,
   balanceLythoshi: string | null | undefined,
 ): string | null {
-  const bps = parseExactNonNegativeInteger(raw);
+  const bps = parsePercentToBps(raw);
   if (bps === null || bps <= 0) return null;
-  const head = `${bps} bps = ${(bps / 100).toFixed(2)}% of balance`;
+  const head = `${(bps / 100).toFixed(2)}% of balance`;
   const credited = effectiveWeightWholeLyth(balanceLythoshi, bps);
   // Unknown balance → no credit clause at all. A zero here would read as a fact.
   return credited === null ? head : `${head} · credits ${credited} LYTH`;
@@ -151,6 +212,7 @@ export type WeightActionGate = { ok: true } | { ok: false; label: string };
  * condition here is one the review handlers already evaluate.
  */
 export function weightActionGate(args: {
+  /** The typed PERCENT. `maxBps` stays in bps — it is a chain-domain bound. */
   raw: string | null | undefined;
   /** 10000 for a delegate, the source weight for a redelegate. */
   maxBps: number;
@@ -158,7 +220,7 @@ export function weightActionGate(args: {
   /** A cap breach established against a RESOLVED read. Never pass true on doubt. */
   capViolated?: boolean;
 }): WeightActionGate {
-  const bps = parseExactNonNegativeInteger(args.raw);
+  const bps = parsePercentToBps(args.raw);
   if (bps === null || bps <= 0) return { ok: false, label: "Enter a weight" };
   if (bps > args.maxBps) return { ok: false, label: "Reduce the weight" };
   // Definite by construction: false whenever the balance could not be read.

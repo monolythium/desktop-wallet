@@ -93,7 +93,9 @@ import {
   autovoteBudgetBps,
   customAllocationsFrom,
   eligibleClusters,
+  formatBpsAsPercentInput,
   parseExactNonNegativeInteger,
+  parsePercentToBps,
   resolveRedelegateDestination,
   weightActionGate,
   weightEchoLine,
@@ -144,7 +146,7 @@ export function Delegate() {
   // Add-more delegate draft on an active-delegation row (distinct from the
   // redelegate draft + the directory-card delegate form).
   const [delegateMoreFor, setDelegateMoreFor] = useState<number | null>(null);
-  const [delegateMoreBps, setDelegateMoreBps] = useState("1000");
+  const [delegateMorePercent, setDelegateMorePercent] = useState("10");
   const [delegateMoreError, setDelegateMoreError] = useState<string | null>(null);
   const [directory, setDirectory] = useState<ClusterDirectoryEntryResponse[]>([]);
   // What the wallet actually KNOWS about the directory after its last read.
@@ -179,9 +181,9 @@ export function Delegate() {
   // destination cluster + weight to move. Distinct from the delegate form.
   const [redelegateFrom, setRedelegateFrom] = useState<number | null>(null);
   const [redelegateTo, setRedelegateTo] = useState("");
-  const [redelegateWeightBps, setRedelegateWeightBps] = useState("1000");
+  const [redelegateWeightPercent, setRedelegateWeightPercent] = useState("10");
   const [redelegateError, setRedelegateError] = useState<string | null>(null);
-  const [draftWeightBps, setDraftWeightBps] = useState("1000");
+  const [draftWeightPercent, setDraftWeightPercent] = useState("10");
   const [draftError, setDraftError] = useState<string | null>(null);
   // Read-only per-cluster diversity scores (lyth_getClusterDiversity, PF-6),
   // keyed by clusterId. Feeds the autovote Max Diversity / Max Decentralization
@@ -213,7 +215,7 @@ export function Delegate() {
   // Autovote (§25.1): weight budget (cap) to spread across clusters, the
   // selected mode + its previewed plan, the Details toggle, and the live
   // per-step submit progress.
-  const [autoCapBps, setAutoCapBps] = useState("5000");
+  const [autoCapPercent, setAutoCapPercent] = useState("50");
   const [autovoteBusy, setAutovoteBusy] = useState(false);
   const [autovoteError, setAutovoteError] = useState<string | null>(null);
   const [autovoteMode, setAutovoteMode] = useState<Exclude<AutovoteMode, "custom"> | null>(null);
@@ -222,7 +224,7 @@ export function Delegate() {
   const [autovoteProgress, setAutovoteProgress] = useState<{ done: number; total: number } | null>(null);
   // Custom mode: manual per-cluster weight inputs (bps), keyed by clusterId.
   const [customOpen, setCustomOpen] = useState(false);
-  const [customBps, setCustomBps] = useState<Map<number, string>>(new Map());
+  const [customPercent, setCustomPercent] = useState<Map<number, string>>(new Map());
   // Whether the wallet can pay to submit a delegation at all. ADVISORY: it warns
   // and never blocks — see the fail-open reasoning in sdk/delegation-fee.ts.
   const [feeAffordability, setFeeAffordability] = useState<FeeAffordability>({
@@ -562,10 +564,12 @@ export function Delegate() {
     capState: { note: string; warning: string | null },
     raw?: string,
   ) => {
-    // What the typed number actually means. The field takes basis points while
-    // the note beside it states the limit in percent, so this is the line that
-    // makes the label checkable rather than merely accurate. Quiet by design —
-    // it is always on, and an always-on line must not compete with the alarm.
+    // What the typed number actually means. The field takes a percent, so this
+    // line no longer bridges two units — it confirms the NORMALISED reading (a
+    // typed `0.5` echoes `0.50%`) and states the LYTH the weight would credit,
+    // which needs the live balance and so cannot come from a label. Quiet by
+    // design — it is always on, and an always-on line must not compete with the
+    // alarm.
     const echo = raw === undefined ? null : weightEchoLine(raw, balanceLythoshi);
     return (
       <>
@@ -593,7 +597,7 @@ export function Delegate() {
     raw: string;
     forMove?: boolean;
   }) => {
-    const bps = parseExactNonNegativeInteger(args.raw);
+    const bps = parsePercentToBps(args.raw);
     return delegateCapWarning({
       existingWeightBps: args.existingWeightBps,
       totalDelegatedBps: args.forMove ? 0 : totalBps,
@@ -1074,9 +1078,9 @@ export function Delegate() {
     setAutovoteProgress(null);
     setCustomOpen(false);
 
-    const capBps = autovoteBudgetBps(autoCapBps);
+    const capBps = autovoteBudgetBps(autoCapPercent);
     if (capBps === null) {
-      setAutovoteError("Weight budget must be 1–10000 basis points (0.01% – 100%).");
+      setAutovoteError("Weight budget must be between 0.01% and 100%, to at most two decimal places.");
       setAutovoteMode(null);
       setAutovotePlan(null);
       return;
@@ -1286,12 +1290,12 @@ export function Delegate() {
   };
 
   // Custom mode — manual per-cluster allocations → the SAME cap guard + batch.
-  const customDraft = () => customAllocationsFrom(customBps.entries());
+  const customDraft = () => customAllocationsFrom(customPercent.entries());
   const customAllocationsDraft = (): AutovoteAllocation[] => customDraft().allocations;
   const customTotalBps = customAllocationsDraft().reduce((s, a) => s + a.weightBps, 0);
   // Display budget only — the submit path refuses an unreadable budget outright
   // (reviewCustomAutovote), so this fallback never reaches a signature.
-  const customBudgetBps = autovoteBudgetBps(autoCapBps) ?? 10_000;
+  const customBudgetBps = autovoteBudgetBps(autoCapPercent) ?? 10_000;
   // Out-of-policy the user is warned about BEFORE review: over the budget, or any
   // single cluster over the binding per-cluster cap.
   const customBindingCap = bindingPerClusterCapBps(aggregateCapBps);
@@ -1299,9 +1303,9 @@ export function Delegate() {
     customTotalBps > customBudgetBps ||
     customAllocationsDraft().some((a) => a.weightBps > customBindingCap);
 
-  const setCustomClusterBps = (clusterId: number, value: string) => {
+  const setCustomClusterPercent = (clusterId: number, value: string) => {
     setAutovoteError(null);
-    setCustomBps((prev) => {
+    setCustomPercent((prev) => {
       const next = new Map(prev);
       if (value.trim() === "") next.delete(clusterId);
       else next.set(clusterId, value);
@@ -1318,21 +1322,21 @@ export function Delegate() {
     const firstInvalid = invalid[0];
     if (firstInvalid !== undefined) {
       setAutovoteError(
-        `${clusterName(firstInvalid)}: enter a whole number of basis points (1–10000).`,
+        `${clusterName(firstInvalid)}: enter a percent between 0.01 and 100, to at most two decimal places.`,
       );
       return;
     }
-    if (autovoteBudgetBps(autoCapBps) === null) {
-      setAutovoteError("Weight budget must be 1–10000 basis points (0.01% – 100%).");
+    if (autovoteBudgetBps(autoCapPercent) === null) {
+      setAutovoteError("Weight budget must be between 0.01% and 100%, to at most two decimal places.");
       return;
     }
     if (allocations.length === 0) {
-      setAutovoteError("Enter a weight (bps) for at least one cluster.");
+      setAutovoteError("Enter a weight for at least one cluster.");
       return;
     }
     for (const a of allocations) {
       if (a.weightBps > 10_000) {
-        setAutovoteError(`${clusterName(a.clusterId)}: weight must be 1–10000 bps.`);
+        setAutovoteError(`${clusterName(a.clusterId)}: weight must be 100% or less.`);
         return;
       }
     }
@@ -1594,7 +1598,7 @@ export function Delegate() {
                             className="btn btn--sm btn--ghost"
                             onClick={() => {
                               setDelegateMoreFor(row.cluster);
-                              setDelegateMoreBps("1000");
+                              setDelegateMorePercent("1000");
                               setDelegateMoreError(null);
                             }}
                           >
@@ -1605,7 +1609,7 @@ export function Delegate() {
                             onClick={() => {
                               setRedelegateFrom(row.cluster);
                               setRedelegateTo("");
-                              setRedelegateWeightBps(String(row.weightBps));
+                              setRedelegateWeightPercent(formatBpsAsPercentInput(row.weightBps));
                               setRedelegateError(null);
                             }}
                           >
@@ -1623,10 +1627,10 @@ export function Delegate() {
                       {isDelegatingMore && (() => {
                         const capState = stackingCapState({
                           existingWeightBps: row.weightBps,
-                          raw: delegateMoreBps,
+                          raw: delegateMorePercent,
                         });
                         const addMoreGate = weightActionGate({
-                          raw: delegateMoreBps,
+                          raw: delegateMorePercent,
                           maxBps: 10000,
                           balanceLythoshi,
                           // Only a breach measured against a resolved read.
@@ -1635,21 +1639,22 @@ export function Delegate() {
                         return (
                         <div style={inlineFormStyle}>
                           <label style={redelegateLabelStyle}>
-                            Additional weight in basis points (100 = 1%)
+                            Additional weight (% of your balance)
                           </label>
                           <input
                             type="number"
-                            inputMode="numeric"
-                            min={1}
-                            max={10000}
-                            value={delegateMoreBps}
+                            inputMode="decimal"
+                            min={0.01}
+                            max={100}
+                            step={0.01}
+                            value={delegateMorePercent}
                             onChange={(e) => {
-                              setDelegateMoreBps(e.target.value);
+                              setDelegateMorePercent(e.target.value);
                               setDelegateMoreError(null);
                             }}
                             style={autovoteInputStyle}
                           />
-                          {capFeedback(capState, delegateMoreBps)}
+                          {capFeedback(capState, delegateMorePercent)}
                           {delegateMoreError && (
                             <div className="row-help" style={{ color: "var(--err)" }}>
                               {delegateMoreError}
@@ -1667,10 +1672,10 @@ export function Delegate() {
                               Cancel
                             </button>
                             {reviewButton(addMoreGate, async () => {
-                                const bps = parseExactNonNegativeInteger(delegateMoreBps);
+                                const bps = parsePercentToBps(delegateMorePercent);
                                 if (bps === null || bps <= 0 || bps > 10000) {
                                   setDelegateMoreError(
-                                    "Weight must be 1–10000 basis points (0.01% – 100%).",
+                                    "Weight must be between 0.01% and 100%, to at most two decimal places.",
                                   );
                                   return;
                                 }
@@ -1709,7 +1714,7 @@ export function Delegate() {
                           )?.weightBps ?? 0;
                         const capState = stackingCapState({
                           existingWeightBps: dstBps,
-                          raw: redelegateWeightBps,
+                          raw: redelegateWeightPercent,
                           forMove: true,
                         });
                         const dstRaw = parseExactNonNegativeInteger(redelegateTo);
@@ -1725,7 +1730,7 @@ export function Delegate() {
                               ? { ok: false, label: "Pick a different cluster" }
                               : { ok: true };
                         const weightGate = weightActionGate({
-                          raw: redelegateWeightBps,
+                          raw: redelegateWeightPercent,
                           maxBps: row.weightBps,
                           balanceLythoshi,
                           capViolated: capReadResolved && capState.warning !== null,
@@ -1749,23 +1754,24 @@ export function Delegate() {
                             style={autovoteInputStyle}
                           />
                           <label style={redelegateLabelStyle}>
-                            Weight to move in basis points (100 = 1%)
+                            Weight to move (% of your balance)
                           </label>
                           <input
                             type="number"
-                            inputMode="numeric"
-                            min={1}
-                            max={row.weightBps}
-                            value={redelegateWeightBps}
+                            inputMode="decimal"
+                            min={0.01}
+                            max={row.weightBps / 100}
+                            step={0.01}
+                            value={redelegateWeightPercent}
                             onChange={(e) => {
-                              setRedelegateWeightBps(e.target.value);
+                              setRedelegateWeightPercent(e.target.value);
                               setRedelegateError(null);
                             }}
                             style={autovoteInputStyle}
                           />
                           {/* The DESTINATION is what stacks weight, so it is
                               what the cap is about. */}
-                          {capFeedback(capState, redelegateWeightBps)}
+                          {capFeedback(capState, redelegateWeightPercent)}
                           {redelegateError && (
                             <div className="row-help" style={{ color: "var(--err)" }}>
                               {redelegateError}
@@ -1797,10 +1803,10 @@ export function Delegate() {
                                   return;
                                 }
                                 const to = dst.clusterId;
-                                const bps = parseExactNonNegativeInteger(redelegateWeightBps);
+                                const bps = parsePercentToBps(redelegateWeightPercent);
                                 if (bps === null || bps <= 0 || bps > row.weightBps) {
                                   setRedelegateError(
-                                    `Weight must be 1–${row.weightBps} basis points (no more than the source delegation).`,
+                                    `Weight must be between 0.01% and ${bpsToPercentLabel(row.weightBps)} — no more than the source delegation, to at most two decimal places.`,
                                   );
                                   return;
                                 }
@@ -1870,8 +1876,8 @@ export function Delegate() {
                       undelegate is instant and queues nothing — so these settle
                       on-chain automatically as they mature. There is no manual
                       completion step (the completeRedemption call was removed
-                      from the chain). Tickets carry weight (basis points) only,
-                      never a principal LYTH amount.
+                      from the chain). Tickets carry a weight only, never a
+                      principal LYTH amount.
                     </div>
                     <div className="w-live-list">
                       {q.tickets.map((t) => (
@@ -1955,16 +1961,17 @@ export function Delegate() {
                   marginBottom: 6,
                 }}
               >
-                Weight budget (bps · 100 = 1%)
+                Weight budget (% of your balance)
               </label>
               <input
                 type="number"
-                inputMode="numeric"
-                min={1}
-                max={10000}
-                value={autoCapBps}
+                inputMode="decimal"
+                min={0.01}
+                max={100}
+                step={0.01}
+                value={autoCapPercent}
                 onChange={(e) => {
-                  setAutoCapBps(e.target.value);
+                  setAutoCapPercent(e.target.value);
                   setAutovoteError(null);
                   // A budget change invalidates any previewed plan.
                   setAutovotePlan(null);
@@ -2031,10 +2038,10 @@ export function Delegate() {
                     than one that was never offered. Same rule the review guard
                     applies. */}
                 {eligibleClusters(directory).map((c) => {
-                  const raw = customBps.get(c.clusterId) ?? "";
+                  const raw = customPercent.get(c.clusterId) ?? "";
                   // The SAME line the three weight forms show, from the same
-                  // helper — these fields take the same basis points and are
-                  // the surface most likely to drift, having previously derived
+                  // helper — these fields take the same percent and are the
+                  // surface most likely to drift, having previously derived
                   // their own percent from a numeric-PREFIX parse (which reads
                   // a browser-legal "1e3" as 1, echoing 0.01% for 10%). Its
                   // honest absence comes along with it: no credit clause when
@@ -2047,12 +2054,13 @@ export function Delegate() {
                         <span style={{ flex: 1, fontSize: 12.5 }}>{clusterName(c.clusterId)}</span>
                         <input
                           type="number"
-                          inputMode="numeric"
+                          inputMode="decimal"
                           min={0}
-                          max={10000}
-                          placeholder="bps"
+                          max={100}
+                          step={0.01}
+                          placeholder="%"
                           value={raw}
-                          onChange={(e) => setCustomClusterBps(c.clusterId, e.target.value)}
+                          onChange={(e) => setCustomClusterPercent(c.clusterId, e.target.value)}
                           style={{ ...autovoteInputStyle, width: 110 }}
                         />
                       </div>
@@ -2069,8 +2077,9 @@ export function Delegate() {
                 className="row-help mono"
                 style={{ marginTop: 8, color: customOutOfPolicy ? "var(--warn)" : undefined }}
               >
-                Total: {customTotalBps} bps ({(customTotalBps / 100).toFixed(2)}%) · budget{" "}
-                {customBudgetBps} bps · per-cluster cap {(customBindingCap / 100).toFixed(0)}%
+                Total: {(customTotalBps / 100).toFixed(2)}% · budget{" "}
+                {(customBudgetBps / 100).toFixed(2)}% · per-cluster cap{" "}
+                {(customBindingCap / 100).toFixed(0)}%
               </div>
               {customOutOfPolicy && (
                 <div className="row-help" style={{ color: "var(--warn)", marginTop: 6, lineHeight: 1.5 }}>
@@ -2110,8 +2119,7 @@ export function Delegate() {
             >
               <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
                 <strong style={{ fontSize: 13 }}>
-                  Spread {autovotePlan.totalWeightBps} bps (
-                  {(autovotePlan.totalWeightBps / 100).toFixed(2)}%) across{" "}
+                  Spread {(autovotePlan.totalWeightBps / 100).toFixed(2)}% across{" "}
                   {autovotePlan.allocations.length} cluster
                   {autovotePlan.allocations.length === 1 ? "" : "s"} — {autovoteModeMeta(autovoteMode).label}
                 </strong>
@@ -2204,15 +2212,18 @@ export function Delegate() {
             const existingWeightBps =
               delegations?.rows.find((r) => r.cluster === c.clusterId)?.weightBps ?? 0;
             const totalDelegatedBps = delegations?.totalBps ?? 0;
-            const draftBps = Number.parseInt(draftWeightBps, 10);
+            // The last parseInt residual on this page: it read "10.5" as 10 and
+            // "1e3" as 1, so the cap preview could disagree with the weight the
+            // review handler would actually encode. Same exact parse as the gate.
+            const draftBps = parsePercentToBps(draftWeightPercent);
             const capState = delegateCapWarning({
               existingWeightBps,
               totalDelegatedBps,
-              additionalBps: Number.isFinite(draftBps) && draftBps > 0 ? draftBps : null,
+              additionalBps: draftBps !== null && draftBps > 0 ? draftBps : null,
               aggregateCapBps,
             });
             const directoryGate = weightActionGate({
-              raw: draftWeightBps,
+              raw: draftWeightPercent,
               maxBps: 10000,
               balanceLythoshi,
               capViolated: capReadResolved && capState.warning !== null,
@@ -2266,7 +2277,7 @@ export function Delegate() {
                         className="btn btn--sm"
                         onClick={() => {
                           setOpenForm(c.clusterId);
-                          setDraftWeightBps("1000");
+                          setDraftWeightPercent("1000");
                           setDraftError(null);
                         }}
                         disabled={!c.active}
@@ -2297,16 +2308,17 @@ export function Delegate() {
                         color: "var(--fg-400)",
                       }}
                     >
-                      Weight in basis points (100 = 1%)
+                      Weight (% of your balance)
                     </label>
                     <input
                       type="number"
-                      inputMode="numeric"
-                      min={1}
-                      max={10000}
-                      value={draftWeightBps}
+                      inputMode="decimal"
+                      min={0.01}
+                      max={100}
+                      step={0.01}
+                      value={draftWeightPercent}
                       onChange={(e) => {
-                        setDraftWeightBps(e.target.value);
+                        setDraftWeightPercent(e.target.value);
                         setDraftError(null);
                       }}
                       style={{
@@ -2325,7 +2337,7 @@ export function Delegate() {
                       no tokens are escrowed. Your LYTH stays in your wallet and
                       remains spendable; effective weight = balance × weightBps.
                     </div>
-                    {capFeedback(capState, draftWeightBps)}
+                    {capFeedback(capState, draftWeightPercent)}
                     {draftError && (
                       <div className="row-help" style={{ color: "var(--err)" }}>
                         {draftError}
@@ -2343,10 +2355,10 @@ export function Delegate() {
                         Cancel
                       </button>
                       {reviewButton(directoryGate, async () => {
-                          const bps = parseExactNonNegativeInteger(draftWeightBps);
+                          const bps = parsePercentToBps(draftWeightPercent);
                           if (bps === null || bps <= 0 || bps > 10_000) {
                             setDraftError(
-                              "Weight must be 1–10000 basis points (0.01% – 100%).",
+                              "Weight must be between 0.01% and 100%, to at most two decimal places.",
                             );
                             return;
                           }
