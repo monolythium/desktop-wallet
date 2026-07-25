@@ -48,6 +48,11 @@ import {
 } from "../sdk/live";
 import { bpsToPercentLabel } from "../sdk/delegation-summary";
 import {
+  DIRECTORY_INCONSISTENT_MESSAGE,
+  readClusterDirectoryPage,
+  type ClusterDirectoryReading,
+} from "../sdk/cluster-directory";
+import {
   activeDelegationsSummary,
   effectiveWeightWholeLyth,
   inertDelegationMessage,
@@ -142,7 +147,10 @@ export function Delegate() {
   const [delegateMoreBps, setDelegateMoreBps] = useState("1000");
   const [delegateMoreError, setDelegateMoreError] = useState<string | null>(null);
   const [directory, setDirectory] = useState<ClusterDirectoryEntryResponse[]>([]);
-  const [directoryError, setDirectoryError] = useState<string | null>(null);
+  // What the wallet actually KNOWS about the directory after its last read.
+  // Replaces a bare error string, which could not tell a chain with no clusters
+  // apart from a read that contradicted itself. `null` = not read yet.
+  const [directoryReading, setDirectoryReading] = useState<ClusterDirectoryReading | null>(null);
   // Pending delegation rewards (lyth_pendingRewards). RpcOutcome so a node
   // failure surfaces the verbatim error rather than a blank/fabricated zero.
   const [rewards, setRewards] = useState<RpcOutcome<PendingRewardsResponse> | null>(null);
@@ -258,7 +266,7 @@ export function Delegate() {
       setStatus(null);
       setBalance(null);
       setDirectory([]);
-      setDirectoryError(null);
+      setDirectoryReading(null);
       setStatusError(null);
       setRewards(null);
       setAcTarget(null);
@@ -274,6 +282,9 @@ export function Delegate() {
     // A fresh load invalidates any expanded cluster detail.
     setExpandedDetail(null);
     setDetailByCluster(new Map());
+    // Held in an object rather than a `let` so the catch below can record the
+    // failure without the compiler narrowing it back to null at the read site.
+    const directoryFailure: { message: string | null } = { message: null };
     try {
       const [s, bal, dir, rew, red, feeBasis, feeReservation] = await Promise.all([
         // The one member that used to be uncaught: a rejection here (a degraded
@@ -286,7 +297,7 @@ export function Delegate() {
         }),
         capture(() => loadNativeBalanceLythoshi(walletAddress)),
         fetchClusterDirectory(CLUSTER_DIRECTORY_FIRST_PAGE, 25).catch((cause: unknown) => {
-          setDirectoryError((cause as Error)?.message ?? "directory unavailable");
+          directoryFailure.message = (cause as Error)?.message ?? "directory unavailable";
           return null;
         }),
         capture(() => fetchPendingRewards(walletAddress)),
@@ -311,29 +322,37 @@ export function Delegate() {
         setRedemptions(red);
         redemptionScope.current = redemptionKey;
       }
-      if (dir) {
-        setDirectory(dir.clusters);
-        setDirectoryError(null);
+      // Classify the read ONCE, here, so the three states can never be
+      // collapsed downstream: a failed read, a chain with no clusters, and a
+      // response that contradicted itself are different facts.
+      const reading = readClusterDirectoryPage(dir, directoryFailure.message);
+      setDirectoryReading(reading);
+      // Only a directory we actually know populates the rows. An inconsistent
+      // response contributes nothing — the fan-outs below would otherwise run
+      // against a list the wallet has no reason to trust.
+      setDirectory(reading.kind === "clusters" ? reading.rows : []);
+      if (reading.kind === "clusters") {
+        const rows = reading.rows;
         // Fan out the live per-cluster raw APR (aprBps) reads for the cards;
         // tolerant of per-cluster failures (a missing entry renders "—"). A real
         // 0 is included and renders "0.00%".
-        loadLiveClusterAprBpsMap(dir.clusters.map((c) => c.clusterId))
+        loadLiveClusterAprBpsMap(rows.map((c) => c.clusterId))
           .then(setAprBpsMap)
           .catch(() => setAprBpsMap(new Map()));
         // Resolve each cluster's operating entity for the card; tolerant of
         // per-cluster failures (a missing entity renders "—").
-        loadLiveClusterEntities(dir.clusters.map((c) => c.clusterId))
+        loadLiveClusterEntities(rows.map((c) => c.clusterId))
           .then(setEntities)
           .catch(() => setEntities(new Map()));
         // Resolve cluster names so a delegation can capture the real name at
         // submit; tolerant of per-cluster failures (a missing name → #id).
-        loadLiveClusterNames(dir.clusters.map((c) => c.clusterId))
+        loadLiveClusterNames(rows.map((c) => c.clusterId))
           .then(setNames)
           .catch(() => setNames(new Map()));
         // Fan out the per-cluster diversity reads for the autovote planner
         // (Diversity / Decentralization). Tolerant of per-cluster failures (a
         // missing score just renders "—").
-        fetchClusterDiversities(dir.clusters)
+        fetchClusterDiversities(rows)
           .then(setDiversities)
           .catch(() => setDiversities(new Map()));
       }
@@ -1536,9 +1555,13 @@ export function Delegate() {
                 <div className="row-help">Loading delegations…</div>
               )
             ) : delegationRows.length === 0 ? (
+              // The invitation is only honest when there is a directory to pick
+              // from. Offering it above an unavailable or self-contradictory
+              // read points the user at a list the wallet does not have.
               <div className="row-help">
-                You are not delegating to any cluster yet. Pick a cluster from the
-                directory below to start.
+                {directoryReading?.kind === "clusters"
+                  ? "You are not delegating to any cluster yet. Pick a cluster from the directory below to start."
+                  : "You are not delegating to any cluster yet."}
               </div>
             ) : (
               <div className="w-live-list">
@@ -2145,20 +2168,29 @@ export function Delegate() {
           <h3>Cluster directory</h3>
           <span className="w-card__head__spacer" />
           <span className="row-help mono">
-            {directory.length === 0
-              ? directoryError
-                ? "directory unavailable"
-                : "loading"
-              : `${directory.length} active`}
+            {directoryReading === null
+              ? "loading"
+              : directoryReading.kind === "clusters"
+                ? `${directoryReading.rows.length} listed`
+                : directoryReading.kind === "none"
+                  ? "none"
+                  : "unavailable"}
           </span>
         </div>
         <div className="w-card__body">
-          {directoryError && (
-            <div className="w-live-error">{directoryError}</div>
+          {/* The three states are rendered as three different things. An empty
+              page against a positive total is a defect in the question the
+              wallet asked, not an answer about the network, so it must never
+              reach the "no clusters" copy below. */}
+          {directoryReading?.kind === "unavailable" && (
+            <div className="w-live-error">{directoryReading.error}</div>
           )}
-          {directory.length === 0 && !directoryError && !busy && (
+          {directoryReading?.kind === "inconsistent" && (
+            <div className="w-live-error">{DIRECTORY_INCONSISTENT_MESSAGE}</div>
+          )}
+          {directoryReading?.kind === "none" && !busy && (
             <div className="row-help">
-              No clusters surfaced by lyth_clusterDirectory.
+              This chain has no clusters to delegate to.
             </div>
           )}
           {directory.map((c) => {
