@@ -100,6 +100,7 @@ import {
   type FeeAffordability,
 } from "../sdk/delegation-fee";
 import { withDelegationRevertCopy } from "../sdk/delegation-reverts";
+import { trackOperationTx } from "../sdk/reconcile";
 import { useDelegationRejection } from "../sdk/DelegationRejectionProvider";
 import { claimButtonState } from "../sdk/claim-in-flight";
 import {
@@ -954,6 +955,16 @@ export function Delegate() {
       auth: "keychain",
       // value = 0: a shortfall here is entirely fee, never "the amount plus".
       errorContext: { amountLythoshi: 0n },
+      // Without this the drawer skips recordOperationFailure entirely, so a
+      // batch that died mid-run left only a transient error pane. Plan-level:
+      // the descriptor is built before execution and cannot know which
+      // allocation will fail. The ones that LANDED are recorded individually as
+      // they land, below.
+      notify: {
+        kind: "delegate",
+        amountDecimal: "0",
+        counterparty: DELEGATION_PRECOMPILE,
+      },
       diff: [
         { k: "From", v: selfBech32m },
         { k: "Mode", v: label },
@@ -1005,13 +1016,35 @@ export function Delegate() {
         setAutovoteBusy(true);
         setAutovoteProgress({ done: 0, total: plan.allocations.length });
         try {
-          const result = await submitAutovotePlan(plan, ctx.vaultSeed, (done, total) =>
-            setAutovoteProgress({ done, total }),
+          const result = await submitAutovotePlan(
+            plan,
+            ctx.vaultSeed,
+            (done, total) => setAutovoteProgress({ done, total }),
+            // Track each delegation the moment it lands, exactly as a single
+            // delegate is tracked. A whole-batch result never arrives when the
+            // run dies part-way, so waiting for one is what made the landed
+            // delegations invisible.
+            (s) => {
+              void trackOperationTx(
+                {
+                  kind: "delegate",
+                  amountDecimal: "0",
+                  counterparty: DELEGATION_PRECOMPILE,
+                  clusterId: s.clusterId,
+                  clusterName: names.get(s.clusterId),
+                  delegationWeightBps: s.weightBps,
+                },
+                s.txHash,
+                s.nonce,
+              );
+            },
           );
+          rejection.clear();
           return {
             headline: `Autovote ${label} · ${result.txHashes.length} delegation${result.txHashes.length === 1 ? "" : "s"} submitted`,
             detail: result.txHashes.join(", "),
-            txHash: result.txHashes[result.txHashes.length - 1],
+            // Deliberately no txHash: each submission was already tracked as it
+            // landed, and returning one here would track the last a second time.
           };
         } finally {
           setAutovoteBusy(false);

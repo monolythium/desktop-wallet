@@ -507,6 +507,56 @@ export interface SubmitAutovotePlanResult {
   txHashes: string[];
 }
 
+/** One delegation that actually landed, reported the moment it did. */
+export interface AutovoteSubmission {
+  clusterId: number;
+  weightBps: number;
+  txHash: string;
+  nonce: number;
+  /** 1-based position in the plan. */
+  index: number;
+  total: number;
+}
+
+/**
+ * A batch that failed part-way, carrying what had already been submitted.
+ *
+ * Before this existed the hashes were local to the submit loop and died with the
+ * throw: real delegations sat on chain with no trace anywhere in the wallet, and
+ * the user was told only that "autovote failed". The boundary between what
+ * landed and what did not is the one fact a half-applied plan has to make
+ * legible, so it travels with the failure.
+ *
+ * The underlying reason stays reachable as `cause` — the classifier walks the
+ * chain for it — and this wrapper's own words add nothing the drawer's error
+ * classifier would rewrite.
+ */
+export class AutovoteBatchError extends Error {
+  readonly submittedTxHashes: string[];
+  readonly failedIndex: number;
+  readonly total: number;
+
+  constructor(args: {
+    cause: unknown;
+    submittedTxHashes: string[];
+    failedIndex: number;
+    total: number;
+  }) {
+    const landed = args.submittedTxHashes.length;
+    const reason = args.cause instanceof Error ? args.cause.message : String(args.cause);
+    super(
+      landed === 0
+        ? `${reason} Nothing was submitted.`
+        : `${reason} ${landed} of ${args.total} delegations were already submitted and stand; the rest were not sent.`,
+      { cause: args.cause },
+    );
+    this.name = "AutovoteBatchError";
+    this.submittedTxHashes = args.submittedTxHashes;
+    this.failedIndex = args.failedIndex;
+    this.total = args.total;
+  }
+}
+
 /**
  * Submit an autovote plan as N sequential delegate calls. Reuses the
  * delegation seam verbatim — NON-CUSTODIAL, each delegate carries no value
@@ -517,17 +567,43 @@ export async function submitAutovotePlan(
   plan: AutovotePlan,
   seed: Uint8Array,
   onProgress?: (submitted: number, total: number) => void,
+  /** Called the moment each delegation lands, so the caller can record it like a
+   *  single delegate rather than waiting for a whole-batch result that a
+   *  mid-batch failure never produces. */
+  onSubmitted?: (submission: AutovoteSubmission) => void,
 ): Promise<SubmitAutovotePlanResult> {
   const txHashes: string[] = [];
-  for (const a of plan.allocations) {
+  const total = plan.allocations.length;
+  for (let i = 0; i < total; i += 1) {
+    const a = plan.allocations[i]!;
     const calldata = buildDelegateCalldata({ clusterId: a.clusterId, weightBps: a.weightBps });
-    // Each batch step classifies too — a plan that trips a cap or the row limit
-    // mid-run must say which wall it hit, not just that a step failed.
-    const result = await withDelegationRevertCopy(() =>
-      submitDelegationTx({ seed, data: calldata }),
-    );
+    let result: { txHash: string; nonce: number };
+    try {
+      // Each batch step classifies too — a plan that trips a cap or the row limit
+      // mid-run must say which wall it hit, not just that a step failed.
+      result = await withDelegationRevertCopy(() =>
+        submitDelegationTx({ seed, data: calldata }),
+      );
+    } catch (cause) {
+      // Everything before this point is on chain. Carry it out with the failure
+      // rather than losing it to the throw.
+      throw new AutovoteBatchError({
+        cause,
+        submittedTxHashes: [...txHashes],
+        failedIndex: i,
+        total,
+      });
+    }
     txHashes.push(result.txHash);
-    onProgress?.(txHashes.length, plan.allocations.length);
+    onSubmitted?.({
+      clusterId: a.clusterId,
+      weightBps: a.weightBps,
+      txHash: result.txHash,
+      nonce: result.nonce,
+      index: i + 1,
+      total,
+    });
+    onProgress?.(txHashes.length, total);
   }
   return { txHashes };
 }
