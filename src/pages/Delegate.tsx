@@ -77,7 +77,10 @@ import {
   normalizeAggregateCapBps,
   preflightDelegationVerdict,
 } from "../sdk/delegation-caps";
-import { parseExactNonNegativeInteger } from "../sdk/delegation-input";
+import {
+  parseExactNonNegativeInteger,
+  resolveRedelegateDestination,
+} from "../sdk/delegation-input";
 import { withDelegationRevertCopy } from "../sdk/delegation-reverts";
 import { useDelegationRejection } from "../sdk/DelegationRejectionProvider";
 import { claimButtonState } from "../sdk/claim-in-flight";
@@ -1270,15 +1273,20 @@ export function Delegate() {
                             <button
                               className="btn btn--sm btn--primary"
                               onClick={() => {
-                                const to = parseExactNonNegativeInteger(redelegateTo);
-                                if (to === null) {
-                                  setRedelegateError("Enter a valid destination cluster id.");
+                                // The destination is typed, so it must be shown
+                                // to name a cluster the wallet has actually seen
+                                // and that may receive weight — a wrong id names
+                                // a REAL other cluster and the chain accepts it.
+                                const dst = resolveRedelegateDestination({
+                                  raw: redelegateTo,
+                                  sourceClusterId: row.cluster,
+                                  clusters: directory,
+                                });
+                                if (!dst.ok) {
+                                  setRedelegateError(dst.message);
                                   return;
                                 }
-                                if (to === row.cluster) {
-                                  setRedelegateError("Destination must differ from the source cluster.");
-                                  return;
-                                }
+                                const to = dst.clusterId;
                                 const bps = parseExactNonNegativeInteger(redelegateWeightBps);
                                 if (bps === null || bps <= 0 || bps > row.weightBps) {
                                   setRedelegateError(

@@ -6,7 +6,10 @@
 // delegation weight or a destination cluster id.
 
 import { describe, expect, it } from "vitest";
-import { parseExactNonNegativeInteger } from "../delegation-input";
+import {
+  parseExactNonNegativeInteger,
+  resolveRedelegateDestination,
+} from "../delegation-input";
 
 describe("parseExactNonNegativeInteger", () => {
   describe("the verified hazards — refused, never truncated", () => {
@@ -89,5 +92,102 @@ describe("parseExactNonNegativeInteger", () => {
       expect(parseExactNonNegativeInteger(null)).toBeNull();
       expect(parseExactNonNegativeInteger(undefined)).toBeNull();
     });
+  });
+});
+
+// The destination a redelegate moves real voting weight to.
+//
+// The failure this guards is not a revert — it is a WRONG RECIPIENT that the
+// chain accepts. A typed id that names some other real cluster produces a valid
+// transaction moving weight somewhere the user never named, and no admission
+// refusal will catch it. That is why membership fails CLOSED here, unlike every
+// other refusal in this flow.
+describe("resolveRedelegateDestination", () => {
+  const CLUSTERS = [
+    { clusterId: 1, active: true },
+    { clusterId: 2, active: true },
+    { clusterId: 7, active: false },
+  ];
+
+  it("accepts an active cluster that is in the directory", () => {
+    const v = resolveRedelegateDestination({
+      raw: "2",
+      sourceClusterId: 1,
+      clusters: CLUSTERS,
+    });
+    expect(v).toEqual({ ok: true, clusterId: 2 });
+  });
+
+  it("refuses an id that names no known cluster — the wrong-recipient case", () => {
+    const v = resolveRedelegateDestination({
+      raw: "99",
+      sourceClusterId: 1,
+      clusters: CLUSTERS,
+    });
+    expect(v.ok).toBe(false);
+    expect(v.ok === false && v.message).toContain("99");
+  });
+
+  it("refuses an ineligible cluster, agreeing with the directory disabling its action", () => {
+    const v = resolveRedelegateDestination({
+      raw: "7",
+      sourceClusterId: 1,
+      clusters: CLUSTERS,
+    });
+    expect(v.ok).toBe(false);
+    expect(v.ok === false && v.message).toContain("7");
+  });
+
+  it("treats a non-true eligibility flag as ineligible, exactly as !active does", () => {
+    const odd = [{ clusterId: 3, active: undefined as unknown as boolean }];
+    const v = resolveRedelegateDestination({
+      raw: "3",
+      sourceClusterId: 1,
+      clusters: odd,
+    });
+    expect(v.ok).toBe(false);
+  });
+
+  it("fails CLOSED when the cluster set is unavailable — membership is unverifiable", () => {
+    const v = resolveRedelegateDestination({
+      raw: "2",
+      sourceClusterId: 1,
+      clusters: [],
+    });
+    expect(v.ok).toBe(false);
+    expect(v.ok === false && v.message).toContain("directory");
+  });
+
+  it("refuses the source cluster before it reaches the directory checks", () => {
+    const v = resolveRedelegateDestination({
+      raw: "1",
+      sourceClusterId: 1,
+      clusters: CLUSTERS,
+    });
+    expect(v.ok).toBe(false);
+    expect(v.ok === false && v.message).toContain("differ");
+  });
+
+  it("refuses the hazardous parse forms rather than resolving them to a neighbour", () => {
+    // "1e1" once became 1 — a real, active cluster, and the wrong one.
+    for (const raw of ["1e1", "1e3", "2.9", "2abc", "", "  "]) {
+      const v = resolveRedelegateDestination({
+        raw,
+        sourceClusterId: 5,
+        clusters: CLUSTERS,
+      });
+      expect(v.ok).toBe(false);
+    }
+  });
+
+  it("does not let a hazardous form reach the directory as a truncated id", () => {
+    // Guards the ordering: if the parse ran loosely, "1e1" would resolve to
+    // cluster 1 and pass every later check.
+    const v = resolveRedelegateDestination({
+      raw: "1e1",
+      sourceClusterId: 5,
+      clusters: CLUSTERS,
+    });
+    expect(v).not.toEqual({ ok: true, clusterId: 1 });
   });
 });
