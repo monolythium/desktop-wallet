@@ -44,7 +44,11 @@ export function emptyActivityCopy(kind: ActivityCoverageKind): {
     case "indexer_disabled":
       return {
         title: "Activity history is unavailable",
-        body: "This network's indexer is turned off, so past transactions can't be listed here. Your balance and new transfers are unaffected.",
+        // The last sentence is the one addition taken from the behaviour
+        // specification, and it names THIS wallet's own surface rather than the
+        // specification's, which points at a location that does not exist here.
+        // Without it the user is told what is wrong and given nothing to do.
+        body: "This network's indexer is turned off, so past transactions can't be listed here. Your balance and new transfers are unaffected. Another operator may serve it — you can switch on the Operators page.",
       };
     case "pruned":
       return {

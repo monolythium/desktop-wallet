@@ -275,10 +275,15 @@ export function pendingLifecycleNote(lifecycle: PendingLifecycle): string {
       return "broadcast — waiting for inclusion";
     case "slow":
       return "taking longer than usual";
+    // Both terminal notes carry WHY as well as WHAT. "didn't confirm" leaves a
+    // user guessing whether their funds moved; naming the two causes that
+    // actually produce it — the nonce was consumed by another transaction, or
+    // the wallet gave up waiting — is the difference between a verdict and an
+    // explanation. House style keeps them lowercase.
     case "dropped":
-      return "didn't confirm";
+      return "didn't confirm (replaced or dropped)";
     case "expired":
-      return "status unknown";
+      return "status unknown — taking unusually long";
     case "pending":
     default:
       return "in flight";

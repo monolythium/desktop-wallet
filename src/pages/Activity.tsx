@@ -544,10 +544,21 @@ export function Activity() {
               {SAVED_HISTORY_NOTICE}
             </div>
           ) : null}
-          {/* Diagnostic, and superseded by the notice above whenever there are
-              saved rows to explain — two bands about one failure is clutter. */}
+          {/* Superseded by the notice above whenever there are saved rows to
+              explain — two bands about one failure is clutter. What remains is
+              the genuinely-empty-and-failed case, where the raw node string used
+              to be the entire message: it named the internals and offered the
+              user nothing to do. */}
           {activity?.ok === false && !showingSavedHistory ? (
-            <div className="w-live-error">address activity: {activity.error}</div>
+            <button
+              type="button"
+              className="w-live-error"
+              onClick={() => void refresh()}
+              disabled={busy}
+              style={{ width: "100%", background: "none", border: "none", cursor: "pointer", font: "inherit", color: "inherit" }}
+            >
+              {busy ? "Fetching activity…" : "Couldn't fetch activity. Tap to retry."}
+            </button>
           ) : null}
           {/* Advisory only — never blocks the feed. Keyed by scope so a chain
               switch starts with a clean set of per-class dismissals. */}

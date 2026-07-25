@@ -100,11 +100,13 @@ describe("the guard and the note", () => {
     expect(pendingLifecycleNote("awaiting-inclusion")).toBe("broadcast — waiting for inclusion");
   });
 
-  it("leaves every existing note untouched", () => {
+  it("pins every note, so changing one stays a deliberate diff", () => {
     expect(pendingLifecycleNote("pending")).toBe("in flight");
     expect(pendingLifecycleNote("slow")).toBe("taking longer than usual");
-    expect(pendingLifecycleNote("dropped")).toBe("didn't confirm");
-    expect(pendingLifecycleNote("expired")).toBe("status unknown");
+    // The two terminal notes carry their cause as well as their verdict:
+    // "didn't confirm" alone leaves a user guessing whether funds moved.
+    expect(pendingLifecycleNote("dropped")).toBe("didn't confirm (replaced or dropped)");
+    expect(pendingLifecycleNote("expired")).toBe("status unknown — taking unusually long");
   });
 });
 
