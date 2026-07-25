@@ -49,6 +49,8 @@ import { bpsToPercentLabel } from "../sdk/delegation-summary";
 import {
   activeDelegationsSummary,
   effectiveWeightWholeLyth,
+  inertDelegationMessage,
+  isInertDelegation,
 } from "../sdk/delegation-derive";
 import {
   aprLabelFromBps,
@@ -401,6 +403,24 @@ export function Delegate() {
     const lyth = effectiveWeightWholeLyth(balanceLythoshi, bps);
     return lyth === null ? bpsToPercentLabel(bps) : `${lyth} LYTH`;
   };
+
+  // Would this weight credit nothing at all? A different question from the caps:
+  // the chain ACCEPTS an inert delegation, so no cap check catches it, and the
+  // user pays a fee for a position that earns nothing and votes nothing.
+  //
+  // Returns null — proceed — when the delegation would do something, AND when
+  // the balance could not be read. In that case the test cannot run, and a guard
+  // that cannot evaluate its own condition must not refuse on suspicion. That is
+  // the cap re-read's direction, not the destination check's: a false pass here
+  // costs one wasted fee, a false block denies a good delegation outright.
+  //
+  // Checked before the cap re-read: it is synchronous, and at a low balance its
+  // answer ("no allowed weight works") is the terminal one, where "reduce to
+  // cap" would only send the user round again.
+  const inertRefusal = (weightBps: number): string | null =>
+    isInertDelegation(balanceLythoshi, weightBps)
+      ? inertDelegationMessage(balanceLythoshi, bindingPerClusterCapBps(aggregateCapBps))
+      : null;
 
   // The last word before signing. Re-checking at Review only NARROWS the stale
   // window — the passphrase unlock sits between that check and the signature, so
@@ -1277,6 +1297,11 @@ export function Delegate() {
                                   );
                                   return;
                                 }
+                                const inert = inertRefusal(bps);
+                                if (inert) {
+                                  setDelegateMoreError(inert);
+                                  return;
+                                }
                                 // Same dual-cap pre-flight the directory Delegate
                                 // form runs — add-more stacks onto an existing
                                 // delegation, so it is the most cap-prone path,
@@ -1373,6 +1398,11 @@ export function Delegate() {
                                   setRedelegateError(
                                     `Weight must be 1–${row.weightBps} basis points (no more than the source delegation).`,
                                   );
+                                  return;
+                                }
+                                const inert = inertRefusal(bps);
+                                if (inert) {
+                                  setRedelegateError(inert);
                                   return;
                                 }
                                 // Same per-cluster cap pre-flight the delegate
@@ -1903,6 +1933,11 @@ export function Delegate() {
                             setDraftError(
                               "Weight must be 1-10000 basis points (0.01% – 100%).",
                             );
+                            return;
+                          }
+                          const inert = inertRefusal(bps);
+                          if (inert) {
+                            setDraftError(inert);
                             return;
                           }
                           // Block a delegate the chain would revert on a cap

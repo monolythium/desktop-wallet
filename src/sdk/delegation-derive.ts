@@ -78,6 +78,100 @@ export function effectiveWeightLythDisplay(
   return raw === null ? null : formatLythDisplay(raw, decimals);
 }
 
+/** The balance as an exact bigint, or null when it is absent / undecodable /
+ *  negative — the same tolerance {@link effectiveWeightLythoshi} applies, so the
+ *  inert test and the weight figures can never disagree about what is readable. */
+function balanceOrNull(balanceLythoshi: string | null | undefined): bigint | null {
+  if (
+    balanceLythoshi === null ||
+    balanceLythoshi === undefined ||
+    balanceLythoshi.trim() === ""
+  ) {
+    return null;
+  }
+  try {
+    const balance = BigInt(balanceLythoshi);
+    return balance < 0n ? null : balance;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Would this weight credit nothing at all?
+ *
+ * The chain counts effective weight on a WHOLE-LYTH grid, so a weight whose
+ * effective value floors to zero is accepted, earns nothing, casts no vote, and
+ * still costs a fee. Every cap check passes it — it is well inside every cap —
+ * which is why this is a separate question from whether the delegation is
+ * allowed.
+ *
+ * FAILS OPEN, and deliberately. An unknown balance yields null from the
+ * arithmetic (A6) and this returns FALSE: null means *cannot test*, not *inert*,
+ * and a guard that cannot evaluate its own condition must not refuse on
+ * suspicion. That is the cap re-read's reasoning, not the destination check's —
+ * a false pass here costs a fee on a delegation that earns nothing, while a
+ * false block would deny a perfectly good delegation on a failed balance read.
+ *
+ * A zero balance is likewise not inert: there is nothing to round down, and the
+ * zero-weight guard already covers it. Pure.
+ */
+export function isInertDelegation(
+  balanceLythoshi: string | null | undefined,
+  weightBps: number,
+): boolean {
+  if (!Number.isInteger(weightBps) || weightBps < 1) return false;
+  const balance = balanceOrNull(balanceLythoshi);
+  if (balance === null || balance <= 0n) return false;
+  return effectiveWeightWholeLyth(balanceLythoshi, weightBps) === "0";
+}
+
+/** The smallest weight that credits one whole LYTH at this balance, or null when
+ *  there is none to quote — an unknown balance, a zero balance, or a balance
+ *  below one whole LYTH, where no weight up to 100% can reach one.
+ *
+ *  Rounds UP (integer ceil), because the floor of the quoted weight must itself
+ *  still reach a whole LYTH. Out of range returns null rather than being clamped
+ *  to 10000 (A5) — quoting an unreachable minimum as if it were reachable would
+ *  send the user to a weight that is still inert. Pure. */
+export function minNonInertBps(
+  balanceLythoshi: string | null | undefined,
+): number | null {
+  const balance = balanceOrNull(balanceLythoshi);
+  if (balance === null || balance <= 0n) return null;
+  const numerator = 10_000n * 10n ** 18n;
+  const ceilBps = (numerator + balance - 1n) / balance;
+  return ceilBps > 10_000n ? null : Number(ceilBps);
+}
+
+/** The refusal shown for an inert delegation.
+ *
+ *  Says what is actually wrong — this weight credits nothing at this balance —
+ *  and quotes the minimum in BASIS POINTS, the unit the forms actually take, so
+ *  the user is not left converting a percentage. When no weight can reach one
+ *  whole LYTH it says that instead of quoting an impossible number.
+ *
+ *  Carries no wording the drawer's error classifier would read as a chain
+ *  revert, which would replace the whole body with a generic sentence. Pure. */
+export function inertDelegationMessage(
+  balanceLythoshi: string | null | undefined,
+  bindingCapBps?: number,
+): string {
+  const head =
+    "This weight credits 0 LYTH at your balance — it would earn nothing and cast no vote.";
+  const minBps = minNonInertBps(balanceLythoshi);
+  if (minBps === null) {
+    return `${head} No weight reaches a whole LYTH until your balance grows.`;
+  }
+  // At a low enough balance the smallest useful weight sits ABOVE the
+  // per-cluster cap. Quoting it would send the user to a weight the cap then
+  // refuses — advice that cannot be followed, on a fund control.
+  if (bindingCapBps !== undefined && minBps > bindingCapBps) {
+    return `${head} It would take ${minBps} bps to reach a whole LYTH, which is over the ${(bindingCapBps / 100).toFixed(0)}% per-cluster cap — no allowed weight works at this balance.`;
+  }
+  return `${head} Use at least ${minBps} bps (${(minBps / 100).toFixed(2)}%).`;
+}
+
 /** Summary of a wallet's active delegations: the count of clusters carrying
  *  weight, the total delegated basis points (the real `delegations.totalBps`
  *  read, passed in), and its percent label. Pure. */
