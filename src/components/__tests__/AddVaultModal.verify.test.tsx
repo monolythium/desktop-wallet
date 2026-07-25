@@ -63,6 +63,15 @@ function emptyIndices(): number[] {
     .map((b) => parseInt(b.getAttribute("aria-label")!.match(/Word (\d+),/)![1]!, 10));
 }
 
+// Both tests here seal a real vault, so each pays the Argon2id cost twice over.
+// That fits inside the 5s default alone but not under full-suite load, where
+// this file has timed out at ~6.3s while passing in isolation — a failure nobody
+// believes, in a suite that has to stay worth reading.
+//
+// The cost is deliberately NOT lowered to make this fast: the KDF parameters are
+// a real security control, not a test-harness knob. Only the wait is raised.
+vi.setConfig({ testTimeout: 20_000 });
+
 describe("AddVaultModal — forced verification before a secondary wallet is sealed", () => {
   it("does not seal until a correct verification, then seals the shown phrase", async () => {
     const onClose = vi.fn();
