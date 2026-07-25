@@ -23,6 +23,8 @@
 // digits, and must survive the round trip to a number exactly. Anything else is
 // refused and explained, never quietly reinterpreted.
 
+import { effectiveWeightWholeLyth, isInertDelegation } from "./delegation-derive";
+
 /** The anchored full-string parse for a non-negative integer field.
  *
  *  Returns the value only when the entire trimmed input is digits and the result
@@ -88,6 +90,83 @@ export function autovoteBudgetBps(raw: string | null | undefined): number | null
   const value = parseExactNonNegativeInteger(raw);
   if (value === null || value <= 0 || value > MAX_WEIGHT_BPS) return null;
   return value;
+}
+
+/**
+ * What the typed weight actually means, echoed live beneath the field.
+ *
+ * The forms take integer basis points while every cap beside them is stated in
+ * percent, so a user who reads "50%" and types 50 signs 0.50%. Renaming the
+ * field is necessary but not sufficient — someone who has learned to type 50
+ * keeps typing it. This is the control that makes the label checkable, because
+ * it shows the meaning of the number while it is still being typed.
+ *
+ * NEVER FABRICATES. The percentage is pure arithmetic on the typed value and is
+ * always available; the credited amount needs the balance, and when that cannot
+ * be read the clause is omitted rather than shown as zero (A6 — unknown is not
+ * zero, and the distinction is protected in the arithmetic precisely so it can
+ * survive into the display).
+ *
+ * NEVER CLAMPS (A5). A typed 50000 echoes as 500.00%, because hiding the mistake
+ * behind a tidy 100.00% would defeat the one job this line has. The refusal
+ * explains; the echo reports.
+ *
+ * Returns null when nothing readable was typed — there is nothing to say yet.
+ * Pure.
+ */
+export function weightEchoLine(
+  raw: string | null | undefined,
+  balanceLythoshi: string | null | undefined,
+): string | null {
+  const bps = parseExactNonNegativeInteger(raw);
+  if (bps === null || bps <= 0) return null;
+  const head = `${bps} bps = ${(bps / 100).toFixed(2)}% of balance`;
+  const credited = effectiveWeightWholeLyth(balanceLythoshi, bps);
+  // Unknown balance → no credit clause at all. A zero here would read as a fact.
+  return credited === null ? head : `${head} · credits ${credited} LYTH`;
+}
+
+/** Whether the action may be attempted, and if not, what to do about it. */
+export type WeightActionGate = { ok: true } | { ok: false; label: string };
+
+/**
+ * Should the action button be disabled, and what should it say?
+ *
+ * ONLY DEFINITE CONDITIONS GATE. Disabling because a cap is definitively
+ * exceeded is honest — pressing could only fail. Disabling because a READ DID
+ * NOT RESOLVE would be a false block, the same failure this project's
+ * fail-direction ledger has rejected at every previous guard, arriving through a
+ * new door. So:
+ *
+ *   - an unreadable balance does NOT gate: the inert test cannot run, and a
+ *     guard that cannot evaluate its condition must not disable the action;
+ *   - `capViolated` must only ever be passed `true` when the delegation read
+ *     actually resolved. Absent or false means unknown-or-fine, and both leave
+ *     the button enabled for the review handler — which re-reads fresh state —
+ *     to decide, where a refusal comes with an explanation.
+ *
+ * Labels name the remedy rather than the refusal, so a disabled control still
+ * tells the user what to do. Ordered most-fundamental first: an unreadable field
+ * is not a cap problem, whatever the cap says. Pure — enforces nothing, and every
+ * condition here is one the review handlers already evaluate.
+ */
+export function weightActionGate(args: {
+  raw: string | null | undefined;
+  /** 10000 for a delegate, the source weight for a redelegate. */
+  maxBps: number;
+  balanceLythoshi: string | null | undefined;
+  /** A cap breach established against a RESOLVED read. Never pass true on doubt. */
+  capViolated?: boolean;
+}): WeightActionGate {
+  const bps = parseExactNonNegativeInteger(args.raw);
+  if (bps === null || bps <= 0) return { ok: false, label: "Enter a weight" };
+  if (bps > args.maxBps) return { ok: false, label: "Reduce the weight" };
+  // Definite by construction: false whenever the balance could not be read.
+  if (isInertDelegation(args.balanceLythoshi, bps)) {
+    return { ok: false, label: "Too small to credit" };
+  }
+  if (args.capViolated === true) return { ok: false, label: "Reduce to the cap" };
+  return { ok: true };
 }
 
 /** The outcome of resolving a typed redelegate destination. */
