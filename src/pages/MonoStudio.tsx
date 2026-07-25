@@ -59,7 +59,16 @@ export function MonoStudio({ goto }: MonoStudioProps) {
   const [channel, setChannel] = useState<NativeDevkitChannel>(() => readDevkitChannel());
   const [localPath, setLocalPath] = useState(() => readLocalDevkitPath() ?? "");
   const [manifestPath, setManifestPath] = useState("");
+  // What the developer typed, and the ONLY workspace value that is persisted.
+  // The canonical root a trust check resolves is deliberately kept out of this
+  // state: every backend command canonicalises its own argument, so the
+  // canonical form is derived at use time and storing it would put a value that
+  // came out of a trust decision into local storage for no gain.
   const [workspacePath, setWorkspacePath] = useState(() => readStudioWorkspacePath() ?? "");
+  // The resolved root from the last trust round-trip, shown but never stored.
+  // Cleared as soon as the typed path changes, since it then describes a path
+  // the developer is no longer asking about.
+  const [resolvedRoot, setResolvedRoot] = useState<string | null>(null);
   const [trustedRoots, setTrustedRoots] = useState<string[]>([]);
   const [workspaceTrusted, setWorkspaceTrusted] = useState(false);
   const [sidecarEvents, setSidecarEvents] = useState<SidecarEventRecord[]>([]);
@@ -214,7 +223,7 @@ export function MonoStudio({ goto }: MonoStudioProps) {
     setSidecarAction("starting");
     try {
       const trusted = await assertWorkspaceTrusted(workspacePath.trim());
-      setWorkspacePath(trusted.root);
+      setResolvedRoot(trusted.root);
       setWorkspaceTrusted(true);
       await startDevkitSidecar({
         installPath: status.devkit.installPath,
@@ -297,7 +306,7 @@ export function MonoStudio({ goto }: MonoStudioProps) {
     setBusy(true);
     try {
       const result = await trustWorkspace(workspacePath.trim());
-      setWorkspacePath(result.root);
+      setResolvedRoot(result.root);
       setWorkspaceTrusted(true);
       setTrustedRoots(result.trustedRoots);
       setError(null);
@@ -313,6 +322,7 @@ export function MonoStudio({ goto }: MonoStudioProps) {
     setBusy(true);
     try {
       const result = await removeWorkspaceTrust(workspacePath.trim());
+      setResolvedRoot(null);
       setWorkspaceTrusted(false);
       setTrustedRoots(result.trustedRoots);
       setError(null);
@@ -559,7 +569,10 @@ export function MonoStudio({ goto }: MonoStudioProps) {
                 <span>Project root</span>
                 <input
                   value={workspacePath}
-                  onChange={(event) => setWorkspacePath(event.target.value)}
+                  onChange={(event) => {
+                    setWorkspacePath(event.target.value);
+                    setResolvedRoot(null);
+                  }}
                   placeholder="/path/to/project"
                 />
               </label>
@@ -586,6 +599,10 @@ export function MonoStudio({ goto }: MonoStudioProps) {
               <div className="w-kv-list">
                 <KV k="Sidecar state" v={sidecarLabel} />
                 <KV k="Trusted roots" v={String(trustedRoots.length)} />
+                {/* What the backend resolved the typed path to. The field used
+                    to be overwritten with this; showing it here says the same
+                    thing without putting it into the value that is stored. */}
+                {resolvedRoot ? <KV k="Resolved root" v={resolvedRoot} mono /> : null}
               </div>
             </div>
           </div>
