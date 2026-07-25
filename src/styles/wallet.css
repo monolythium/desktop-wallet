@@ -263,6 +263,17 @@ html[data-sidebar="collapsed"]:not([data-layout="topbar"]) .w-nav__item {
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
   gap: 12px;
+  /* The `backdrop-filter` above CREATES A STACKING CONTEXT. Everything inside
+     this bar is therefore ordered relative to the bar and not to the page, so
+     the peer popover's own `z-index: 200` cannot lift it over `.w-main` — and
+     `.w-main`'s cards each create a stacking context of their own (they carry
+     a backdrop-filter too) and come later in DOM order, so they paint on top
+     and the popover opens behind the page. Raising the popover's number is
+     powerless against this; the trapping context is the only thing that can
+     be ordered, which is what this does.
+     10 is deliberately below `.w-overlay` (100) and `.w-toast` (200) so
+     dialogs, the operations drawer and toasts still cover the bar. */
+  z-index: 10;
 }
 .w-top__title {
   font-size: 16px; font-weight: 600;

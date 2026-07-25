@@ -17,6 +17,16 @@ export type ChainHealthTone = "ok" | "warn" | "err" | "muted";
 export interface ChainHealthPresentation {
   /** Compact chip label (the state name, with the head height where useful). */
   label: string;
+  /**
+   * The same label with the head height removed — the state name alone, equal
+   * to `label` for the kinds that carry no height.
+   *
+   * A block number is a diagnostic, not a status: it tells someone debugging
+   * where the chain is, and tells everyone else nothing they can act on. The
+   * dot and the state name already carry whether the wallet is connected, so
+   * the chip shows this and reveals `label` only in developer mode.
+   */
+  labelPlain: string;
   /** Severity → design token. */
   tone: ChainHealthTone;
   /** Topbar dot class: "" (ok) | is-stale (warn) | is-down (err) | is-muted. */
@@ -40,7 +50,17 @@ export function chainHealthPresentation(health: ChainHealth): ChainHealthPresent
     tone: ChainHealthTone,
     tappable: boolean,
     hint: string | null,
-  ): ChainHealthPresentation => ({ label, tone, dotClass: DOT_CLASS[tone], tappable, hint });
+    // Defaults to `label`, so a kind that carries no height needs no second
+    // string and the two can never drift apart for those kinds.
+    labelPlain: string = label,
+  ): ChainHealthPresentation => ({
+    label,
+    labelPlain,
+    tone,
+    dotClass: DOT_CLASS[tone],
+    tappable,
+    hint,
+  });
 
   switch (health.kind) {
     case "loading":
@@ -51,15 +71,17 @@ export function chainHealthPresentation(health: ChainHealth): ChainHealthPresent
         "warn",
         false,
         "Showing the last block seen — reconnecting to an operator to confirm.",
+        "RECONNECTING…",
       );
     case "live":
-      return p(`LIVE · #${health.height}`, "ok", false, null);
+      return p(`LIVE · #${health.height}`, "ok", false, null, "LIVE");
     case "stalled":
       return p(
         `STALLED · #${health.height}`,
         "warn",
         true,
         "The chain hasn't advanced for a while. Review your operators.",
+        "STALLED",
       );
     case "untrusted":
       // Names the CHAIN ID, not the genesis: this state is reachable only via

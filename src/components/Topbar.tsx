@@ -19,6 +19,7 @@ import { useEffect, useRef, useState } from "react";
 import { useActiveWallet } from "../sdk/active-wallet";
 import { useChainHealthView } from "../sdk/ChainHealthProvider";
 import { chainHealthPresentation } from "../sdk/chain-health-presentation";
+import { useDeveloperMode } from "../sdk/developer-mode";
 import { getUnread, subscribeNotifications } from "../sdk/notifications-store";
 import {
   currentEndpoint,
@@ -80,8 +81,18 @@ export function Topbar({ route, setRoute }: Props) {
   const ready = wallet.status === "ready";
   const chain = useChainHealthView();
   const pres = chainHealthPresentation(chain.health);
+  const devMode = useDeveloperMode();
   const dotClass = !ready ? "is-stale" : pres.dotClass;
-  const syncLabel = !ready ? "No active address" : pres.label;
+  // The head height is a developer diagnostic, so the chip states the CONNECTION
+  // (dot + state name) and shows the block number only in developer mode. What a
+  // normal user needs from this control — whether the wallet is talking to a
+  // trusted operator — is carried by the dot and the state word either way; no
+  // signal is lost, only the number.
+  const syncLabel = !ready
+    ? "No active address"
+    : devMode
+      ? pres.label
+      : pres.labelPlain;
 
   return (
     <header className="w-top">

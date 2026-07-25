@@ -53,6 +53,32 @@ describe("chainHealthPresentation (§M)", () => {
   });
 });
 
+describe("labelPlain — the chip's label with the head height removed", () => {
+  it("strips the number from the three kinds that carry one", () => {
+    expect(chainHealthPresentation({ kind: "live", height: 100 }).labelPlain).toBe("LIVE");
+    expect(chainHealthPresentation({ kind: "stalled", height: 100 }).labelPlain).toBe("STALLED");
+    expect(chainHealthPresentation({ kind: "reconnecting", height: 16 }).labelPlain).toBe(
+      "RECONNECTING…",
+    );
+  });
+
+  it("is identical to label for every kind that carries no height", () => {
+    for (const [health] of cases.filter(([h]) => !("height" in h))) {
+      const p = chainHealthPresentation(health);
+      expect(p.labelPlain, health.kind).toBe(p.label);
+    }
+  });
+
+  it("never leaks a digit, whatever the height", () => {
+    // The point of the field is that no block number reaches the chip. Pinning
+    // the three strings alone would still pass if a later format change put a
+    // number back into a fourth kind.
+    for (const [health] of cases) {
+      expect(chainHealthPresentation(health).labelPlain, health.kind).not.toMatch(/\d/);
+    }
+  });
+});
+
 describe("each degraded hint names the signal its state actually fires on", () => {
   it("UNTRUSTED OPERATOR names the chain ID, because that is what triggers it", () => {
     // `untrusted` is reachable only via anyWrongChainId (chain-health.ts:107-108),
