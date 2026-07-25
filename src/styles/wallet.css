@@ -793,6 +793,25 @@ html[data-sidebar="collapsed"]:not([data-layout="topbar"]) .w-nav__item {
   display: grid; place-items: center;
   background: var(--w-bg); border: 1px solid var(--w-line);
 }
+/* ============ Network-status answer line ============
+   The reachability answer: a state dot and the chain-health label. Tone comes
+   from the same dot classes the top-bar indicator uses, so one vocabulary
+   drives both. */
+.w-net-answer { display: flex; align-items: center; gap: 9px; margin-bottom: 8px; }
+.w-net-answer__dot {
+  width: 9px; height: 9px; border-radius: 50%;
+  background: var(--ok); box-shadow: 0 0 8px var(--ok);
+  flex: 0 0 auto;
+}
+.w-net-answer__dot.is-stale { background: var(--warn); box-shadow: 0 0 8px var(--warn); }
+.w-net-answer__dot.is-down  { background: var(--err);  box-shadow: 0 0 8px var(--err); }
+/* CONNECTING — muted, and the only dot with no glow, matching the chip. */
+.w-net-answer__dot.is-muted { background: var(--fg-500); box-shadow: none; }
+.w-net-answer__label {
+  font-family: var(--f-mono); font-size: 12px;
+  letter-spacing: 0.06em; color: var(--fg-100);
+}
+
 /* ============ Row glyph badge (activity-icons) ============
    The kind glyph plus its corner status mark. Status is carried by SHAPE — a
    distinct mark per state — with tone only reinforcing it, so the distinction

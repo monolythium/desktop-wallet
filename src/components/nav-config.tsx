@@ -105,6 +105,13 @@ const ICON_OPERATORS = () => (
     <path d="M7 7h.01M7 17h.01" />
   </svg>
 );
+// A pulse trace — the chain's heartbeat. Deliberately not the globe used for
+// Networks: these sit two rows apart and must not read as the same thing.
+const ICON_PULSE = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M2 12h4l3-8 4 16 3-8h6" />
+  </svg>
+);
 const ICON_NETWORKS = () => (
   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <circle cx="12" cy="12" r="9" />
@@ -286,6 +293,12 @@ export const NAV_CATEGORIES: NavCategory[] = [
     header: "Manage",
     items: [
       { id: "contacts", label: "Contacts", icon: ICON_CONTACTS, route: "contacts" },
+      // Placed immediately before Operators because the two answer neighbouring
+      // questions — "is the chain alright" and "which operator am I reading
+      // from" — and a user with the first question looks where the second is
+      // answered. Named "Network status" rather than "Network" so it cannot be
+      // confused with "Networks" two rows below, which switches chains.
+      { id: "network-status", label: "Network status", icon: ICON_PULSE, route: "network-status" },
       { id: "operators", label: "Operators", icon: ICON_OPERATORS, route: "operators" },
       { id: "networks", label: "Networks", icon: ICON_NETWORKS, route: "networks" },
       { id: "riscv", label: "RISC-V", icon: ICON_RISCV, route: "riscv", developerOnly: true, badge: "dev" },

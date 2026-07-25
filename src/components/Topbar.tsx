@@ -54,6 +54,7 @@ const TITLES: Record<Route, string> = {
   operators: "Operators",
   "operator-management": "Operator management",
   networks: "Networks",
+  "network-status": "Network status",
   riscv: "RISC-V",
   studio: "Mono Studio",
   trade: "Trade",
