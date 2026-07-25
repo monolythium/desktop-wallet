@@ -142,3 +142,49 @@ describe("no feed content reaches the DOM as markup", () => {
     expect((globalThis as Record<string, unknown>).__xssFired).toBeUndefined();
   });
 });
+
+describe("stripped feed text reaches the DOM as text, never as markup", () => {
+  // The strip DECODES entities — that is what it is for — so its output may
+  // legitimately contain `<`, `>` and `&`. A feed carrying `&lt;img …&gt;`
+  // leaves the parse as the CHARACTERS `<img …>`. Whether those characters
+  // become an ELEMENT is decided by the render sink, not by the parse. That
+  // is the whole of CodeQL's js/xss-through-dom finding on `stripHtml`, and
+  // the reason the finding is not exploitable is these four sinks, so these
+  // four sinks are what has to be pinned.
+  //
+  // The fixtures above cannot see this: `<![CDATA[<img …>payload]]>` is
+  // stripped to the bare word `payload`, which is inert through ANY sink —
+  // those tests pass unchanged against `dangerouslySetInnerHTML`. Only a
+  // payload that survives the strip AS markup text tells the two apart.
+  const DECODES_TO_MARKUP =
+    '<![CDATA[&lt;img src=x onerror="globalThis.__xssFired = true"&gt;payload]]>';
+  const AS_TEXT = '<img src=x onerror="globalThis.__xssFired = true">payload';
+
+  beforeEach(() => {
+    rig.body = feed(
+      `<item><title>${DECODES_TO_MARKUP}</title><link>https://monolythium.com/blog/a/</link><description>${DECODES_TO_MARKUP}</description><category>${DECODES_TO_MARKUP}</category></item>`,
+      `<description>${DECODES_TO_MARKUP}</description>`,
+    );
+  });
+
+  it("keeps the decoded markup as literal text in every field it strips", async () => {
+    const { container } = renderWithProviders(<News />);
+    await screen.findByText(AS_TEXT, { selector: ".w-news-item__title" });
+    // Every consumer of the strip, named one by one. A sink that interpreted
+    // the string would leave `payload` here — the `<img>` contributes no text.
+    expect(container.querySelector(".sub")?.textContent).toBe(AS_TEXT);
+    expect(container.querySelector(".w-news-item__title")?.textContent).toBe(AS_TEXT);
+    expect(container.querySelector(".w-news-item__summary")?.textContent).toBe(AS_TEXT);
+    expect(container.querySelector(".w-news-item__tags")?.textContent).toBe(AS_TEXT);
+  });
+
+  it("creates no element from feed text that decoded to markup", async () => {
+    const { container } = renderWithProviders(<News />);
+    // Anchored on a substring the safe and the unsafe render BOTH contain, so
+    // this fails reporting the element it found, not a missed text lookup.
+    await screen.findAllByText(/payload/);
+    expect(container.querySelector("img")).toBeNull();
+    expect(container.querySelector("script")).toBeNull();
+    expect((globalThis as Record<string, unknown>).__xssFired).toBeUndefined();
+  });
+});
