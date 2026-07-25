@@ -28,10 +28,18 @@ import {
 } from "../useChainHealth";
 
 // The fleet is just the active endpoint here, so the trust resolver's failover
-// probe makes no real network calls.
+// probe makes no real network calls. `throwOnce` lets a test make the fleet read
+// itself fail, which is how a tick rejects OUTSIDE the verdict helper's catch.
+const peersCtl = vi.hoisted(() => ({ throwOnce: false }));
 vi.mock("../peers", async (orig) => ({
   ...(await orig<typeof import("../peers")>()),
-  listPeers: () => [{ url: "http://test-operator", label: "test", region: null, tier: "gateway" }],
+  listPeers: () => {
+    if (peersCtl.throwOnce) {
+      peersCtl.throwOnce = false;
+      throw new Error("operator store unreadable");
+    }
+    return [{ url: "http://test-operator", label: "test", region: null, tier: "gateway" }];
+  },
 }));
 
 // The warm-start store is mocked so the hook never touches the real Tauri store.
@@ -115,6 +123,7 @@ beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(0);
   reads = 0;
+  peersCtl.throwOnce = false;
   statsImpl = async () => head(100, "0xaa");
   warm.loadWarmStartHead.mockReset();
   warm.loadWarmStartHead.mockResolvedValue(null);
@@ -296,5 +305,36 @@ describe("useChainHealth warm-start (§I)", () => {
     expect(view!.health.kind).toBe("live");
     act(() => root2.unmount());
     container2.remove();
+  });
+});
+
+describe("the heartbeat survives a failing tick (the successor is always armed)", () => {
+  it("a tick that THROWS still arms the next one, and fails closed meanwhile", async () => {
+    await mount();
+    expect(view!.health).toEqual({ kind: "live", height: 100 });
+    expect(activeOperatorTrust()).toBeNull();
+    const beforeFailing = reads;
+
+    // Reject the next tick OUTSIDE the verdict helper's catch: the active
+    // operator goes wrong-chain so the resolver fans out, and reading the fleet
+    // then throws. Nothing downstream of that await can catch it.
+    statsImpl = async () => ({ ...head(101, "0xbb"), chainId: 1 });
+    peersCtl.throwOnce = true;
+    await advance(HEALTH_TICK_MS);
+    expect(reads).toBeGreaterThan(beforeFailing); // the failing tick did run
+
+    // A tick that could not produce a verdict has not verified anything, so the
+    // seam must refuse rather than coast on the previous verdict.
+    expect(activeOperatorTrust()).not.toBeNull();
+    expect(view!.health.kind).toBe("offline");
+
+    // …and the heartbeat must still be beating. Without a guaranteed successor
+    // no further timer is ever armed and the wallet stays stuck here forever.
+    const beforeRecovery = reads;
+    statsImpl = async () => head(102, "0xcc");
+    await advance(HEALTH_TICK_MS);
+    expect(reads).toBeGreaterThan(beforeRecovery);
+    expect(view!.health).toEqual({ kind: "live", height: 102 });
+    expect(activeOperatorTrust()).toBeNull();
   });
 });

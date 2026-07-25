@@ -24,6 +24,12 @@
 // the window is hidden and refreshed immediately on becoming visible (status
 // specification §D.2 visibility gate); the machine restarts fresh when the
 // active endpoint changes (a failover) or the address changes (a new scope).
+//
+// The successor tick is armed in a `finally`, so a round that rejects cannot end
+// the heartbeat — and a round that reached no verdict marks the seam untrusted
+// rather than leaving the previous one standing. Both matter because the trust
+// flag this loop writes is what every read and every broadcast is gated on: a
+// stopped heartbeat would freeze it, and a frozen "trusted" never re-verifies.
 
 import { useEffect, useState } from "react";
 import {
@@ -128,8 +134,11 @@ export function useChainHealth(address: string | null): ChainHealthView {
       if (!cancelled) timer = setTimeout(() => void tick(), ms);
     };
 
-    const tick = async () => {
-      if (cancelled) return;
+    /** One observation round. Every cause it can CLASSIFY is already fail-closed
+     *  inside the resolver, so this throws only when the tick could not reach a
+     *  verdict at all — an unreadable fleet list, a throwing endpoint subscriber,
+     *  an unresolvable chain record. {@link tick} owns that case. */
+    const runTick = async () => {
       // Visibility gate: skip the RPC read while hidden, but keep the heartbeat
       // scheduled so it resumes cleanly on the next visible tick.
       if (document.visibilityState !== "hidden") {
@@ -169,7 +178,28 @@ export function useChainHealth(address: string | null): ChainHealthView {
           endpoint: res.ok ? res.url : currentEndpoint(),
         });
       }
-      schedule(HEALTH_TICK_MS);
+    };
+
+    const tick = async () => {
+      if (cancelled) return;
+      try {
+        await runTick();
+      } catch {
+        // The tick died before producing a verdict, so nothing was verified this
+        // round. The chain cannot catch that for us — we never got as far as
+        // asking it — so the seam refuses rather than coasting on the previous
+        // verdict. The next tick re-establishes trust the moment it can.
+        if (cancelled) return;
+        markActiveOperatorUntrusted("unreachable");
+        state = reduceHealth(state, { ok: false, cause: "unreachable" }, Date.now());
+        publish({ health: state.health, chainId: lastChainId, endpoint: currentEndpoint() });
+      } finally {
+        // The successor is armed whether this round resolved, rejected, or was
+        // abandoned. Scheduling only on the happy path is what let one failure
+        // stop the heartbeat permanently, freezing the trust flag at its last
+        // value; `schedule` already no-ops once cancelled.
+        schedule(HEALTH_TICK_MS);
+      }
     };
 
     const boot = async () => {
