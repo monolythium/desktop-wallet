@@ -85,6 +85,7 @@ import {
   parseExactNonNegativeInteger,
   resolveRedelegateDestination,
 } from "../sdk/delegation-input";
+import { refreshDelegationSnapshot } from "../sdk/delegation-preflight";
 import { withDelegationRevertCopy } from "../sdk/delegation-reverts";
 import { useDelegationRejection } from "../sdk/DelegationRejectionProvider";
 import { claimButtonState } from "../sdk/claim-in-flight";
@@ -339,6 +340,30 @@ export function Delegate() {
   // Rows that actually occupy a chain slot. The chain's ten-row limit counts
   // these, so a zero-weight row must not consume a slot in our preflight.
   const activeDelegationCount = delegationRows.filter((r) => r.weightBps > 0).length;
+
+  // The cap pre-flight's inputs, re-read best-effort so a second action on a row
+  // is not judged against the weight the page loaded with. Bounded: past the
+  // bound the mount-time snapshot is used and chain admission stays the backstop
+  // — a failed read must never deny a legitimate non-custodial action.
+  //
+  // Uses the page's own status read, so it dials through the trust-gated
+  // provider seam; on a degraded chain it throws, the snapshot stands, and the
+  // fail-open path is reached by the correct route rather than around the gate.
+  const freshVerdictInputs = async (clusterId: number) => {
+    const { snapshot } = await refreshDelegationSnapshot({
+      snapshot: { rows: delegationRows, totalBps, aggregateCapBps },
+      read: () => loadLiveDelegationStatus(walletAddress),
+    });
+    return {
+      dstExistingWeightBps:
+        snapshot.rows.find((r) => r.cluster === clusterId)?.weightBps ?? 0,
+      totalDelegatedBps: snapshot.totalBps,
+      capBps: snapshot.aggregateCapBps,
+      // Rows carrying weight, as everywhere else — a zero-weight row must not
+      // consume one of the ten slots.
+      currentDelegationCount: snapshot.rows.filter((r) => r.weightBps > 0).length,
+    };
+  };
   const clusterName = (id: number) => names.get(id) ?? `Cluster #${id}`;
   /** Raise the durable rejection signal. Only delegate/redelegate raise it: an
    *  undelegate that fails leaves the user's weight where it was, which the page
@@ -1208,7 +1233,7 @@ export function Delegate() {
                             </button>
                             <button
                               className="btn btn--sm btn--primary"
-                              onClick={() => {
+                              onClick={async () => {
                                 const bps = parseExactNonNegativeInteger(delegateMoreBps);
                                 if (bps === null || bps <= 0 || bps > 10000) {
                                   setDelegateMoreError(
@@ -1218,14 +1243,13 @@ export function Delegate() {
                                 }
                                 // Same dual-cap pre-flight the directory Delegate
                                 // form runs — add-more stacks onto an existing
-                                // delegation, so it is the most cap-prone path.
+                                // delegation, so it is the most cap-prone path,
+                                // and the one where a stale weight bites.
+                                const fresh = await freshVerdictInputs(row.cluster);
                                 const verdict = preflightDelegationVerdict({
                                   action: "delegate",
-                                  dstExistingWeightBps: row.weightBps,
-                                  totalDelegatedBps: totalBps,
                                   moveBps: bps,
-                                  capBps: aggregateCapBps,
-                                  currentDelegationCount: activeDelegationCount,
+                                  ...fresh,
                                 });
                                 if (!verdict.ok) {
                                   setDelegateMoreError(verdict.message);
@@ -1293,7 +1317,7 @@ export function Delegate() {
                             </button>
                             <button
                               className="btn btn--sm btn--primary"
-                              onClick={() => {
+                              onClick={async () => {
                                 // The destination is typed, so it must be shown
                                 // to name a cluster the wallet has actually seen
                                 // and that may receive weight — a wrong id names
@@ -1321,17 +1345,14 @@ export function Delegate() {
                                 // per-wallet cap — block the guaranteed 0x0213
                                 // revert before signing instead of leaving it to
                                 // the chain.
+                                const fresh = await freshVerdictInputs(to);
                                 const verdict = preflightDelegationVerdict({
                                   action: "redelegate",
-                                  dstExistingWeightBps:
-                                    delegationRows.find((r) => r.cluster === to)?.weightBps ?? 0,
-                                  totalDelegatedBps: totalBps,
                                   moveBps: bps,
-                                  capBps: aggregateCapBps,
                                   // The chain opens the destination row before
                                   // freeing the source, so a move to an
                                   // eleventh cluster reverts.
-                                  currentDelegationCount: activeDelegationCount,
+                                  ...fresh,
                                 });
                                 if (!verdict.ok) {
                                   setRedelegateError(verdict.message);
@@ -1840,7 +1861,7 @@ export function Delegate() {
                       </button>
                       <button
                         className="btn btn--sm btn--primary"
-                        onClick={() => {
+                        onClick={async () => {
                           const bps = parseExactNonNegativeInteger(draftWeightBps);
                           if (bps === null || bps <= 0 || bps > 10_000) {
                             setDraftError(
@@ -1850,13 +1871,11 @@ export function Delegate() {
                           }
                           // Block a delegate the chain would revert on a cap
                           // (per-cluster 50% / global 100%) before signing.
+                          const fresh = await freshVerdictInputs(c.clusterId);
                           const verdict = preflightDelegationVerdict({
                             action: "delegate",
-                            dstExistingWeightBps: existingWeightBps,
-                            totalDelegatedBps,
                             moveBps: bps,
-                            capBps: aggregateCapBps,
-                            currentDelegationCount: activeDelegationCount,
+                            ...fresh,
                           });
                           if (!verdict.ok) {
                             setDraftError(verdict.message);
