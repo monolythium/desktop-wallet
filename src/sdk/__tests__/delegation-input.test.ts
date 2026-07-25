@@ -8,6 +8,8 @@
 import { describe, expect, it } from "vitest";
 import {
   allocationsEligibilityVerdict,
+  autovoteBudgetBps,
+  customAllocationsFrom,
   parseExactNonNegativeInteger,
   resolveRedelegateDestination,
 } from "../delegation-input";
@@ -271,5 +273,81 @@ describe("allocationsEligibilityVerdict", () => {
     expect(allocationsEligibilityVerdict({ allocations: [], clusters: CLUSTERS })).toEqual({
       ok: true,
     });
+  });
+});
+
+// The autovote fields Phase 1 left on the old parse. Same defect class as the
+// four it fixed: `1e3` read as 1, so a budget or an allocation the user typed as
+// 1000 bps became 1 bps. Understatement rather than misdirection, but the same
+// silent reinterpretation of a fund-relevant field.
+describe("customAllocationsFrom", () => {
+  it("reads well-formed per-cluster weights", () => {
+    const r = customAllocationsFrom([
+      [1, "1000"],
+      [2, "2500"],
+    ]);
+    expect(r.allocations).toEqual([
+      { clusterId: 1, weightBps: 1000 },
+      { clusterId: 2, weightBps: 2500 },
+    ]);
+    expect(r.invalid).toEqual([]);
+  });
+
+  it("reports a hazardous entry as invalid instead of reading it as 1", () => {
+    const r = customAllocationsFrom([[1, "1e3"]]);
+    expect(r.allocations).toEqual([]);
+    expect(r.invalid).toEqual([1]);
+  });
+
+  it("reports every unreadable entry, not just the first", () => {
+    const r = customAllocationsFrom([
+      [1, "1000"],
+      [2, "12.9"],
+      [3, "50abc"],
+    ]);
+    expect(r.allocations).toEqual([{ clusterId: 1, weightBps: 1000 }]);
+    expect(r.invalid).toEqual([2, 3]);
+  });
+
+  it("treats an empty or blank entry as absent, not as invalid", () => {
+    // Clearing a field is how a user removes a cluster from the plan.
+    const r = customAllocationsFrom([
+      [1, ""],
+      [2, "   "],
+    ]);
+    expect(r.allocations).toEqual([]);
+    expect(r.invalid).toEqual([]);
+  });
+
+  it("treats an explicit zero as absent — a zero allocation delegates nothing", () => {
+    const r = customAllocationsFrom([[1, "0"]]);
+    expect(r.allocations).toEqual([]);
+    expect(r.invalid).toEqual([]);
+  });
+});
+
+describe("autovoteBudgetBps", () => {
+  it("reads a well-formed budget", () => {
+    expect(autovoteBudgetBps("5000")).toBe(5000);
+    expect(autovoteBudgetBps("1")).toBe(1);
+    expect(autovoteBudgetBps("10000")).toBe(10000);
+  });
+
+  it("refuses the hazardous forms rather than reading a 1000x smaller budget", () => {
+    expect(autovoteBudgetBps("1e3")).toBeNull();
+    expect(autovoteBudgetBps("1e1")).toBeNull();
+    expect(autovoteBudgetBps("12.9")).toBeNull();
+    expect(autovoteBudgetBps("50abc")).toBeNull();
+  });
+
+  it("refuses a budget outside the basis-point range, and does not clamp it", () => {
+    expect(autovoteBudgetBps("0")).toBeNull();
+    expect(autovoteBudgetBps("10001")).toBeNull();
+    expect(autovoteBudgetBps("50000")).toBeNull();
+  });
+
+  it("refuses an absent budget", () => {
+    expect(autovoteBudgetBps("")).toBeNull();
+    expect(autovoteBudgetBps("  ")).toBeNull();
   });
 });

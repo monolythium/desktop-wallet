@@ -79,6 +79,8 @@ import {
 } from "../sdk/delegation-caps";
 import {
   allocationsEligibilityVerdict,
+  autovoteBudgetBps,
+  customAllocationsFrom,
   parseExactNonNegativeInteger,
   resolveRedelegateDestination,
 } from "../sdk/delegation-input";
@@ -742,8 +744,8 @@ export function Delegate() {
     setAutovoteProgress(null);
     setCustomOpen(false);
 
-    const capBps = parseInt(autoCapBps, 10);
-    if (!Number.isFinite(capBps) || capBps <= 0 || capBps > 10_000) {
+    const capBps = autovoteBudgetBps(autoCapBps);
+    if (capBps === null) {
       setAutovoteError("Weight budget must be 1-10000 basis points (0.01% – 100%).");
       setAutovoteMode(null);
       setAutovotePlan(null);
@@ -863,19 +865,12 @@ export function Delegate() {
   };
 
   // Custom mode — manual per-cluster allocations → the SAME cap guard + batch.
-  const customAllocationsDraft = (): AutovoteAllocation[] => {
-    const out: AutovoteAllocation[] = [];
-    for (const [clusterId, raw] of customBps.entries()) {
-      const bps = parseInt(raw, 10);
-      if (Number.isFinite(bps) && bps > 0) out.push({ clusterId, weightBps: bps });
-    }
-    return out;
-  };
+  const customDraft = () => customAllocationsFrom(customBps.entries());
+  const customAllocationsDraft = (): AutovoteAllocation[] => customDraft().allocations;
   const customTotalBps = customAllocationsDraft().reduce((s, a) => s + a.weightBps, 0);
-  const customBudgetBps = (() => {
-    const b = parseInt(autoCapBps, 10);
-    return Number.isFinite(b) && b > 0 ? Math.min(b, 10_000) : 10_000;
-  })();
+  // Display budget only — the submit path refuses an unreadable budget outright
+  // (reviewCustomAutovote), so this fallback never reaches a signature.
+  const customBudgetBps = autovoteBudgetBps(autoCapBps) ?? 10_000;
   // Out-of-policy the user is warned about BEFORE review: over the budget, or any
   // single cluster over the binding per-cluster cap.
   const customBindingCap = bindingPerClusterCapBps(aggregateCapBps);
@@ -896,7 +891,20 @@ export function Delegate() {
   const reviewCustomAutovote = () => {
     setAutovoteError(null);
     setAutovoteProgress(null);
-    const allocations = customAllocationsDraft();
+    const { allocations, invalid } = customDraft();
+    // An unreadable weight is refused by name, never dropped: silently shrinking
+    // the plan would be the same reinterpretation the anchored parse ended.
+    const firstInvalid = invalid[0];
+    if (firstInvalid !== undefined) {
+      setAutovoteError(
+        `${clusterName(firstInvalid)}: enter a whole number of basis points (1-10000).`,
+      );
+      return;
+    }
+    if (autovoteBudgetBps(autoCapBps) === null) {
+      setAutovoteError("Weight budget must be 1-10000 basis points (0.01% – 100%).");
+      return;
+    }
     if (allocations.length === 0) {
       setAutovoteError("Enter a weight (bps) for at least one cluster.");
       return;

@@ -46,6 +46,50 @@ export function parseExactNonNegativeInteger(
   return Number.isSafeInteger(value) ? value : null;
 }
 
+/** The widest weight any delegation field may carry (100%). */
+const MAX_WEIGHT_BPS = 10_000;
+
+/**
+ * The custom autovote allocations a user has typed, split into what could be
+ * read and what could not.
+ *
+ * An entry that cannot be read is reported rather than dropped. Dropping it
+ * would quietly shrink the plan — the same silent reinterpretation the anchored
+ * parse exists to end, one level up. An empty field is genuinely absent (it is
+ * how a cluster is removed from the plan), and an explicit `0` allocates
+ * nothing, so neither is an error. Pure.
+ */
+export function customAllocationsFrom(
+  entries: Iterable<[number, string]>,
+): {
+  allocations: Array<{ clusterId: number; weightBps: number }>;
+  invalid: number[];
+} {
+  const allocations: Array<{ clusterId: number; weightBps: number }> = [];
+  const invalid: number[] = [];
+  for (const [clusterId, raw] of entries) {
+    if (typeof raw !== "string" || raw.trim() === "") continue;
+    const weightBps = parseExactNonNegativeInteger(raw);
+    if (weightBps === null) {
+      invalid.push(clusterId);
+      continue;
+    }
+    if (weightBps > 0) allocations.push({ clusterId, weightBps });
+  }
+  return { allocations, invalid };
+}
+
+/** The typed autovote weight budget in basis points, or null when the field
+ *  cannot be read or falls outside 1–10000.
+ *
+ *  Out of range is a refusal, not a clamp: silently lowering a typed 50000 to
+ *  100% would build a plan against a budget the user never set. Pure. */
+export function autovoteBudgetBps(raw: string | null | undefined): number | null {
+  const value = parseExactNonNegativeInteger(raw);
+  if (value === null || value <= 0 || value > MAX_WEIGHT_BPS) return null;
+  return value;
+}
+
 /** The outcome of resolving a typed redelegate destination. */
 export type RedelegateDestinationVerdict =
   | { ok: true; clusterId: number }
