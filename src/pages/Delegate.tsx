@@ -20,6 +20,7 @@ import type {
 import { useOperations } from "../operations/context";
 import { useActiveWallet } from "../sdk/active-wallet";
 import {
+  CLUSTER_DIRECTORY_FIRST_PAGE,
   DELEGATION_PRECOMPILE,
   buildClaimRewardsCalldata,
   buildDelegateCalldata,
@@ -284,7 +285,7 @@ export function Delegate() {
           return null;
         }),
         capture(() => loadNativeBalanceLythoshi(walletAddress)),
-        fetchClusterDirectory(1, 20).catch((cause: unknown) => {
+        fetchClusterDirectory(CLUSTER_DIRECTORY_FIRST_PAGE, 25).catch((cause: unknown) => {
           setDirectoryError((cause as Error)?.message ?? "directory unavailable");
           return null;
         }),

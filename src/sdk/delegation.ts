@@ -103,9 +103,24 @@ export function buildSetAutoCompoundCalldata(enabled: boolean): string {
   return encodeSetAutoCompoundCalldata(enabled);
 }
 
+/** The chain's FIRST directory page. `lyth_clusterDirectory` is 0-indexed:
+ *  `parse_cluster_directory_args` unwraps an absent page to `0`, and
+ *  `ClusterDirectoryPage.page` is documented as a "0-based page index".
+ *  Asking for page 1 on a 4-cluster chain returns an empty page, not an error. */
+export const CLUSTER_DIRECTORY_FIRST_PAGE = 0;
+
+/** One page of the public cluster directory.
+ *
+ *  BOTH ARGUMENTS ARE REQUIRED, deliberately. The page base used to live in a
+ *  default here AND in each caller, written from memory rather than from canon,
+ *  and the two copies disagreed — this seam asked for page 1 while the status
+ *  seam asked for page 0. A default is what let one of them be wrong without
+ *  anyone naming a number; requiring the argument leaves exactly one place per
+ *  call where the value can be wrong, and {@link CLUSTER_DIRECTORY_FIRST_PAGE}
+ *  carries the canon citation to that place. */
 export async function fetchClusterDirectory(
-  page: number = 1,
-  limit: number = 20,
+  page: number,
+  limit: number,
 ): Promise<ClusterDirectoryPageResponse> {
   return getProvider().rpcClient.lythClusterDirectory(page, limit);
 }
