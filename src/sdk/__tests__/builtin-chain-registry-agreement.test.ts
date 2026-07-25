@@ -14,6 +14,13 @@
 //
 // This is the cheap guard: it turns a silent divergence into a red test on the
 // bump that causes it, which is the only moment anyone is looking.
+//
+// The same reasoning applies to the GENESIS hash, and until now nothing applied
+// it. The chain id was guarded because `chains.ts` carries it as a literal; the
+// genesis hash was guarded only for SHAPE, so a bump that brought a registry
+// entry with a different genesis_hash (same chain id) moved the wallet's whole
+// trust anchor with a fully green suite. The review gate at the foot of this
+// file closes that, without giving the runtime a second source of truth.
 
 import { describe, expect, it } from "vitest";
 import { getChainInfo } from "@monolythium/core-sdk";
@@ -57,6 +64,57 @@ describe("the builtin chain record agrees with the SDK registry", () => {
       .filter(([, src]) => /0x[0-9a-f]{8}[0-9a-f]{56}/i.test(src))
       .map(([rel]) => rel);
     expect(offenders).toEqual([]);
+  });
+});
+
+// ── The review gate on the trust anchor ────────────────────────────────────
+//
+// The enforced pin stays a runtime read of the installed registry. That is
+// deliberate: a legitimate re-genesis auto-tracks, and there is never a second
+// runtime source of truth that could disagree with the first — which is exactly
+// what the scan above exists to prevent.
+//
+// What that leaves open is a REVIEW gap, not a runtime one. `pnpm up
+// @monolythium/core-sdk` moves the wallet's chain identity as a side effect, and
+// nobody reading a dependency diff is looking at a genesis hash.
+//
+// The literal below closes it. Nothing reads it at runtime and it gates nothing;
+// it is the value a human last reviewed. If the registry moves, this goes red at
+// the one moment someone is looking. It lives in a test precisely so the scan
+// above — which excludes __tests__ — still forbids a second anchor in shipped
+// source.
+// Reviewed 2026-07-25 against core-sdk 0.6.8: confirmed identical to
+// lyth_chainStats.genesisHash on all 41 live operators (chain id 69420).
+const REVIEWED_GENESIS_HASH =
+  "0xe22733f4d7e013b93f0f825667fcf852cbf7ad1ca31a42a1bfcf1ab6d79c89a3";
+
+const REPIN_GUIDANCE = [
+  "The chain registry's genesis_hash no longer matches the value recorded here.",
+  "This is expected after a legitimate re-genesis, and it means the wallet's",
+  "chain identity has just moved. Confirm the new value against the live chain",
+  "(lyth_chainStats.genesisHash) and the published registry, then update",
+  "REVIEWED_GENESIS_HASH in this file — that edit IS the review record.",
+  "Do NOT add a literal to shipped source: the enforced pin is meant to stay the",
+  "registry read, and the scan above will reject a second anchor.",
+].join(" ");
+
+describe("the trust anchor cannot move without a reviewer seeing it", () => {
+  it("the registry's genesis is still the one a human reviewed", () => {
+    expect(getChainInfo(NETWORK_SLUG).genesis_hash.toLowerCase(), REPIN_GUIDANCE).toBe(
+      REVIEWED_GENESIS_HASH.toLowerCase(),
+    );
+  });
+
+  it("the recorded value is a real hash, so the gate cannot pass vacuously", () => {
+    expect(REVIEWED_GENESIS_HASH).toMatch(/^0x[0-9a-f]{64}$/);
+  });
+
+  it("the enforced pin is still the registry read, not this literal", () => {
+    // Belt and braces with the assertion above: if someone "fixes" a red gate by
+    // pointing chain-trust at this constant, both the review gate and the
+    // single-source-of-truth rule would be silently defeated.
+    expect(TRUST_SOURCE).not.toContain("REVIEWED_GENESIS_HASH");
+    expect(TRUST_SOURCE).toContain("info.genesis_hash");
   });
 });
 
