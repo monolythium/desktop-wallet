@@ -62,11 +62,15 @@ export function chainHealthPresentation(health: ChainHealth): ChainHealthPresent
         "The chain hasn't advanced for a while. Review your operators.",
       );
     case "untrusted":
+      // Names the CHAIN ID, not the genesis: this state is reachable only via
+      // `anyWrongChainId`, and that signal is computed without ever reading the
+      // genesis field. Naming genesis here would point at the wrong evidence and
+      // imply the wrong remedy — a wallet update, rather than another operator.
       return p(
         "UNTRUSTED OPERATOR",
         "err",
         true,
-        "This operator reports a different genesis hash than this wallet build expects — it may be on a different chain. The wallet won't read or sign against it; it reconnects automatically when a trusted operator answers, or switch operators.",
+        "This operator reports a different chain ID than this wallet expects — it's serving another network. The wallet won't read or sign against it; it reconnects automatically when a trusted operator answers, or switch operators.",
       );
     case "regenesis":
       return p(

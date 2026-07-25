@@ -52,3 +52,23 @@ describe("chainHealthPresentation (§M)", () => {
     expect(hint).not.toMatch(/live|connected|synced/i); // never implies a healthy chain
   });
 });
+
+describe("each degraded hint names the signal its state actually fires on", () => {
+  it("UNTRUSTED OPERATOR names the chain ID, because that is what triggers it", () => {
+    // `untrusted` is reachable only via anyWrongChainId (chain-health.ts:107-108),
+    // and wrongChainId = !chainIdOk never consults the genesis field. Naming
+    // genesis here points the user at the wrong signal, and at the wrong remedy.
+    const hint = chainHealthPresentation({ kind: "untrusted" }).hint!;
+    expect(hint).toMatch(/chain ID/i);
+    expect(hint).not.toMatch(/genesis/i);
+    // The remedy stays true: a trusted fleet operator is failed over to, and the
+    // user can also pick one.
+    expect(hint).toMatch(/switch operators/i);
+  });
+
+  it("ALL OPERATORS UNTRUSTED keeps naming genesis — that state IS the genesis mismatch", () => {
+    const hint = chainHealthPresentation({ kind: "regenesis" }).hint!;
+    expect(hint).toMatch(/genesis/i);
+    expect(hint).toMatch(/update the wallet app/i);
+  });
+});
