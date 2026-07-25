@@ -10,6 +10,7 @@ import { getChainInfo } from "@monolythium/core-sdk";
 import type { ChainStatsResponse } from "@monolythium/core-sdk";
 import {
   CHAIN_TRUST_TIMEOUT_MS,
+  probeActiveChainOperator,
   NETWORK_SLUG,
   fleetSignals,
   probeOperator,
@@ -413,5 +414,58 @@ describe("the trust read is bounded — a hung operator cannot stall the verdict
     // resolveHeadOverFleet awaits the active operator, then the fleet fan-out —
     // two sequential deadlines. The tick must not overrun its own period.
     expect(CHAIN_TRUST_TIMEOUT_MS * 2).toBeLessThan(HEALTH_TICK_MS);
+  });
+});
+
+describe("probeActiveChainOperator — the switch-time gate verifies against the SAME pin the tick uses", () => {
+  afterEach(() => {
+    resetProviderForTest();
+    localStorage.clear();
+  });
+
+  /** Records the pin each probe was handed, so the gate can be shown to reuse
+   *  the resolver's pin selection rather than re-deriving one of its own. */
+  function recordingProbe(): { seen: Array<[number, string | null]>; probe: typeof probeOperator } {
+    const seen: Array<[number, string | null]> = [];
+    return {
+      seen,
+      probe: async (url, chainId, genesis) => {
+        seen.push([chainId, genesis]);
+        return unreachableVerdict(url);
+      },
+    };
+  }
+
+  it("the builtin chain is verified on chain id AND genesis", async () => {
+    const { seen, probe } = recordingProbe();
+    await probeActiveChainOperator("http://candidate", probe);
+    expect(seen).toEqual([[PIN_CHAIN, PIN_GENESIS]]);
+  });
+
+  it("a custom chain has no genesis to prove, so its pin is chain-id-only (§15)", async () => {
+    localStorage.setItem(
+      USER_CHAINS_KEY,
+      JSON.stringify({
+        "0x539": { chainId: "0x539", chainIdNum: 1337, name: "Local", rpc: "http://local", official: false, builtin: false },
+      }),
+    );
+    localStorage.setItem(ACTIVE_CHAIN_KEY, "0x539");
+    const { seen, probe } = recordingProbe();
+    await probeActiveChainOperator("http://candidate", probe);
+    expect(seen).toEqual([[1337, null]]);
+  });
+
+  it("returns the candidate's own verdict — the caller decides what to do with it", async () => {
+    const trusted: typeof probeOperator = async (url) => ({
+      url, wrongChainId: false, genesisMismatch: false, quarantined: false, trusted: true,
+      height: 9, headId: "0xh", observedGenesis: PIN_GENESIS, observedChainId: PIN_CHAIN,
+    });
+    await expect(probeActiveChainOperator("http://good", trusted)).resolves.toMatchObject({
+      url: "http://good",
+      trusted: true,
+    });
+    await expect(probeActiveChainOperator("http://bad", async (u) => unreachableVerdict(u))).resolves.toMatchObject({
+      trusted: false,
+    });
   });
 });

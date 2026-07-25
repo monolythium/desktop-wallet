@@ -371,6 +371,15 @@ html[data-sidebar="collapsed"]:not([data-layout="topbar"]) .w-nav__item {
   display: flex; align-items: center; justify-content: center;
   width: 16px; color: var(--gold);
 }
+/* A peer that failed the chain-identity check. Stated where the choice was
+   made, so a refused switch is never a click that appears to do nothing. */
+.w-peer-pop__error {
+  padding: 8px 12px;
+  border-top: 1px solid var(--fg-700);
+  color: var(--err);
+  font-size: var(--fs-11);
+  line-height: 1.45;
+}
 .w-peer-pop__foot {
   padding: 10px 12px;
   border-top: 1px solid var(--fg-700);

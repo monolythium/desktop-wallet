@@ -231,16 +231,47 @@ export async function probeOperator(
 export async function resolveTrustedHead(
   probe: typeof probeOperator = probeOperator,
 ): Promise<TrustedHead> {
+  const { chainId, genesis } = activeChainPin();
+  return resolveHeadOverFleet(chainId, genesis, probe);
+}
+
+/**
+ * The identity the ACTIVE chain is verified against.
+ *
+ * Builtin chain: the pin ALWAYS comes from the SDK registry symbol (a non-null
+ * genesis) — genesis is enforced, and the null-pin custom branch is structurally
+ * unreachable there. Custom chain (§15): chain-id-only trust, no genesis pin.
+ *
+ * One derivation, so every place that decides whether an operator may be trusted
+ * asks the same question — the tick, and the switch-time gate below.
+ */
+export function activeChainPin(): { chainId: number; genesis: string | null } {
   const record = activeChainRecord();
   if (record.builtin) {
-    // Builtin chain: the pin ALWAYS comes from the SDK registry symbol (a
-    // non-null genesis) — genesis is enforced, and the null-pin custom branch is
-    // structurally unreachable here.
     const info = getChainInfo(NETWORK_SLUG);
-    return resolveHeadOverFleet(info.chain_id, info.genesis_hash, probe);
+    return { chainId: info.chain_id, genesis: info.genesis_hash };
   }
-  // Custom chain (§15): chain-id-only trust, no genesis pin.
-  return resolveHeadOverFleet(record.chainIdNum, null, probe);
+  return { chainId: record.chainIdNum, genesis: null };
+}
+
+/**
+ * Verify one candidate operator against the active chain's pin, for a caller
+ * about to point the read path at it.
+ *
+ * The seam already fails closed on a switch ({@link setEndpoint} drops the
+ * verdict), so this is not what makes a switch safe — it is what makes a switch
+ * HONEST: the user gets the verdict before the endpoint moves, instead of a
+ * switch that silently reverts on the next tick. A caller that skips it is safe
+ * but slower to tell the truth.
+ *
+ * `probe` is injectable for tests; production uses {@link probeOperator}.
+ */
+export async function probeActiveChainOperator(
+  url: string,
+  probe: typeof probeOperator = probeOperator,
+): Promise<OperatorVerdict> {
+  const { chainId, genesis } = activeChainPin();
+  return probe(url, chainId, genesis);
 }
 
 /** Resolve a trusted head over the effective fleet for a given pin (pure I/O

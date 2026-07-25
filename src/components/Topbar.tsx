@@ -33,6 +33,7 @@ import {
   type ProbeResult,
 } from "../sdk/peers";
 import { activeFleet } from "../sdk/fleet";
+import { probeActiveChainOperator } from "../sdk/chain-trust";
 import { shortHex } from "./format";
 import type { Route } from "./types";
 
@@ -163,6 +164,9 @@ function PeerChip({
   // URLs with an in-flight probe (drives the "probing…" state per row).
   const [probing, setProbing] = useState<Set<string>>(new Set());
   const [switchingFastest, setSwitchingFastest] = useState(false);
+  // Set when a chosen peer failed the pin, so the refusal is visible instead of
+  // the popover simply doing nothing.
+  const [switchError, setSwitchError] = useState<string | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const peers = activeFleet();
 
@@ -210,9 +214,30 @@ function PeerChip({
     // per open, not on every render (the peer list is constant per session).
   }, [open]);
 
-  const onSwitch = (url: string) => {
+  // Point the read path at `url` only once it has PROVEN the active chain's pin.
+  // The row probe behind this popover reads `eth_chainId` alone, and a fork that
+  // shares our chain id answers it correctly — so latency and chain id together
+  // still cannot tell a fork from the real chain. Only the genesis read can, and
+  // it is one call, made here, before anything moves.
+  //
+  // The seam makes an unverified switch SAFE regardless (setEndpoint drops the
+  // trust verdict, so reads refuse until a tick verdicts the new operator). This
+  // gate makes it HONEST: the user is told now, and their operator is left alone,
+  // rather than being moved and silently moved back a tick later.
+  const switchVerified = async (url: string, name: string): Promise<void> => {
+    const verdict = await probeActiveChainOperator(url);
+    if (!verdict.trusted) {
+      setSwitchError(`Couldn't switch to ${name} — it didn't prove this build's chain identity. Your operator was left unchanged.`);
+      return;
+    }
+    setSwitchError(null);
     setEndpoint(url);
     setOpen(false);
+  };
+
+  const onSwitch = (url: string) => {
+    const name = peers.find((p) => p.url === url)?.label ?? stripScheme(url);
+    void switchVerified(url, name);
   };
 
   const onSwitchFastest = async () => {
@@ -224,8 +249,8 @@ function PeerChip({
       setProbes(merged);
       const winner = pickFastest(results);
       if (winner) {
-        setEndpoint(winner.url);
-        setOpen(false);
+        const name = peers.find((p) => p.url === winner.url)?.label ?? stripScheme(winner.url);
+        await switchVerified(winner.url, name);
       }
     } finally {
       setSwitchingFastest(false);
@@ -276,6 +301,12 @@ function PeerChip({
               />
             ))}
           </div>
+
+          {switchError ? (
+            <div className="w-peer-pop__error" role="status">
+              {switchError}
+            </div>
+          ) : null}
 
           <div className="w-peer-pop__foot">
             <button
