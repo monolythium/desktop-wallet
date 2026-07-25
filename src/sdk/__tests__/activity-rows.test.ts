@@ -140,7 +140,10 @@ describe("activityRowToTx", () => {
       direction: "in",
       counterparty: "mono1xyz",
       memo: "",
-      kind: "transfer",
+      // `kind` now carries the classified taxonomy value; the coarse
+      // three-way category moved to `bucket` and is derived from it.
+      kind: "tx_receive",
+      bucket: "transfer",
     });
   });
 

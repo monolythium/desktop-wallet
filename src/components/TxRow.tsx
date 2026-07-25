@@ -14,9 +14,9 @@ interface Props {
 export function TxRow({ tx, onClick, counterpartyLabel }: Props) {
   const typeLabel = tx.typeLabel;
   const counterparty = counterpartyLabel ?? tx.counterparty;
-  const label = tx.kind === "reward"
+  const label = tx.bucket === "reward"
     ? counterparty
-    : tx.kind === "delegate"
+    : tx.bucket === "delegate"
     ? `To ${counterparty}`
     : tx.direction === "in"
     ? `From ${counterparty}`

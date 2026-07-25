@@ -15,8 +15,13 @@
 // public row with no amount). Token labels are the raw indexer token id (no
 // name registry exists); native rows show "LYTH".
 
-import type { Tx } from "../data/types";
+import type { Tx, TxBucket } from "../data/types";
 import type { LiveAddressActivityRow } from "./live";
+import {
+  activityKindIsUnsigned,
+  activityKindOf,
+  type ActivityKind,
+} from "./activity-kind";
 import {
   formatLythDisplay,
   isNativeLythTokenId,
@@ -28,17 +33,33 @@ import { bpsToPercentLabel } from "./delegation-summary";
 import { txTypeLabelForActivity } from "./tx-type-label";
 import { tokenAmountDisplay, type TokenMeta } from "./token-metadata";
 
-/** Indexer kind → the `TxRow` icon/category bucket. Conservative: only the
- *  clearly-recognisable families map to reward/delegate; everything else is a
- *  generic transfer (the eyebrow still shows the precise indexer kind). The
- *  match operands below test the indexer's free-string `kind` (which still
- *  emits legacy "stake"/"undeleg" spellings) — keep them; only the bucket the
- *  wallet produces is delegate-worded. */
-export function activityKindToTxKind(kind: string): Tx["kind"] {
-  const k = kind.toLowerCase();
-  if (k.includes("reward")) return "reward";
-  if (k.includes("delegat") || k.includes("stake") || k.includes("undeleg")) return "delegate";
-  return "transfer";
+/** Indexer kind → the coarse icon/category bucket.
+ *
+ *  DERIVED, not a second classifier: it collapses the real {@link ActivityKind}
+ *  onto the three-value bucket some older call sites still want. The taxonomy
+ *  and its match operands live in `activity-kind.ts`; this only widens them.
+ *  Kept because the bucket is genuinely what a categorical caller wants — but
+ *  new code should read the kind, which distinguishes the three delegation
+ *  operations this bucket flattens together. */
+export function activityKindToTxKind(kind: string): TxBucket {
+  return txBucketOf(activityKindOf({ kind }));
+}
+
+/** Collapse a classified kind onto the coarse bucket. Exhaustive, no default. */
+export function txBucketOf(kind: ActivityKind): TxBucket {
+  switch (kind) {
+    case "claim":
+      return "reward";
+    case "delegate":
+    case "undelegate":
+    case "redelegate":
+      return "delegate";
+    case "tx_send":
+    case "tx_receive":
+    case "token_transfer":
+    case "unclassified":
+      return "transfer";
+  }
 }
 
 /** Direction from the indexer row, defaulting to "out" when absent (the icon
@@ -105,12 +126,13 @@ export function activityRowToTx(
   row: LiveAddressActivityRow,
   tokenMeta?: Map<string, TokenMeta>,
 ): Tx {
-  const kind = activityKindToTxKind(
-    row.subKind ? `${row.kind} ${row.subKind}` : row.kind,
-  );
+  // Classified ONCE, here. The bucket, the sign and (from the next commit) the
+  // direction are all derived from this value rather than re-decided per site.
+  const kind = activityKindOf(row);
+  const bucket = txBucketOf(kind);
   let amountText: string | null;
   let unit: string;
-  if (kind === "delegate") {
+  if (bucket === "delegate") {
     amountText = row.weightBps != null ? bpsToPercentLabel(row.weightBps) : null;
     unit = "weight";
   } else if (isNativeLythTokenId(row.tokenId)) {
@@ -129,12 +151,15 @@ export function activityRowToTx(
     when: activityWhen(row),
     amountText,
     unit,
-    signed: kind !== "delegate",
+    // A delegation figure is a WEIGHT, not a token amount — it renders unsigned,
+    // because a sign there would claim a fund movement the row does not carry.
+    signed: !activityKindIsUnsigned(kind),
     direction: activityDirection(row.direction),
+    kind,
+    bucket,
     counterparty: activityCounterparty(row),
     // The indexer stream carries no memo — left empty so TxRow omits it.
     memo: "",
-    kind,
     typeLabel: txTypeLabelForActivity(row),
   };
 }

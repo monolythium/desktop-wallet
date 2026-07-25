@@ -1,3 +1,9 @@
+import type { ActivityKind } from "../sdk/activity-kind";
+
+/** The coarse three-way category some call sites want. Derived from
+ *  {@link ActivityKind} by `txBucketOf` — never classified independently. */
+export type TxBucket = "transfer" | "reward" | "delegate";
+
 export interface Token {
   sym: string;
   name: string;
@@ -35,7 +41,13 @@ export interface Tx {
   direction: "in" | "out";
   counterparty: string;
   memo: string;
-  kind: "transfer" | "reward" | "delegate";
+  /** The classified operation — the taxonomy value, from `activity-kind.ts`.
+   *  This is what direction and the sign derive from. */
+  kind: ActivityKind;
+  /** The coarse icon/category bucket, derived from `kind`. Retained for the
+   *  categorical call sites that genuinely want the three-way split; it flattens
+   *  the three delegation operations together, so prefer `kind` in new code. */
+  bucket: TxBucket;
   /** Neutral type-noun for the row eyebrow (e.g. "Outgoing transfer", "Delegate"),
    *  derived from the indexed activity kind via tx-type-label. */
   typeLabel: string;

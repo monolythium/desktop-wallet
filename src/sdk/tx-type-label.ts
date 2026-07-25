@@ -4,6 +4,7 @@
 // lookup, no DOM.
 
 import { isNativeLythTokenId } from "./lyth-display";
+import { activityMatchText, DELEGATION_OPERANDS } from "./activity-kind";
 import type { TxOpKind } from "./notifications";
 
 /** Neutral type-noun for a recorded/operation kind — drives the notification
@@ -45,13 +46,20 @@ export function txTypeLabelForActivity(row: {
    *  by the direction-less token rule below. */
   tokenId?: string | null;
 }): string {
-  // Operands test the indexer's free-string `kind` (which still emits legacy
-  // "stake" spellings) — keep them; only the returned label is delegate-worded.
-  const k = `${row.kind} ${row.subKind ?? ""}`.toLowerCase();
-  if (k.includes("redeleg")) return "Redelegate";
-  if (k.includes("undeleg")) return "Undelegate";
-  if (k.includes("deleg") || k.includes("stake")) return "Delegate";
-  if (k.includes("reward") || k.includes("claim")) return "Claim rewards";
+  // The operands come from the ONE shared set in `activity-kind.ts`, so this
+  // label path and the kind classifier can never disagree about what counts as a
+  // delegation family. They test the indexer's free-string `kind`/`subKind`
+  // (which still emit legacy "stake"/"unstake" spellings) — keep them; only the
+  // returned label is delegate-worded.
+  const k = activityMatchText(row);
+  const hit = (ops: readonly string[]) => ops.some((op) => k.includes(op));
+  // Claim is tested FIRST, matching the kind classifier: a claim aggregates
+  // across the whole stake and is reported against no real target, so testing
+  // the delegation family ahead of it would label every claim a delegation.
+  if (hit(DELEGATION_OPERANDS.claim)) return "Claim rewards";
+  if (hit(DELEGATION_OPERANDS.redelegate)) return "Redelegate";
+  if (hit(DELEGATION_OPERANDS.undelegate)) return "Undelegate";
+  if (hit(DELEGATION_OPERANDS.delegate)) return "Delegate";
   if (k.includes("rebalance")) return "Auto-rebalance";
   // Reserved: the chain does not emit a private-transfer kind today. Matched (so
   // it renders honestly the day it lands) but NEVER client-synthesized.
