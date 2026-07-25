@@ -762,18 +762,53 @@ export function Delegate() {
         if (!ctx?.vaultSeed) {
           throw new Error("vault seed unavailable after keychain authorization");
         }
-        let last = { txHash: "", nonce: 0 };
-        for (const r of rows) {
+        // Track each undelegation the MOMENT it lands, the shape the autovote
+        // batch proved. Waiting for a whole-batch result is what made the
+        // earlier ones invisible: only the last hash survived the loop, so N-1
+        // submissions produced no pending row and no notification, and a
+        // mid-run failure left every one of them with no record at all.
+        const submitted: string[] = [];
+        for (let i = 0; i < rows.length; i += 1) {
+          const r = rows[i]!;
           const calldata = buildUndelegateCalldata(r.cluster);
-          last = await withDelegationRevertCopy(() =>
-            submitDelegationTx({ seed: ctx.vaultSeed!, data: calldata }),
+          let result: { txHash: string; nonce: number };
+          try {
+            result = await withDelegationRevertCopy(() =>
+              submitDelegationTx({ seed: ctx.vaultSeed!, data: calldata }),
+            );
+          } catch (cause) {
+            // Everything before this is on chain. Carry the boundary out with
+            // the failure instead of losing it to the throw.
+            const reason = cause instanceof Error ? cause.message : String(cause);
+            throw new ClassifiedWalletError(
+              submitted.length === 0
+                ? `${reason} Nothing was submitted.`
+                : `${reason} ${submitted.length} of ${rows.length} undelegations were already submitted and stand; the rest were not sent.`,
+              { cause },
+            );
+          }
+          submitted.push(result.txHash);
+          void trackOperationTx(
+            {
+              kind: "undelegate",
+              amountDecimal: "0",
+              counterparty: DELEGATION_PRECOMPILE,
+              clusterId: r.cluster,
+              clusterName: names.get(r.cluster),
+              delegationWeightBps: r.weightBps,
+            },
+            result.txHash,
+            result.nonce,
           );
         }
+        // A completed batch resolves any rejection an earlier attempt raised,
+        // exactly as the single actions do.
+        rejection.clear();
         return {
           headline: `Undelegated all ${rows.length} cluster${rows.length === 1 ? "" : "s"}`,
-          detail: last.txHash,
-          txHash: last.txHash,
-          nonce: last.nonce,
+          detail: submitted.join(", "),
+          // No txHash: each was tracked as it landed, and returning one here
+          // would track the last a second time.
         };
       },
     });
