@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { renderWithProviders } from "../../test/renderWithProviders";
 import type { OperationDescriptor } from "../../operations/types";
 import type { LiveDelegationStatus } from "../../sdk/live";
@@ -201,5 +201,52 @@ describe("Delegate — add-more cap preflight + weight→calldata", () => {
     expect(del.submitDelegationTx).toHaveBeenCalledWith(
       expect.objectContaining({ data: buildDelegateCalldata({ clusterId: CLUSTER, weightBps: 1500 }) }),
     );
+  });
+});
+
+// The three weight forms echo what a typed number MEANS while it is being
+// typed, because the fields take basis points and every limit beside them is
+// stated in percent. The custom autovote fields take the same basis points and
+// were the one surface left without that line — and the one most likely to
+// drift, because it had grown its own percent derivation.
+describe("Delegate — the custom autovote fields echo what was typed", () => {
+  async function openCustomPanel() {
+    del.fetchClusterDirectory.mockResolvedValue({
+      clusters: [{ clusterId: 9, active: true }],
+    });
+    const { user } = renderWithProviders(<Delegate />);
+    await screen.findByText("Autovote");
+    await user.click(screen.getByRole("button", { name: "Custom" }));
+    const field = await screen.findByPlaceholderText("bps");
+    return { user, field };
+  }
+
+  it("states the percent and the credited LYTH the shared helper derives", async () => {
+    // 1000 LYTH (the fixture): 2500 bps credits 250 LYTH.
+    const { user, field } = await openCustomPanel();
+    await user.type(field, "2500");
+    expect(screen.getByText(/2500 bps = 25\.00% of balance · credits 250 LYTH/)).toBeInTheDocument();
+  });
+
+  it("reads a browser-legal exponent as unreadable rather than as a smaller weight", async () => {
+    // These inputs are type="number", for which "1e3" is a legal value handed
+    // through verbatim. A prefix parse reads it as 1 and would echo 0.01%,
+    // understating the typed weight by three orders of magnitude.
+    const { field } = await openCustomPanel();
+    // Handed through whole, the way a browser hands a number input's legal
+    // exponent form to the change handler.
+    fireEvent.change(field, { target: { value: "1e3" } });
+    // Read through textContent: a derived percent rendered beside its own "%"
+    // sits in two text nodes, which a text matcher would miss entirely.
+    expect(document.body.textContent).not.toContain("0.01%");
+    expect(screen.queryByText(/bps =/)).toBeNull();
+  });
+
+  it("omits the credit clause when the balance cannot be read — never a zero", async () => {
+    live.loadNativeBalanceLythoshi.mockRejectedValue(new Error("node down"));
+    const { user, field } = await openCustomPanel();
+    await user.type(field, "2500");
+    expect(screen.getByText(/2500 bps = 25\.00% of balance/)).toBeInTheDocument();
+    expect(screen.queryByText(/credits/)).toBeNull();
   });
 });

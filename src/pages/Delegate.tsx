@@ -2003,24 +2003,40 @@ export function Delegate() {
                     an input the user can fill and then be refused for is worse
                     than one that was never offered. Same rule the review guard
                     applies. */}
-                {eligibleClusters(directory).map((c) => (
-                  <div key={c.clusterId} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <span style={{ flex: 1, fontSize: 12.5 }}>{clusterName(c.clusterId)}</span>
-                    <input
-                      type="number"
-                      inputMode="numeric"
-                      min={0}
-                      max={10000}
-                      placeholder="bps"
-                      value={customBps.get(c.clusterId) ?? ""}
-                      onChange={(e) => setCustomClusterBps(c.clusterId, e.target.value)}
-                      style={{ ...autovoteInputStyle, width: 110 }}
-                    />
-                    <span className="row-help mono" style={{ width: 56, textAlign: "right" }}>
-                      {((parseInt(customBps.get(c.clusterId) ?? "0", 10) || 0) / 100).toFixed(2)}%
-                    </span>
-                  </div>
-                ))}
+                {eligibleClusters(directory).map((c) => {
+                  const raw = customBps.get(c.clusterId) ?? "";
+                  // The SAME line the three weight forms show, from the same
+                  // helper — these fields take the same basis points and are
+                  // the surface most likely to drift, having previously derived
+                  // their own percent from a numeric-PREFIX parse (which reads
+                  // a browser-legal "1e3" as 1, echoing 0.01% for 10%). Its
+                  // honest absence comes along with it: no credit clause when
+                  // the balance is unreadable, and nothing at all when the
+                  // field cannot be read.
+                  const echo = weightEchoLine(raw, balanceLythoshi);
+                  return (
+                    <div key={c.clusterId} style={{ display: "grid", gap: 3 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <span style={{ flex: 1, fontSize: 12.5 }}>{clusterName(c.clusterId)}</span>
+                        <input
+                          type="number"
+                          inputMode="numeric"
+                          min={0}
+                          max={10000}
+                          placeholder="bps"
+                          value={raw}
+                          onChange={(e) => setCustomClusterBps(c.clusterId, e.target.value)}
+                          style={{ ...autovoteInputStyle, width: 110 }}
+                        />
+                      </div>
+                      {echo && (
+                        <div className="row-help mono" style={{ lineHeight: 1.5 }}>
+                          {echo}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
               <div
                 className="row-help mono"
