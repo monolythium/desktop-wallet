@@ -22,6 +22,7 @@ import type {
 } from "@monolythium/core-sdk";
 import { MlDsa65Backend } from "@monolythium/core-sdk/crypto";
 import { getProvider } from "./client";
+import { isMethodDisabled, METHOD_UNAVAILABLE_LABEL } from "./rpc-availability";
 import { getNativeTransactionCount } from "./native-rpc";
 import { requireTypedUserAddress, requireTypedUserAddressHex } from "./address";
 import { selectNativeSpotMarket, type SelectedNativeSpotMarket } from "./market";
@@ -852,8 +853,19 @@ export function deriveLiveWalletIdentity(seed: Uint8Array): LiveWalletIdentity {
   };
 }
 
+/**
+ * Render an outcome for display.
+ *
+ * Three answers, not two. A read that FAILED shows its error, a read that
+ * SUCCEEDED shows its value — and a method the endpoint declines to serve shows
+ * neither, because it is a different fact from both. Handled here at the shared
+ * seam rather than per surface, so every consumer gets the same answer instead
+ * of each solving it locally and drifting apart.
+ */
 export function formatOutcome<T>(outcome: RpcOutcome<T>, render: (value: T) => string): string {
-  if (!outcome.ok) return outcome.error ?? "unavailable";
+  if (!outcome.ok) {
+    return isMethodDisabled(outcome.error) ? METHOD_UNAVAILABLE_LABEL : outcome.error ?? "unavailable";
+  }
   return render(outcome.value as T);
 }
 

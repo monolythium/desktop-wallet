@@ -54,7 +54,14 @@ export function Trade() {
     <div className="w-page">
       <div className="w-page__header">
         <h1>Trade</h1>
-        <div className="sub">Native spot CLOB readiness. Read-only until live market data is available.</div>
+        {/* The page is NOT read-only: it places and cancels limit orders below,
+            and cancelling needs only an order id, so it works with no market
+            listed. Saying "read-only" and then showing a submit button teaches
+            the user to distrust every other label on the screen. */}
+        <div className="sub">
+          Native spot CLOB. Place and cancel limit orders; no market is listed yet, so
+          there is nothing to trade against.
+        </div>
       </div>
 
       <div className="w-card">

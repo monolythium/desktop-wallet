@@ -8,6 +8,7 @@ import {
   loadRecentNetworkEvents,
   type BlogFeedItem,
 } from "../sdk/news";
+import { isMethodDisabled, METHOD_UNAVAILABLE_LABEL } from "../sdk/rpc-availability";
 import { formatOutcome, loadLiveNetworkStatus, type LiveNetworkStatus } from "../sdk/live";
 import { ExternalLink } from "../components/ExternalLink";
 import { RefreshButton } from "../components/RefreshButton";
@@ -119,9 +120,14 @@ export function News() {
           {status?.chainStats.ok === false ? <div className="w-live-error">chainStats: {status.chainStats.error}</div> : null}
           {status?.clientVersion.ok ? <div className="row-help">Client: <span className="mono">{status.clientVersion.value}</span></div> : null}
           {status?.clientVersion.ok === false ? <div className="w-live-error">clientVersion: {status.clientVersion.error}</div> : null}
-          {status?.mempoolStatus.ok ? <div className="row-help">Mempool: <span className="mono">{compact(status.mempoolStatus.value)}</span></div> : null}
-          {status?.indexerStatus.ok ? <div className="row-help">Indexer: <span className="mono">{compact(status.indexerStatus.value)}</span></div> : null}
-          {status?.syncStatus.ok ? <div className="row-help">DAG sync: <span className="mono">{compact(status.syncStatus.value)}</span></div> : null}
+          {/* These three rendered NOTHING when their read failed, which claimed
+              an absence nobody established — and one of them (the mempool) is
+              declined outright by the default operator, so it was permanently
+              invisible with no explanation. A method the endpoint refuses to
+              serve is its own fact and now says so. */}
+          <StatusLine label="Mempool" outcome={status?.mempoolStatus} />
+          <StatusLine label="Indexer" outcome={status?.indexerStatus} />
+          <StatusLine label="DAG sync" outcome={status?.syncStatus} />
           {precompiles.length > 0 ? (
             <div className="w-live-list">
               {precompiles.slice(0, 8).map((precompile) => (
@@ -172,6 +178,35 @@ export function News() {
       </div>
     </div>
   );
+}
+
+/** One status row that distinguishes all three outcomes: a value, a failure, and
+ *  a method this operator declines to serve. Rendering the third as silence
+ *  asserted an absence; rendering it as an error invited a retry that can never
+ *  succeed. */
+function StatusLine({
+  label,
+  outcome,
+}: {
+  label: string;
+  outcome: { ok: boolean; value?: unknown; error?: string } | undefined;
+}) {
+  if (!outcome) return null;
+  if (outcome.ok) {
+    return (
+      <div className="row-help">
+        {label}: <span className="mono">{compact(outcome.value)}</span>
+      </div>
+    );
+  }
+  if (isMethodDisabled(outcome.error)) {
+    return (
+      <div className="row-help">
+        {label}: <span className="mono">{METHOD_UNAVAILABLE_LABEL}</span>
+      </div>
+    );
+  }
+  return <div className="w-live-error">{label}: {outcome.error}</div>;
 }
 
 function LiveCell({ label, value }: { label: string; value: string }) {
