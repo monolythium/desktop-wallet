@@ -466,7 +466,9 @@ export function Delegate() {
       disabled={!gate.ok}
       title={gate.ok ? undefined : gate.label}
       onClick={onClick}
-      style={{ flex: 1, ...(gate.ok ? {} : { opacity: 0.5, cursor: "default" }) }}
+      // No inline dimming: the shared `.btn:disabled` rule owns the disabled
+      // appearance, and Law 8.2 forbids dimming text with inline opacity.
+      style={{ flex: 1 }}
     >
       {gate.ok ? "Review" : gate.label}
     </button>
