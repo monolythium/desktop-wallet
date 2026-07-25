@@ -4,14 +4,22 @@
 // visuals are semantics rather than decoration. Two surfaces drawing different
 // glyphs for the same verb is a comprehension bug.
 //
-// SCOPE NOTE: the shared module below is consumed by the Notifications surface.
-// The Activity feed's `TxRow` renders DIRECTION arrows, not kind glyphs, and its
-// row model (`Tx["kind"]`) carries only three buckets — transfer / reward /
-// delegate — deliberately collapsing undelegate and redelegate into one. Wiring
-// the kind mapping there is therefore a data-model change, not an icon refactor.
+// The scope note that used to sit here said the Activity feed could not consume
+// this mapping because its row model collapsed undelegate and redelegate into
+// one bucket, making the wiring a data-model change rather than an icon
+// refactor. That data model landed: rows now carry a real `ActivityKind`, so
+// both surfaces read this module and the cross-surface agreement is asserted
+// behaviourally below.
 
 import { describe, expect, it } from "vitest";
-import { badgeRingColor, iconForKind } from "../activity-icons";
+import type { ReactElement } from "react";
+import {
+  ACTIVITY_ICON_SIZE,
+  badgeRingColor,
+  iconForActivityKind,
+  iconForKind,
+} from "../activity-icons";
+import type { ActivityKind } from "../../sdk/activity-kind";
 import type { TxOpKind } from "../../sdk/notifications";
 
 const KINDS: TxOpKind[] = [
@@ -63,6 +71,90 @@ describe("the kind→glyph mapping", () => {
     expect(iconForKind("contract_call")).toBeDefined();
     expect(iconForKind("something-new" as TxOpKind)).toBeDefined();
   });
+});
+
+/** React 19 types `ReactElement.props` as `unknown`; these glyphs are always
+ *  plain `<svg>` elements, so read their attributes through one narrow cast. */
+function svgProps(el: ReactElement): Record<string, unknown> {
+  return el.props as Record<string, unknown>;
+}
+
+const ACTIVITY_KINDS: ActivityKind[] = [
+  "tx_send",
+  "tx_receive",
+  "token_transfer",
+  "delegate",
+  "undelegate",
+  "redelegate",
+  "claim",
+  "unclassified",
+];
+
+describe("the activity-kind → glyph mapping", () => {
+  it("resolves every kind the taxonomy carries", () => {
+    for (const kind of ACTIVITY_KINDS) {
+      expect(iconForActivityKind(kind), kind).toBeDefined();
+    }
+  });
+
+  it("gives each delegation verb its OWN glyph here too", () => {
+    expect(iconForActivityKind("delegate")).not.toBe(iconForActivityKind("undelegate"));
+    expect(iconForActivityKind("undelegate")).not.toBe(iconForActivityKind("redelegate"));
+    expect(iconForActivityKind("delegate")).not.toBe(iconForActivityKind("redelegate"));
+  });
+
+  it("a token transfer is NOT a native send or receive", () => {
+    // A token movement may be either way or neither, so it gets a symmetric
+    // glyph of its own rather than borrowing a directional one.
+    expect(iconForActivityKind("token_transfer")).not.toBe(iconForActivityKind("tx_send"));
+    expect(iconForActivityKind("token_transfer")).not.toBe(iconForActivityKind("tx_receive"));
+  });
+
+  it("an unclassified row gets a mark that states no operation", () => {
+    const unclassified = iconForActivityKind("unclassified");
+    expect(unclassified).toBeDefined();
+    for (const kind of ACTIVITY_KINDS.filter((k) => k !== "unclassified")) {
+      expect(unclassified, kind).not.toBe(iconForActivityKind(kind));
+    }
+  });
+
+  it("every glyph is one shared size", () => {
+    for (const kind of ACTIVITY_KINDS) {
+      expect(svgProps(iconForActivityKind(kind)).width, kind).toBe(ACTIVITY_ICON_SIZE);
+      expect(svgProps(iconForActivityKind(kind)).height, kind).toBe(ACTIVITY_ICON_SIZE);
+    }
+  });
+
+  it("every glyph is decorative — it never carries the meaning alone", () => {
+    // G4: the row's text names the operation and its status, so the glyph is
+    // hidden from assistive tech rather than duplicating that name badly.
+    for (const kind of ACTIVITY_KINDS) {
+      expect(svgProps(iconForActivityKind(kind))["aria-hidden"], kind).toBe("true");
+    }
+    for (const kind of KINDS) {
+      expect(svgProps(iconForKind(kind))["aria-hidden"], kind).toBe("true");
+    }
+  });
+});
+
+describe("the two vocabularies agree — one operation, one glyph", () => {
+  // THE cross-surface property. The Activity feed speaks ActivityKind and the
+  // Notifications feed speaks TxOpKind; they name the same real operations, and
+  // a user seeing the same event in both places must see the same mark.
+  // Asserted per family, not on a single representative.
+  it.each([
+    ["send", "tx_send"],
+    ["receive", "tx_receive"],
+    ["delegate", "delegate"],
+    ["undelegate", "undelegate"],
+    ["redelegate", "redelegate"],
+    ["claim", "claim"],
+  ] as Array<[TxOpKind, ActivityKind]>)(
+    "%s and %s are the same glyph",
+    (opKind, activityKind) => {
+      expect(iconForKind(opKind)).toBe(iconForActivityKind(activityKind));
+    },
+  );
 });
 
 describe("status colouring", () => {
