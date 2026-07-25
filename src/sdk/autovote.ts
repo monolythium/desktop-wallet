@@ -21,6 +21,7 @@ import { getProvider } from "./client";
 import { buildDelegateCalldata, submitDelegationTx } from "./delegation";
 import { preflightDelegationVerdict } from "./delegation-caps";
 import { isInertDelegation, minNonInertBps } from "./delegation-derive";
+import { LATE_REFUSAL_PREFIX } from "./delegation-preflight";
 import { withDelegationRevertCopy } from "./delegation-reverts";
 import { ClassifiedWalletError } from "./send-error";
 
@@ -452,7 +453,7 @@ export function lateBatchVerdict(args: {
       ok: false,
       // Plan-level by construction — several allocations can be inert at once,
       // and the verdict names them all rather than electing one.
-      message: lateRefusal("Your balance changed while this was open", inert.message),
+      message: lateRefusal(LATE_BALANCE_PREFIX, inert.message),
     };
   }
   const verdict = preflightAutovotePlan(args);
@@ -461,9 +462,15 @@ export function lateBatchVerdict(args: {
   return {
     ok: false,
     clusterId: verdict.clusterId,
-    message: lateRefusal("Your delegation state changed while this was open", reason),
+    message: lateRefusal(LATE_REFUSAL_PREFIX, reason),
   };
 }
+
+/** What moved, when the thing that moved was the balance rather than the
+ *  delegation state. The sibling half of {@link LATE_REFUSAL_PREFIX}: a batch
+ *  can be refused late for either reason, and saying "your delegation state
+ *  changed" about a balance would send the user to look at the wrong thing. */
+export const LATE_BALANCE_PREFIX = "Your balance changed while this was open";
 
 /** One sentence shape for every late refusal, so the two questions cannot drift
  *  apart in how they explain themselves: what moved, the verdict's own words,
