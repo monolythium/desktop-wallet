@@ -64,6 +64,7 @@ import {
   buildAutovotePlan,
   fetchClusterDiversities,
   autovoteInertVerdict,
+  lateBatchVerdict,
   preflightAutovotePlan,
   submitAutovotePlan,
   type AutovoteAllocation,
@@ -424,6 +425,23 @@ export function Delegate() {
   const rowWeightLabel = (bps: number): string => {
     const lyth = effectiveWeightWholeLyth(balanceLythoshi, bps);
     return lyth === null ? bpsToPercentLabel(bps) : `${lyth} LYTH`;
+  };
+
+  // The batch's view of the same fresher state `freshVerdictInputs` gives a
+  // single action — the whole weight map, total, cap and row count, because the
+  // batch gate accumulates across every allocation. Fails open identically: an
+  // unresolved read keeps the mount-time snapshot.
+  const freshBatchInputs = async () => {
+    const { snapshot } = await refreshDelegationSnapshot({
+      snapshot: { rows: delegationRows, totalBps, aggregateCapBps },
+      read: () => loadLiveDelegationStatus(walletAddress),
+    });
+    return {
+      existingWeightByCluster: new Map(snapshot.rows.map((r) => [r.cluster, r.weightBps])),
+      currentTotalBps: snapshot.totalBps,
+      capBps: snapshot.aggregateCapBps,
+      currentDelegationCount: snapshot.rows.filter((r) => r.weightBps > 0).length,
+    };
   };
 
   // Would this weight credit nothing at all? A different question from the caps:
@@ -968,6 +986,21 @@ export function Delegate() {
       execute: async (ctx) => {
         if (!ctx?.vaultSeed) {
           throw new Error("vault seed unavailable after keychain authorization");
+        }
+        // ALL-OR-NOTHING, before the first submit. A batch cannot re-check per
+        // call: a refusal between submits leaves part of the plan on chain with
+        // no way to undo what landed. This is the one moment where refusing
+        // costs nothing. Same gate, accumulation intact, fresher inputs — and
+        // fails open, so an unresolved read proceeds on the snapshot.
+        const late = lateBatchVerdict({
+          allocations: plan.allocations,
+          ...(await freshBatchInputs()),
+        });
+        if (!late.ok) {
+          if (late.clusterId !== undefined) {
+            raiseRejection(late.clusterId, "delegate", late.message);
+          }
+          throw new Error(late.message);
         }
         setAutovoteBusy(true);
         setAutovoteProgress({ done: 0, total: plan.allocations.length });

@@ -395,6 +395,39 @@ export function preflightAutovotePlan(args: {
   return { ok: true };
 }
 
+/**
+ * The cap verdict re-run after the unlock, immediately before the FIRST submit.
+ *
+ * WHY ALL-OR-NOTHING, AND WHY HERE. The single paths re-check at the top of
+ * `execute` and refuse one transaction. A batch cannot re-check per call: a
+ * refusal BETWEEN submits leaves part of the plan on chain, with no way to undo
+ * what landed and nothing coherent to tell the user about a half-applied
+ * intention. Before the first submit is the only moment where refusing costs
+ * exactly nothing, so that is where the whole plan is judged.
+ *
+ * It is the SAME gate, not a looser one — `preflightAutovotePlan`, accumulation
+ * intact — given fresher inputs. A late refusal says the state changed, because
+ * a cap sentence arriving after the passphrase is otherwise indistinguishable
+ * from a chain rejection, and carries no wording the drawer's error classifier
+ * would rewrite as a chain revert. Pure.
+ */
+export function lateBatchVerdict(args: {
+  allocations: readonly AutovoteAllocation[];
+  existingWeightByCluster: Map<number, number>;
+  currentTotalBps: number;
+  capBps: number | null;
+  currentDelegationCount?: number;
+}): { ok: true } | { ok: false; clusterId?: number; message: string } {
+  const verdict = preflightAutovotePlan(args);
+  if (verdict.ok) return { ok: true };
+  const reason = verdict.message ?? "this plan would exceed a delegation cap.";
+  return {
+    ok: false,
+    clusterId: verdict.clusterId,
+    message: `Your delegation state changed while this was open — ${reason} Nothing was submitted.`,
+  };
+}
+
 export interface AutovoteInertVerdict {
   ok: boolean;
   /** The allocations that would credit nothing, when blocked. */

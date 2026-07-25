@@ -12,7 +12,7 @@
 // value turns these red.
 
 import { describe, expect, it } from "vitest";
-import { preflightAutovotePlan } from "../autovote";
+import { lateBatchVerdict, preflightAutovotePlan } from "../autovote";
 
 const alloc = (clusterId: number, weightBps: number) => ({ clusterId, weightBps });
 
@@ -105,5 +105,66 @@ describe("preflightAutovotePlan — the running ROW COUNT accumulates", () => {
       capBps: null,
     });
     expect(r.ok).toBe(true);
+  });
+});
+
+// The post-unlock re-check, and why it is all-or-nothing.
+//
+// The single paths re-run the verdict after the unlock. A batch cannot do that
+// per call: a refusal BETWEEN submits leaves part of the plan on chain with no
+// clean recovery and nothing coherent to tell the user. The one moment with a
+// clean failure story is before the FIRST submit, where refusing costs nothing.
+describe("lateBatchVerdict", () => {
+  it("passes a plan that still fits the fresher state", () => {
+    const r = lateBatchVerdict({
+      allocations: [alloc(1, 1000)],
+      existingWeightByCluster: new Map(),
+      currentTotalBps: 0,
+      capBps: null,
+    });
+    expect(r.ok).toBe(true);
+  });
+
+  it("refuses the WHOLE plan when the fresher state no longer allows it", () => {
+    // The wallet moved to 95% while the drawer was open.
+    const r = lateBatchVerdict({
+      allocations: [alloc(1, 1000), alloc(2, 1000)],
+      existingWeightByCluster: new Map(),
+      currentTotalBps: 9500,
+      capBps: null,
+    });
+    expect(r.ok).toBe(false);
+  });
+
+  it("still accumulates — it is the same gate, not a looser one", () => {
+    // Individually fine, cumulatively over: the invariant must survive here too.
+    const r = lateBatchVerdict({
+      allocations: [alloc(1, 4000), alloc(2, 4000), alloc(3, 4000)],
+      existingWeightByCluster: new Map(),
+      currentTotalBps: 0,
+      capBps: null,
+    });
+    expect(r.ok).toBe(false);
+    expect(r.ok === false && r.clusterId).toBe(3);
+  });
+
+  it("says the state changed, so a late refusal is not read as a chain rejection", () => {
+    const r = lateBatchVerdict({
+      allocations: [alloc(1, 1000)],
+      existingWeightByCluster: new Map(),
+      currentTotalBps: 9500,
+      capBps: null,
+    });
+    expect(r.ok === false && r.message).toContain("changed");
+  });
+
+  it("carries no word the drawer's error classifier would read as a chain revert", () => {
+    const r = lateBatchVerdict({
+      allocations: [alloc(1, 1000)],
+      existingWeightByCluster: new Map(),
+      currentTotalBps: 9500,
+      capBps: null,
+    });
+    expect(r.ok === false && r.message.toLowerCase()).not.toContain("revert");
   });
 });
