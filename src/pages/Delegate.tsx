@@ -91,6 +91,12 @@ import {
   lateRefusalMessage,
   refreshDelegationSnapshot,
 } from "../sdk/delegation-preflight";
+import {
+  delegationFeeAffordability,
+  loadDelegationFeeBasis,
+  loadDelegationFeeReservation,
+  type FeeAffordability,
+} from "../sdk/delegation-fee";
 import { withDelegationRevertCopy } from "../sdk/delegation-reverts";
 import { useDelegationRejection } from "../sdk/DelegationRejectionProvider";
 import { claimButtonState } from "../sdk/claim-in-flight";
@@ -188,6 +194,11 @@ export function Delegate() {
   // Custom mode: manual per-cluster weight inputs (bps), keyed by clusterId.
   const [customOpen, setCustomOpen] = useState(false);
   const [customBps, setCustomBps] = useState<Map<number, string>>(new Map());
+  // Whether the wallet can pay to submit a delegation at all. ADVISORY: it warns
+  // and never blocks — see the fail-open reasoning in sdk/delegation-fee.ts.
+  const [feeAffordability, setFeeAffordability] = useState<FeeAffordability>({
+    status: "unknown",
+  });
 
   // Bounded re-read after an auto-compound flip. The page is manual-refresh by
   // design, so this polls only while a flip is genuinely outstanding — and it
@@ -241,7 +252,7 @@ export function Delegate() {
     setExpandedDetail(null);
     setDetailByCluster(new Map());
     try {
-      const [s, bal, dir, rew, red] = await Promise.all([
+      const [s, bal, dir, rew, red, feeBasis, feeReservation] = await Promise.all([
         loadLiveDelegationStatus(walletAddress),
         capture(() => loadNativeBalanceLythoshi(walletAddress)),
         fetchClusterDirectory(1, 20).catch((cause: unknown) => {
@@ -250,7 +261,17 @@ export function Delegate() {
         }),
         capture(() => fetchPendingRewards(walletAddress)),
         capture(() => fetchRedemptionQueue(walletAddress)),
+        // The affordability basis and comparand. Both resolve to null rather
+        // than throwing, and null means "cannot tell" — never zero.
+        loadDelegationFeeBasis(walletAddress),
+        loadDelegationFeeReservation(),
       ]);
+      setFeeAffordability(
+        delegationFeeAffordability({
+          basisLythoshi: feeBasis,
+          reservationLythoshi: feeReservation,
+        }),
+      );
       setStatus(s);
       setBalance(bal);
       setRewards(rew);
@@ -1031,6 +1052,17 @@ export function Delegate() {
           spendable. Effective weight tracks your live balance.
         </div>
       </div>
+
+      {/* ADVISORY, never a block. Every other guard here reasons about weight;
+          this one asks whether the wallet can pay to submit at all. It renders
+          only on a definite shortfall — an unreadable balance or an unresolved
+          quote say nothing rather than guessing, so this can never appear
+          because a read failed. */}
+      {feeAffordability.status === "short" && (
+        <div className="w-warn-prominent" style={{ marginBottom: 12 }}>
+          {feeAffordability.message}
+        </div>
+      )}
 
       {/* Header facts + rewards/actions. Spendable balance is a real read
           (eth_getBalance); Effective weight LYTH is derived (balance × bps ÷
