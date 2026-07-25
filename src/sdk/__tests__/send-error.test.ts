@@ -100,7 +100,9 @@ describe("formatSendError — admission band + code independence", () => {
 describe("desktop provider-gate predicates", () => {
   it("classifies the fail-closed provider gate's causes honestly", () => {
     expect(classifySendError("refusing to use an untrusted operator (chain regenesis)").kind).toBe("genesis-mismatch");
-    expect(classifySendError("refusing to use an untrusted operator (chain untrusted)").kind).toBe("genesis-mismatch");
+    // A wrong chain ID is NOT a genesis mismatch — it has its own row and its own
+    // remedy (switch operators), see the dedicated describe below.
+    expect(classifySendError("refusing to use an untrusted operator (chain untrusted)").kind).toBe("operator-wrong-chain");
     expect(classifySendError("refusing to use an untrusted operator (chain unreachable)").kind).toBe("operator-offline");
   });
 
@@ -165,8 +167,9 @@ describe("hygiene + helpers", () => {
     expect(classifySendError("plaintext not allowed").body).not.toMatch(/encrypt/i);
     expect(classifySendError("totally novel").body).not.toMatch(/encrypt/i);
   });
-  it("errorLinksOperators covers exactly the three network kinds", () => {
+  it("errorLinksOperators covers exactly the four network kinds", () => {
     expect(errorLinksOperators("genesis-mismatch")).toBe(true);
+    expect(errorLinksOperators("operator-wrong-chain")).toBe(true);
     expect(errorLinksOperators("chain-quarantined")).toBe(true);
     expect(errorLinksOperators("operator-offline")).toBe(true);
     expect(errorLinksOperators("insufficient-funds")).toBe(false);
@@ -176,5 +179,39 @@ describe("hygiene + helpers", () => {
     const err = Object.assign(new Error("outer"), { cause: Object.assign(new Error("inner"), { code: -32047 }) });
     expect(extractSendError(err)).toEqual({ message: "outer", code: -32047 });
     expect(extractSendError("boom")).toEqual({ message: "boom", code: null });
+  });
+});
+
+describe("the untrusted-operator cause names its own remedy", () => {
+  it("a wrong-chain-ID operator is told to switch, NOT to wait for a pin update", () => {
+    // `(chain untrusted)` is reachable ONLY through anyWrongChainId — the
+    // classifier returns regenesis first, and wrongChainId is computed without
+    // consulting the genesis field at all. Telling this user to wait for a
+    // wallet release is a remedy that will never arrive; another operator fixes
+    // it now.
+    const c = classifySendError("refusing to use an untrusted operator (chain untrusted)");
+    expect(c.kind).toBe("operator-wrong-chain");
+    expect(c.body).toMatch(/different chain/i);
+    expect(c.body).toMatch(/switch/i);
+    expect(c.body).not.toMatch(/pinned genesis/i);
+    expect(c.body).not.toMatch(/re-genesis/i);
+    expect(errorLinksOperators(c.kind)).toBe(true);
+  });
+
+  it("a real genesis mismatch still prescribes the pin update", () => {
+    const c = classifySendError("refusing to use an untrusted operator (chain regenesis)");
+    expect(c.kind).toBe("genesis-mismatch");
+    expect(c.body).toMatch(/pinned chain genesis/i);
+    expect(c.body).toMatch(/update/i);
+  });
+
+  it("the two causes never collapse onto one another", () => {
+    const wrongChain = classifySendError("refusing to use an untrusted operator (chain untrusted)");
+    const regenesis = classifySendError("refusing to use an untrusted operator (chain regenesis)");
+    expect(wrongChain.kind).not.toBe(regenesis.kind);
+    expect(wrongChain.body).not.toBe(regenesis.body);
+    // …and neither steals the quarantine or offline causes.
+    expect(classifySendError("refusing to use an untrusted operator (chain quarantined)").kind).toBe("chain-quarantined");
+    expect(classifySendError("refusing to use an untrusted operator (chain unreachable)").kind).toBe("operator-offline");
   });
 });

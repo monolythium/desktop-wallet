@@ -60,6 +60,7 @@ export type SendErrorKind =
   | "active-vault-changed"
   | "spending-policy-unavailable"
   | "genesis-mismatch"
+  | "operator-wrong-chain"
   | "plaintext-not-allowed"
   | "gas-estimation"
   | "nonce-conflict"
@@ -138,7 +139,12 @@ export function extractMempoolInner(display: string): string | null {
 
 /** Which kinds carry a routable "See Operators" link (§8.7). */
 export function errorLinksOperators(kind: SendErrorKind): boolean {
-  return kind === "genesis-mismatch" || kind === "chain-quarantined" || kind === "operator-offline";
+  return (
+    kind === "genesis-mismatch" ||
+    kind === "operator-wrong-chain" ||
+    kind === "chain-quarantined" ||
+    kind === "operator-offline"
+  );
 }
 
 export const severityColours: Record<
@@ -210,12 +216,30 @@ const RULES: Rule[] = [
       "A temporary network issue interrupted the spending-policy check — your policy is unchanged. Try again in a moment.",
   },
   {
-    match: (l) => has(l, "untrusted genesis", "genesis mismatch", "chain regenesis", "chain untrusted"),
+    // A DEFINITIVE genesis mismatch: the operators are on this build's chain id
+    // but report a different genesis. Only a newer build can pin the new one, so
+    // the remedy really is to update — see the row below for the cause that is
+    // NOT this one.
+    match: (l) => has(l, "untrusted genesis", "genesis mismatch", "chain regenesis"),
     kind: "genesis-mismatch",
     headline: "Chain genesis mismatch",
     severity: "err",
     body: () =>
       "The wallet's pinned chain genesis no longer matches the live network, which may have re-genesised. Sends are paused until the pinned genesis is updated. See Operators.",
+  },
+  {
+    // `(chain untrusted)` is reachable ONLY via anyWrongChainId: the fleet
+    // classifier returns regenesis first, and wrongChainId is computed from the
+    // chain id alone — the genesis field is never consulted on that branch. So
+    // this is an operator on a different NETWORK, and the genesis row's "wait
+    // until the pinned genesis is updated" would send the user off to wait for a
+    // release that fixes nothing. Another operator fixes it now.
+    match: (l) => has(l, "chain untrusted", "wrong chain id"),
+    kind: "operator-wrong-chain",
+    headline: "Operator on a different chain",
+    severity: "err",
+    body: () =>
+      "This operator reports a different chain ID than your wallet expects — it's serving another network. Sends are paused until you're on an operator for your chain. Switch operators to continue. See Operators.",
   },
   {
     match: (l) => (has(l, "plaintext") && has(l, "not allowed", "encrypted envelope")) || has(l, "encrypted mempool required"),
