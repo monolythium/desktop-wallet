@@ -88,7 +88,9 @@ import {
   eligibleClusters,
   parseExactNonNegativeInteger,
   resolveRedelegateDestination,
+  weightActionGate,
   weightEchoLine,
+  type WeightActionGate,
 } from "../sdk/delegation-input";
 import {
   lateRefusalMessage,
@@ -445,6 +447,30 @@ export function Delegate() {
       currentDelegationCount: snapshot.rows.filter((r) => r.weightBps > 0).length,
     };
   };
+
+  // Did the delegations read actually resolve? A cap breach measured against an
+  // unresolved read is not a fact, and gating on it would be a false block — the
+  // failure this project's fail-direction ledger has refused at every guard.
+  // Only when this is true may a cap condition disable an action.
+  const capReadResolved = delegations != null;
+
+  // The action button, disabled ONLY on definite conditions and always saying
+  // why. Kept in the tree rather than removed, so the layout does not shift as
+  // the user types and the reason stays readable.
+  const reviewButton = (
+    gate: WeightActionGate,
+    onClick: () => void | Promise<void>,
+  ) => (
+    <button
+      className="btn btn--sm btn--primary"
+      disabled={!gate.ok}
+      title={gate.ok ? undefined : gate.label}
+      onClick={onClick}
+      style={{ flex: 1, ...(gate.ok ? {} : { opacity: 0.5, cursor: "default" }) }}
+    >
+      {gate.ok ? "Review" : gate.label}
+    </button>
+  );
 
   // ONE feedback pattern for all three weight forms, so they cannot drift.
   //
@@ -1437,7 +1463,19 @@ export function Delegate() {
                         </div>
                       </div>
 
-                      {isDelegatingMore && (
+                      {isDelegatingMore && (() => {
+                        const capState = stackingCapState({
+                          existingWeightBps: row.weightBps,
+                          raw: delegateMoreBps,
+                        });
+                        const addMoreGate = weightActionGate({
+                          raw: delegateMoreBps,
+                          maxBps: 10000,
+                          balanceLythoshi,
+                          // Only a breach measured against a resolved read.
+                          capViolated: capReadResolved && capState.warning !== null,
+                        });
+                        return (
                         <div style={inlineFormStyle}>
                           <label style={redelegateLabelStyle}>
                             Additional weight in basis points (100 = 1%)
@@ -1454,13 +1492,7 @@ export function Delegate() {
                             }}
                             style={autovoteInputStyle}
                           />
-                          {capFeedback(
-                            stackingCapState({
-                              existingWeightBps: row.weightBps,
-                              raw: delegateMoreBps,
-                            }),
-                            delegateMoreBps,
-                          )}
+                          {capFeedback(capState, delegateMoreBps)}
                           {delegateMoreError && (
                             <div className="row-help" style={{ color: "var(--err)" }}>
                               {delegateMoreError}
@@ -1477,9 +1509,7 @@ export function Delegate() {
                             >
                               Cancel
                             </button>
-                            <button
-                              className="btn btn--sm btn--primary"
-                              onClick={async () => {
+                            {reviewButton(addMoreGate, async () => {
                                 const bps = parseExactNonNegativeInteger(delegateMoreBps);
                                 if (bps === null || bps <= 0 || bps > 10000) {
                                   setDelegateMoreError(
@@ -1509,16 +1539,42 @@ export function Delegate() {
                                 }
                                 setDelegateMoreFor(null);
                                 openDelegate({ clusterId: row.cluster, weightBps: bps });
-                              }}
-                              style={{ flex: 1 }}
-                            >
-                              Review
-                            </button>
+                            })}
                           </div>
                         </div>
-                      )}
+                        );
+                      })()}
 
-                      {isRedelegating && (
+                      {isRedelegating && (() => {
+                        const dstBps =
+                          delegationRows.find(
+                            (r) => r.cluster === parseExactNonNegativeInteger(redelegateTo),
+                          )?.weightBps ?? 0;
+                        const capState = stackingCapState({
+                          existingWeightBps: dstBps,
+                          raw: redelegateWeightBps,
+                          forMove: true,
+                        });
+                        const dstRaw = parseExactNonNegativeInteger(redelegateTo);
+                        // Destination gating stops at DEFINITE problems only:
+                        // an empty field, or the source itself. Membership and
+                        // eligibility depend on the directory read resolving, so
+                        // they are left to the review handler's resolver, which
+                        // refuses with an explanation instead of a grey button.
+                        const dstGate: WeightActionGate =
+                          dstRaw === null
+                            ? { ok: false, label: "Pick a destination" }
+                            : dstRaw === row.cluster
+                              ? { ok: false, label: "Pick a different cluster" }
+                              : { ok: true };
+                        const weightGate = weightActionGate({
+                          raw: redelegateWeightBps,
+                          maxBps: row.weightBps,
+                          balanceLythoshi,
+                          capViolated: capReadResolved && capState.warning !== null,
+                        });
+                        const redelegateGate = !dstGate.ok ? dstGate : weightGate;
+                        return (
                         <div style={inlineFormStyle}>
                           <label style={redelegateLabelStyle}>
                             Destination cluster id
@@ -1550,20 +1606,9 @@ export function Delegate() {
                             }}
                             style={autovoteInputStyle}
                           />
-                          {capFeedback(
-                            stackingCapState({
-                              // The DESTINATION is what stacks weight, so it is
-                              // what the cap is about.
-                              existingWeightBps:
-                                delegationRows.find(
-                                  (r) =>
-                                    r.cluster === parseExactNonNegativeInteger(redelegateTo),
-                                )?.weightBps ?? 0,
-                              raw: redelegateWeightBps,
-                              forMove: true,
-                            }),
-                            redelegateWeightBps,
-                          )}
+                          {/* The DESTINATION is what stacks weight, so it is
+                              what the cap is about. */}
+                          {capFeedback(capState, redelegateWeightBps)}
                           {redelegateError && (
                             <div className="row-help" style={{ color: "var(--err)" }}>
                               {redelegateError}
@@ -1580,9 +1625,7 @@ export function Delegate() {
                             >
                               Cancel
                             </button>
-                            <button
-                              className="btn btn--sm btn--primary"
-                              onClick={async () => {
+                            {reviewButton(redelegateGate, async () => {
                                 // The destination is typed, so it must be shown
                                 // to name a cluster the wallet has actually seen
                                 // and that may receive weight — a wrong id names
@@ -1630,14 +1673,11 @@ export function Delegate() {
                                   return;
                                 }
                                 openRedelegate({ fromCluster: row.cluster, toCluster: to, weightBps: bps });
-                              }}
-                              style={{ flex: 1 }}
-                            >
-                              Review
-                            </button>
+                            })}
                           </div>
                         </div>
-                      )}
+                        );
+                      })()}
                     </div>
                   );
                 })}
@@ -1994,6 +2034,12 @@ export function Delegate() {
               additionalBps: Number.isFinite(draftBps) && draftBps > 0 ? draftBps : null,
               aggregateCapBps,
             });
+            const directoryGate = weightActionGate({
+              raw: draftWeightBps,
+              maxBps: 10000,
+              balanceLythoshi,
+              capViolated: capReadResolved && capState.warning !== null,
+            });
             return (
               <div
                 key={c.clusterId}
@@ -2119,9 +2165,7 @@ export function Delegate() {
                       >
                         Cancel
                       </button>
-                      <button
-                        className="btn btn--sm btn--primary"
-                        onClick={async () => {
+                      {reviewButton(directoryGate, async () => {
                           const bps = parseExactNonNegativeInteger(draftWeightBps);
                           if (bps === null || bps <= 0 || bps > 10_000) {
                             setDraftError(
@@ -2148,11 +2192,7 @@ export function Delegate() {
                             return;
                           }
                           openDelegate({ clusterId: c.clusterId, weightBps: bps });
-                        }}
-                        style={{ flex: 1 }}
-                      >
-                        Review
-                      </button>
+                      })}
                     </div>
                   </div>
                 )}

@@ -126,7 +126,8 @@ describe("Delegate — add-more cap preflight + weight→calldata", () => {
     const { user } = renderWithProviders(<Delegate />);
     await screen.findByText("Active delegations"); // row list loaded
     await user.click(screen.getByRole("button", { name: "Delegate" })); // opens the add-more form
-    await screen.findByText(/additional weight to delegate/i); // form is open
+    // The label now leads with the unit that is actually typed.
+    await screen.findByText(/additional weight in basis points/i); // form is open
     // the bps input defaults to "1000"; pick it among any number inputs.
     const input =
       screen.getAllByRole("spinbutton").find((el) => (el as HTMLInputElement).value === "1000") ??
@@ -134,11 +135,14 @@ describe("Delegate — add-more cap preflight + weight→calldata", () => {
     return { user, input: input as HTMLElement };
   }
 
-  it("BLOCKS an over-cap add-more before signing (respects the preflight verdict)", async () => {
+  it("BLOCKS an add-more the preflight refuses, before signing", async () => {
+    // 1000 on top of the fixture's 3000 stays inside the 5000 cap, so the form
+    // gate passes and the click reaches the handler — which is what this test is
+    // about. The gate's own behaviour is covered separately below.
     caps.preflightDelegationVerdict.mockReturnValue({ ok: false, message: "would exceed the delegation cap" });
     const { user, input } = await openAddMoreForm();
     await user.clear(input);
-    await user.type(input, "3000"); // +30% → over the 50% cap in this fixture
+    await user.type(input, "1000");
     await user.click(screen.getByRole("button", { name: "Review" }));
 
     expect(caps.preflightDelegationVerdict).toHaveBeenCalled();
@@ -146,18 +150,37 @@ describe("Delegate — add-more cap preflight + weight→calldata", () => {
     expect(cap.descriptor).toBeUndefined(); // no operation opened
   });
 
-  it("refuses a weight that would credit nothing, before the cap check runs", async () => {
-    // The guard is wired, not merely unit-tested: at a 2 LYTH balance a 4999 bps
-    // weight credits 0.9998 LYTH, which the chain floors to zero — accepted,
-    // earning nothing, and costing a fee. It must not reach the cap pre-flight.
+  it("disables the action on a definite cap breach, and says what to do", async () => {
+    // 3000 on top of the fixture's 3000 exceeds the 5000 cap. The user learns
+    // this from the control itself rather than from a post-click error.
+    caps.preflightDelegationVerdict.mockReturnValue({ ok: true });
+    const { user, input } = await openAddMoreForm();
+    await user.clear(input);
+    await user.type(input, "3000");
+
+    const action = screen.getByRole("button", { name: "Reduce to the cap" });
+    expect(action).toBeDisabled();
+    await user.click(action);
+    expect(caps.preflightDelegationVerdict).not.toHaveBeenCalled();
+    expect(cap.descriptor).toBeUndefined();
+  });
+
+  it("shows a weight that would credit nothing, and disables the action", async () => {
+    // At a 2 LYTH balance a 4999 bps weight credits 0.9998 LYTH, which the chain
+    // floors to zero — accepted, earning nothing, costing a fee. The echo says so
+    // while it is typed and the control refuses to be pressed, so this never
+    // reaches the pre-flight. (The handler's own inert guard remains pinned in
+    // sdk/__tests__/delegation-inert.test.ts.)
     live.loadNativeBalanceLythoshi.mockResolvedValue("2000000000000000000");
     caps.preflightDelegationVerdict.mockReturnValue({ ok: true });
     const { user, input } = await openAddMoreForm();
     await user.clear(input);
     await user.type(input, "4999");
-    await user.click(screen.getByRole("button", { name: "Review" }));
 
     expect(screen.getByText(/credits 0 LYTH/i)).toBeInTheDocument();
+    const action = screen.getByRole("button", { name: "Too small to credit" });
+    expect(action).toBeDisabled();
+    await user.click(action);
     expect(caps.preflightDelegationVerdict).not.toHaveBeenCalled();
     expect(cap.descriptor).toBeUndefined(); // nothing opened, nothing signed
   });
