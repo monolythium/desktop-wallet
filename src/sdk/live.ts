@@ -1,4 +1,5 @@
 import {
+  addressToTypedBech32,
   ApiClient,
   CLAIMED_EVENT_TOPIC0,
   decodeClaimedEvent,
@@ -824,11 +825,28 @@ export async function loadLiveWalletBalance(address: string): Promise<LiveWallet
   };
 }
 
+/**
+ * Derive the live wallet identity from a vault seed.
+ *
+ * THE ADDRESS FORM IS CONVERTED HERE, and this function is the reason why. The
+ * SDK backend returns a raw `0x` address; this wallet retired that form
+ * everywhere — the recipient parser rejects it, the spending policy
+ * canonicalises away from it, and every reader validates through
+ * `requireTypedUserAddress*`. So the derivation seam is where the SDK's form
+ * becomes the wallet's.
+ *
+ * Converting at the call site instead would have fixed one caller and left the
+ * trap armed for the next: the identity previously flowed straight into
+ * `loadLiveWalletBalance`, whose first act is that validator, which threw
+ * "raw 0x addresses are retired" on the wallet's own address — and the panel
+ * reported balance and nonce as unavailable when the request had simply never
+ * been made.
+ */
 export function deriveLiveWalletIdentity(seed: Uint8Array): LiveWalletIdentity {
   const backend = MlDsa65Backend.fromSeed(seed);
   const publicKey = backend.publicKey();
   return {
-    address: backend.getAddress(),
+    address: addressToTypedBech32("user", backend.getAddress()),
     publicKeyHex: bytesToHex(publicKey),
     publicKeyBytes: publicKey.length,
   };
