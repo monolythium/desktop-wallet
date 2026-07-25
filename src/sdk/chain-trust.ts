@@ -82,6 +82,31 @@ export type TrustedHead =
   | { ok: true; url: string; height: number; headId: string; chainId: number }
   | { ok: false; cause: DegradedCause; reason?: string };
 
+// ── DECIDED AGAINST: a block-0 hash as a second identity signal (A7) ────────
+//
+// The specification argues for corroborating the genesis hash with the hash of
+// block 0, so an operator that does not expose `genesisHash` can still be
+// identified. This wallet deliberately does not, and the reasoning is recorded
+// here — beside the comparison it would have changed — so it reads as a
+// considered choice rather than an omission.
+//
+//  1. TWO FIELDS FROM ONE OPERATOR ARE NOT TWO OPINIONS. An operator that
+//     fabricates the identity hash in one response can fabricate a block hash in
+//     another. A second field bought from the same source is not independent
+//     evidence, and treating it as such is the error the whole idea rests on.
+//  2. IT COVERS ONLY AN IMPLEMENTATION GAP. Against a lying operator it adds
+//     nothing (see 1), so all it really addresses is an operator that does not
+//     expose the identity hash at all. Every fleet member currently exposes it.
+//  3. IT WOULD BE A SECOND PINNED CONSTANT, immediately after a pass spent
+//     establishing that the wallet should have exactly ONE anchor — and the
+//     specification's own note warns the two values must never be compared
+//     against each other, which is a second rule to keep correct forever.
+//  4. THE TRANSPORT DEFEATS IT. On the one this fleet actually uses, an on-path
+//     rewrite changes both fields in the same body.
+//
+// REVISIT WHEN: a fleet member stops exposing the identity hash. At that point
+// reason 2 is no longer hypothetical and this becomes worth having.
+
 /**
  * Build a trust verdict from one operator's `lyth_chainStats` (pure).
  *
