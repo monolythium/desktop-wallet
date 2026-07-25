@@ -30,3 +30,41 @@ describe("stripHtml", () => {
     expect((globalThis as Record<string, unknown>).__xssFired).toBeUndefined();
   });
 });
+
+describe("stripHtml leaves no assembled tag behind", () => {
+  // A single parse is not idempotent. For mutation-XSS shapes the browser
+  // re-interprets `<svg>` / `<math>` / `<style>` nesting on a second read, so
+  // text extracted after ONE parse can still contain a whole tag — inert only
+  // for as long as nothing parses it again. These are the cases the sanitizer
+  // closed and the previous hand-rolled parse did not.
+  //
+  // The assertion is the PROPERTY (no tag survives), not an exact string, so a
+  // future sanitizer version that strips differently but still safely does not
+  // fail this for the wrong reason.
+  const NO_TAG = /<[a-z]/i;
+
+  afterEach(() => {
+    delete (globalThis as Record<string, unknown>).__xssFired;
+  });
+
+  it("strips a nested <form>/<math> payload that a single parse reassembled", () => {
+    // The previous implementation returned the literal, complete tag
+    // `</math><img src onerror=globalThis.__xssFired=true>` for this input.
+    const out = stripHtml(
+      "<form><math><mtext></form><form><mglyph><style></math><img src onerror=globalThis.__xssFired=true>",
+    );
+    expect(out).not.toMatch(NO_TAG);
+    expect(out).not.toContain("onerror");
+    expect((globalThis as Record<string, unknown>).__xssFired).toBeUndefined();
+  });
+
+  it("strips a <style>-inside-<svg> payload that a single parse reassembled", () => {
+    // The previous implementation returned `<a id="">` for this input.
+    const out = stripHtml(
+      '<svg></p><style><a id="</style><img src=x onerror=globalThis.__xssFired=true>">',
+    );
+    expect(out).not.toMatch(NO_TAG);
+    expect(out).not.toContain("onerror");
+    expect((globalThis as Record<string, unknown>).__xssFired).toBeUndefined();
+  });
+});
