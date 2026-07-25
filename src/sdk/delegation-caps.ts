@@ -106,7 +106,26 @@ export function opensNewDelegationRowAtLimit(
  *  Check order is deliberate and test-pinned: undelegate is unconditionally
  *  allowed; then the row limit (a structural refusal — no amount would help);
  *  then the per-cluster cap; then the wallet total, which only a delegate can
- *  push up (a redelegate moves weight, leaving the total unchanged). */
+ *  push up (a redelegate moves weight, leaving the total unchanged).
+ *
+ *  WHAT THIS FUNCTION DELIBERATELY DOES NOT ASK, so the absence reads as a
+ *  decision rather than an oversight:
+ *
+ *  - Whether the wallet can PAY. There is no balance term and no fee term here,
+ *    and that is on purpose. Affordability is answered beside this check, not
+ *    inside it (`sdk/delegation-fee.ts`), because it needs live reads and this
+ *    function must stay pure and synchronously testable without chain access.
+ *    It is also ADVISORY where these are blocking: a cap breach is a certain
+ *    chain refusal, while an affordability estimate can be wrong in both
+ *    directions, so it warns and never gates.
+ *  - Whether the weight would credit anything. An inert delegation
+ *    (`isInertDelegation` in `sdk/delegation-derive.ts`) is well inside every cap
+ *    — the chain accepts it — so it is not a cap question, and it needs the
+ *    balance this function has no business reading.
+ *
+ *  Both live at the call sites, which pass this function fresher arguments and
+ *  run their own checks around it. Adding either here would cost the purity that
+ *  makes this the one delegation guard testable without a chain. */
 export function preflightDelegationVerdict(args: {
   action: "delegate" | "undelegate" | "redelegate";
   dstExistingWeightBps: number;
