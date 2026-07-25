@@ -87,6 +87,38 @@ export function chainHealthPresentation(health: ChainHealth): ChainHealthPresent
   }
 }
 
+/**
+ * Whether the chain is producing blocks, in one short clause.
+ *
+ * Lives here rather than on the surface that needed it, so there is ONE
+ * vocabulary for this condition. The status page asks "is it advancing?", which
+ * a height alone does not answer — but a second set of words for a state the
+ * chip already names would drift from it within a release.
+ *
+ * Deliberately says only whether blocks are arriving. What a degraded state
+ * MEANS, and what to do about it, stays with `hint` and the banner that renders
+ * it; `null` here means the label already carries everything worth saying.
+ */
+export function chainAdvancementLine(kind: ChainHealthKind): string | null {
+  switch (kind) {
+    case "live":
+      return "New blocks are arriving.";
+    case "stalled":
+      return "No new block has arrived for a while.";
+    case "reconnecting":
+    case "loading":
+      return "Checking whether new blocks are arriving.";
+    case "offline":
+    case "untrusted":
+    case "regenesis":
+    case "quarantined":
+      // The wallet is not reading from a trusted operator, so it cannot say
+      // whether the chain is advancing — and guessing would be worse than
+      // silence. The label already states the condition.
+      return null;
+  }
+}
+
 /** True for the degraded, red kinds that warrant the explanatory banner
  *  (UNTRUSTED OPERATOR / ALL OPERATORS UNTRUSTED / OPERATOR QUARANTINED /
  *  OFFLINE). Stalled shows on the chip (amber) but not the banner. */

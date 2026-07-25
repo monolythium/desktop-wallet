@@ -30,7 +30,7 @@ import { useEffect, useState } from "react";
 import { CollapsibleSection } from "../components/CollapsibleSection";
 import { RefreshButton } from "../components/RefreshButton";
 import { useChainHealthView } from "../sdk/ChainHealthProvider";
-import { chainHealthPresentation } from "../sdk/chain-health-presentation";
+import { chainAdvancementLine, chainHealthPresentation } from "../sdk/chain-health-presentation";
 import { useDeveloperMode } from "../sdk/developer-mode";
 import { formatOutcome, loadLiveNetworkStatus, type LiveNetworkStatus } from "../sdk/live";
 import { loadRecentNetworkEvents } from "../sdk/news";
@@ -77,6 +77,9 @@ export function NetworkStatus() {
   }, []);
 
   const presentation = chainHealthPresentation(health);
+  // From the shared vocabulary, not written here — see G2 in the report and the
+  // note on `chainAdvancementLine`.
+  const advancing = chainAdvancementLine(health.kind);
   const stats = status?.chainStats.ok ? status.chainStats.value : null;
   const indexer = parseIndexerStatus(status?.indexerStatus.ok ? status.indexerStatus.value : null);
   const sync = parseSyncStatus(status?.syncStatus.ok ? status.syncStatus.value : null);
@@ -113,8 +116,7 @@ export function NetworkStatus() {
             {height !== null
               ? `Latest block ${num(height as bigint)}.`
               : "The wallet has not read a block height yet."}
-            {health.kind === "live" ? " New blocks are arriving." : null}
-            {health.kind === "stalled" ? " No new block has arrived for a while." : null}
+            {advancing !== null ? ` ${advancing}` : null}
           </div>
 
           {/* 3 — is my history current? */}
