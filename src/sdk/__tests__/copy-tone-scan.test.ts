@@ -21,6 +21,8 @@
 // matcher operands do NOT trip it.
 
 import { describe, expect, it } from "vitest";
+import { activityKindOf } from "../activity-kind";
+import { txTypeLabelForActivity } from "../tx-type-label";
 
 const RAW = import.meta.glob("/src/**/*.{ts,tsx}", {
   query: "?raw",
@@ -139,10 +141,26 @@ describe("Law 9 — capitalized stake vocabulary is forbidden", () => {
     // The converse: the gate is only meaningful if those operands exist. If the
     // indexer matchers were deleted, "no offenders" would be true and the
     // wallet would be misclassifying rows.
+    //
+    // The operands now live in ONE shared set (`activity-kind.ts`) that both the
+    // kind classifier and the type-label path consume, instead of a duplicated
+    // `includes("stake")` call in each — so this checks their new home.
+    const operands = SHIPPED.find((f) => f.rel === "sdk/activity-kind.ts")!;
+    expect(operands.source).toContain('"stake"');
+    expect(operands.source).toContain('"unstake"');
     const label = SHIPPED.find((f) => f.rel === "sdk/tx-type-label.ts")!;
-    const rows = SHIPPED.find((f) => f.rel === "sdk/activity-rows.ts")!;
-    expect(label.source).toContain('includes("stake")');
-    expect(rows.source).toContain('includes("stake")');
+    expect(label.source).toContain("DELEGATION_OPERANDS");
+  });
+
+  it("and those operands actually classify — the behaviour, not the spelling", () => {
+    // Stronger than the source check above, and the reason this suite can stop
+    // pinning a call-site spelling: a refactor may move the operands anywhere,
+    // but a lowercase "stake"/"unstake" from the wire must keep classifying. The
+    // behaviour specification's exact-match table would drop both.
+    expect(activityKindOf({ kind: "stake" })).toBe("delegate");
+    expect(activityKindOf({ kind: "delegation", subKind: "stake" })).toBe("delegate");
+    expect(activityKindOf({ kind: "delegation", subKind: "unstake" })).toBe("undelegate");
+    expect(txTypeLabelForActivity({ kind: "stake" })).toBe("Delegate");
   });
 
   it("the settled delegation nouns are what the label module produces", () => {
