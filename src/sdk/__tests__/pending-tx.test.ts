@@ -320,8 +320,10 @@ describe("pendingLifecycleNote", () => {
   it("maps each lifecycle to its eyebrow note", () => {
     expect(pendingLifecycleNote("pending")).toBe("in flight");
     expect(pendingLifecycleNote("slow")).toBe("taking longer than usual");
-    expect(pendingLifecycleNote("dropped")).toBe("didn't confirm");
-    expect(pendingLifecycleNote("expired")).toBe("status unknown");
+    // Both terminal notes carry their cause, not just their verdict — a bare
+    // "didn't confirm" leaves a user guessing whether their funds moved.
+    expect(pendingLifecycleNote("dropped")).toBe("didn't confirm (replaced or dropped)");
+    expect(pendingLifecycleNote("expired")).toBe("status unknown — taking unusually long");
   });
 });
 
