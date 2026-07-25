@@ -2407,12 +2407,20 @@ export function Delegate() {
                           </div>
                         )}
 
-                        {/* Pending rewards for THIS cluster (pre-claim). The
-                            Claimed event is cluster-less so post-claim
-                            attribution is impossible; lyth_pendingRewards.rows
-                            is the honest per-cluster reward view. */}
+                        {/* THIS wallet's weight toward this cluster.
+                            NO per-cluster reward amount is shown, and none can
+                            be: `lyth_pendingRewards.rows` carries only the
+                            UNSETTLED component, and every settling operation
+                            (claim, delegate, undelegate, redelegate, enabling
+                            auto-compound — all run settle_in_order) moves that
+                            into a wallet-level pot with no cluster attribution.
+                            The rows therefore fall toward zero while the wallet
+                            total stays correct, so any figure here would be
+                            systematically understated. The chain exposes no
+                            per-cluster total, so this is an absence to state,
+                            not a number to derive. */}
                         <div className="cap" style={{ marginTop: 10 }}>
-                          Pending rewards
+                          Your delegation
                         </div>
                         {rewards?.ok === false ? (
                           <div className="w-live-error">
@@ -2424,16 +2432,19 @@ export function Delegate() {
                               ? pendingRewardForCluster(rewards.value.rows, c.clusterId)
                               : undefined;
                           return rewardRow ? (
-                            <div className="row-help mono">
-                              {truncateDecimals(
-                                formatRewardLyth(rewardRow.unsettledAmountLythoshi),
-                                4,
-                              )}{" "}
-                              LYTH unsettled · weight {(rewardRow.weightBps / 100).toFixed(2)}%
-                            </div>
+                            <>
+                              <div className="row-help mono">
+                                weight {(rewardRow.weightBps / 100).toFixed(2)}%
+                              </div>
+                              {/* Said out loud so the missing amount reads as a
+                                  chain limit rather than a failed read. */}
+                              <div className="row-help">
+                                Rewards are claimed for the whole wallet, not per cluster.
+                              </div>
+                            </>
                           ) : (
                             <div className="row-help">
-                              No pending rewards accrued for this cluster.
+                              You have no delegation to this cluster.
                             </div>
                           );
                         })()}
