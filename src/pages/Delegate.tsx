@@ -93,9 +93,11 @@ import {
   type WeightActionGate,
 } from "../sdk/delegation-input";
 import {
+  DELEGATION_REREAD_TIMEOUT_MS,
   lateRefusalMessage,
   refreshDelegationSnapshot,
 } from "../sdk/delegation-preflight";
+import { withDeadline } from "../sdk/with-deadline";
 import {
   delegationFeeAffordability,
   loadDelegationFeeBasis,
@@ -476,6 +478,26 @@ export function Delegate() {
       capBps: snapshot.aggregateCapBps,
       currentDelegationCount: snapshot.rows.filter((r) => r.weightBps > 0).length,
     };
+  };
+
+  // The balance the batch's late inert re-check is measured against.
+  //
+  // A separate read because it is a separate fact: the delegation snapshot
+  // carries weights and caps, and inertness is a question about the BALANCE —
+  // which moves for reasons that have nothing to do with delegation state.
+  // Routed through the affordability basis rather than a new accessor, so it
+  // dials the same trust-gated seam every other read on this page does.
+  //
+  // Bounded on the same budget as the snapshot re-read, and past the bound it
+  // falls back to the value review ran against. Either way the verdict fails
+  // open: a null is untestable, and the snapshot value is what already passed.
+  const freshBalanceLythoshi = async (): Promise<string | null> => {
+    const basis = await withDeadline(
+      loadDelegationFeeBasis(walletAddress),
+      DELEGATION_REREAD_TIMEOUT_MS,
+      null,
+    );
+    return basis === null ? balanceLythoshi : basis.toString();
   };
 
   // Did the delegations read actually resolve? A cap breach measured against an
@@ -1153,11 +1175,19 @@ export function Delegate() {
         // ALL-OR-NOTHING, before the first submit. A batch cannot re-check per
         // call: a refusal between submits leaves part of the plan on chain with
         // no way to undo what landed. This is the one moment where refusing
-        // costs nothing. Same gate, accumulation intact, fresher inputs — and
-        // fails open, so an unresolved read proceeds on the snapshot.
+        // costs nothing. Same gates, accumulation intact, fresher inputs — and
+        // both fail open, so an unresolved read proceeds on the snapshot.
+        //
+        // Concurrent, so re-asking the caps and re-asking whether the plan still
+        // credits anything cost one bound between them rather than two.
+        const [batchInputs, freshBalance] = await Promise.all([
+          freshBatchInputs(),
+          freshBalanceLythoshi(),
+        ]);
         const late = lateBatchVerdict({
           allocations: plan.allocations,
-          ...(await freshBatchInputs()),
+          ...batchInputs,
+          balanceLythoshi: freshBalance,
         });
         if (!late.ok) {
           if (late.clusterId !== undefined) {

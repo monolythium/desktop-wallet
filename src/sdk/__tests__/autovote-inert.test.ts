@@ -12,7 +12,7 @@
 // budget cannot give m to every cluster.
 
 import { describe, expect, it } from "vitest";
-import { autovoteInertVerdict } from "../autovote";
+import { autovoteInertVerdict, lateBatchVerdict } from "../autovote";
 
 const ONE = 10n ** 18n;
 const lythoshi = (whole: bigint) => (whole * ONE).toString();
@@ -117,5 +117,82 @@ describe("autovoteInertVerdict", () => {
       balanceLythoshi: lythoshi(2n),
     });
     expect(r.message?.toLowerCase()).not.toContain("revert");
+  });
+});
+
+// The late gate re-asks the inert question, not only the cap question.
+//
+// The caps were already re-checked after the unlock; inertness was not. The
+// balance is what inertness is measured against, and the balance can move while
+// the passphrase prompt is open — a spend from another surface, or the same
+// wallet elsewhere. A plan reviewed against a balance that has since collapsed
+// pays N fees and credits nothing, which is precisely the outcome the
+// review-time check exists to prevent.
+describe("lateBatchVerdict — the inert question, re-asked after the unlock", () => {
+  // 1000 LYTH at review; the plan credits 250 LYTH per cluster.
+  const plan = [alloc(1, 2500), alloc(2, 2500)];
+  const caps = { existingWeightByCluster: new Map<number, number>(), currentTotalBps: 0, capBps: null };
+
+  it("passes a plan that still credits something at the fresher balance", () => {
+    const r = lateBatchVerdict({ allocations: plan, ...caps, balanceLythoshi: lythoshi(1000n) });
+    expect(r.ok).toBe(true);
+  });
+
+  it("refuses when the balance collapsed while the drawer was open", () => {
+    // 2 LYTH: 2500 bps credits 0.5 LYTH — every allocation now credits nothing.
+    const r = lateBatchVerdict({ allocations: plan, ...caps, balanceLythoshi: lythoshi(2n) });
+    expect(r.ok).toBe(false);
+    expect(r.ok === false && r.message.toLowerCase()).toContain("balance");
+  });
+
+  it("is the SAME predicate, not a second one — same words as the review-time verdict", () => {
+    const late = lateBatchVerdict({ allocations: plan, ...caps, balanceLythoshi: lythoshi(2n) });
+    const review = autovoteInertVerdict({ allocations: plan, balanceLythoshi: lythoshi(2n) });
+    expect(review.ok).toBe(false);
+    expect(late.ok === false && late.message).toContain(review.message!);
+  });
+
+  it("asks the inert question BEFORE the caps — at a collapsed balance it is the terminal answer", () => {
+    // Over the 100% total AND inert. "Reduce to the cap" would only send the
+    // user round again; "your balance is too small" ends it.
+    const r = lateBatchVerdict({
+      allocations: [alloc(1, 5000), alloc(2, 5000)],
+      existingWeightByCluster: new Map(),
+      currentTotalBps: 9500,
+      capBps: null,
+      balanceLythoshi: (ONE / 2n).toString(),
+    });
+    expect(r.ok).toBe(false);
+    expect(r.ok === false && r.message.toLowerCase()).toContain("balance");
+  });
+
+  it("says the balance changed, so a late refusal is not read as a chain rejection", () => {
+    const r = lateBatchVerdict({ allocations: plan, ...caps, balanceLythoshi: lythoshi(2n) });
+    expect(r.ok === false && r.message).toContain("changed");
+    expect(r.ok === false && r.message).toContain("Nothing was submitted");
+    expect(r.ok === false && r.message.toLowerCase()).not.toContain("revert");
+  });
+
+  describe("failing OPEN, exactly as its review-time sibling does", () => {
+    it("an unreadable fresher balance does not block — the test cannot run", () => {
+      for (const b of [null, undefined, "", "not-a-number"]) {
+        expect(lateBatchVerdict({ allocations: plan, ...caps, balanceLythoshi: b }).ok).toBe(true);
+      }
+    });
+
+    it("an omitted balance does not block either — no argument was passed, so none was made", () => {
+      expect(lateBatchVerdict({ allocations: plan, ...caps }).ok).toBe(true);
+    });
+
+    it("a cap breach still refuses at an unreadable balance — failing open on one question does not silence the other", () => {
+      const r = lateBatchVerdict({
+        allocations: [alloc(1, 1000)],
+        existingWeightByCluster: new Map(),
+        currentTotalBps: 9500,
+        capBps: null,
+        balanceLythoshi: null,
+      });
+      expect(r.ok).toBe(false);
+    });
   });
 });

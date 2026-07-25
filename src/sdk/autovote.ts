@@ -397,7 +397,8 @@ export function preflightAutovotePlan(args: {
 }
 
 /**
- * The cap verdict re-run after the unlock, immediately before the FIRST submit.
+ * Both plan verdicts re-run after the unlock, immediately before the FIRST
+ * submit.
  *
  * WHY ALL-OR-NOTHING, AND WHY HERE. The single paths re-check at the top of
  * `execute` and refuse one transaction. A batch cannot re-check per call: a
@@ -406,11 +407,31 @@ export function preflightAutovotePlan(args: {
  * intention. Before the first submit is the only moment where refusing costs
  * exactly nothing, so that is where the whole plan is judged.
  *
- * It is the SAME gate, not a looser one — `preflightAutovotePlan`, accumulation
- * intact — given fresher inputs. A late refusal says the state changed, because
- * a cap sentence arriving after the passphrase is otherwise indistinguishable
- * from a chain rejection, and carries no wording the drawer's error classifier
- * would rewrite as a chain revert. Pure.
+ * TWO QUESTIONS, BOTH RE-ASKED. The caps are one; whether the plan credits
+ * anything is the other, and it is measured against the BALANCE — which moves
+ * for reasons that have nothing to do with delegation state, including a spend
+ * from another surface while the passphrase prompt is open. Re-checking only the
+ * caps left the cheaper failure live: a plan reviewed against a balance that has
+ * since collapsed pays N fees and credits nothing, exactly what the review-time
+ * check exists to prevent.
+ *
+ * INERT IS ASKED FIRST, matching the single paths: at a collapsed balance its
+ * answer is terminal, where "reduce to the cap" would only send the user round
+ * again to the same wall.
+ *
+ * SAME GATES, NOT LOOSER ONES — `preflightAutovotePlan` with its accumulation
+ * intact, and `autovoteInertVerdict` verbatim — given fresher inputs. Each
+ * refusal names WHICH state moved, because a cap or balance sentence arriving
+ * after the passphrase is otherwise indistinguishable from a chain rejection,
+ * and neither carries wording the drawer's error classifier would rewrite as a
+ * chain revert.
+ *
+ * FAILS OPEN ON THE BALANCE, exactly as its review-time sibling does: an
+ * unreadable balance means the inert test CANNOT RUN, never that the plan is
+ * inert. It also cannot mean "untested" here — the review-time check already
+ * passed on a readable balance, so an unreadable one late is merely the absence
+ * of fresher evidence, and refusing on it would deny a plan already verified.
+ * The cap question is unaffected and still refuses on its own terms. Pure.
  */
 export function lateBatchVerdict(args: {
   allocations: readonly AutovoteAllocation[];
@@ -418,15 +439,37 @@ export function lateBatchVerdict(args: {
   currentTotalBps: number;
   capBps: number | null;
   currentDelegationCount?: number;
+  /** The freshest balance the caller could get. Absent/unreadable → the inert
+   *  question is not asked, and nothing is refused on account of it. */
+  balanceLythoshi?: string | null;
 }): { ok: true } | { ok: false; clusterId?: number; message: string } {
+  const inert = autovoteInertVerdict({
+    allocations: args.allocations,
+    balanceLythoshi: args.balanceLythoshi,
+  });
+  if (!inert.ok && inert.message !== undefined) {
+    return {
+      ok: false,
+      // Plan-level by construction — several allocations can be inert at once,
+      // and the verdict names them all rather than electing one.
+      message: lateRefusal("Your balance changed while this was open", inert.message),
+    };
+  }
   const verdict = preflightAutovotePlan(args);
   if (verdict.ok) return { ok: true };
   const reason = verdict.message ?? "this plan would exceed a delegation cap.";
   return {
     ok: false,
     clusterId: verdict.clusterId,
-    message: `Your delegation state changed while this was open — ${reason} Nothing was submitted.`,
+    message: lateRefusal("Your delegation state changed while this was open", reason),
   };
+}
+
+/** One sentence shape for every late refusal, so the two questions cannot drift
+ *  apart in how they explain themselves: what moved, the verdict's own words,
+ *  and the fact that nothing reached the chain. */
+function lateRefusal(whatMoved: string, reason: string): string {
+  return `${whatMoved} — ${reason} Nothing was submitted.`;
 }
 
 export interface AutovoteInertVerdict {
