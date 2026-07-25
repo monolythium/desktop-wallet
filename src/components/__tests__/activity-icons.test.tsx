@@ -11,16 +11,21 @@
 // both surfaces read this module and the cross-surface agreement is asserted
 // behaviourally below.
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+import { cleanup, render } from "@testing-library/react";
 import type { ReactElement } from "react";
 import {
   ACTIVITY_ICON_SIZE,
   badgeRingColor,
+  GlyphBadge,
   iconForActivityKind,
   iconForKind,
+  StatusOverlay,
 } from "../activity-icons";
 import type { ActivityKind } from "../../sdk/activity-kind";
 import type { TxOpKind } from "../../sdk/notifications";
+
+afterEach(cleanup);
 
 const KINDS: TxOpKind[] = [
   "send",
@@ -155,6 +160,54 @@ describe("the two vocabularies agree — one operation, one glyph", () => {
       expect(iconForKind(opKind)).toBe(iconForActivityKind(activityKind));
     },
   );
+});
+
+describe("the status mark — shape, not colour alone", () => {
+  // The behaviour specification distinguishes a failed row by turning the ring
+  // and the glyph red and changing nothing else. That is invisible to a user
+  // with a colour-vision deficiency and gone entirely in a forced-colours mode.
+  // These assertions are about the MARK, because that is what survives.
+  it("failed and stalled carry different marks", () => {
+    const { container: failed } = render(<StatusOverlay status="failed" />);
+    const { container: stalled } = render(<StatusOverlay status="stalled" />);
+    const failedPath = failed.querySelector("path")?.getAttribute("d");
+    const stalledPath = stalled.querySelector("path")?.getAttribute("d");
+    expect(failedPath).toBeTruthy();
+    expect(stalledPath).toBeTruthy();
+    expect(failedPath).not.toBe(stalledPath);
+  });
+
+  it("each non-resting state is distinguishable without reading a colour", () => {
+    for (const status of ["failed", "stalled", "pending"] as const) {
+      const { container } = render(<StatusOverlay status={status} />);
+      const mark = container.querySelector(".w-glyph-badge__mark");
+      expect(mark, status).not.toBeNull();
+      // The state name is in the class, so the shape/animation is selectable —
+      // not encoded in an inline colour that a forced-colours mode overrides.
+      expect(mark!.className, status).toContain(`is-${status}`);
+    }
+  });
+
+  it("confirmed is the resting state and adds no mark", () => {
+    const { container } = render(<StatusOverlay status="confirmed" />);
+    expect(container.querySelector(".w-glyph-badge__mark")).toBeNull();
+  });
+
+  it("the badge composes the kind glyph with its mark", () => {
+    const { container } = render(
+      <GlyphBadge glyph={iconForActivityKind("delegate")} status="failed" />,
+    );
+    // The KIND stays legible on a failed row — the mark is added, not swapped in.
+    expect(container.querySelectorAll("svg").length).toBe(2);
+    expect(container.querySelector(".w-glyph-badge__mark.is-failed")).not.toBeNull();
+  });
+
+  it("marks are decorative — the row states its status in text", () => {
+    const { container } = render(<StatusOverlay status="failed" />);
+    expect(container.querySelector(".w-glyph-badge__mark")!.getAttribute("aria-hidden")).toBe(
+      "true",
+    );
+  });
 });
 
 describe("status colouring", () => {

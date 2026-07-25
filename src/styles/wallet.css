@@ -793,6 +793,34 @@ html[data-sidebar="collapsed"]:not([data-layout="topbar"]) .w-nav__item {
   display: grid; place-items: center;
   background: var(--w-bg); border: 1px solid var(--w-line);
 }
+/* ============ Row glyph badge (activity-icons) ============
+   The kind glyph plus its corner status mark. Status is carried by SHAPE — a
+   distinct mark per state — with tone only reinforcing it, so the distinction
+   survives a colour-vision deficiency and a forced-colours mode. */
+.w-glyph-badge { position: relative; display: inline-flex; }
+.w-glyph-badge__mark {
+  position: absolute; right: -3px; bottom: -3px;
+  width: 11px; height: 11px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 50%;
+  border: 1.5px solid var(--w-bg, var(--bg-100));
+  box-sizing: border-box;
+}
+.w-glyph-badge__mark.is-failed  { background: var(--err);  color: #fff; }
+.w-glyph-badge__mark.is-stalled { background: var(--warn); color: #1a1300; }
+/* In flight: a ring with a gap, spinning. Never green — green is reserved for
+   an observed confirmation, and a premature green is a claim we have not
+   earned. */
+.w-glyph-badge__mark.is-pending {
+  background: none;
+  border-color: var(--warn);
+  border-top-color: transparent;
+  animation: w-spin 900ms linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .w-glyph-badge__mark.is-pending { animation: none; opacity: 0.6; }
+}
+
 .w-tx__dir.in  { color: var(--ok); }
 .w-tx__dir.out { color: var(--alert); }
 /* Directionless — the chain reported no movement direction for this row. Muted

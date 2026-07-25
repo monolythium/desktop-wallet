@@ -231,3 +231,78 @@ export function iconForActivityKind(kind: ActivityKind): ReactElement {
 export function badgeRingColor(status: "confirmed" | "failed"): string {
   return status === "failed" ? "var(--err)" : "var(--ok)";
 }
+
+/** How a row stands, as far as the badge is concerned. */
+export type RowStatus = "confirmed" | "failed" | "pending" | "stalled";
+
+/**
+ * The corner status mark.
+ *
+ * WHY THIS EXISTS. The behaviour specification distinguishes a failed row by
+ * colour and colour only: it keeps the kind glyph (rightly — a failed
+ * delegation should still read as a delegation) and turns the badge ring and
+ * the glyph red. That is not a distinction for a user with a colour-vision
+ * deficiency, and it disappears entirely in a forced-colours or high-contrast
+ * mode, where the row would read as ordinary. So the tone is kept as
+ * REINFORCEMENT and the actual carrier is a shape: a small mark in the corner
+ * of the badge, distinct per state.
+ *
+ *   failed   ✕ — terminal, and something went wrong
+ *   stalled  ! — terminal, and the outcome is not known
+ *   pending  ◌ — still moving
+ *   confirmed  no mark. The resting state, and on the Activity feed every
+ *              confirmed row would otherwise carry the same tick, which is
+ *              noise rather than signal.
+ *
+ * Decorative: every row that shows one of these also states its status in text
+ * ("Send failed", "Failed", "didn't confirm", "in flight"), so the mark
+ * reinforces a label rather than being the only way to know.
+ */
+export function StatusOverlay({ status }: { status: RowStatus }): ReactElement | null {
+  if (status === "confirmed") return null;
+  return (
+    <span className={`w-glyph-badge__mark is-${status}`} aria-hidden="true">
+      {status === "pending" ? null : (
+        <svg
+          width="8"
+          height="8"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="4"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          {status === "failed" ? (
+            <path d="M18 6 6 18M6 6l12 12" />
+          ) : (
+            <path d="M12 5v9M12 19h.01" />
+          )}
+        </svg>
+      )}
+    </span>
+  );
+}
+
+/**
+ * A row's badge content: the kind glyph, plus its status mark.
+ *
+ * Both surfaces render this so the composition cannot drift — the alternative
+ * is each one positioning its own overlay, which is how the glyphs themselves
+ * came to differ in the first place. The outer badge (its size, its ring) stays
+ * with the surface, because the two row designs legitimately differ there.
+ */
+export function GlyphBadge({
+  glyph,
+  status = "confirmed",
+}: {
+  glyph: ReactElement;
+  status?: RowStatus;
+}): ReactElement {
+  return (
+    <span className="w-glyph-badge">
+      {glyph}
+      <StatusOverlay status={status} />
+    </span>
+  );
+}
