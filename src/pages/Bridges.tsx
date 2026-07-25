@@ -140,8 +140,21 @@ function BridgesStableView() {
     <div className="w-page">
       <div className="w-page__header">
         <h1>Bridges</h1>
+        {/* This wallet has no bridge send path — not a blocked one, none at
+            all: no encoder, no submit, and the SDK gates quote and submit
+            behind blocked-reason constants. An earlier line here said the
+            wallet "bridges through signed calls elsewhere", which the other
+            two renderings already contradicted. They were right.
+
+            The vendor name is gone too. A protocol is named per ROUTE, by the
+            disclosure's own `protocol` field; the registry is what this header
+            describes, and naming one bridge over it asserts of the whole set
+            what only a row can say — while the set is empty, it describes
+            nothing at all. Chain policy constraining which protocols MAY be
+            registered is not the same claim, and is not this page's to make. */}
         <div className="sub">
-          Trusted Chainlink CCIP route disclosures. Read-only registry — wallet bridges through signed calls elsewhere.
+          Trusted route disclosures for third-party bridges. Read-only registry — the
+          wallet exposes no live bridge send.
         </div>
       </div>
 
@@ -178,7 +191,9 @@ function BridgesStableView() {
           ))}
           {rows.length > 0 ? (
             <div className="row-help">
-              These disclosures come from the chain's trusted-routes registry. They publish the foundation-curated CCIP routes, their fee token (LINK), drain caps, finality, and verifier model so users can verify before signing a bridge call.
+              These disclosures come from the chain's trusted-routes registry. Each
+              route publishes its own fee token, drain cap, finality and verifier
+              model — shown above — so a route can be checked before it is used.
             </div>
           ) : null}
         </div>
