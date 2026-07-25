@@ -88,6 +88,7 @@ import {
   eligibleClusters,
   parseExactNonNegativeInteger,
   resolveRedelegateDestination,
+  weightEchoLine,
 } from "../sdk/delegation-input";
 import {
   lateRefusalMessage,
@@ -456,14 +457,29 @@ export function Delegate() {
   //
   // Last in the card, immediately above the action, matching the form that
   // already worked.
-  const capFeedback = (capState: { note: string; warning: string | null }) => (
-    <>
-      <div className="row-help" style={{ lineHeight: 1.5 }}>
-        {capState.note}
-      </div>
-      {capState.warning && <div className="w-warn-prominent">{capState.warning}</div>}
-    </>
-  );
+  const capFeedback = (
+    capState: { note: string; warning: string | null },
+    raw?: string,
+  ) => {
+    // What the typed number actually means. The field takes basis points while
+    // the note beside it states the limit in percent, so this is the line that
+    // makes the label checkable rather than merely accurate. Quiet by design —
+    // it is always on, and an always-on line must not compete with the alarm.
+    const echo = raw === undefined ? null : weightEchoLine(raw, balanceLythoshi);
+    return (
+      <>
+        {echo && (
+          <div className="row-help mono" style={{ lineHeight: 1.5 }}>
+            {echo}
+          </div>
+        )}
+        <div className="row-help" style={{ lineHeight: 1.5 }}>
+          {capState.note}
+        </div>
+        {capState.warning && <div className="w-warn-prominent">{capState.warning}</div>}
+      </>
+    );
+  };
 
   // The cap state for a form that STACKS weight onto a destination cluster.
   //
@@ -1424,7 +1440,7 @@ export function Delegate() {
                       {isDelegatingMore && (
                         <div style={inlineFormStyle}>
                           <label style={redelegateLabelStyle}>
-                            Additional weight to delegate (basis points · 100 = 1%)
+                            Additional weight in basis points (100 = 1%)
                           </label>
                           <input
                             type="number"
@@ -1443,6 +1459,7 @@ export function Delegate() {
                               existingWeightBps: row.weightBps,
                               raw: delegateMoreBps,
                             }),
+                            delegateMoreBps,
                           )}
                           {delegateMoreError && (
                             <div className="row-help" style={{ color: "var(--err)" }}>
@@ -1519,7 +1536,7 @@ export function Delegate() {
                             style={autovoteInputStyle}
                           />
                           <label style={redelegateLabelStyle}>
-                            Weight to move (basis points · 100 = 1%)
+                            Weight to move in basis points (100 = 1%)
                           </label>
                           <input
                             type="number"
@@ -1545,6 +1562,7 @@ export function Delegate() {
                               raw: redelegateWeightBps,
                               forMove: true,
                             }),
+                            redelegateWeightBps,
                           )}
                           {redelegateError && (
                             <div className="row-help" style={{ color: "var(--err)" }}>
@@ -2056,7 +2074,7 @@ export function Delegate() {
                         color: "var(--fg-400)",
                       }}
                     >
-                      Weight — % of balance (basis points · 100 = 1%)
+                      Weight in basis points (100 = 1%)
                     </label>
                     <input
                       type="number"
@@ -2084,7 +2102,7 @@ export function Delegate() {
                       no tokens are escrowed. Your LYTH stays in your wallet and
                       remains spendable; effective weight = balance × weightBps.
                     </div>
-                    {capFeedback(capState)}
+                    {capFeedback(capState, draftWeightBps)}
                     {draftError && (
                       <div className="row-help" style={{ color: "var(--err)" }}>
                         {draftError}
