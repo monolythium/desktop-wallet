@@ -20,6 +20,7 @@ import { shake256 } from "@noble/hashes/sha3.js";
 import { getProvider } from "./client";
 import { buildDelegateCalldata, submitDelegationTx } from "./delegation";
 import { preflightDelegationVerdict } from "./delegation-caps";
+import { isInertDelegation, minNonInertBps } from "./delegation-derive";
 import { withDelegationRevertCopy } from "./delegation-reverts";
 
 /** Domain tag mixed into the per-user shuffle seed so autovote entropy can't
@@ -392,6 +393,81 @@ export function preflightAutovotePlan(args: {
     if (runningCount !== undefined && dstExistingWeightBps === 0) runningCount += 1;
   }
   return { ok: true };
+}
+
+export interface AutovoteInertVerdict {
+  ok: boolean;
+  /** The allocations that would credit nothing, when blocked. */
+  inertClusterIds?: number[];
+  message?: string;
+}
+
+/**
+ * Would any allocation in this plan credit nothing at all?
+ *
+ * NOT the single-path check run N times. A plan divides a budget across
+ * clusters, so each allocation is a FRACTION of it, and at a modest balance a
+ * split that looks reasonable makes every allocation floor to zero whole LYTH:
+ * every cap passes, N fees are paid, and nothing is credited anywhere. That
+ * failure exists only because the weight was divided, which makes it a property
+ * of the plan rather than of any one allocation.
+ *
+ * So detection is per-allocation and the verdict is plan-level. Refusing the
+ * whole plan is right on both counts: this surface offers no way to sign "just
+ * the ones that work", and the remedy — fewer clusters, or a larger budget — is
+ * a plan-level adjustment anyway. A batch refusal is also cheap to recover from;
+ * the user changes one number and reviews again.
+ *
+ * THE ADVICE MUST BE PLAN-LEVEL TOO. The single-path message quotes a minimum
+ * per-cluster weight, which is unfollowable across a split: four clusters each
+ * needing 5000 bps would be 20000 bps of a 10000 bps wallet. This one quotes how
+ * many clusters the budget can actually support.
+ *
+ * FAILS OPEN. An unreadable balance yields null from the arithmetic (A6) and
+ * every allocation reads as not-inert: null means *cannot test*, never *inert*.
+ * A zero balance is likewise not inert — there is nothing to round down. Pure.
+ */
+export function autovoteInertVerdict(args: {
+  allocations: readonly AutovoteAllocation[];
+  balanceLythoshi: string | null | undefined;
+}): AutovoteInertVerdict {
+  if (args.allocations.length === 0) return { ok: true };
+  const inertClusterIds = args.allocations
+    .filter((a) => isInertDelegation(args.balanceLythoshi, a.weightBps))
+    .map((a) => a.clusterId);
+  if (inertClusterIds.length === 0) return { ok: true };
+
+  const total = args.allocations.length;
+  const minBps = minNonInertBps(args.balanceLythoshi);
+  const head =
+    inertClusterIds.length === total
+      ? `None of these ${total} allocations would credit anything at your balance — each would earn nothing and cast no vote, and still cost a fee.`
+      : `${inertClusterIds.length} of ${total} allocations would credit nothing at your balance — each would earn nothing and cast no vote, and still cost a fee.`;
+
+  // No weight up to 100% reaches a whole LYTH, so no split of any budget does.
+  if (minBps === null) {
+    return {
+      ok: false,
+      inertClusterIds,
+      message: `${head} No split reaches a whole LYTH until your balance grows.`,
+    };
+  }
+  // How many clusters this budget can actually carry at that minimum. Integer
+  // division, never rounded up — a partial cluster is an inert one.
+  const budgetBps = args.allocations.reduce((sum, a) => sum + a.weightBps, 0);
+  const supported = Math.floor(budgetBps / minBps);
+  if (supported < 1) {
+    return {
+      ok: false,
+      inertClusterIds,
+      message: `${head} A cluster needs at least ${minBps} bps at this balance, more than this whole budget — raise the budget.`,
+    };
+  }
+  return {
+    ok: false,
+    inertClusterIds,
+    message: `${head} A cluster needs at least ${minBps} bps at this balance, so this budget supports ${supported} cluster${supported === 1 ? "" : "s"} — spread it across that many or fewer, or raise it.`,
+  };
 }
 
 export interface SubmitAutovotePlanResult {

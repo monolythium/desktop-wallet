@@ -63,6 +63,7 @@ import {
   autovoteModeMeta,
   buildAutovotePlan,
   fetchClusterDiversities,
+  autovoteInertVerdict,
   preflightAutovotePlan,
   submitAutovotePlan,
   type AutovoteAllocation,
@@ -901,6 +902,20 @@ export function Delegate() {
       capBps: aggregateCapBps,
       currentDelegationCount: activeDelegationCount,
     });
+    // Would any allocation credit nothing? A separate question from the caps —
+    // a split budget can floor every allocation to zero whole LYTH while passing
+    // every cap, costing one fee per call for nothing. Plan-level refusal,
+    // because the remedy (fewer clusters, or a larger budget) is plan-level.
+    const inert = autovoteInertVerdict({
+      allocations: plan.allocations,
+      balanceLythoshi,
+    });
+    if (!inert.ok) {
+      const named = (inert.inertClusterIds ?? []).map(clusterName).join(", ");
+      setAutovoteError(named ? `${inert.message} (${named})` : inert.message ?? "");
+      return false;
+    }
+
     if (!verdict.ok) {
       setAutovoteError(
         verdict.clusterId !== undefined
