@@ -6,12 +6,21 @@
 // page and the Notifications page render the same transactions.
 //
 // The glyphs previously lived page-local in Notifications.tsx, which meant
-// nothing stopped a second page from inventing its own. They live here now and
-// both pages import them; a test asserts MODULE IDENTITY rather than lookalike
-// JSX, because two hand-copied SVGs that render alike today are exactly what
-// drifts tomorrow.
+// nothing stopped a second page from inventing its own. They live here now; a
+// test asserts MODULE IDENTITY rather than lookalike JSX, because two
+// hand-copied SVGs that render alike today are exactly what drifts tomorrow.
 //
 // Changing a glyph is a deliberate diff: the mapping is test-pinned.
+//
+// CONSOLIDATION IS INCOMPLETE, and this comment used to claim otherwise. Only
+// the Notifications page imports this module. The Activity page still
+// hand-draws its own badge glyphs inline — a spinner, a check, a clock and an
+// X for its pending / bridged / stalled / failed rows — so the drift this
+// module exists to prevent has partly re-occurred. That is a known gap owned by
+// the icon pass, not an oversight: the two surfaces also disagree on the failed
+// treatment, where this module rings the badge and keeps the kind glyph legible
+// while the Activity page substitutes an X and loses the kind. Do not read the
+// module's existence as proof the glyphs are already shared.
 
 import type { ReactElement } from "react";
 import type { TxOpKind } from "../sdk/notifications";
