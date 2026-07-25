@@ -620,7 +620,9 @@ function ErrorPane({
   onClose: () => void;
 }) {
   const display = formatSendError(input);
-  const c = classifySendError(display, context);
+  // A failure a subsystem already classified keeps its own words; the rule table
+  // only runs on messages nothing has interpreted yet.
+  const c = classifySendError(display, context, input.classified);
   const colours = severityColours[c.severity];
   // Dev-gated raw detail — hidden when off, and pointless for `unknown` (its body
   // IS the raw message). Read live (never cached at mount).

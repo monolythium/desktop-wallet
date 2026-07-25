@@ -104,6 +104,7 @@ import {
 } from "../sdk/delegation-fee";
 import { withDelegationRevertCopy } from "../sdk/delegation-reverts";
 import { trackOperationTx } from "../sdk/reconcile";
+import { ClassifiedWalletError } from "../sdk/send-error";
 import { useDelegationRejection } from "../sdk/DelegationRejectionProvider";
 import { claimButtonState } from "../sdk/claim-in-flight";
 import {
@@ -569,7 +570,8 @@ export function Delegate() {
     if (verdict.ok) return;
     const message = lateRefusalMessage(verdict.message);
     raiseRejection(args.clusterId, args.action, message);
-    throw new Error(message);
+    // Already the sentence to show — the rule table must not re-derive it.
+    throw new ClassifiedWalletError(message);
   };
 
   const openDelegate = ({ clusterId, weightBps }: { clusterId: number; weightBps: number }) => {
@@ -1095,7 +1097,7 @@ export function Delegate() {
           if (late.clusterId !== undefined) {
             raiseRejection(late.clusterId, "delegate", late.message);
           }
-          throw new Error(late.message);
+          throw new ClassifiedWalletError(late.message);
         }
         setAutovoteBusy(true);
         setAutovoteProgress({ done: 0, total: plan.allocations.length });

@@ -22,6 +22,7 @@ import { buildDelegateCalldata, submitDelegationTx } from "./delegation";
 import { preflightDelegationVerdict } from "./delegation-caps";
 import { isInertDelegation, minNonInertBps } from "./delegation-derive";
 import { withDelegationRevertCopy } from "./delegation-reverts";
+import { ClassifiedWalletError } from "./send-error";
 
 /** Domain tag mixed into the per-user shuffle seed so autovote entropy can't
  *  collide with any other SHAKE256 use of the same address. */
@@ -531,7 +532,7 @@ export interface AutovoteSubmission {
  * chain for it — and this wrapper's own words add nothing the drawer's error
  * classifier would rewrite.
  */
-export class AutovoteBatchError extends Error {
+export class AutovoteBatchError extends ClassifiedWalletError {
   readonly submittedTxHashes: string[];
   readonly failedIndex: number;
   readonly total: number;

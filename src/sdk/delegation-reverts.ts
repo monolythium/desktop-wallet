@@ -24,6 +24,7 @@ import {
   TOO_MANY_DELEGATIONS_MESSAGE,
   WALLET_TOTAL_CAP_REVERT_MESSAGE,
 } from "./delegation-caps";
+import { ClassifiedWalletError } from "./send-error";
 
 // The three codes with a local preflight twin are DEFINED in delegation-caps.ts
 // (next to the check that raises them) and re-exported here, so the taxonomy is
@@ -202,6 +203,10 @@ export async function withDelegationRevertCopy<T>(
     const mapped = classifyDelegationFailure(cause);
     if (mapped === null) throw cause;
     onMapped?.(mapped);
-    throw new Error(mapped, { cause });
+    // ClassifiedWalletError, not a bare Error: this sentence IS the copy to
+    // show, and the shared rule table must not re-derive a generic body over it.
+    // An unmapped failure above is rethrown untouched and stays eligible for
+    // those branches — the taxonomy is unchanged, only what happens after it.
+    throw new ClassifiedWalletError(mapped, { cause });
   }
 }

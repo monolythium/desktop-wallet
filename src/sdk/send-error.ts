@@ -15,6 +15,40 @@ import { formatLyth } from "@monolythium/core-sdk";
 export interface SendErrorInput {
   message: string;
   code?: number | null;
+  /** True when a subsystem already turned this failure into user-facing copy.
+   *  The rule table must not re-derive a body over the top of it. */
+  classified?: boolean;
+}
+
+/**
+ * A failure whose message is ALREADY the sentence to show.
+ *
+ * Thrown by a subsystem that has its own taxonomy — the delegation revert map is
+ * the first — so the generic rule table does not re-classify copy that was
+ * already classified more precisely. Before this existed the table matched a
+ * bare "revert" substring, and since "revert" is a substring of "reverted", any
+ * mapped delegation reason containing either word had its whole body replaced
+ * with the generic sentence. The taxonomy conformed at its own layer and was
+ * undone one layer up.
+ *
+ * The `cause` chain is preserved, so the node's own numeric code and inner text
+ * remain reachable for the developer-gated detail.
+ */
+export class ClassifiedWalletError extends Error {
+  readonly walletClassified = true as const;
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options);
+    this.name = "ClassifiedWalletError";
+  }
+}
+
+/** Is this (or anything in its cause chain) an already-classified failure? */
+function isClassified(value: unknown): boolean {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    (value as { walletClassified?: unknown }).walletClassified === true
+  );
 }
 
 /** The mempool admission-reject JSON-RPC band. `-32050` monthly-cap /
@@ -62,17 +96,21 @@ export interface SendErrorContext {
 export function extractSendError(cause: unknown): SendErrorInput {
   let message = "";
   let code: number | null = null;
+  let classified = false;
   const seen = new Set<unknown>();
   let cur: unknown = cause;
   while (cur && typeof cur === "object" && !seen.has(cur)) {
     seen.add(cur);
+    if (isClassified(cur)) classified = true;
     const o = cur as { message?: unknown; code?: unknown; cause?: unknown };
     if (!message && typeof o.message === "string" && o.message.length > 0) message = o.message;
     if (code === null && typeof o.code === "number" && Number.isFinite(o.code)) code = o.code;
     cur = o.cause;
   }
   if (!message) message = typeof cause === "string" ? cause : String(cause);
-  return { message, code };
+  // Only present when true: an ordinary failure keeps the exact shape callers
+  // (and their tests) already rely on.
+  return classified ? { message, code, classified: true } : { message, code };
 }
 
 /** Prefix an admission-band rejection with `Chain rejected:`; otherwise the raw
@@ -326,7 +364,23 @@ function classifyPlain(msg: string, context: SendErrorContext | undefined, wrapp
  * honest `transaction-rejected`, a non-wrapped unrecognized message is `unknown`
  * with its raw text as the body.
  */
-export function classifySendError(display: string, context?: SendErrorContext): SendErrorClassification {
+export function classifySendError(
+  display: string,
+  context?: SendErrorContext,
+  /** Set when the message is already the sentence to show — see
+   *  {@link ClassifiedWalletError}. The rule table is skipped entirely rather
+   *  than allowed to re-derive a body over copy that was classified more
+   *  precisely upstream. */
+  preclassified?: boolean,
+): SendErrorClassification {
+  if (preclassified === true) {
+    return {
+      kind: "transaction-rejected",
+      headline: "Transaction failed",
+      severity: "err",
+      body: display,
+    };
+  }
   const inner = extractMempoolInner(display);
   if (inner !== null) return classifyPlain(inner, context, true);
   return classifyPlain(display, context, false);
