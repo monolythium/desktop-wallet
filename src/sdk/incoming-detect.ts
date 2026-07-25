@@ -48,17 +48,58 @@ export interface IncomingCandidate {
   counterparty: string;
 }
 
+/**
+ * True ONLY when the row's counterparty can be positively established as this
+ * wallet's own address. Both sides are typed bech32m, which is case-insensitive
+ * by construction, so lowercasing can never make two DIFFERENT addresses equal —
+ * normalising here cannot silence a real arrival.
+ *
+ * FAIL DIRECTION — this must fail toward NOTIFYING, and that is encoded here
+ * rather than left to the caller's control flow. Every uncertainty (no own
+ * address, a blank or non-string value on either side, a normalisation that
+ * throws) returns FALSE, meaning "not self", meaning the arrival is announced.
+ * A spurious notification is an annoyance; a silenced real one is invisible —
+ * there is no chain signal for it and nothing downstream surfaces it, so the
+ * user simply never learns money arrived.
+ */
+function isOwnCounterparty(counterparty: unknown, ownBech32m: unknown): boolean {
+  try {
+    if (typeof counterparty !== "string" || typeof ownBech32m !== "string") return false;
+    const cp = counterparty.trim().toLowerCase();
+    const own = ownBech32m.trim().toLowerCase();
+    if (cp === "" || own === "") return false;
+    return cp === own;
+  } catch {
+    return false; // any doubt announces
+  }
+}
+
 /** Reduce indexed activity rows to inbound NATIVE-LYTH candidates. Outgoing rows
  *  and MRC-20 token transfers are ignored — native is the null OR zero-address
  *  token id (the indexer's native sentinel), so the check is by
  *  `isNativeLythTokenId`, not `tokenId === null`. The raw-lythoshi amount is
- *  converted to display LYTH for the notification. Pure. */
+ *  converted to display LYTH for the notification. Pure.
+ *
+ *  `ownBech32m` suppresses a SELF-TRANSFER's inbound leg. The chain serves such a
+ *  transfer as two rows (its activity view selects the inbound arm on `to_addr`
+ *  and the outbound arm on `from_addr`), and the inbound one would otherwise be
+ *  announced as money arriving from the user's own address. Omitting the
+ *  argument suppresses nothing — see {@link isOwnCounterparty} for the fail
+ *  direction, which is deliberate and must not be inverted.
+ *
+ *  Scoped to the address this detection run is FOR, not to every address the
+ *  vault holds: a transfer between two accounts the user owns is a genuine
+ *  arrival at the receiving one, and suppressing it would be the forbidden
+ *  direction. */
 export function incomingCandidatesFromRows(
   rows: ReadonlyArray<LiveAddressActivityRow>,
+  ownBech32m?: string | null,
 ): IncomingCandidate[] {
   const out: IncomingCandidate[] = [];
   for (const r of rows) {
     if (r.direction !== "in" || !isNativeLythTokenId(r.tokenId)) continue;
+    // The inbound half of a self-transfer is not an arrival.
+    if (isOwnCounterparty(r.counterparty, ownBech32m)) continue;
     out.push({
       anchor: {
         blockHeight: Number(r.blockHeight),
@@ -218,7 +259,10 @@ export async function detectAndNotifyIncoming(
   confirmedRows: ReadonlyArray<LiveAddressActivityRow>,
 ): Promise<{ recorded: number }> {
   try {
-    const candidates = incomingCandidatesFromRows(confirmedRows);
+    // `addressLower` is this run's own wallet address — the scope the rows were
+    // read for — so a self-transfer's inbound leg is recognised and not
+    // announced as an arrival.
+    const candidates = incomingCandidatesFromRows(confirmedRows, addressLower);
     if (candidates.length === 0) return { recorded: 0 };
 
     const watermark = await getIncomingWatermark(addressLower, chainIdHex);

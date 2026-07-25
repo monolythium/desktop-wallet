@@ -60,6 +60,73 @@ describe("incomingCandidatesFromRows", () => {
   });
 });
 
+describe("incomingCandidatesFromRows — an arrival from oneself is not an arrival", () => {
+  // The chain serves a self-transfer as two rows, and the inbound one is a real
+  // `direction: "in"` row. Announcing it tells the user they received money they
+  // sent themselves.
+  const SELF = "mono1selfaddress";
+
+  it("suppresses the inbound leg of a self-transfer", () => {
+    const c = incomingCandidatesFromRows([row({ direction: "in", counterparty: SELF })], SELF);
+    expect(c).toHaveLength(0);
+  });
+
+  it("still announces a genuine arrival from someone else", () => {
+    const c = incomingCandidatesFromRows([row({ direction: "in", counterparty: "mono1someoneelse" })], SELF);
+    expect(c).toHaveLength(1);
+  });
+
+  it("matches regardless of case — bech32m is case-insensitive", () => {
+    // Normalising can never make two DIFFERENT addresses equal, so this cannot
+    // silence a real arrival; it only stops a case variant slipping through.
+    const c = incomingCandidatesFromRows([row({ direction: "in", counterparty: SELF.toUpperCase() })], SELF);
+    expect(c).toHaveLength(0);
+  });
+});
+
+describe("incomingCandidatesFromRows — FAIL DIRECTION: every doubt must NOTIFY", () => {
+  // A spurious notification is an annoyance. A silenced real one is invisible:
+  // there is no chain signal for it and nothing downstream surfaces it, so the
+  // user simply never learns money arrived. Every uncertain input must notify.
+  const SELF = "mono1selfaddress";
+
+  it("notifies when the wallet's own address is not supplied at all", () => {
+    expect(incomingCandidatesFromRows([row({ direction: "in", counterparty: SELF })])).toHaveLength(1);
+  });
+
+  it("notifies when the own address is null, undefined or blank", () => {
+    for (const own of [null, undefined, "", "   "]) {
+      const c = incomingCandidatesFromRows([row({ direction: "in", counterparty: SELF })], own);
+      expect(c, `own=${JSON.stringify(own)} must not suppress`).toHaveLength(1);
+    }
+  });
+
+  it("notifies when the row carries no counterparty to compare", () => {
+    for (const cp of [null, "", "   "]) {
+      const c = incomingCandidatesFromRows([row({ direction: "in", counterparty: cp })], SELF);
+      expect(c, `counterparty=${JSON.stringify(cp)} must not suppress`).toHaveLength(1);
+    }
+  });
+
+  it("notifies when the counterparty is not a string at all", () => {
+    // The row shape is decoded from an untrusted wire payload; a non-string here
+    // is a comparison we cannot make, not a self-transfer.
+    const bad = { ...row({ direction: "in" }), counterparty: 42 as unknown as string };
+    expect(incomingCandidatesFromRows([bad], SELF)).toHaveLength(1);
+  });
+
+  it("notifies for an own-address that is not a usable string, even a hostile one", () => {
+    // Guards the suppressing branch against a value that only looks string-like.
+    // It must be rejected outright, never coerced into a comparison.
+    const hostile = { toLowerCase() { throw new Error("boom"); }, trim() { throw new Error("boom"); } };
+    const c = incomingCandidatesFromRows(
+      [row({ direction: "in", counterparty: SELF })],
+      hostile as unknown as string,
+    );
+    expect(c).toHaveLength(1);
+  });
+});
+
 describe("planIncomingNotifications", () => {
   it("first run with a SMALL receive set notifies them all (fresh-wallet fix)", () => {
     // A fresh / newly-migrated wallet's genuine recent arrivals — record +
