@@ -86,9 +86,16 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # Hard gate: the JS dependency tree is clean at `high` today (verified at
-      # both high and moderate), so block a PR that introduces a high-severity
-      # advisory. Lower-severity/dev-only advisories don't fail here.
+      # Hard gate: fail anything that puts a high-severity advisory in the JS
+      # dependency tree. Advisories below `high` are reported, not fatal.
+      # Versions the resolver will not reach on its own are forced from the
+      # `pnpm.overrides` block in package.json (currently form-data, postcss).
+      #
+      # This describes the rule on purpose, not how clean the tree is. The
+      # previous wording asserted the tree was "clean at `high` today"; an
+      # advisory published months later made that false while the comment went
+      # on claiming it. A date would only have slowed the decay — the run's own
+      # exit code is the only answer that stays current.
       - name: pnpm audit (fail on high)
         run: pnpm audit --audit-level high
 
@@ -110,6 +117,20 @@ jobs:
       #    accepted decision is explicit and survives an advisory re-classification.
       # The remaining gtk-rs "unmaintained" notices are warnings that do not fail
       # `cargo audit` (no `--deny warnings`), so they need no ignore entry.
+      #
+      # What this gate CANNOT see. cargo-audit reads RUSTSEC; the repository's
+      # dependency alerts read the GitHub Advisory Database. The two do not
+      # cover the same crates, and both directions have already bitten us:
+      #  - serde_with GHSA-7gcf-g7xr-8hxj sat open as an alert for weeks while
+      #    this gate stayed green. No configuration here could have caught it —
+      #    RUSTSEC carries no serde_with advisory at all. Closed by a lockfile
+      #    bump to 3.21.0.
+      #  - quick-xml RUSTSEC-2026-0194/0195 and anyhow RUSTSEC-2026-0190 exist
+      #    only in RUSTSEC, so remediating them moved the alert count by zero.
+      # So a green run here means "no RUSTSEC vulnerability", NOT "no
+      # outstanding Rust advisory". The alert list is a separate read:
+      # `gh api repos/<owner>/<repo>/dependabot/alerts?state=open`. Treating
+      # green here as the whole answer is what left an alert unexamined.
       - name: cargo audit (fail on vulnerabilities)
         working-directory: src-tauri
         run: cargo audit --ignore RUSTSEC-2024-0429
