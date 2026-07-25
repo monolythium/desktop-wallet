@@ -320,3 +320,46 @@ describe("Operators screen", () => {
     expect(screen.queryByText("Network re-genesis")).not.toBeInTheDocument();
   });
 });
+
+describe("the automatic-failover promise only appears where failover is possible", () => {
+  const AUTO_FAILOVER = /switches to the first trusted operator automatically/i;
+
+  it("is shown in states where a trusted operator can still be reached", async () => {
+    // `untrusted` is the ACTIVE operator being on another chain — the rest of the
+    // fleet may be fine, and the tick really does move to one. Offline and
+    // quarantined recover on their own, so the mechanism works again unaided.
+    for (const kind of ["live", "untrusted", "quarantined", "offline"]) {
+      healthMock.kind = kind;
+      rowsMock.rows = [row("http://a", { verdict: verdict("http://a", { trusted: true }) })];
+      const { unmount } = renderOperators(false);
+      expect(await screen.findByText(AUTO_FAILOVER)).toBeInTheDocument();
+      unmount();
+    }
+  });
+
+  it("is withheld on regenesis, where there is no trusted operator to switch to", async () => {
+    // Every operator reports a different genesis. Nothing is trustable and
+    // nothing will be until a new build pins the new one, so promising an
+    // automatic switch contradicts the explainer rendered directly above it.
+    healthMock.kind = "regenesis";
+    rowsMock.rows = [row("http://a", { verdict: verdict("http://a", { genesisMismatch: true }) })];
+    renderOperators(false);
+    expect(await screen.findByText("Network re-genesis")).toBeInTheDocument();
+    expect(screen.queryByText(AUTO_FAILOVER)).not.toBeInTheDocument();
+  });
+
+  it("the per-row connect hint drops its failover promise on regenesis too", async () => {
+    healthMock.kind = "regenesis";
+    rowsMock.rows = [row("http://a", { verdict: verdict("http://a", { trusted: true }) })];
+    renderOperators(false);
+    // The row div also carries role="button" and is named by its content, so
+    // address the real control by tag.
+    await screen.findByText("Network re-genesis");
+    const use = screen
+      .getAllByRole("button", { name: /use this operator/i })
+      .find((el) => el.tagName === "BUTTON");
+    expect(use).toBeDefined();
+    expect(use!.getAttribute("title") ?? "").toMatch(/wallet switches to it/i);
+    expect(use!.getAttribute("title") ?? "").not.toMatch(/keeps failing over automatically/i);
+  });
+});

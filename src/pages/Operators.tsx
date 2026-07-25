@@ -62,6 +62,13 @@ const hostOf = (url: string) => url.replace(/^https?:\/\//, "");
 export function Operators({ goto }: { goto: (r: Route) => void }) {
   const devMode = useDeveloperMode();
   const health = useChainHealthView().health;
+  // Whether promising automatic failover is honest right now. Every degraded
+  // state recovers on its own — offline when the network returns, quarantined
+  // when an operator does, untrusted by moving to a fleet member that is fine —
+  // except `regenesis`, where every operator reports a different genesis. There
+  // the mechanism itself cannot help until a new build pins the new value, so
+  // the promise would contradict the explainer rendered directly above it.
+  const canFailOver = health.kind !== "regenesis";
   const [rows, setRows] = useState<OperatorInspectRow[] | null>(null);
   const [probing, setProbing] = useState(true);
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -145,9 +152,11 @@ export function Operators({ goto }: { goto: (r: Route) => void }) {
           )}
         </div>
         <div className="row-help" style={{ marginTop: 4 }}>
-          {activeInFleet
-            ? "The wallet reads from one operator at a time. If this one degrades, the health probe switches to the first trusted operator automatically on the next tick."
-            : "Build-time override — not in the registry catalogue."}
+          {!activeInFleet
+            ? "Build-time override — not in the registry catalogue."
+            : canFailOver
+              ? "The wallet reads from one operator at a time. If this one degrades, the health probe switches to the first trusted operator automatically on the next tick."
+              : "The wallet reads from one operator at a time. No operator currently proves this build's chain identity, so there is nothing to fail over to."}
         </div>
       </div>
 
@@ -171,6 +180,7 @@ export function Operators({ goto }: { goto: (r: Route) => void }) {
                 key={row.peer.url}
                 row={row}
                 devMode={devMode}
+                canFailOver={canFailOver}
                 inUse={row.peer.url === activeEndpoint}
                 onUse={() => setConnect({ phase: "confirm", row })}
                 expanded={expanded === row.peer.url}
@@ -575,12 +585,20 @@ function statusPill(row: OperatorInspectRow): Pill {
   return { label: "Offline", color: "var(--err)" };
 }
 
-const USE_TITLE =
-  "Probe this operator; if it's reachable and verified on the pinned chain, the wallet switches to it. The health probe keeps failing over automatically if it later degrades.";
+/** The connect affordance's hint. The failover half is dropped where failover
+ *  cannot happen — see {@link canFailOverIn}. */
+function connectTitle(canFailOver: boolean): string {
+  const base =
+    "Probe this operator; if it's reachable and verified on the pinned chain, the wallet switches to it.";
+  return canFailOver
+    ? `${base} The health probe keeps failing over automatically if it later degrades.`
+    : base;
+}
 
 function OperatorRow({
   row,
   devMode,
+  canFailOver,
   inUse,
   onUse,
   expanded,
@@ -588,6 +606,7 @@ function OperatorRow({
 }: {
   row: OperatorInspectRow;
   devMode: boolean;
+  canFailOver: boolean;
   inUse: boolean;
   onUse: () => void;
   expanded: boolean;
@@ -637,7 +656,7 @@ function OperatorRow({
           {inUse ? (
             <span style={{ color: "var(--ok)", fontSize: "var(--fs-11)" }}>→ In use</span>
           ) : canUse ? (
-            <button type="button" className="w-chip" title={USE_TITLE} onClick={onUse}>
+            <button type="button" className="w-chip" title={connectTitle(canFailOver)} onClick={onUse}>
               Use this operator
             </button>
           ) : null}
