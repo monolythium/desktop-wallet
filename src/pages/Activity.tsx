@@ -19,6 +19,7 @@ import { ActivityDetail, type DetailRow } from "../components/ActivityDetail";
 import { NotificationDetail } from "../components/NotificationDetail";
 import { TxRow } from "../components/TxRow";
 import { RefreshButton } from "../components/RefreshButton";
+import { GlyphBadge, iconForKind } from "../components/activity-icons";
 import { useReverseNamesEager } from "../sdk/use-reverse-names";
 import { preferredAddressLabel } from "../sdk/address-label";
 import { addressbookLookup } from "../sdk/addressbook";
@@ -580,36 +581,14 @@ export function Activity() {
                             : undefined
                       }
                     >
-                      {bridged ? (
-                        <svg
-                          width="14"
-                          height="14"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        >
-                          <path d="m5 12 5 5L20 7" />
-                        </svg>
-                      ) : stalled ? (
-                        <svg
-                          width="14"
-                          height="14"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        >
-                          <circle cx="12" cy="12" r="9" />
-                          <path d="M12 7v5l3 2" />
-                        </svg>
-                      ) : (
-                        <span className="w-spin" style={{ width: 14, height: 14, margin: 0 }} />
-                      )}
+                      {/* The KIND stays on screen through every lifecycle state
+                          — the corner mark carries the state. This used to
+                          replace the glyph with a spinner, a tick or a clock,
+                          so a pending row told you nothing about what it was. */}
+                      <GlyphBadge
+                        glyph={iconForKind(tx.opKind)}
+                        status={bridged ? "confirmed" : stalled ? "stalled" : "pending"}
+                      />
                     </div>
                     <div className="w-tx__info">
                       <div className="eyebrow">
@@ -668,19 +647,11 @@ export function Activity() {
                     onClick={() => setSelectedFailed(rec)}
                     style={{ cursor: "pointer" }}
                   >
+                    {/* A failed delegation still reads as a delegation: the kind
+                        glyph stays and the failure is an added mark, not a
+                        substituted X that erased what was attempted. */}
                     <div className="w-tx__dir" style={{ color: "var(--err)" }} aria-hidden>
-                      <svg
-                        width="14"
-                        height="14"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      >
-                        <path d="M18 6 6 18M6 6l12 12" />
-                      </svg>
+                      <GlyphBadge glyph={iconForKind(rec.kind)} status="failed" />
                     </div>
                     <div className="w-tx__info">
                       <div className="eyebrow">

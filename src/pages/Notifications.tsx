@@ -17,7 +17,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { CSSProperties } from "react";
 import { NotificationDetail } from "../components/NotificationDetail";
-import { badgeRingColor, iconForKind } from "../components/activity-icons";
+import { badgeRingColor, GlyphBadge, iconForKind } from "../components/activity-icons";
 import { truncMiddle } from "../components/_detailModalParts";
 import {
   isDelegationKind,
@@ -191,7 +191,7 @@ function NotificationRow({
             flexShrink: 0,
           }}
         >
-          {iconForKind(record.kind)}
+          <GlyphBadge glyph={iconForKind(record.kind)} status={record.status} />
         </span>
         <div style={{ minWidth: 0 }}>
           <div className="row-label" style={{ fontWeight: 600 }}>

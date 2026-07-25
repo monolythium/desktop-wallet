@@ -1,6 +1,7 @@
 // Transaction row — adapted from the wallet-pages design (TxRow).
 
 import type { Tx } from "../data/types";
+import { GlyphBadge, iconForActivityKind } from "./activity-icons";
 
 interface Props {
   tx: Tx;
@@ -36,22 +37,17 @@ export function TxRow({ tx, onClick, counterpartyLabel }: Props) {
 
   return (
     <div className="w-tx" onClick={onClick} role={onClick ? "button" : undefined}>
-      <div className={`w-tx__dir ${tx.direction}${tx.direction === "out" ? " sent-ok" : ""}`}>
-        {tx.direction === "in" ? (
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M7 17 17 7M17 7H9M17 7v8" />
-          </svg>
-        ) : tx.direction === "out" ? (
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M17 7 7 17M7 17h8M7 17V9" />
-          </svg>
-        ) : (
-          // Directionless: a neutral dot. An arrow — either arrow — would be the
-          // wallet answering a question the chain did not.
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="12" cy="12" r="3.5" />
-          </svg>
-        )}
+      {/* The badge says WHAT the operation was, from the one shared glyph set;
+          the badge's tone says WHICH WAY the value moved. They compose rather
+          than compete — an unclassified row draws a neutral dot and a neutral
+          tone, claiming neither. This row used to hand-draw its own arrows,
+          which is why the same event looked different here and on the
+          Notifications page. */}
+      <div
+        className={`w-tx__dir ${tx.direction}${tx.direction === "out" ? " sent-ok" : ""}`}
+        aria-hidden
+      >
+        <GlyphBadge glyph={iconForActivityKind(tx.kind)} />
       </div>
       <div className="w-tx__info">
         <div className="eyebrow">

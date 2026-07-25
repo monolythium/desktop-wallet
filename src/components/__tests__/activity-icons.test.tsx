@@ -22,6 +22,7 @@ import {
   iconForKind,
   StatusOverlay,
 } from "../activity-icons";
+import { TxRow } from "../TxRow";
 import type { ActivityKind } from "../../sdk/activity-kind";
 import type { TxOpKind } from "../../sdk/notifications";
 
@@ -227,36 +228,86 @@ describe("status colouring", () => {
   });
 });
 
-describe("one module, not a lookalike copy", () => {
-  it("Notifications imports the SHARED mapping", async () => {
-    // Asserted by module identity rather than by comparing rendered JSX: two
-    // hand-copied SVGs that render alike today are precisely what drifts.
-    const page = await import("../../pages/Notifications");
-    const shared = await import("../activity-icons");
-    expect(typeof shared.iconForKind).toBe("function");
-    // The page module loads and does not define its own mapping.
-    expect(page.Notifications).toBeDefined();
+describe("one implementation — asserted by what the surfaces RENDER", () => {
+  // This used to be a source scan for a second `function iconForKind`. A
+  // text-shaped guard cannot tell a rendered glyph from a comment, and this
+  // codebase has twice found that out — one such sweep was abandoned last pass
+  // for exactly that reason. More to the point, the scan passed the whole time
+  // the Activity page was hand-drawing its own glyphs, because those were
+  // inline JSX and never a second function of that name. It proved nothing.
+  //
+  // What follows compares the actual SVG geometry each surface paints. A second
+  // implementation fails these the moment its paths differ by a pixel, and a
+  // hand-drawn duplicate that happens to match today is caught the first time
+  // the shared glyph changes and the copy does not.
+
+  /** The `d` of every path a rendered tree paints, in order. */
+  function paths(el: HTMLElement): string[] {
+    return Array.from(el.querySelectorAll("path,circle,rect")).map((n) =>
+      n.tagName === "path"
+        ? (n.getAttribute("d") ?? "")
+        : `${n.tagName}:${n.getAttribute("cx") ?? ""},${n.getAttribute("cy") ?? ""},${n.getAttribute("r") ?? ""}${n.getAttribute("x") ?? ""}`,
+    );
+  }
+
+  it("the shared glyph is what a feed row paints", () => {
+    // Render the row, and the glyph on its own, and compare the geometry.
+    const { container: row } = render(
+      <TxRow
+        tx={{
+          id: "1",
+          when: "block 1 · tx 0",
+          amountText: "1",
+          unit: "LYTH",
+          signed: true,
+          direction: "out",
+          counterparty: "mono1abc",
+          memo: "",
+          kind: "delegate",
+          bucket: "delegate",
+          typeLabel: "Delegate",
+        }}
+      />,
+    );
+    const { container: shared } = render(
+      <GlyphBadge glyph={iconForActivityKind("delegate")} />,
+    );
+    const rowBadge = row.querySelector(".w-glyph-badge") as HTMLElement;
+    expect(rowBadge).not.toBeNull();
+    expect(paths(rowBadge)).toEqual(paths(shared));
   });
 
-  it("no page defines a second kind→glyph mapping", async () => {
-    const RAW = import.meta.glob("/src/**/*.tsx", {
-      query: "?raw",
-      import: "default",
-      eager: true,
-    }) as Record<string, string>;
-
-    const shipped = Object.entries(RAW)
-      .map(([p, source]) => ({ rel: p.replace(/^\/src\//, ""), source }))
-      .filter(({ rel }) => !rel.includes("__tests__"));
-
-    // Non-vacuity: the scan must have seen both the owner and a consumer.
-    expect(shipped.length).toBeGreaterThan(30);
-    expect(shipped.map((f) => f.rel)).toContain("components/activity-icons.tsx");
-    expect(shipped.map((f) => f.rel)).toContain("pages/Notifications.tsx");
-
-    const definers = shipped
-      .filter(({ source }) => /function iconForKind\b/.test(source))
-      .map((f) => f.rel);
-    expect(definers).toEqual(["components/activity-icons.tsx"]);
+  it("no surface paints a kind glyph the shared set does not define", () => {
+    // Every glyph the module can produce, by geometry.
+    const known = new Set(
+      ACTIVITY_KINDS.map((k) => {
+        const { container } = render(<GlyphBadge glyph={iconForActivityKind(k)} />);
+        return paths(container).join("|");
+      }),
+    );
+    cleanup();
+    // A representative row per family must be one of them.
+    for (const kind of ["tx_send", "tx_receive", "delegate", "claim", "unclassified"] as ActivityKind[]) {
+      const { container } = render(
+        <TxRow
+          tx={{
+            id: "1",
+            when: "w",
+            amountText: "1",
+            unit: "LYTH",
+            signed: true,
+            direction: "none",
+            counterparty: "mono1abc",
+            memo: "",
+            kind,
+            bucket: "transfer",
+            typeLabel: "t",
+          }}
+        />,
+      );
+      const badge = container.querySelector(".w-glyph-badge") as HTMLElement;
+      expect(known.has(paths(badge).join("|")), kind).toBe(true);
+      cleanup();
+    }
   });
 });
