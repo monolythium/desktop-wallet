@@ -68,6 +68,30 @@ export function emptyActivityCopy(kind: ActivityCoverageKind): {
 }
 
 /**
+ * The label a feed owes the user when its rows came from the saved cache
+ * because the live read did not land.
+ *
+ * PROVENANCE — why these rows may be shown at all. Every live read the feed
+ * makes goes through the trust-gated provider, which refuses while the active
+ * operator is untrusted, and the cache is written only after such a read
+ * succeeds. So a degraded chain yields a FAILED read rather than rows from an
+ * unverifiable operator, and everything the cache holds was verified when it was
+ * fetched. Hiding it because the network is unreachable now would erase the
+ * user's own verified past to no honest end.
+ *
+ * WHAT IT DOES NOT SAY. Not why the chain is degraded. The chain-health banner
+ * already names untrusted / re-genesised / quarantined / offline and what to do
+ * about each; a second telling here would be a second vocabulary for one
+ * condition, and the two would drift. This states only what the ROWS are.
+ *
+ * The consequence clause is the load-bearing half: "saved" alone is a label a
+ * user has no reason to act on, whereas "newer transactions may be missing"
+ * says what it costs them.
+ */
+export const SAVED_HISTORY_NOTICE =
+  "Showing saved history. The wallet couldn't refresh this list from the network just now, so newer transactions may be missing.";
+
+/**
  * The pruned empty state's optional third line.
  *
  * Renders ONLY for the `pruned` kind with a known retention floor. A null value

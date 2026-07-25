@@ -38,6 +38,7 @@ import {
 } from "../sdk/live";
 import {
   emptyActivityCopy,
+  SAVED_HISTORY_NOTICE,
   prunedRetentionLine,
 } from "../sdk/activity-coverage";
 import {
@@ -359,6 +360,13 @@ export function Activity() {
 
   // The single feed. A filter narrows to the confirmed rows only; unfiltered,
   // the wallet's own pending + failed rows interleave by recency.
+  // The live read did not land, and there are saved confirmed rows on screen —
+  // so what the user is looking at is remembered, not current. Keyed on the READ
+  // OUTCOME rather than on chain health, because that is the actual provenance
+  // of the rows: a transient indexer failure leaves them just as stale as an
+  // untrusted operator does, and the user is owed the same label either way.
+  const showingSavedHistory = activity?.ok === false && confirmedRows.length > 0;
+
   const merged = useMemo(() => {
     const p = !filtersActive && showExtra ? tracked : [];
     const f = !filtersActive && showExtra ? failed : [];
@@ -522,7 +530,23 @@ export function Activity() {
           <RefreshButton busy={busy} onClick={() => void refresh()} />
         </div>
         <div className="w-card__body">
-          {activity?.ok === false ? (
+          {/* The rows on screen came from the saved cache because the live read
+              did not land. They are the user's own previously verified history —
+              every live read is trust-gated and the cache is written only after
+              one succeeds — so they are shown, and labelled. The reason the
+              chain is degraded belongs to the chain-health banner, not here. */}
+          {showingSavedHistory ? (
+            <div
+              data-testid="activity-saved-history"
+              className="row-help"
+              style={{ marginBottom: 10, color: "var(--w-text-3)" }}
+            >
+              {SAVED_HISTORY_NOTICE}
+            </div>
+          ) : null}
+          {/* Diagnostic, and superseded by the notice above whenever there are
+              saved rows to explain — two bands about one failure is clutter. */}
+          {activity?.ok === false && !showingSavedHistory ? (
             <div className="w-live-error">address activity: {activity.error}</div>
           ) : null}
           {/* Advisory only — never blocks the feed. Keyed by scope so a chain
