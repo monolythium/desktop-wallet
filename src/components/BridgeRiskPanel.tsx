@@ -102,14 +102,17 @@ export function BridgeRiskPanel({
         <span className="k">Drain cap</span>
         <span className="v">{formatAtomic1e18(route.drainCapAtomic)}</span>
       </div>
-      <div className="w-kv">
-        <span className="k">Drain remaining</span>
-        <span className="v">
-          {drainRemaining !== null
-            ? formatAtomic1e18(drainRemaining)
-            : "no per-asset cap / not loaded"}
-        </span>
-      </div>
+      {/* Rendered only when a live drain bucket was actually supplied. The
+          previous placeholder ("no per-asset cap / not loaded") read as a
+          transient condition, but no caller supplies one: the live read keys on
+          a bridgeId the disclosure shape does not carry. A row that can never
+          populate is better absent than labelled. */}
+      {drainRemaining !== null ? (
+        <div className="w-kv">
+          <span className="k">Drain remaining</span>
+          <span className="v">{formatAtomic1e18(drainRemaining)}</span>
+        </div>
+      ) : null}
       <div className="w-kv">
         <span className="k">Circuit breaker</span>
         <span className="v">{route.circuitBreaker}</span>

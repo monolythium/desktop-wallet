@@ -9,10 +9,11 @@
 //    who's trusted.
 //
 //  - ON: the same registry plus the per-route risk panel — each disclosed
-//    route gets its SDK-computed risk tier (chromatic halo), the live
-//    drain-cap remaining (lyth_bridgeDrainStatus), and the global
-//    circuit-breaker posture (lyth_bridgeHealth). Still no write surface;
-//    the wallet exposes no live bridge send (blocked at the SDK boundary).
+//    route gets its SDK-computed risk tier (chromatic halo), derived from the
+//    disclosure itself. Still no write surface; the wallet exposes no live
+//    bridge send (blocked at the SDK boundary). It does NOT join the live
+//    drain / health reads — see the note on BridgesRiskView for why that join
+//    can never resolve.
 //
 // When the flag is off the page is byte-for-byte the stable table, so the
 // risk-panel preview is fully opt-in.
@@ -26,13 +27,7 @@ import { DevModeStub } from "../components/DevModeStub";
 import { RefreshButton } from "../components/RefreshButton";
 import { useDeveloperMode } from "../sdk/developer-mode";
 import type { Route } from "../components/types";
-import {
-  assessRoute,
-  fetchBridgeHealth,
-  fetchBridgeRoutes,
-  fetchDrainStatus,
-} from "../sdk/bridge";
-import type { BridgeDrainStatus } from "../sdk/bridge";
+import { assessRoute, fetchBridgeRoutes } from "../sdk/bridge";
 
 interface BridgesProps {
   /** When true, render the per-route risk panel preview; otherwise the stable table. */
@@ -196,14 +191,24 @@ function BridgesStableView() {
 // Risk view — registry + per-route risk panel (experimental preview).
 // ---------------------------------------------------------------------------
 
+// NO DRAIN / HEALTH JOIN HERE, and it is not an omission.
+//
+// Both reads key on a 32-byte `bridgeId`. `BridgeRouteDisclosure` — the shape
+// `lyth_bridgeRoutes` actually returns — does not carry one, and does not carry
+// `updatedAtBlock` either; those fields live on the separate catalogue-route
+// shape this read never returns. The stable table above already says as much.
+// So the join key is absent by construction, not merely missing while the
+// registry is empty: seeding routes would not produce it.
+//
+// The reads would also tell us nothing if the key existed. Both address the
+// retired `0x1008` namespace, which only the removed precompile could ever have
+// written, so every value in it is zero permanently rather than pending.
+//
+// A join that cannot resolve against state that cannot be non-zero is not a
+// best-effort enrichment; it is two round-trips per refresh in exchange for
+// nothing. The disclosure's own `circuitBreaker` field still renders.
 function BridgesRiskView() {
   const [routes, setRoutes] = useState<BridgeRouteDisclosure[]>([]);
-  const [drainByRoute, setDrainByRoute] = useState<
-    Map<string, BridgeDrainStatus>
-  >(new Map());
-  const [breakerById, setBreakerById] = useState<Map<string, string>>(
-    new Map(),
-  );
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -213,39 +218,6 @@ function BridgesRiskView() {
     try {
       const { routes: fetched } = await fetchBridgeRoutes(undefined, 25);
       setRoutes(fetched);
-
-      // Best-effort: page bridge health for circuit-breaker posture keyed
-      // by bridgeId. A failure here must not blank the route list.
-      const breaker = new Map<string, string>();
-      try {
-        const health = await fetchBridgeHealth(null, 50);
-        for (const rec of health.records) {
-          breaker.set(rec.bridgeId, rec.circuitBreaker.paused ? "paused" : rec.status);
-        }
-      } catch {
-        // breaker stays empty — the disclosure's own circuitBreaker field
-        // still renders in the panel.
-      }
-      setBreakerById(breaker);
-
-      // Best-effort live drain bucket per route (bridgeId + wrapped asset).
-      const drain = new Map<string, BridgeDrainStatus>();
-      await Promise.all(
-        fetched.map(async (r) => {
-          // The disclosure carries `bridge`/`asset` labels; the live drain
-          // read keys on the 32-byte bridgeId + wrapped asset. Only attempt
-          // when a route-level bridge id is exposed via the catalogue route.
-          const bridgeId = (r as { bridgeId?: string }).bridgeId;
-          if (!bridgeId) return;
-          try {
-            const status = await fetchDrainStatus(bridgeId, r.asset);
-            drain.set(r.routeId, status);
-          } catch {
-            // no per-asset cap or read failure — leave unset.
-          }
-        }),
-      );
-      setDrainByRoute(drain);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -284,28 +256,17 @@ function BridgesRiskView() {
           ) : null}
 
           <div style={{ display: "grid", gap: 14 }}>
-            {routes.map((route) => {
-              const assessment = assessRoute(route);
-              const breaker = breakerById.get(
-                (route as { bridgeId?: string }).bridgeId ?? "",
-              );
-              return (
-                <div key={route.routeId} style={{ display: "grid", gap: 4 }}>
-                  <BridgeRiskPanel
-                    route={route}
-                    assessment={assessment}
-                    drainStatus={drainByRoute.get(route.routeId) ?? null}
-                  />
-                  <div
-                    className="row-help mono"
-                    style={{ fontSize: 11, paddingLeft: 4 }}
-                  >
-                    {route.routeId}
-                    {breaker ? ` · health: ${breaker}` : ""}
-                  </div>
+            {routes.map((route) => (
+              <div key={route.routeId} style={{ display: "grid", gap: 4 }}>
+                <BridgeRiskPanel route={route} assessment={assessRoute(route)} />
+                <div
+                  className="row-help mono"
+                  style={{ fontSize: 11, paddingLeft: 4 }}
+                >
+                  {route.routeId}
                 </div>
-              );
-            })}
+              </div>
+            ))}
           </div>
 
           {routes.length > 0 ? (

@@ -82,9 +82,23 @@ export function rankRoutes(routes: readonly BridgeRouteDisclosure[]) {
 }
 
 /**
- * Live per-route drain bucket for one `(bridgeId, wrappedAsset)`. The
- * `remaining` field is the headroom left in the current rolling window
- * before the bridge's drain-cap circuit-breaker trips.
+ * Live per-route drain bucket for one `(bridgeId, wrappedAsset)`.
+ *
+ * NO CALLER, AND IT CANNOT GAIN ONE FROM THE DISCLOSURE PATH. Two independent
+ * reasons, either sufficient:
+ *
+ *  - the key does not exist. `BridgeRouteDisclosure` (what `lyth_bridgeRoutes`
+ *    returns) carries no `bridgeId`; that field belongs to the separate
+ *    catalogue-route shape. This is structural, not a consequence of the
+ *    registry being empty.
+ *  - the answer would be zero anyway. The bucket lives in the retired `0x1008`
+ *    namespace, which only the removed precompile could ever write, so every
+ *    slot in it is permanently zero.
+ *
+ * Kept because the chain kept the method — it is still served, for wire
+ * compatibility with pre-removal clients — and deleting the wrapper would only
+ * move the question rather than answer it. Do not re-wire it into a view
+ * without first establishing that a real `bridgeId` reaches the call site.
  */
 export async function fetchDrainStatus(
   bridgeId: string,
@@ -99,6 +113,11 @@ export async function fetchDrainStatus(
 /**
  * Page the global bridge-health set — each record's `circuitBreaker`
  * answers "is this route paused / rate-limited" in one round-trip.
+ *
+ * NO CALLER, for the same two reasons as {@link fetchDrainStatus}: the records
+ * are keyed by `bridgeId`, which the disclosure shape does not carry, and the
+ * set is served from the retired `0x1008` state and is permanently empty. A
+ * route's own `circuitBreaker` field is the posture the panel renders instead.
  */
 export async function fetchBridgeHealth(
   cursor?: string | null,
