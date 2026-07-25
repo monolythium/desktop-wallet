@@ -34,6 +34,7 @@ import { TxRow } from "../components/TxRow";
 import type { Route } from "../components/types";
 import { useActiveWallet } from "../sdk/active-wallet";
 import { activityRowToTx } from "../sdk/activity-rows";
+import { confirmedRowKey } from "../sdk/activity-cache";
 import { liveTokenStatusToRows } from "../sdk/token-rows";
 import { loadTokenMetaMap, type TokenMeta } from "../sdk/token-metadata";
 import { truncateDecimals } from "../sdk/lyth-display";
@@ -516,7 +517,7 @@ export function Home({ goto }: Props) {
           {liveActivity?.ok && activityRows.length > 0 ? (
             activityRows.slice(0, 5).map((row) => (
               <TxRow
-                key={`${row.blockHeight}-${row.txIndex}-${row.logIndex}`}
+                key={confirmedRowKey(row)}
                 tx={activityRowToTx(row, tokenMeta)}
               />
             ))

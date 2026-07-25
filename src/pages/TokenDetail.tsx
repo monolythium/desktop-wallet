@@ -22,6 +22,7 @@ import { TxRow } from "../components/TxRow";
 import type { Route } from "../components/types";
 import { useActiveWallet } from "../sdk/active-wallet";
 import { activityRowToTx } from "../sdk/activity-rows";
+import { confirmedRowKey } from "../sdk/activity-cache";
 import { formatLythDisplay, isNativeLythTokenId } from "../sdk/lyth-display";
 import {
   assessRoute,
@@ -355,7 +356,7 @@ function ActivityTab({
             ) : (
               rows.map((row) => (
                 <TxRow
-                  key={`${row.blockHeight}-${row.txIndex}-${row.logIndex}`}
+                  key={confirmedRowKey(row)}
                   tx={activityRowToTx(row, tokenMeta)}
                 />
               ))

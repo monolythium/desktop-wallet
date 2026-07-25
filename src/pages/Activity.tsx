@@ -710,7 +710,7 @@ export function Activity() {
               const row = item.row;
               return (
                 <TxRow
-                  key={`c:${row.blockHeight}-${row.txIndex}-${row.logIndex}`}
+                  key={`c:${confirmedRowKey(row)}`}
                   tx={activityRowToTx(row, tokenMeta)}
                   counterpartyLabel={labelFor(row.counterparty)}
                   onClick={() => setSelected(indexedRowToDetail(row))}

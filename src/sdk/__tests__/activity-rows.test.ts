@@ -30,6 +30,36 @@ function row(partial: Partial<LiveAddressActivityRow>): LiveAddressActivityRow {
   };
 }
 
+describe("row identity — the two legs of a self-transfer", () => {
+  // The chain's `address_activity` view has separate inbound and outbound arms
+  // over one `transfers` table, so a transfer whose sender and recipient match
+  // yields TWO rows at the SAME (block, txIndex, logIndex) — native transfers
+  // all carry the same log-index sentinel, so the anchor alone cannot tell them
+  // apart. An identity built from the anchor alone collides, which makes React's
+  // reconciliation ambiguous for exactly the two rows that must read as distinct.
+  const anchor = { blockHeight: 4242n, txIndex: 1, logIndex: 4_294_967_295 };
+  const outLeg = row({ ...anchor, direction: "out" });
+  const inLeg = row({ ...anchor, direction: "in" });
+
+  it("gives the two legs DISTINCT ids even though the anchor is identical", () => {
+    expect(activityRowToTx(outLeg).id).not.toBe(activityRowToTx(inLeg).id);
+  });
+
+  it("keeps each leg's id stable across repeated mapping (no ordinal, no counter)", () => {
+    // A collision "fixed" with an index would renumber on re-render and move
+    // rows about; identity must be a pure function of the row.
+    expect(activityRowToTx(outLeg).id).toBe(activityRowToTx(outLeg).id);
+    expect(activityRowToTx(inLeg).id).toBe(activityRowToTx(inLeg).id);
+  });
+
+  it("still separates two genuinely different rows that share an anchor", () => {
+    // Not self-transfer specific: the indexer pins some native/delegation
+    // coordinates, so a delegation row can share an anchor with a transfer.
+    const deleg = row({ ...anchor, kind: "delegation", subKind: "delegated", direction: null, cluster: 3 });
+    expect(activityRowToTx(outLeg).id).not.toBe(activityRowToTx(deleg).id);
+  });
+});
+
 describe("activityKindToTxKind", () => {
   it("recognises reward and delegation families, else transfer", () => {
     // Inputs are the indexer's free-string kinds (kept verbatim); the produced
@@ -178,7 +208,9 @@ describe("activityRowToTx", () => {
       }),
     );
     expect(tx).toMatchObject({
-      id: "1000-2-0",
+      // Identity folds kind + cluster + direction past the anchor, so the two
+      // legs of a self-transfer (same anchor, opposite direction) stay distinct.
+      id: "1000.2.0.transfer..in",
       when: "block 1000 · tx 2",
       amountText: "3.25",
       unit: "LYTH",

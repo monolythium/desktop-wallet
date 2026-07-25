@@ -17,6 +17,7 @@
 
 import type { Tx, TxBucket } from "../data/types";
 import type { LiveAddressActivityRow } from "./live";
+import { confirmedRowKey } from "./activity-cache";
 import {
   activityDirectionOf,
   activityKindIsUnsigned,
@@ -157,7 +158,13 @@ export function activityRowToTx(
     unit = meta?.symbol?.trim() || tokenUnitLabel(row.tokenId);
   }
   return {
-    id: `${row.blockHeight}-${row.txIndex}-${row.logIndex}`,
+    // The (block, txIndex, logIndex) anchor is NOT unique. Native transfers all
+    // carry the same log-index sentinel, so the two legs the chain serves for a
+    // self-transfer share it entirely and differ only in direction. The cache
+    // already folds direction (and kind, and cluster) into its row identity for
+    // exactly this reason — reuse that one rule rather than keeping a second,
+    // weaker answer here.
+    id: confirmedRowKey(row),
     when: activityWhen(row),
     amountText,
     unit,
