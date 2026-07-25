@@ -55,7 +55,9 @@ describe("txTypeLabelForActivity", () => {
 
   it("never returns a bare 'Transaction' for an unknown kind", () => {
     const label = txTypeLabelForActivity({ kind: "something-new", direction: null });
-    expect(label).toBe("Outgoing transfer");
+    // Neutral, because no direction was reported — but still a noun that says
+    // value moved, not the bare "Transaction" catch-all that names nothing.
+    expect(label).toBe("Transfer");
     expect(label).not.toBe("Transaction");
   });
 
@@ -93,12 +95,14 @@ describe("txTypeLabelForActivity", () => {
   });
 
   it("does NOT fire the token rule for a direction-less NATIVE row", () => {
-    // Native LYTH is the null / zero-address token id — a direction-less native
-    // row keeps the existing fallback rather than being relabelled.
+    // Native LYTH is the null / zero-address token id, so the token rule must
+    // not claim this is a token movement. It reads neutrally instead: the badge
+    // renders such a row directionless, and an "Outgoing transfer" eyebrow
+    // beside a directionless badge was the surface contradicting itself.
     for (const tokenId of [null, undefined, "0x0", `0x${"00".repeat(32)}`]) {
-      expect(
-        txTypeLabelForActivity({ kind: "transfer", direction: null, tokenId }),
-      ).toBe("Outgoing transfer");
+      const label = txTypeLabelForActivity({ kind: "transfer", direction: null, tokenId });
+      expect(label).toBe("Transfer");
+      expect(label).not.toBe("Token transfer");
     }
   });
 

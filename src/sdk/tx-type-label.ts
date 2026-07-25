@@ -71,5 +71,12 @@ export function txTypeLabelForActivity(row: {
   if (!isNativeLythTokenId(row.tokenId ?? null) && row.direction == null) {
     return "Token transfer";
   }
-  return row.direction === "in" ? "Incoming transfer" : "Outgoing transfer";
+  if (row.direction === "in") return "Incoming transfer";
+  if (row.direction === "out") return "Outgoing transfer";
+  // No direction reported. The badge already renders this row directionless, so
+  // an "Outgoing transfer" eyebrow beside it was the surface contradicting
+  // itself — and asserting a fund movement the chain never stated. "Transfer"
+  // says what is known (value moved) and stops there. Deliberately not the bare
+  // "Transaction" catch-all, which names nothing at all.
+  return "Transfer";
 }
