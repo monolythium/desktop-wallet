@@ -11,7 +11,7 @@
 // the live chain before this decision was taken.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import { renderWithProviders } from "../../test/renderWithProviders";
 import { DeveloperModeProvider } from "../../sdk/developer-mode";
 import type { VaultEntry } from "../../sdk/vaultCatalog";
@@ -76,6 +76,11 @@ beforeEach(() => {
 
 const panel = () => screen.queryByRole("heading", { name: "Live active-wallet preview" });
 
+/** The panel's own card. Assertions are scoped to it because the catalogue
+ *  rows and the unlock drawer's diff name some of the same fields — matching
+ *  against the whole screen would pass on the copies this trim removed. */
+const panelCard = () => panel()!.closest(".w-card") as HTMLElement;
+
 describe("the live active-wallet preview panel", () => {
   it("is hidden from a normal user", async () => {
     render(false);
@@ -87,6 +92,24 @@ describe("the live active-wallet preview panel", () => {
   it("is available in developer mode", async () => {
     render(true);
     await waitFor(() => expect(panel()).not.toBeNull());
+  });
+
+  it("carries only the two fields that appear nowhere else", async () => {
+    render(true);
+    await waitFor(() => expect(panel()).not.toBeNull());
+    expect(within(panelCard()).getByText("Public key")).toBeInTheDocument();
+    expect(within(panelCard()).getByText("Nonce")).toBeInTheDocument();
+  });
+
+  it("drops the four the page already shows elsewhere", async () => {
+    // Each of these is one screen-copy of a fact the catalogue rows, About or
+    // this page's own unlock drawer already state. A diagnostic that restates
+    // its surroundings buries the part that is actually diagnostic.
+    render(true);
+    await waitFor(() => expect(panel()).not.toBeNull());
+    for (const label of ["Vault slot", "Algorithm", "Address", "Balance"]) {
+      expect(within(panelCard()).queryByText(label), label).toBeNull();
+    }
   });
 
   it("still shows the vault catalogue's own address and balance without it", async () => {

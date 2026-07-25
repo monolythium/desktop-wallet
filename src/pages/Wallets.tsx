@@ -519,13 +519,18 @@ export function Wallets() {
         </div>
       </div>
 
-      {/* DEVELOPER-GATED, and this is why — so a later reader does not have to
-          guess. Four of its six fields are already better placed: the vault
-          slot, the typed address and the balance all appear on the catalogue
-          rows above, and the algorithm is a constant also stated on About. The
-          two that appear nowhere else — the account nonce and the public-key
-          size — are diagnostics for debugging a stuck transaction or a key,
-          not facts anyone needs in order to spend.
+      {/* DEVELOPER-GATED, and trimmed to what only this panel can answer — so
+          a later reader does not have to guess at either decision.
+          Four of the six fields it used to carry were copies of facts already
+          on screen: the vault slot and the typed address are on every
+          catalogue row above, the balance is on the right of the same row, and
+          the algorithm is a constant stated both on About and in this page's
+          own unlock drawer. A second copy of a fact is a second thing to keep
+          true, and a diagnostic that restates the page around it buries the
+          part that is actually diagnostic.
+          What remains appears nowhere else in the wallet: the account nonce
+          and the public-key size, both wanted by someone debugging a stuck
+          transaction or a key, neither needed in order to spend.
           It is NOT gated because it was broken: the address-form fix landed
           first and the panel was confirmed reading a real balance and nonce
           against the live chain before this gate was added.
@@ -542,13 +547,6 @@ export function Wallets() {
           </button>
         </div>
         <div className="w-card__body">
-          <LiveLine k="Vault slot" v={activeSlot ?? "(none)"} mono />
-          <LiveLine k="Algorithm" v="ML-DSA-65" />
-          <LiveLine
-            k="Address"
-            v={identity?.address ?? "Unlock to derive from vault"}
-            mono
-          />
           <LiveLine
             k="Public key"
             v={
@@ -561,15 +559,6 @@ export function Wallets() {
           <LiveLine
             k="Nonce"
             v={balance ? balance.nonce.toString() : "unavailable until unlock + RPC"}
-            mono
-          />
-          <LiveLine
-            k="Balance"
-            v={
-              balance
-                ? `${balance.balanceLyth} LYTH`
-                : "unavailable until unlock + RPC"
-            }
             mono
           />
           {identityError && (
