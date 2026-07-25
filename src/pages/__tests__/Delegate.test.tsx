@@ -88,7 +88,14 @@ beforeEach(() => {
   walletMock.value = READY;
   live.loadLiveDelegationStatus.mockResolvedValue(statusWithRow(3000)); // 30% already
   // loadNativeBalanceLythoshi is wrapped in capture() → return the RAW lythoshi.
-  live.loadNativeBalanceLythoshi.mockResolvedValue("1000000000000000000");
+  //
+  // 1000 LYTH, not 1: these tests are about the CAP pre-flight and the weight →
+  // calldata encoding, and at a 1 LYTH balance every weight below 100% credits
+  // zero whole LYTH and is refused as inert before the cap check is ever
+  // reached. The balance has to be large enough that the fixture exercises its
+  // actual subject. The inert guard itself is covered separately, below and in
+  // sdk/__tests__/delegation-inert.test.ts.
+  live.loadNativeBalanceLythoshi.mockResolvedValue("1000000000000000000000");
   live.empty.mockResolvedValue(new Map());
   del.fetchClusterDirectory.mockResolvedValue(null);
   del.fetchPendingRewards.mockRejectedValue(new Error("n/a")); // capture → { ok: false }
@@ -137,6 +144,22 @@ describe("Delegate — add-more cap preflight + weight→calldata", () => {
     expect(caps.preflightDelegationVerdict).toHaveBeenCalled();
     expect(screen.getByText(/would exceed the delegation cap/i)).toBeInTheDocument();
     expect(cap.descriptor).toBeUndefined(); // no operation opened
+  });
+
+  it("refuses a weight that would credit nothing, before the cap check runs", async () => {
+    // The guard is wired, not merely unit-tested: at a 2 LYTH balance a 4999 bps
+    // weight credits 0.9998 LYTH, which the chain floors to zero — accepted,
+    // earning nothing, and costing a fee. It must not reach the cap pre-flight.
+    live.loadNativeBalanceLythoshi.mockResolvedValue("2000000000000000000");
+    caps.preflightDelegationVerdict.mockReturnValue({ ok: true });
+    const { user, input } = await openAddMoreForm();
+    await user.clear(input);
+    await user.type(input, "4999");
+    await user.click(screen.getByRole("button", { name: "Review" }));
+
+    expect(screen.getByText(/credits 0 LYTH/i)).toBeInTheDocument();
+    expect(caps.preflightDelegationVerdict).not.toHaveBeenCalled();
+    expect(cap.descriptor).toBeUndefined(); // nothing opened, nothing signed
   });
 
   it("encodes exactly the shown weight when the preflight passes (shown bps == calldata)", async () => {
