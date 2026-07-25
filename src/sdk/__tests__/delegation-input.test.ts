@@ -10,6 +10,7 @@ import {
   allocationsEligibilityVerdict,
   autovoteBudgetBps,
   customAllocationsFrom,
+  eligibleClusters,
   parseExactNonNegativeInteger,
   resolveRedelegateDestination,
 } from "../delegation-input";
@@ -349,5 +350,53 @@ describe("autovoteBudgetBps", () => {
   it("refuses an absent budget", () => {
     expect(autovoteBudgetBps("")).toBeNull();
     expect(autovoteBudgetBps("  ")).toBeNull();
+  });
+});
+
+// What the custom autovote panel may offer a field for. An input a user can fill
+// and then be refused for is worse than one that was never offered, so the
+// render filter and the review guard must agree — same predicate, one rule.
+describe("eligibleClusters", () => {
+  const CLUSTERS = [
+    { clusterId: 1, active: true },
+    { clusterId: 7, active: false },
+    { clusterId: 2, active: true },
+  ];
+
+  it("offers only clusters that may receive weight, in directory order", () => {
+    expect(eligibleClusters(CLUSTERS).map((c) => c.clusterId)).toEqual([1, 2]);
+  });
+
+  it("drops a cluster whose eligibility flag is not strictly true", () => {
+    const odd = [{ clusterId: 3, active: undefined as unknown as boolean }];
+    expect(eligibleClusters(odd)).toEqual([]);
+  });
+
+  it("offers nothing when the cluster set is unavailable", () => {
+    expect(eligibleClusters([])).toEqual([]);
+  });
+
+  it("offers a field for exactly the clusters review would accept", () => {
+    // The guard and the filter cannot disagree: anything offered must pass.
+    for (const c of eligibleClusters(CLUSTERS)) {
+      expect(
+        allocationsEligibilityVerdict({
+          allocations: [{ clusterId: c.clusterId }],
+          clusters: CLUSTERS,
+        }),
+      ).toEqual({ ok: true });
+    }
+    // And anything withheld must be one review would have refused.
+    const withheld = CLUSTERS.filter(
+      (c) => !eligibleClusters(CLUSTERS).some((e) => e.clusterId === c.clusterId),
+    );
+    for (const c of withheld) {
+      expect(
+        allocationsEligibilityVerdict({
+          allocations: [{ clusterId: c.clusterId }],
+          clusters: CLUSTERS,
+        }).ok,
+      ).toBe(false);
+    }
   });
 });

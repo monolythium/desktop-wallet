@@ -184,6 +184,19 @@ export function clusterEligibility(
   return { ok: true };
 }
 
+/** The clusters that may be offered a weight field, in directory order.
+ *
+ *  Uses the same `active === true` test {@link clusterEligibility} applies, so
+ *  the panel cannot offer an input for a cluster review would then refuse — an
+ *  input a user can fill and then be turned away from is worse than one that was
+ *  never there. An empty set offers nothing, which is the honest answer when
+ *  there is nothing to verify against. Pure. */
+export function eligibleClusters<T extends { clusterId: number; active: boolean }>(
+  clusters: ReadonlyArray<T>,
+): T[] {
+  return clusters.filter((c) => c.active === true);
+}
+
 /**
  * Eligibility for a whole custom autovote plan, checked BEFORE the cap
  * pre-flight signs anything.

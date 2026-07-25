@@ -81,6 +81,7 @@ import {
   allocationsEligibilityVerdict,
   autovoteBudgetBps,
   customAllocationsFrom,
+  eligibleClusters,
   parseExactNonNegativeInteger,
   resolveRedelegateDestination,
 } from "../sdk/delegation-input";
@@ -1535,8 +1536,18 @@ export function Delegate() {
               <div className="row-help" style={{ marginBottom: 8, lineHeight: 1.5 }}>
                 {autovoteModeMeta("custom").description}
               </div>
+              {eligibleClusters(directory).length === 0 && (
+                <div className="row-help" style={{ lineHeight: 1.5 }}>
+                  No cluster here can take a delegation right now — none is in the
+                  active set, or the directory has not loaded.
+                </div>
+              )}
               <div style={{ display: "grid", gap: 6 }}>
-                {directory.map((c) => (
+                {/* Only clusters that may actually receive weight get a field:
+                    an input the user can fill and then be refused for is worse
+                    than one that was never offered. Same rule the review guard
+                    applies. */}
+                {eligibleClusters(directory).map((c) => (
                   <div key={c.clusterId} style={{ display: "flex", alignItems: "center", gap: 8 }}>
                     <span style={{ flex: 1, fontSize: 12.5 }}>{clusterName(c.clusterId)}</span>
                     <input
