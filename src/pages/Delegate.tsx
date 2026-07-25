@@ -151,6 +151,10 @@ export function Delegate() {
   // Surfaced for transparency over any legacy ticket; there is no settle action
   // (the chain removed completeRedemption — calling it now reverts). RpcOutcome
   // so a node failure shows the verbatim error rather than a fabricated empty.
+  // Why the delegation status could not be loaded at all, when it could not.
+  // Distinct from a resolved-but-failed sub-read: this one means the load itself
+  // never landed, and without it the page waits forever.
+  const [statusError, setStatusError] = useState<string | null>(null);
   const [redemptions, setRedemptions] = useState<RpcOutcome<RedemptionQueueResponse> | null>(null);
   // Which (wallet, chain) the redemption result belongs to. The legacy queue is a
   // historical artifact that does not change between refreshes, so it is read
@@ -251,6 +255,7 @@ export function Delegate() {
       setBalance(null);
       setDirectory([]);
       setDirectoryError(null);
+      setStatusError(null);
       setRewards(null);
       setAcTarget(null);
       if (redemptionScope.current !== redemptionKey) setRedemptions(null);
@@ -267,7 +272,14 @@ export function Delegate() {
     setDetailByCluster(new Map());
     try {
       const [s, bal, dir, rew, red, feeBasis, feeReservation] = await Promise.all([
-        loadLiveDelegationStatus(walletAddress),
+        // The one member that used to be uncaught: a rejection here (a degraded
+        // chain refused by the trusted seam) left three cards on a permanent
+        // "loading", which reads as "still working" forever. Now it resolves to
+        // null and the page says what actually happened.
+        loadLiveDelegationStatus(walletAddress).catch((cause: unknown) => {
+          setStatusError((cause as Error)?.message ?? "delegation status unavailable");
+          return null;
+        }),
         capture(() => loadNativeBalanceLythoshi(walletAddress)),
         fetchClusterDirectory(1, 20).catch((cause: unknown) => {
           setDirectoryError((cause as Error)?.message ?? "directory unavailable");
@@ -288,7 +300,7 @@ export function Delegate() {
           reservationLythoshi: feeReservation,
         }),
       );
-      setStatus(s);
+      if (s) { setStatus(s); setStatusError(null); }
       setBalance(bal);
       setRewards(rew);
       if (red !== null) {
@@ -354,6 +366,11 @@ export function Delegate() {
   }, [expandedDetail, detailByCluster]);
 
   const delegations = status?.delegations.ok ? status.delegations.value : null;
+  // The same guard Home applies, and for the same reason: the derived figures
+  // report 0 for BOTH an unresolved and a failed read, so rendering them
+  // unguarded asserts "you delegate nothing" on the strength of a read that
+  // never landed. One answer, not a second one invented here.
+  const delegationsResolved = status?.delegations.ok === true;
   const delegationHistory = status?.delegationHistory.ok
     ? status.delegationHistory.value ?? []
     : [];
@@ -1286,7 +1303,10 @@ export function Delegate() {
                         : "—"
                   }
                 />
-                <LiveCell label="Effective weight" value={effectiveWeightLabel(totalBps)} />
+                <LiveCell
+                  label="Effective weight"
+                  value={delegationsResolved ? effectiveWeightLabel(totalBps) : "—"}
+                />
               </div>
 
               <div className="w-live-grid" style={{ marginTop: 12 }}>
@@ -1414,14 +1434,20 @@ export function Delegate() {
             <h3>Active delegations</h3>
             <span className="w-card__head__spacer" />
             <span className="row-help mono">
-              {summary.count} cluster{summary.count === 1 ? "" : "s"} · {summary.percentLabel} total
+              {delegationsResolved
+                ? `${summary.count} cluster${summary.count === 1 ? "" : "s"} · ${summary.percentLabel} total`
+                : "—"}
             </span>
           </div>
           <div className="w-card__body">
             {status?.delegations.ok === false ? (
               <div className="w-live-error">delegations: {status.delegations.error}</div>
             ) : status === null ? (
-              <div className="row-help">Loading delegations…</div>
+              statusError !== null ? (
+                <div className="w-live-error">delegations: {statusError}</div>
+              ) : (
+                <div className="row-help">Loading delegations…</div>
+              )
             ) : delegationRows.length === 0 ? (
               <div className="row-help">
                 You are not delegating to any cluster yet. Pick a cluster from the
