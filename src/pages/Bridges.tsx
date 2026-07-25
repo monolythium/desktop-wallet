@@ -22,7 +22,10 @@ import type { BridgeRouteDisclosure } from "@monolythium/core-sdk";
 import { getProvider } from "../sdk/client";
 import { formatAtomic1e18 } from "../sdk/lyth-display";
 import { BridgeRiskPanel } from "../components/BridgeRiskPanel";
+import { DevModeStub } from "../components/DevModeStub";
 import { RefreshButton } from "../components/RefreshButton";
+import { useDeveloperMode } from "../sdk/developer-mode";
+import type { Route } from "../components/types";
 import {
   assessRoute,
   fetchBridgeHealth,
@@ -34,9 +37,48 @@ import type { BridgeDrainStatus } from "../sdk/bridge";
 interface BridgesProps {
   /** When true, render the per-route risk panel preview; otherwise the stable table. */
   experimentalEnabled?: boolean;
+  /** Navigate — the developer-mode stub links to the pages hosting the toggle. */
+  goto: (r: Route) => void;
 }
 
-export function Bridges({ experimentalEnabled }: BridgesProps) {
+/**
+ * GATED — a reservation, not a retirement, and the difference matters.
+ *
+ * Read from the deployed chain: the bridge slot reports
+ * `enabled: false, gateable: true, activationHeight: null`. The chain names
+ * retirement explicitly — two other slots carry "retired-" in their capability
+ * id and are ungateable — and this slot is in neither state. It is held open.
+ *
+ * The route read is well-formed and answers correctly; there are simply no route
+ * disclosures to return, so this registry is empty for every user and will stay
+ * empty until the slot activates. An ungated entry leading to a permanently
+ * empty screen is a promise the wallet cannot keep, and deleting the surface
+ * would discard work for a capability the chain still holds a slot for.
+ *
+ * UNGATE WHEN: the bridge precompile reports `enabled: true`.
+ */
+export function Bridges({ experimentalEnabled, goto }: BridgesProps) {
+  const devMode = useDeveloperMode();
+  // Gated at the dispatcher, so NEITHER view mounts and neither one's read
+  // fires — the zero-network law a stubbed page must satisfy. The page keeps
+  // its own header so the user still sees where they are.
+  if (!devMode) {
+    return (
+      <div className="w-page">
+        <div className="w-page__header">
+          <h1>Bridges</h1>
+          <div className="sub">
+            Trusted bridge route disclosures. Read-only registry with per-route
+            risk assessment — the wallet exposes no live bridge send.
+          </div>
+        </div>
+        <DevModeStub
+          body="The chain reserves a bridge capability but has not enabled it yet, so this registry is empty for everyone. It stays available to developers until that changes."
+          goto={goto}
+        />
+      </div>
+    );
+  }
   return experimentalEnabled ? <BridgesRiskView /> : <BridgesStableView />;
 }
 

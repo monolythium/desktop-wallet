@@ -37,6 +37,22 @@ export type { BridgeRouteDisclosure, BridgeRouteAssessment, BridgeDrainStatus };
  * Fetch the trusted bridge route disclosures from the connected node.
  * The chain returns the catalogue under either `routes` or
  * `bridgeRouteDisclosures` depending on the path; normalise to one list.
+ *
+ * OMITTING `intent` IS CORRECT FOR A CATALOGUE READ — do not "fix" it by
+ * inventing one. The method answers two questions at once: what disclosures
+ * exist, and which route a given transfer should take. `intent` is optional by
+ * SDK contract, and both callers here are listing the catalogue, not selecting
+ * a route: the token view filters the returned list by asset client-side, and
+ * the registry view shows all of it. Neither has an amount, a destination chain
+ * or a recipient, so constructing an intent would mean fabricating a transfer
+ * the user never expressed.
+ *
+ * The cost of asking without one is a single extra entry in the response's
+ * `blockedReasons` — "bridge route selection requires transfer intent" — which
+ * describes the selection half nobody asked for. Verified against the deployed
+ * chain: supplying a well-formed intent removes exactly that reason and returns
+ * the same empty catalogue. Callers listing disclosures should read `routes`
+ * and ignore the selection verdict, which is what they do.
  */
 export async function fetchBridgeRoutes(
   intent?: BridgeTransferIntent,

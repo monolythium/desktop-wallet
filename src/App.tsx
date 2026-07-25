@@ -330,7 +330,7 @@ export function App() {
           {route === "tokens" ? <Tokens goto={setRoute} /> : null}
           {route === "token-detail" ? <TokenDetail goto={setRoute} /> : null}
           {route === "delegate" ? <Delegate /> : null}
-          {route === "bridges" ? <Bridges experimentalEnabled={experimentalEnabled} /> : null}
+          {route === "bridges" ? <Bridges experimentalEnabled={experimentalEnabled} goto={setRoute} /> : null}
           {route === "agents" && experimentalEnabled ? <Agents /> : null}
           {route === "contacts" ? <Contacts /> : null}
           {route === "operators" ? <Operators goto={setRoute} /> : null}
