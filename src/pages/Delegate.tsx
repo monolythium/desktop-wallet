@@ -445,6 +445,46 @@ export function Delegate() {
     };
   };
 
+  // ONE feedback pattern for all three weight forms, so they cannot drift.
+  //
+  // The order carries the escalation: the always-on limit note stays QUIET, and
+  // only an earned violation takes the loud treatment. Rendering this on three
+  // forms instead of one multiplies how often the loud form can appear, which is
+  // exactly why the resting note must not creep up into it — a warning shape
+  // seen on every visit stops being read, and it is the same shape that has to
+  // carry "this is as far as you can go" when it matters.
+  //
+  // Last in the card, immediately above the action, matching the form that
+  // already worked.
+  const capFeedback = (capState: { note: string; warning: string | null }) => (
+    <>
+      <div className="row-help" style={{ lineHeight: 1.5 }}>
+        {capState.note}
+      </div>
+      {capState.warning && <div className="w-warn-prominent">{capState.warning}</div>}
+    </>
+  );
+
+  // The cap state for a form that STACKS weight onto a destination cluster.
+  //
+  // `forMove` is a redelegate: it moves weight between clusters and leaves the
+  // wallet total unchanged, so the global-headroom branch must not fire. Passing
+  // a zero total is what silences it — the per-cluster branches, which are the
+  // ones that apply, still read the destination's real existing weight.
+  const stackingCapState = (args: {
+    existingWeightBps: number;
+    raw: string;
+    forMove?: boolean;
+  }) => {
+    const bps = parseExactNonNegativeInteger(args.raw);
+    return delegateCapWarning({
+      existingWeightBps: args.existingWeightBps,
+      totalDelegatedBps: args.forMove ? 0 : totalBps,
+      additionalBps: bps !== null && bps > 0 ? bps : null,
+      aggregateCapBps,
+    });
+  };
+
   // Would this weight credit nothing at all? A different question from the caps:
   // the chain ACCEPTS an inert delegation, so no cap check catches it, and the
   // user pays a fee for a position that earns nothing and votes nothing.
@@ -1398,6 +1438,12 @@ export function Delegate() {
                             }}
                             style={autovoteInputStyle}
                           />
+                          {capFeedback(
+                            stackingCapState({
+                              existingWeightBps: row.weightBps,
+                              raw: delegateMoreBps,
+                            }),
+                          )}
                           {delegateMoreError && (
                             <div className="row-help" style={{ color: "var(--err)" }}>
                               {delegateMoreError}
@@ -1487,6 +1533,19 @@ export function Delegate() {
                             }}
                             style={autovoteInputStyle}
                           />
+                          {capFeedback(
+                            stackingCapState({
+                              // The DESTINATION is what stacks weight, so it is
+                              // what the cap is about.
+                              existingWeightBps:
+                                delegationRows.find(
+                                  (r) =>
+                                    r.cluster === parseExactNonNegativeInteger(redelegateTo),
+                                )?.weightBps ?? 0,
+                              raw: redelegateWeightBps,
+                              forMove: true,
+                            }),
+                          )}
                           {redelegateError && (
                             <div className="row-help" style={{ color: "var(--err)" }}>
                               {redelegateError}
@@ -2025,17 +2084,7 @@ export function Delegate() {
                       no tokens are escrowed. Your LYTH stays in your wallet and
                       remains spendable; effective weight = balance × weightBps.
                     </div>
-                    {/* ALWAYS ON — stays quiet. A limit note that shouted every
-                        time the form opened would train the eye to skip that
-                        shape, and the shape is the one the boundary warning
-                        below needs to borrow. */}
-                    <div className="row-help" style={{ lineHeight: 1.5 }}>
-                      {capState.note}
-                    </div>
-                    {/* EARNED escalation — only at or over the cap. */}
-                    {capState.warning && (
-                      <div className="w-warn-prominent">{capState.warning}</div>
-                    )}
+                    {capFeedback(capState)}
                     {draftError && (
                       <div className="row-help" style={{ color: "var(--err)" }}>
                         {draftError}
