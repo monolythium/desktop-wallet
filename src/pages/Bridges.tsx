@@ -42,20 +42,31 @@ interface BridgesProps {
 }
 
 /**
- * GATED — a reservation, not a retirement, and the difference matters.
+ * GATED — the precompile is retired; the ROUTE CATALOGUE is what survives.
  *
- * Read from the deployed chain: the bridge slot reports
- * `enabled: false, gateable: true, activationHeight: null`. The chain names
- * retirement explicitly — two other slots carry "retired-" in their capability
- * id and are ungateable — and this slot is in neither state. It is held open.
+ * An earlier note here read the bridge slot's `kind: "gateable"` as proof the
+ * chain was holding the capability open. That inference does not hold, and the
+ * reason is worth keeping: `kind` is DERIVED, and `gateable` is tested before
+ * `retired-rejecting`, so a slot that stays gateable can never report itself
+ * retired however retired it is. The absence of that label carries no
+ * information, and no future reading of it will either.
  *
- * The route read is well-formed and answers correctly; there are simply no route
- * disclosures to return, so this registry is empty for every user and will stay
- * empty until the slot activates. An ungated entry leading to a permanently
- * empty screen is a promise the wallet cannot keep, and deleting the surface
- * would discard work for a capability the chain still holds a slot for.
+ * What the chain does say, in the slot's own revert: the in-tree bridge was
+ * removed in favour of an external interop integration and the slot CANNOT BE
+ * RE-ACTIVATED. A node refuses at boot any milestone that would activate it, at
+ * any height. So `enabled: true` is not a trigger — it is unreachable, and any
+ * note waiting on it would wait forever.
  *
- * UNGATE WHEN: the bridge precompile reports `enabled: true`.
+ * The surface is kept because the removal deliberately KEPT the third-party
+ * route disclosure catalogue — `lyth_bridgeRoutes`, which is what this page
+ * reads. Bridging moves from chain-operated to third-party-disclosed, and
+ * publishing those disclosures is this wallet's part in it. The registry is
+ * empty until external providers' routes are imported, and an ungated entry
+ * leading to an empty screen is a promise the wallet cannot keep.
+ *
+ * UNGATE WHEN: the route read returns a non-empty catalogue (`routeCount > 0`).
+ * That is the condition this page exists to serve, and unlike the slot's gate
+ * it is something the read itself reports.
  */
 export function Bridges({ experimentalEnabled, goto }: BridgesProps) {
   const devMode = useDeveloperMode();
@@ -73,7 +84,7 @@ export function Bridges({ experimentalEnabled, goto }: BridgesProps) {
           </div>
         </div>
         <DevModeStub
-          body="The chain reserves a bridge capability but has not enabled it yet, so this registry is empty for everyone. It stays available to developers until that changes."
+          body="This chain does not run its own bridge. It publishes the routes of third-party bridges so they can be checked before use, and no such route has been published yet — so this registry is empty for everyone. It stays available to developers until that changes."
           goto={goto}
         />
       </div>

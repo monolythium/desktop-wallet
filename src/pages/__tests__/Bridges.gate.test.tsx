@@ -1,16 +1,18 @@
-// Bridges is gated because the chain reserves the capability and has not
-// enabled it — NOT because it was abandoned.
+// Bridges is gated because the precompile is RETIRED and the route catalogue
+// it publishes is still empty — NOT because the chain is holding the slot open.
 //
-// Evidence, read from the deployed chain: the bridge slot reports
-// `enabled: false, gateable: true, activationHeight: null`. The chain names
-// retirement explicitly elsewhere — two other slots carry "retired-" in their
-// capability id and are ungateable — and the bridge slot is in neither state.
-// It is reserved.
+// An earlier revision of this header argued the opposite from the slot's
+// `kind: "gateable"`. That reading is unsound: `kind` is derived and `gateable`
+// is tested before `retired-rejecting`, so a gateable slot can never report
+// itself retired. The slot's own revert says the bridge was removed and it
+// cannot be re-activated, and a node refuses at boot any milestone that would
+// activate it — so the old reversal condition (`enabled: true`) can never fire.
 //
-// So the surface stays, gated, with the reversal condition written down. An
-// ungated nav entry leading to a permanently empty screen is a promise the
-// wallet cannot keep; deleting it would discard work for a slot the chain still
-// holds open.
+// What survives is the third-party route disclosure catalogue: the removal kept
+// `lyth_bridgeRoutes` deliberately, and that is what this page reads. The
+// surface therefore stays, gated, with a reversal condition that CAN fire —
+// a non-empty route catalogue. An ungated nav entry leading to an empty screen
+// is a promise the wallet cannot keep.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";

@@ -271,12 +271,14 @@ export const NAV_CATEGORIES: NavCategory[] = [
       { id: "wallets", label: "Wallets", icon: ICON_WALLETS, route: "wallets" },
       { id: "tokens", label: "Tokens", icon: ICON_TOKENS, route: "tokens" },
       { id: "delegate", label: "Delegate", icon: ICON_DELEGATE, route: "delegate" },
-      // Reserved on-chain, not enabled: the bridge precompile reports
-      // enabled=false with gateable=true and no activation height, while the
-      // chain names retirement explicitly for other slots. The registry is
-      // therefore empty for everyone. Kept discoverable with the dev badge and
-      // an explanatory stub rather than hidden, so it reads as a reservation.
-      // UNGATE WHEN: the bridge precompile reports enabled=true.
+      // The bridge precompile is RETIRED and cannot be re-activated — do not
+      // read its `gateable` flag as a reservation; that flag is tested before
+      // the retired label, so it cannot report otherwise. What survives is the
+      // third-party route disclosure catalogue this page reads, which no
+      // provider has published into yet, so the registry is empty for everyone.
+      // Kept discoverable with the dev badge and an explanatory stub rather
+      // than hidden. See the gate note in pages/Bridges.tsx for the evidence.
+      // UNGATE WHEN: the route read returns a non-empty catalogue.
       { id: "bridges", label: "Bridges", icon: ICON_BRIDGES, route: "bridges", developerOnly: true, badge: "dev" },
       { id: "trade", label: "Trade", icon: ICON_TRADE, route: "trade" },
       { id: "agents", label: "Agents", icon: ICON_AGENTS, route: "agents", experimentalOnly: true, badge: "preview" },
