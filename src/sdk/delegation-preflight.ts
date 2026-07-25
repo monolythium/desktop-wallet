@@ -43,6 +43,24 @@ import { normalizeAggregateCapBps } from "./delegation-caps";
  */
 export const DELEGATION_REREAD_TIMEOUT_MS = 1_500;
 
+/** What marks a refusal raised after the unlock rather than by the chain.
+ *
+ *  Deliberately says WHEN and WHY, not just what: a cap message appearing after
+ *  the passphrase was entered is otherwise indistinguishable from a chain
+ *  rejection, and the two want different responses from the user. */
+export const LATE_REFUSAL_PREFIX =
+  "Your delegation state changed while this was open";
+
+/** Compose the sentence shown when the post-unlock re-check refuses.
+ *
+ *  Keeps the verdict's own words — they say what to do — and prefixes the reason
+ *  it arrived late. Carries no wording the drawer's error classifier would treat
+ *  as a chain revert, which would otherwise replace all of it with a generic
+ *  body. Pure. */
+export function lateRefusalMessage(verdictMessage: string): string {
+  return `${LATE_REFUSAL_PREFIX} — ${verdictMessage}`;
+}
+
 /** The pre-flight's view of delegation state. */
 export interface DelegationSnapshot {
   rows: ReadonlyArray<{ cluster: number; weightBps: number }>;

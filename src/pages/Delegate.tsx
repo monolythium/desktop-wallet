@@ -85,7 +85,10 @@ import {
   parseExactNonNegativeInteger,
   resolveRedelegateDestination,
 } from "../sdk/delegation-input";
-import { refreshDelegationSnapshot } from "../sdk/delegation-preflight";
+import {
+  lateRefusalMessage,
+  refreshDelegationSnapshot,
+} from "../sdk/delegation-preflight";
 import { withDelegationRevertCopy } from "../sdk/delegation-reverts";
 import { useDelegationRejection } from "../sdk/DelegationRejectionProvider";
 import { claimButtonState } from "../sdk/claim-in-flight";
@@ -399,6 +402,31 @@ export function Delegate() {
     return lyth === null ? bpsToPercentLabel(bps) : `${lyth} LYTH`;
   };
 
+  // The last word before signing. Re-checking at Review only NARROWS the stale
+  // window — the passphrase unlock sits between that check and the signature, so
+  // the verdict runs once more here, inside the existing execute stage. It adds
+  // no stage, reorders none, and cannot re-prompt.
+  //
+  // Fails OPEN exactly as the Review check does: an unresolved read keeps the
+  // snapshot and the action proceeds. Only a definite verdict refuses, and it
+  // says the state changed so the user does not read it as a chain rejection.
+  const assertCapsStillAllow = async (args: {
+    action: "delegate" | "redelegate";
+    clusterId: number;
+    moveBps: number;
+  }) => {
+    const fresh = await freshVerdictInputs(args.clusterId);
+    const verdict = preflightDelegationVerdict({
+      action: args.action,
+      moveBps: args.moveBps,
+      ...fresh,
+    });
+    if (verdict.ok) return;
+    const message = lateRefusalMessage(verdict.message);
+    raiseRejection(args.clusterId, args.action, message);
+    throw new Error(message);
+  };
+
   const openDelegate = ({ clusterId, weightBps }: { clusterId: number; weightBps: number }) => {
     const weightLabel = `${(weightBps / 100).toFixed(2)}%`;
     ops.open({
@@ -434,6 +462,7 @@ export function Delegate() {
         if (!ctx?.vaultSeed) {
           throw new Error("vault seed unavailable after keychain authorization");
         }
+        await assertCapsStillAllow({ action: "delegate", clusterId, moveBps: weightBps });
         const calldata = buildDelegateCalldata({ clusterId, weightBps });
         const result = await withDelegationRevertCopy(
           () => submitDelegationTx({ seed: ctx.vaultSeed!, data: calldata }),
@@ -613,6 +642,13 @@ export function Delegate() {
         if (!ctx?.vaultSeed) {
           throw new Error("vault seed unavailable after keychain authorization");
         }
+        // The destination is what stacks weight, so it is what the cap re-check
+        // must be about.
+        await assertCapsStillAllow({
+          action: "redelegate",
+          clusterId: toCluster,
+          moveBps: weightBps,
+        });
         const calldata = buildRedelegateCalldata({ fromCluster, toCluster, weightBps });
         const result = await withDelegationRevertCopy(
           () => submitDelegationTx({ seed: ctx.vaultSeed!, data: calldata }),

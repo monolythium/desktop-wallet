@@ -15,6 +15,8 @@
 import { describe, expect, it } from "vitest";
 import {
   DELEGATION_REREAD_TIMEOUT_MS,
+  LATE_REFUSAL_PREFIX,
+  lateRefusalMessage,
   refreshDelegationSnapshot,
   type DelegationSnapshot,
 } from "../delegation-preflight";
@@ -124,5 +126,29 @@ describe("refreshDelegationSnapshot", () => {
   it("bounds the wait by default rather than waiting indefinitely", () => {
     expect(DELEGATION_REREAD_TIMEOUT_MS).toBeGreaterThan(0);
     expect(DELEGATION_REREAD_TIMEOUT_MS).toBeLessThanOrEqual(2_500);
+  });
+});
+
+// The verdict re-run after the passphrase unlock. Re-checking at Review only
+// narrows the window; the unlock interaction sits between that check and the
+// signature, so the last word belongs immediately before signing.
+describe("lateRefusalMessage", () => {
+  const VERDICT = "This would exceed your total delegation limit (100%) — reduce the amount.";
+
+  it("keeps the verdict's own words", () => {
+    expect(lateRefusalMessage(VERDICT)).toContain(VERDICT);
+  });
+
+  it("says why the refusal arrived late, so it is not read as a chain rejection", () => {
+    // The gap-check recorded that the wallet cannot otherwise tell a local
+    // refusal from a chain one. This is the distinguishing mark.
+    expect(lateRefusalMessage(VERDICT)).toContain(LATE_REFUSAL_PREFIX);
+    expect(lateRefusalMessage(VERDICT)).not.toBe(VERDICT);
+  });
+
+  it("carries no word the drawer's error classifier would read as a chain revert", () => {
+    // classifySendError matches "revert" as a substring and would replace the
+    // text with a generic "Transaction reverted" body.
+    expect(lateRefusalMessage(VERDICT).toLowerCase()).not.toContain("revert");
   });
 });
