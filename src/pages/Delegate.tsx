@@ -11,6 +11,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { RefreshButton } from "../components/RefreshButton";
+import { CollapsibleSection } from "../components/CollapsibleSection";
 import type {
   ClusterDirectoryEntryResponse,
   ClusterDiversityView,
@@ -1490,43 +1491,6 @@ export function Delegate() {
                 </div>
               </div>
 
-              {/* Secondary reward detail + the auto-compound action (a real read
-                  + a real write — preserved, not stubbed). */}
-              {rewards?.ok && rewards.value ? (
-                <div
-                  className="row-help"
-                  style={{
-                    marginTop: 10,
-                    display: "flex",
-                    gap: 12,
-                    flexWrap: "wrap",
-                    alignItems: "center",
-                  }}
-                >
-                  <span>Auto-compound {rewards.value.autoCompound ? "on" : "off"}</span>
-                  <button
-                    className="btn btn--sm btn--ghost"
-                    data-testid="auto-compound-toggle"
-                    disabled={autoCompoundUpdating(acTarget)}
-                    onClick={() => openAutoCompoundToggle(!rewards.value!.autoCompound)}
-                  >
-                    {autoCompoundUpdating(acTarget)
-                      ? AC_UPDATING_LABEL
-                      : rewards.value.autoCompound
-                        ? "Disable auto-compound"
-                        : "Enable auto-compound"}
-                  </button>
-                  {/* Always visible, not only at confirm: the claim side effect
-                      is the part of this setting people do not expect. */}
-                  <div style={{ flexBasis: "100%", lineHeight: 1.5 }}>
-                    Automatically claim your delegation rewards and delegate them back
-                    instead of claiming by hand — compounding your effective weight over
-                    time.{" "}
-                    <strong>Turning it on also claims your current pending rewards now.</strong>
-                  </div>
-                </div>
-              ) : null}
-
               {balance?.ok === false ? (
                 <div className="row-help" style={{ marginTop: 8 }}>
                   Balance read unavailable — showing weight as a percent only.
@@ -1536,6 +1500,54 @@ export function Delegate() {
           )}
         </div>
       </div>
+
+      {/* Auto-compound — its own section rather than a paragraph competing with
+          the primary flow, on the app's ONE disclosure component (Operators,
+          Settings and Help share it) so this is not a sixth card variant.
+
+          COLLAPSED BY DEFAULT, and it loses nothing: the on/off state rides in
+          the heading via `value`, which is the component's "collapsed is not
+          gone" rule. The toggle lives in the BODY, so the control and the
+          sentence describing its unexpected effect are only ever reachable
+          together — a user cannot press it without the copy on screen.
+
+          The CONFIRM-TIME disclosure is untouched and cannot be hidden by
+          collapsing: it lives in the operations drawer (a `Claims now` diff row
+          and a warn-level effect placed last, directly above the confirm
+          action), which is a separate surface from this section. */}
+      {rewards?.ok && rewards.value ? (
+        <CollapsibleSection
+          title="Auto-compound"
+          value={
+            <span className="mono">
+              {autoCompoundUpdating(acTarget)
+                ? AC_UPDATING_LABEL
+                : rewards.value.autoCompound
+                  ? "On"
+                  : "Off"}
+            </span>
+          }
+        >
+          <div className="row-help" style={{ lineHeight: 1.5, marginBottom: 10 }}>
+            Automatically claim your delegation rewards and delegate them back
+            instead of claiming by hand — compounding your effective weight over
+            time.{" "}
+            <strong>Turning it on also claims your current pending rewards now.</strong>
+          </div>
+          <button
+            className="btn btn--sm btn--ghost"
+            data-testid="auto-compound-toggle"
+            disabled={autoCompoundUpdating(acTarget)}
+            onClick={() => openAutoCompoundToggle(!rewards.value!.autoCompound)}
+          >
+            {autoCompoundUpdating(acTarget)
+              ? AC_UPDATING_LABEL
+              : rewards.value.autoCompound
+                ? "Disable auto-compound"
+                : "Enable auto-compound"}
+          </button>
+        </CollapsibleSection>
+      ) : null}
 
       {/* Active delegations — the wallet's per-cluster delegation rows, each
           with the derived LYTH (or bps-only) figure and the three action flows
