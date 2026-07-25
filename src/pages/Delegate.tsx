@@ -77,6 +77,7 @@ import {
   normalizeAggregateCapBps,
   preflightDelegationVerdict,
 } from "../sdk/delegation-caps";
+import { parseExactNonNegativeInteger } from "../sdk/delegation-input";
 import { withDelegationRevertCopy } from "../sdk/delegation-reverts";
 import { useDelegationRejection } from "../sdk/DelegationRejectionProvider";
 import { claimButtonState } from "../sdk/claim-in-flight";
@@ -1184,8 +1185,8 @@ export function Delegate() {
                             <button
                               className="btn btn--sm btn--primary"
                               onClick={() => {
-                                const bps = parseInt(delegateMoreBps, 10);
-                                if (!Number.isFinite(bps) || bps <= 0 || bps > 10000) {
+                                const bps = parseExactNonNegativeInteger(delegateMoreBps);
+                                if (bps === null || bps <= 0 || bps > 10000) {
                                   setDelegateMoreError(
                                     "Weight must be 1–10000 basis points (0.01% – 100%).",
                                   );
@@ -1269,8 +1270,8 @@ export function Delegate() {
                             <button
                               className="btn btn--sm btn--primary"
                               onClick={() => {
-                                const to = parseInt(redelegateTo, 10);
-                                if (!Number.isFinite(to) || to < 0) {
+                                const to = parseExactNonNegativeInteger(redelegateTo);
+                                if (to === null) {
                                   setRedelegateError("Enter a valid destination cluster id.");
                                   return;
                                 }
@@ -1278,8 +1279,8 @@ export function Delegate() {
                                   setRedelegateError("Destination must differ from the source cluster.");
                                   return;
                                 }
-                                const bps = parseInt(redelegateWeightBps, 10);
-                                if (!Number.isFinite(bps) || bps <= 0 || bps > row.weightBps) {
+                                const bps = parseExactNonNegativeInteger(redelegateWeightBps);
+                                if (bps === null || bps <= 0 || bps > row.weightBps) {
                                   setRedelegateError(
                                     `Weight must be 1–${row.weightBps} basis points (no more than the source delegation).`,
                                   );
@@ -1801,8 +1802,8 @@ export function Delegate() {
                       <button
                         className="btn btn--sm btn--primary"
                         onClick={() => {
-                          const bps = parseInt(draftWeightBps, 10);
-                          if (!Number.isFinite(bps) || bps <= 0 || bps > 10_000) {
+                          const bps = parseExactNonNegativeInteger(draftWeightBps);
+                          if (bps === null || bps <= 0 || bps > 10_000) {
                             setDraftError(
                               "Weight must be 1-10000 basis points (0.01% – 100%).",
                             );
