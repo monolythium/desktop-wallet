@@ -78,6 +78,7 @@ import {
   preflightDelegationVerdict,
 } from "../sdk/delegation-caps";
 import {
+  allocationsEligibilityVerdict,
   parseExactNonNegativeInteger,
   resolveRedelegateDestination,
 } from "../sdk/delegation-input";
@@ -905,6 +906,17 @@ export function Delegate() {
         setAutovoteError(`${clusterName(a.clusterId)}: weight must be 1-10000 bps.`);
         return;
       }
+    }
+    // The per-cluster inputs render from the unfiltered directory and the cap
+    // pre-flight never looks at eligibility, so check it here — the same rule a
+    // typed redelegate destination goes through.
+    const eligible = allocationsEligibilityVerdict({
+      allocations,
+      clusters: directory,
+    });
+    if (!eligible.ok) {
+      setAutovoteError(eligible.message);
+      return;
     }
     // buildAutovotePlan(custom) passes the allocations through and warns if the
     // total exceeds the budget; the preflight (inside submitAutovoteBatch) is

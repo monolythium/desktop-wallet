@@ -7,6 +7,7 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  allocationsEligibilityVerdict,
   parseExactNonNegativeInteger,
   resolveRedelegateDestination,
 } from "../delegation-input";
@@ -189,5 +190,86 @@ describe("resolveRedelegateDestination", () => {
       clusters: CLUSTERS,
     });
     expect(v).not.toEqual({ ok: true, clusterId: 1 });
+  });
+});
+
+// A custom autovote plan is N delegate() calls. The per-cluster inputs render
+// from the unfiltered directory, so an allocation can name a cluster that may
+// not receive weight — and the batch pre-flight checks caps and row count but
+// never eligibility. Same rule as the redelegate destination, one policy.
+describe("allocationsEligibilityVerdict", () => {
+  const CLUSTERS = [
+    { clusterId: 1, active: true },
+    { clusterId: 2, active: true },
+    { clusterId: 7, active: false },
+  ];
+
+  it("accepts a plan whose every allocation is an active known cluster", () => {
+    const v = allocationsEligibilityVerdict({
+      allocations: [{ clusterId: 1 }, { clusterId: 2 }],
+      clusters: CLUSTERS,
+    });
+    expect(v).toEqual({ ok: true });
+  });
+
+  it("refuses a plan containing an ineligible cluster, naming it", () => {
+    const v = allocationsEligibilityVerdict({
+      allocations: [{ clusterId: 1 }, { clusterId: 7 }],
+      clusters: CLUSTERS,
+    });
+    expect(v.ok).toBe(false);
+    expect(v.ok === false && v.message).toContain("7");
+  });
+
+  it("refuses a plan containing a cluster the wallet has never seen", () => {
+    const v = allocationsEligibilityVerdict({
+      allocations: [{ clusterId: 99 }],
+      clusters: CLUSTERS,
+    });
+    expect(v.ok).toBe(false);
+    expect(v.ok === false && v.message).toContain("99");
+  });
+
+  it("fails CLOSED when the cluster set is unavailable, as the destination does", () => {
+    const v = allocationsEligibilityVerdict({
+      allocations: [{ clusterId: 1 }],
+      clusters: [],
+    });
+    expect(v.ok).toBe(false);
+    expect(v.ok === false && v.message).toContain("directory");
+  });
+
+  it("blocks on the FIRST offending allocation, as the cap pre-flight does", () => {
+    const v = allocationsEligibilityVerdict({
+      allocations: [{ clusterId: 7 }, { clusterId: 99 }],
+      clusters: CLUSTERS,
+    });
+    expect(v.ok).toBe(false);
+    expect(v.ok === false && v.message).toContain("7");
+  });
+
+  it("gives the same answer the destination resolver gives for the same cluster", () => {
+    // One policy: whatever a redelegate may not reach, a batch may not either.
+    for (const clusterId of [7, 99]) {
+      const batch = allocationsEligibilityVerdict({
+        allocations: [{ clusterId }],
+        clusters: CLUSTERS,
+      });
+      const single = resolveRedelegateDestination({
+        raw: String(clusterId),
+        sourceClusterId: 1,
+        clusters: CLUSTERS,
+      });
+      expect(batch.ok).toBe(single.ok);
+      expect(batch.ok === false && batch.message).toBe(
+        single.ok === false && single.message,
+      );
+    }
+  });
+
+  it("accepts an empty plan — emptiness is the caller's own refusal", () => {
+    expect(allocationsEligibilityVerdict({ allocations: [], clusters: CLUSTERS })).toEqual({
+      ok: true,
+    });
   });
 });

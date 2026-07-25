@@ -104,16 +104,61 @@ export function resolveRedelegateDestination(args: {
   if (clusterId === args.sourceClusterId) {
     return { ok: false, message: "Destination must differ from the source cluster." };
   }
-  // No set to check against — refuse rather than sign an unverified recipient.
-  if (args.clusters.length === 0) {
+  const eligible = clusterEligibility(clusterId, args.clusters);
+  if (!eligible.ok) return eligible;
+  return { ok: true, clusterId };
+}
+
+/**
+ * May this cluster receive delegation weight?
+ *
+ * THE single eligibility rule. Both the typed redelegate destination and every
+ * allocation in a custom autovote batch resolve through it, so a cluster the
+ * wallet refuses to redelegate to is also one it refuses to include in a plan.
+ * Two copies of this decision would eventually disagree, and the disagreement
+ * would be invisible until a signature.
+ *
+ * Fails closed on an empty set — see {@link resolveRedelegateDestination} for
+ * why this one decision does, when the rest of the flow does not. Pure.
+ */
+export function clusterEligibility(
+  clusterId: number,
+  clusters: ReadonlyArray<{ clusterId: number; active: boolean }>,
+): { ok: true } | { ok: false; message: string } {
+  // No set to check against — refuse rather than act on an unverified cluster.
+  if (clusters.length === 0) {
     return { ok: false, message: DESTINATION_UNVERIFIABLE_MESSAGE };
   }
-  const match = args.clusters.find((c) => c.clusterId === clusterId);
+  const match = clusters.find((c) => c.clusterId === clusterId);
   if (match === undefined) {
     return { ok: false, message: unknownDestinationMessage(clusterId) };
   }
+  // Not strictly `true` is ineligible, matching the directory's own `!active`.
   if (match.active !== true) {
     return { ok: false, message: ineligibleDestinationMessage(clusterId) };
   }
-  return { ok: true, clusterId };
+  return { ok: true };
+}
+
+/**
+ * Eligibility for a whole custom autovote plan, checked BEFORE the cap
+ * pre-flight signs anything.
+ *
+ * The custom inputs render from the unfiltered directory and the batch
+ * pre-flight reasons only about caps and row count, so without this an
+ * allocation could name a cluster that may not receive weight and the plan would
+ * reach the encoder. Blocks on the FIRST offending allocation and names it, the
+ * same shape the cap pre-flight uses. Pure.
+ */
+export function allocationsEligibilityVerdict(args: {
+  allocations: ReadonlyArray<{ clusterId: number }>;
+  clusters: ReadonlyArray<{ clusterId: number; active: boolean }>;
+}): { ok: true } | { ok: false; message: string } {
+  // An empty plan is the caller's own refusal to make, not an eligibility fault.
+  if (args.allocations.length === 0) return { ok: true };
+  for (const allocation of args.allocations) {
+    const eligible = clusterEligibility(allocation.clusterId, args.clusters);
+    if (!eligible.ok) return eligible;
+  }
+  return { ok: true };
 }
