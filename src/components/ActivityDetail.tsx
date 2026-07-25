@@ -33,6 +33,7 @@ import {
 } from "../sdk/notifications";
 import type { PendingLifecycle } from "../sdk/pending-tx";
 import { txTypeLabelForActivity } from "../sdk/tx-type-label";
+import { activityRowDirection } from "../sdk/activity-rows";
 import { tokenAmountDisplay, type TokenMeta } from "../sdk/token-metadata";
 import { CopyableAddress, DRow, MonoscanTxButton, NamedAddress, truncMiddle } from "./_detailModalParts";
 
@@ -236,8 +237,21 @@ function IndexedAmountRow({
   const unit = native ? "LYTH" : meta?.symbol?.trim() || tokenUnitLabel(row.tokenId);
   // Sign only when there's a real figure — an unknown MRC-20 scale shows a bare
   // "—" (never "+—").
+  //
+  // Derived from the SAME classified direction the feed row draws its arrow
+  // from, rather than re-read from the raw field: a claim reports no direction
+  // on the wire but IS incoming, so reading the field here showed "12.5" in the
+  // detail beside a "+12.5" in the row. A directionless row signs nothing.
+  //
+  // The minus is ASCII U+002D, not U+2212 — see the codepoint test.
+  const direction = activityRowDirection({
+    kind: row.activityKind,
+    subKind: row.subKind,
+    direction: row.direction,
+    tokenId: row.tokenId,
+  });
   const sign =
-    display === null ? "" : row.direction === "out" ? "−" : row.direction === "in" ? "+" : "";
+    display === null ? "" : direction === "out" ? "-" : direction === "in" ? "+" : "";
   return <DRow label="Amount" value={`${sign}${display ?? "—"} ${unit}`} />;
 }
 
