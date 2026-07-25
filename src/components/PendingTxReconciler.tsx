@@ -25,8 +25,9 @@ import { subscribeActiveChain } from "../sdk/chains";
 import { reconcilePendingOnce } from "../sdk/reconcile";
 import { hasPendingTxs, subscribePendingTxs } from "../sdk/pending-tx-store";
 
-/** Base cadence between reconcile ticks while txs are outstanding. */
-const RECONCILE_BASE_MS = 4_000;
+/** Base cadence between reconcile ticks while txs are outstanding. Exported so
+ *  the gate matrix can be driven on the real cadence, as IncomingPoller does. */
+export const RECONCILE_BASE_MS = 4_000;
 /** Back-off ceiling — a run of ticks that resolve nothing lengthens the gap up
  *  to here so a stuck tx doesn't hammer the RPC. Well under the 45-minute
  *  absolute cap (and the 60-minute terminal retain that follows it), so a
@@ -54,6 +55,25 @@ export function PendingTxReconciler() {
 
     const tick = async () => {
       if (cancelled) return;
+      // Hidden window: skip the read, keep the loop armed (the visibility
+      // listener below ticks immediately on return) — the same gate the other
+      // pollers use. This is the one poller that used to keep dispatching
+      // through the trust seam while the verdict it consults was, by design,
+      // not being re-proven.
+      //
+      // Deferral cannot become a miss: `reconcilePendingOnce` asks the chain
+      // what happened rather than watching a stream, so the answer is the same
+      // whenever it is asked, and it probes for a terminal verdict BEFORE any
+      // retention removal — so even a row that aged out while the window was
+      // hidden is still recorded on the catch-up tick.
+      //
+      // The delay is carried unchanged rather than backed off: a skipped tick
+      // made no progress because it did no work, and being away is not a stuck
+      // transaction.
+      if (document.visibilityState !== "visible") {
+        schedule(delay);
+        return;
+      }
       const before = await hasPendingTxs();
       if (!before) {
         // Nothing tracked — go fully idle. A future enqueue re-arms via the
@@ -105,6 +125,19 @@ export function PendingTxReconciler() {
       if (timer === null) schedule(RECONCILE_BASE_MS);
     });
 
+    // Catch up the instant the window is visible again, rather than waiting out
+    // the remainder of a timer that has been ticking past skipped work. Only
+    // when the loop was actually armed — an idle reconciler (nothing tracked)
+    // stays idle, and its next enqueue wakes it through the store subscription.
+    const onVisible = () => {
+      if (cancelled || timer === null) return;
+      if (document.visibilityState !== "visible") return;
+      delay = RECONCILE_BASE_MS;
+      clear();
+      void tick();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+
     // Re-arm at mount for any tx left tracked across an app restart.
     void (async () => {
       if (cancelled) return;
@@ -114,6 +147,7 @@ export function PendingTxReconciler() {
     return () => {
       cancelled = true;
       clear();
+      document.removeEventListener("visibilitychange", onVisible);
       unsubscribe();
       unsubscribeChain();
     };
