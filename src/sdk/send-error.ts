@@ -118,6 +118,18 @@ const fmt = (n: bigint): string => formatLyth(n.toString(), { includeUnit: false
  *  known (fee optional), else the generic body. Never a partial fabrication. */
 function insufficientFundsBody(context?: SendErrorContext): string {
   const generic = "Your wallet doesn't have enough LYTH to cover the amount plus the network fee.";
+  // A transaction that moves nothing — a delegation call carries value = 0. The
+  // amount is not unknown here, it is known to be zero, so "the amount plus the
+  // network fee" describes a transfer the user never made and hides that the
+  // whole shortfall is fee.
+  if (context?.amountLythoshi === 0n) {
+    const zeroValueGeneric =
+      "Your wallet doesn't have enough LYTH to cover the network fee. This transaction moves no tokens, so the fee is the whole cost.";
+    const x = context.balanceLythoshi;
+    const f = context.maxFeeLythoshi;
+    if (x === undefined || f === undefined) return zeroValueGeneric;
+    return `You have ${fmt(x)} LYTH but the network fee needs ${fmt(f)} LYTH. Shortfall: ${fmt(f - x)} LYTH. This transaction moves no tokens, so the fee is the whole cost.`;
+  }
   if (!context || context.balanceLythoshi === undefined || context.amountLythoshi === undefined) {
     return generic;
   }

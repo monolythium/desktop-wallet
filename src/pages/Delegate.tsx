@@ -474,6 +474,8 @@ export function Delegate() {
       title: `Delegate ${weightLabel} to cluster ${clusterId}`,
       subtitle: `Weight ${weightLabel} of your balance — non-custodial, tokens stay liquid`,
       auth: "keychain",
+      // value = 0: a shortfall here is entirely fee, never "the amount plus".
+      errorContext: { amountLythoshi: 0n },
       diff: [
         { k: "From", v: selfBech32m },
         { k: "Cluster", v: String(clusterId) },
@@ -530,6 +532,8 @@ export function Delegate() {
       title: `Undelegate from cluster ${clusterId}`,
       subtitle: `Undelegate ${weightLabel} of wallet weight — instant, nothing was locked`,
       auth: "keychain",
+      // value = 0: a shortfall here is entirely fee, never "the amount plus".
+      errorContext: { amountLythoshi: 0n },
       diff: [
         { k: "From", v: selfBech32m },
         { k: "Cluster", v: String(clusterId) },
@@ -592,6 +596,8 @@ export function Delegate() {
       title: `Undelegate all · ${rows.length} cluster${rows.length === 1 ? "" : "s"}`,
       subtitle: `Remove ${totalPct} of wallet weight across every cluster — instant, nothing was locked`,
       auth: "keychain",
+      // value = 0: a shortfall here is entirely fee, never "the amount plus".
+      errorContext: { amountLythoshi: 0n },
       diff: [
         { k: "From", v: selfBech32m },
         { k: "Clusters", v: String(rows.length) },
@@ -651,6 +657,8 @@ export function Delegate() {
       title: `Redelegate cluster ${fromCluster} → ${toCluster}`,
       subtitle: `Move ${weightLabel} of wallet weight without an unbonding round`,
       auth: "keychain",
+      // value = 0: a shortfall here is entirely fee, never "the amount plus".
+      errorContext: { amountLythoshi: 0n },
       diff: [
         { k: "From", v: selfBech32m },
         { k: "Source cluster", v: String(fromCluster) },
@@ -720,6 +728,8 @@ export function Delegate() {
       // rewards accrued in the meantime.
       subtitle: "Settle and withdraw your pending delegation rewards",
       auth: "keychain",
+      // value = 0: a shortfall here is entirely fee, never "the amount plus".
+      errorContext: { amountLythoshi: 0n },
       diff: [
         { k: "From", v: selfBech32m },
         // Labelled as a live preview, not an outcome.
@@ -786,6 +796,8 @@ export function Delegate() {
         ? "Future rewards will be claimed and delegated back automatically."
         : "Rewards will stop compounding — claim them manually.",
       auth: "keychain",
+      // value = 0: a shortfall here is entirely fee, never "the amount plus".
+      errorContext: { amountLythoshi: 0n },
       diff: [
         { k: "From", v: selfBech32m },
         { k: "Auto-compound", v: next ? "on" : "off" },
@@ -907,6 +919,8 @@ export function Delegate() {
       title: `Autovote · ${label}`,
       subtitle: `Spread ${(plan.totalWeightBps / 100).toFixed(2)}% of balance across ${plan.allocations.length} cluster${plan.allocations.length === 1 ? "" : "s"} — non-custodial`,
       auth: "keychain",
+      // value = 0: a shortfall here is entirely fee, never "the amount plus".
+      errorContext: { amountLythoshi: 0n },
       diff: [
         { k: "From", v: selfBech32m },
         { k: "Mode", v: label },
