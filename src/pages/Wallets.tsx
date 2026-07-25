@@ -11,6 +11,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { addressToTypedBech32 } from "@monolythium/core-sdk";
+import { useDeveloperMode } from "../sdk/developer-mode";
 
 /** Per-wallet live native-balance state. Each wallet tracks its own state so
  *  one RPC failure renders an honest per-row error rather than blanking the
@@ -51,6 +52,7 @@ import {
 const NO_PRICE_FEED_TITLE = "No LYTH price feed is registered on-chain.";
 
 export function Wallets() {
+  const devMode = useDeveloperMode();
   const ops = useOperations();
   const [identity, setIdentity] = useState<LiveWalletIdentity | null>(null);
   const [balance, setBalance] = useState<LiveWalletBalance | null>(null);
@@ -517,6 +519,19 @@ export function Wallets() {
         </div>
       </div>
 
+      {/* DEVELOPER-GATED, and this is why — so a later reader does not have to
+          guess. Four of its six fields are already better placed: the vault
+          slot, the typed address and the balance all appear on the catalogue
+          rows above, and the algorithm is a constant also stated on About. The
+          two that appear nowhere else — the account nonce and the public-key
+          size — are diagnostics for debugging a stuck transaction or a key,
+          not facts anyone needs in order to spend.
+          It is NOT gated because it was broken: the address-form fix landed
+          first and the panel was confirmed reading a real balance and nonce
+          against the live chain before this gate was added.
+          UNGATE IF: a field here becomes something a normal user needs and
+          cannot get from the catalogue rows, Receive, or Home. */}
+      {devMode ? (
       <div className="w-card">
         <div className="w-card__head">
           <h3>Live active-wallet preview</h3>
@@ -564,6 +579,7 @@ export function Wallets() {
           )}
         </div>
       </div>
+      ) : null}
 
       {showAdd && (
         <AddVaultModal
