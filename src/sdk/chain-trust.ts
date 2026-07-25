@@ -20,6 +20,7 @@ import { RpcClient, getChainInfo, isQuarantineError } from "@monolythium/core-sd
 import type { ChainStatsResponse } from "@monolythium/core-sdk";
 import { currentEndpoint, getProviderUnchecked } from "./client";
 import { rpcClientOptions } from "./http";
+import { withDeadline } from "./with-deadline";
 import { activeFleet } from "./fleet";
 import { activeChainRecord } from "./chains";
 import {
@@ -30,6 +31,22 @@ import {
 
 /** The registry network this build pins its chain identity to. */
 export const NETWORK_SLUG = "testnet-69420";
+
+/**
+ * Wall-clock bound on ONE trust read (ms).
+ *
+ * The SDK client exposes no timeout — `RpcClientOptions` is `{fetch?, headers?}`
+ * and its bundle contains no abort signal — so a wedged operator would otherwise
+ * hold a health tick open forever, and with it the trust verdict every read and
+ * broadcast is gated on. Every other probe path in this wallet is already
+ * bounded (peer reachability 4 000, operator inspection 6 000, spend guard
+ * 2 500); this one is the tightest of them because it is the only one that runs
+ * unattended every {@link HEALTH_TICK_MS}, and because a tick spends its budget
+ * TWICE in the worst case — the active operator, then the failover fan-out. At
+ * 2 000 both legs still complete inside one 5 000 ms period, which is the
+ * property {@link resolveHeadOverFleet}'s tests pin.
+ */
+export const CHAIN_TRUST_TIMEOUT_MS = 2_000;
 
 /** One operator's trust verdict — the real signals fed to
  *  {@link classifyNoOperatorReason}. A quarantined operator answered a `-32047`
@@ -235,9 +252,20 @@ async function resolveHeadOverFleet(
 ): Promise<TrustedHead> {
   const active = currentEndpoint();
 
+  // Both legs are bounded by CHAIN_TRUST_TIMEOUT_MS and fold to `unreachable` on
+  // expiry — fail-closed, and the SAME shape a transport fault already produces,
+  // so a wedged operator is indistinguishable from an absent one rather than
+  // being able to hold the verdict open. Without this the tick has no upper
+  // bound and a never-settling read freezes the trust flag at its last value.
+  const bounded = (p: Promise<OperatorVerdict>, url: string): Promise<OperatorVerdict> =>
+    withDeadline(p, CHAIN_TRUST_TIMEOUT_MS, unreachableVerdict(url));
+
   // The health probe re-checks the active operator even while it is untrusted
   // (to detect recovery), so it reads through the UNCHECKED provider.
-  const activeVerdict = await verdictForClient(getProviderUnchecked().rpcClient, active, pinChain, pinGenesis);
+  const activeVerdict = await bounded(
+    verdictForClient(getProviderUnchecked().rpcClient, active, pinChain, pinGenesis),
+    active,
+  );
   if (activeVerdict.trusted) {
     return resolveFleet([activeVerdict], pinChain);
   }
@@ -246,7 +274,7 @@ async function resolveHeadOverFleet(
     activeFleet()
       .map((peer) => peer.url)
       .filter((url) => url !== active)
-      .map((url) => probe(url, pinChain, pinGenesis)),
+      .map((url) => bounded(probe(url, pinChain, pinGenesis), url)),
   );
   return resolveFleet([activeVerdict, ...others], pinChain);
 }

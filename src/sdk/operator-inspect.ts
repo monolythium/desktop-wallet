@@ -11,6 +11,7 @@
 
 import { RpcClient, getChainInfo } from "@monolythium/core-sdk";
 import { rpcClientOptions } from "./http";
+import { withDeadline } from "./with-deadline";
 import { probePeer, type Peer, type ProbeResult } from "./peers";
 import { activeFleet } from "./fleet";
 import { probeOperator, unreachableVerdict, NETWORK_SLUG, type OperatorVerdict } from "./chain-trust";
@@ -47,21 +48,6 @@ export interface InspectDeps {
 
 function timedOutProbe(url: string, ms: number): ProbeResult {
   return { url, reachable: false, latencyMs: ms, chainIdOk: false, error: "timeout" };
-}
-
-/** Resolve `p`, or `fallback` if it hasn't settled within `ms`. Never rejects. */
-function withDeadline<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
-  return new Promise((resolve) => {
-    let settled = false;
-    const done = (v: T) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      resolve(v);
-    };
-    const timer = setTimeout(() => done(fallback), ms);
-    p.then(done, () => done(fallback));
-  });
 }
 
 async function readCapabilities(url: string): Promise<Record<string, { status: string }> | null> {

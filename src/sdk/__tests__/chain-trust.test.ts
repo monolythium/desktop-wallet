@@ -5,10 +5,11 @@
 // genesis → regenesis / fail-closed), plus the fail-closed seam gate
 // (getProvider refuses an untrusted operator; getProviderUnchecked does not).
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getChainInfo } from "@monolythium/core-sdk";
 import type { ChainStatsResponse } from "@monolythium/core-sdk";
 import {
+  CHAIN_TRUST_TIMEOUT_MS,
   NETWORK_SLUG,
   fleetSignals,
   probeOperator,
@@ -28,7 +29,7 @@ import {
   setProviderForTest,
   type MonolythiumClient,
 } from "../client";
-import { classifyNoOperatorReason } from "../chain-health";
+import { HEALTH_TICK_MS, classifyNoOperatorReason } from "../chain-health";
 import { ACTIVE_CHAIN_KEY, USER_CHAINS_KEY } from "../chains";
 import { writeOperatorOverride } from "../operator-override";
 
@@ -338,5 +339,79 @@ describe("fail-closed seam — getProvider refuses an untrusted operator", () =>
 
     markActiveOperatorTrusted();
     expect(getProvider().endpoint).toBe("http://op");
+  });
+});
+
+describe("the trust read is bounded — a hung operator cannot stall the verdict", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => {
+    vi.useRealTimers();
+    resetProviderForTest();
+  });
+
+  /** An active operator whose `lyth_chainStats` never settles. */
+  function installHangingActive(): void {
+    const rpcClient = {
+      lythChainStats: () => new Promise<ChainStatsResponse>(() => {}),
+    } as unknown as MonolythiumClient["rpcClient"];
+    setProviderForTest({ rpcClient, endpoint: "http://active" });
+  }
+
+  const PENDING = Symbol("pending");
+  /** The resolved value, or PENDING when `p` has not settled by now. */
+  async function peek<T>(p: Promise<T>): Promise<T | typeof PENDING> {
+    return Promise.race([p, Promise.resolve(PENDING)]);
+  }
+
+  it("a never-settling active read yields a degraded cause inside one health tick", async () => {
+    installHangingActive();
+    const probe: typeof probeOperator = async (url) => unreachableVerdict(url);
+
+    const pending = resolveTrustedHead(probe);
+    await vi.advanceTimersByTimeAsync(HEALTH_TICK_MS);
+
+    const res = await peek(pending);
+    expect(res).not.toBe(PENDING); // unbounded today: the tick never returns
+    expect(res).toEqual({ ok: false, cause: "unreachable" });
+  });
+
+  it("a never-settling FLEET probe also yields — the failover fan-out is bounded too", async () => {
+    // Active operator is on the wrong chain, so the resolver fans out; the fleet
+    // probe then hangs. Both legs must be bounded for the tick to complete.
+    const rpcClient = {
+      lythChainStats: async () => ({ ...stats({}), chainId: 1 }),
+    } as unknown as MonolythiumClient["rpcClient"];
+    setProviderForTest({ rpcClient, endpoint: "http://active" });
+    const probe: typeof probeOperator = () => new Promise<OperatorVerdict>(() => {});
+
+    const pending = resolveTrustedHead(probe);
+    await vi.advanceTimersByTimeAsync(HEALTH_TICK_MS);
+
+    const res = await peek(pending);
+    expect(res).not.toBe(PENDING);
+    expect(res).toEqual({ ok: false, cause: "untrusted" }); // the active op's wrong chain id still classifies
+  });
+
+  it("a slow-but-honest operator answering inside the deadline is still trusted", async () => {
+    const rpcClient = {
+      lythChainStats: () =>
+        new Promise<ChainStatsResponse>((resolve) => {
+          setTimeout(() => resolve(stats({})), CHAIN_TRUST_TIMEOUT_MS - 1);
+        }),
+    } as unknown as MonolythiumClient["rpcClient"];
+    setProviderForTest({ rpcClient, endpoint: "http://active" });
+
+    const pending = resolveTrustedHead(vi.fn() as unknown as typeof probeOperator);
+    await vi.advanceTimersByTimeAsync(CHAIN_TRUST_TIMEOUT_MS);
+
+    const res = await peek(pending);
+    expect(res).not.toBe(PENDING);
+    expect(res).toMatchObject({ ok: true, url: "http://active" });
+  });
+
+  it("the deadline leaves room for BOTH legs inside one tick (active read, then the fan-out)", () => {
+    // resolveHeadOverFleet awaits the active operator, then the fleet fan-out —
+    // two sequential deadlines. The tick must not overrun its own period.
+    expect(CHAIN_TRUST_TIMEOUT_MS * 2).toBeLessThan(HEALTH_TICK_MS);
   });
 });
