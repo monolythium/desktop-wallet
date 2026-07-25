@@ -9,8 +9,15 @@
 // to render pre-vault in the `needs_onboarding` boot state. All three values are
 // read synchronously at mount (no hydration flash), and the panel never calls
 // applyTheme on mount — the pre-paint boot path already applied it.
+//
+// The rows are the wallet's ONE disclosure component, controlled from here so
+// opening a row still shuts the others. It hides with an attribute rather than
+// unmounting, which is inert for this panel: every row's content is
+// presentational (a theme grid, two option lists) and not one of them runs
+// anything on mount, so nothing moves from page load to first expand.
 
 import { useState, type ReactNode } from "react";
+import { CollapsibleSection } from "./CollapsibleSection";
 import { THEMES, applyTheme, readTheme } from "../sdk/theme";
 import {
   ISO_4217_CURRENCIES,
@@ -58,8 +65,9 @@ export function PreferencesPanel() {
   const themeLabel = THEMES.find((t) => t.id === theme)?.label ?? theme;
 
   return (
-    <div data-testid="preferences-panel" style={{ display: "grid", gap: 8 }}>
-      <AccordionRow
+    <div data-testid="preferences-panel" style={{ display: "grid" }}>
+      <CollapsibleSection
+        flush
         title="Theme"
         value={themeLabel}
         open={open === "theme"}
@@ -69,9 +77,10 @@ export function PreferencesPanel() {
           {"Pick a palette. Applies across the wallet and persists on this device."}
         </div>
         <ThemeGrid selectedId={theme} onSelect={pickTheme} />
-      </AccordionRow>
+      </CollapsibleSection>
 
-      <AccordionRow
+      <CollapsibleSection
+        flush
         title="Language"
         value={LANGUAGE_LABELS[language]}
         open={open === "language"}
@@ -85,15 +94,16 @@ export function PreferencesPanel() {
           ))}
         </div>
         <Caption>{"Display language. More locales will follow — English (US) for now."}</Caption>
-      </AccordionRow>
+      </CollapsibleSection>
 
-      <AccordionRow
+      <CollapsibleSection
+        flush
         title="Display currency"
         value={currency}
         open={open === "currency"}
         onToggle={() => toggle("currency")}
       >
-        {/* Bounded so the accordion stays a reasonable height. */}
+        {/* Bounded so the row stays a reasonable height. */}
         <div style={{ ...GRID_2COL, maxHeight: 220, overflowY: "auto" }}>
           {ISO_4217_CURRENCIES.map((entry) => (
             <OptionButton
@@ -108,7 +118,7 @@ export function PreferencesPanel() {
         <Caption>
           {"Sets the currency for the wallet's fiat estimates. There is no LYTH price source yet, so estimate slots show only your currency's symbol and a dash until one exists."}
         </Caption>
-      </AccordionRow>
+      </CollapsibleSection>
     </div>
   );
 }
@@ -118,78 +128,6 @@ const GRID_2COL: React.CSSProperties = {
   gridTemplateColumns: "1fr 1fr",
   gap: 8,
 };
-
-function AccordionRow({
-  title,
-  value,
-  open,
-  onToggle,
-  children,
-}: {
-  title: string;
-  value: string;
-  open: boolean;
-  onToggle: () => void;
-  children: ReactNode;
-}) {
-  return (
-    <div
-      style={{
-        border: "1px solid var(--fg-700)",
-        borderRadius: 10,
-        background: "rgba(255,255,255,0.03)",
-        overflow: "hidden",
-      }}
-    >
-      <button
-        type="button"
-        onClick={onToggle}
-        aria-expanded={open}
-        style={{
-          width: "100%",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: 10,
-          padding: "12px 14px",
-          background: "none",
-          border: "none",
-          cursor: "pointer",
-          textAlign: "left",
-        }}
-      >
-        <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--fg-100)" }}>{title}</span>
-        <span style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
-          <span
-            style={{
-              fontSize: 12,
-              color: "var(--fg-300)",
-              whiteSpace: "nowrap",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-            }}
-          >
-            {value}
-          </span>
-          <span
-            aria-hidden="true"
-            style={{
-              display: "inline-flex",
-              color: "var(--fg-400)",
-              transform: open ? "rotate(90deg)" : "rotate(0deg)",
-              transition: "transform 150ms ease-out",
-            }}
-          >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="m9 18 6-6-6-6" />
-            </svg>
-          </span>
-        </span>
-      </button>
-      {open ? <div style={{ padding: "0 12px 12px" }}>{children}</div> : null}
-    </div>
-  );
-}
 
 function OptionButton({
   active,

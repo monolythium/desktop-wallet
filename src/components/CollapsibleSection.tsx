@@ -19,6 +19,12 @@
 // (the consensus cards, the chain registry, operator provenance); unmounting on
 // collapse would silently move those reads from page load to first expand and
 // turn a layout change into a lifecycle change.
+//
+// OPEN STATE CAN BE LIFTED. Sections are self-managing by default. A parent that
+// needs a relationship BETWEEN sections — the preferences accordion, where
+// opening one row shuts the others — supplies `open`/`onToggle` and owns it. The
+// alternative was a second collapsible for that one rule, which is exactly the
+// drift this module exists to prevent.
 
 import { useId, useState, type ReactNode } from "react";
 
@@ -28,12 +34,18 @@ interface CollapsibleSectionProps {
   value?: ReactNode;
   /** Never hidden. For signals a user must see to avoid acting wrongly. */
   always?: ReactNode;
-  /** Open on first render. Per-visit only — nothing here is persisted. */
+  /** Open on first render. Per-visit only — nothing here is persisted.
+   *  Ignored when the parent controls `open`. */
   defaultOpen?: boolean;
   /** Drop the card chrome so the section can be a row INSIDE an existing card
    *  (Help's one-question-per-row accordion). Chrome only: the trigger, the
    *  keyboard behaviour and the assistive-tech contract are identical. */
   flush?: boolean;
+  /** Controlled disclosure — supply WITH `onToggle` to let a parent own the
+   *  state (an at-most-one-open group). Omit both for self-management. */
+  open?: boolean;
+  /** Called instead of the internal toggle when the parent owns the state. */
+  onToggle?: () => void;
   children: ReactNode;
 }
 
@@ -43,9 +55,13 @@ export function CollapsibleSection({
   always,
   defaultOpen = false,
   flush = false,
+  open: openProp,
+  onToggle,
   children,
 }: CollapsibleSectionProps) {
-  const [open, setOpen] = useState(defaultOpen);
+  const [selfOpen, setSelfOpen] = useState(defaultOpen);
+  const open = openProp ?? selfOpen;
+  const toggle = onToggle ?? (() => setSelfOpen((v) => !v));
   const id = useId();
   const bodyId = `${id}-body`;
   const triggerId = `${id}-trigger`;
@@ -62,7 +78,7 @@ export function CollapsibleSection({
           className="w-disclosure__trigger"
           aria-expanded={open}
           aria-controls={bodyId}
-          onClick={() => setOpen((v) => !v)}
+          onClick={toggle}
         >
           <span className="w-disclosure__title">{title}</span>
           {value !== undefined && value !== null ? (

@@ -45,6 +45,18 @@ describe("PreferencesPanel — structure + single-open accordion", () => {
     expect(header("Theme")).toHaveAttribute("aria-expanded", "false");
   });
 
+  it("a collapsed row keeps its body mounted, and out of reach", async () => {
+    // The shared disclosure hides with an attribute rather than unmounting, so
+    // sections that read on mount do so at page load and not at first expand.
+    // Inert for this panel — nothing here runs on mount — but the contract has
+    // to hold, and a collapsed row must still be unusable.
+    const { user } = renderWithProviders(<PreferencesPanel />);
+    expect(screen.getByText("EUR — Euro")).toBeInTheDocument();
+    expect(screen.queryAllByRole("button", { name: /EUR — Euro/ })).toHaveLength(0);
+    await user.click(header("Display currency"));
+    expect(screen.getAllByRole("button", { name: /EUR — Euro/ })).toHaveLength(1);
+  });
+
   it("headers show the current values (theme LABEL, language label, bare code)", () => {
     renderWithProviders(<PreferencesPanel />);
     expect(header("Theme").textContent).toContain("Monolythium");
