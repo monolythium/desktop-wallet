@@ -213,7 +213,12 @@ export async function submitNativeTx(
 }
 
 /** True for a 0x-prefixed 32-byte hex hash — the only shape we treat as a
- *  usable canonical tx hash. */
-function isCanonicalHash(v: unknown): v is string {
+ *  usable canonical hash.
+ *
+ *  Exported because the chain-identity comparison asks the same question of a
+ *  reported genesis hash: both are 32-byte chain hashes, and a value that is not
+ *  one is not evidence of anything. One derivation, so the two cannot come to
+ *  disagree about what a well-formed hash is. */
+export function isCanonicalHash(v: unknown): v is string {
   return typeof v === "string" && /^0x[0-9a-fA-F]{64}$/.test(v);
 }

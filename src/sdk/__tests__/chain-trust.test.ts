@@ -48,6 +48,18 @@ const PIN = getChainInfo(NETWORK_SLUG);
 const PIN_CHAIN = PIN.chain_id;
 const PIN_GENESIS = PIN.genesis_hash;
 
+/**
+ * What a REAL re-genesis looks like: a correctly-shaped 32-byte hash that is
+ * simply not ours.
+ *
+ * Every mismatch fixture in this tree used to feed a MALFORMED value
+ * (`0xdeadbeef` and friends), so the only case the regenesis verdict actually
+ * exists for had never been exercised — the tests proved the branch fired on
+ * garbage, which is the case it must NOT fire on.
+ */
+const WELL_FORMED_WRONG =
+  "0x7c1d9b3ae4508f26d0b1c47a9e35f8021b6d4ca7e93f05182b7ce640a9d3f851";
+
 function stats(over: Partial<ChainStatsResponse>): ChainStatsResponse {
   return {
     schemaVersion: 1,
@@ -86,7 +98,7 @@ describe("verdictFromStats — the §F chain-id vs genesis split", () => {
   });
 
   it("right chain, different genesis → genesisMismatch (regenesis)", () => {
-    const v = verdictFromStats(stats({ genesisHash: "0xdeadbeef" }), PIN_CHAIN, PIN_GENESIS);
+    const v = verdictFromStats(stats({ genesisHash: WELL_FORMED_WRONG }), PIN_CHAIN, PIN_GENESIS);
     expect(v.genesisMismatch).toBe(true);
     expect(v.wrongChainId).toBe(false);
     expect(v.trusted).toBe(false);
@@ -119,6 +131,86 @@ describe("verdictFromStats — the §F chain-id vs genesis split", () => {
     expect(t.trusted).toBe(true);
     // Absent genesis records null and stays fail-closed.
     expect(verdictFromStats(stats({ genesisHash: null }), PIN_CHAIN, PIN_GENESIS).observedGenesis).toBeNull();
+  });
+});
+
+// A6 — only a well-formed hash can be evidence of anything.
+//
+// A regenesis verdict is a claim ABOUT THE CHAIN: it says this operator is
+// serving a chain that re-genesised under our chain id. A value that is not a
+// 32-byte hash cannot support that claim — it says the operator is broken or
+// answering something that is not a genesis hash at all, which is a statement
+// about the OPERATOR. Both paths refuse, so this buys a correct label rather
+// than a protection; the label is what a user reads and acts on.
+//
+// The three-outcome model is untouched: exact, full-length, case-insensitive,
+// no quorum, fail-closed on a missing hash. A malformed value moves from
+// DEFINITIVE MISMATCH to NON-DEFINITIVE — still refused, differently labelled.
+describe("verdictFromStats — only a well-formed hash can prove a re-genesis", () => {
+  it("a correctly-shaped hash that is not ours IS the re-genesis verdict", () => {
+    const v = verdictFromStats(stats({ genesisHash: WELL_FORMED_WRONG }), PIN_CHAIN, PIN_GENESIS);
+    expect(v.genesisMismatch).toBe(true);
+    expect(v.trusted).toBe(false);
+    expect(v.wrongChainId).toBe(false);
+    expect(v.observedGenesis).toBe(WELL_FORMED_WRONG);
+  });
+
+  it("the DIGITS are judged case-insensitively, like the comparison itself", () => {
+    const upperDigits = `0x${WELL_FORMED_WRONG.slice(2).toUpperCase()}`;
+    const v = verdictFromStats(stats({ genesisHash: upperDigits }), PIN_CHAIN, PIN_GENESIS);
+    expect(v.genesisMismatch).toBe(true);
+    expect(v.trusted).toBe(false);
+    // …and an upper-cased PIN still matches, so the shape gate did not quietly
+    // narrow the comparison it sits in front of.
+    const t = verdictFromStats(
+      stats({ genesisHash: PIN_GENESIS.toUpperCase().replace("0X", "0x") }),
+      PIN_CHAIN,
+      PIN_GENESIS,
+    );
+    expect(t.trusted).toBe(true);
+  });
+
+  it("the other direction: the SAME gate leaves a matching hash trusted", () => {
+    const v = verdictFromStats(stats({}), PIN_CHAIN, PIN_GENESIS);
+    expect(v.trusted).toBe(true);
+    expect(v.genesisMismatch).toBe(false);
+  });
+
+  it("a malformed value is not proof of a re-genesis — and still never passes", () => {
+    const malformed = [
+      "0xdeadbeef", // too short
+      "0xwronggenesis00000000", // not hex at all
+      "0x",
+      "not-hex",
+      "", // an empty string is not an absent field, and is not a hash either
+      PIN_GENESIS.slice(0, -1), // one nibble short of ours
+      `${PIN_GENESIS}0`, // one nibble long
+      PIN_GENESIS.slice(2), // right digits, no 0x
+      // An upper-cased PREFIX is malformed too — the shared shape test anchors
+      // on a literal "0x", which is what every JSON-RPC hex value carries. The
+      // digits are case-insensitive; the prefix is not.
+      `0X${WELL_FORMED_WRONG.slice(2)}`,
+    ];
+    for (const genesisHash of malformed) {
+      const v = verdictFromStats(stats({ genesisHash }), PIN_CHAIN, PIN_GENESIS);
+      expect(v.genesisMismatch, genesisHash).toBe(false);
+      // Fail-closed is unchanged: unproven is never trusted.
+      expect(v.trusted, genesisHash).toBe(false);
+      expect(v.wrongChainId, genesisHash).toBe(false);
+      // Still recorded verbatim for the inspection UI — the display shows what
+      // the operator actually said, whatever the verdict made of it.
+      expect(v.observedGenesis, genesisHash).toBe(genesisHash);
+    }
+  });
+
+  it("a wrong CHAIN ID is still never classified on genesis, well-formed or not", () => {
+    const v = verdictFromStats(
+      stats({ chainId: 1, genesisHash: WELL_FORMED_WRONG }),
+      PIN_CHAIN,
+      PIN_GENESIS,
+    );
+    expect(v.wrongChainId).toBe(true);
+    expect(v.genesisMismatch).toBe(false);
   });
 });
 
@@ -253,11 +345,26 @@ describe("resolveTrustedHead — fleet + failover + quarantine (health follows t
     // No active chain set ⇒ builtin ⇒ resolveTrustedHead pins from getChainInfo
     // (non-null genesis). A wrong genesis surfaces a definitive mismatch, proving
     // the null-pin custom branch is never taken for the builtin chain.
-    installActive(async () => ({ ...stats({}), genesisHash: "0xwronggenesis00000000" }));
+    installActive(async () => ({ ...stats({}), genesisHash: WELL_FORMED_WRONG }));
     const probe: typeof probeOperator = async (url) => unreachableVerdict(url);
     const res = await resolveTrustedHead(probe);
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.cause).toBe("regenesis");
+  });
+
+  it("a MALFORMED genesis reaches the banner as a broken operator, not a re-genesis", () => {
+    // The end-to-end half of A6: the label a user actually reads. Same refusal,
+    // and the same cause an operator that answered no genesis at all produces.
+    return (async () => {
+      installActive(async () => ({ ...stats({}), genesisHash: "0xdeadbeef" }));
+      const probe: typeof probeOperator = async (url) => unreachableVerdict(url);
+      const res = await resolveTrustedHead(probe);
+      expect(res.ok).toBe(false);
+      if (!res.ok) {
+        expect(res.cause).not.toBe("regenesis");
+        expect(res.cause).toBe("unreachable");
+      }
+    })();
   });
 });
 

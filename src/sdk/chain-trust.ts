@@ -20,6 +20,7 @@ import { RpcClient, getChainInfo, isQuarantineError } from "@monolythium/core-sd
 import type { ChainStatsResponse } from "@monolythium/core-sdk";
 import { currentEndpoint, getProviderUnchecked } from "./client";
 import { rpcClientOptions } from "./http";
+import { isCanonicalHash } from "./submit";
 import { withDeadline } from "./with-deadline";
 import { activeFleet } from "./fleet";
 import { activeChainRecord } from "./chains";
@@ -93,6 +94,17 @@ export type TrustedHead =
  * `genesisMismatch` can NEVER fire (regenesis is unreachable on a custom chain).
  * The observed genesis is still recorded for display; it is not judged on.
  *
+ * ONLY A WELL-FORMED HASH CAN PROVE A RE-GENESIS (A6). `genesisMismatch` is a
+ * claim about the CHAIN — that this operator serves a chain which re-genesised
+ * under our chain id — and a value that is not a 32-byte hash cannot support it.
+ * Such a value says the operator is broken or answering something that is not a
+ * genesis hash, which is a claim about the OPERATOR. Both refuse, so this buys a
+ * correct LABEL rather than a protection; the label is what a user reads.
+ * A malformed value therefore lands exactly where an ABSENT one does:
+ * non-definitive, unproven, untrusted. Shape is judged by the same
+ * {@link isCanonicalHash} the submit seam uses, so there is one answer in this
+ * wallet to what a well-formed chain hash is.
+ *
  * The head identity is the block hash, or the height when the hash is null
  * (fail-closed).
  */
@@ -111,7 +123,8 @@ export function verdictFromStats(
   return {
     url,
     wrongChainId: !chainIdOk,
-    genesisMismatch: pinGenesis !== null && chainIdOk && observed != null && !genesisOk,
+    genesisMismatch:
+      pinGenesis !== null && chainIdOk && isCanonicalHash(observed) && !genesisOk,
     quarantined: false,
     trusted: genesisOk,
     height: stats.latestHeight,

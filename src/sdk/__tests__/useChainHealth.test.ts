@@ -214,7 +214,13 @@ describe("useChainHealth heartbeat", () => {
   });
 
   it("goes ALL-UNTRUSTED (regenesis) on the right chain with a mismatched genesis", async () => {
-    statsImpl = async () => ({ ...head(100, "0xaa"), genesisHash: "0xdeadbeef" });
+    // A well-formed 32-byte hash that is not ours — what a real re-genesis
+    // produces, and the only shape that is evidence of one (A6). A malformed
+    // value is a broken operator, and is classified as such.
+    statsImpl = async () => ({
+      ...head(100, "0xaa"),
+      genesisHash: "0x7c1d9b3ae4508f26d0b1c47a9e35f8021b6d4ca7e93f05182b7ce640a9d3f851",
+    });
     await mount();
     expect(view!.health.kind).toBe("regenesis");
     expect(activeOperatorTrust()).toBe("regenesis");
