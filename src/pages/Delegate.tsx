@@ -60,6 +60,7 @@ import {
 } from "../sdk/delegation-cards";
 import { formatLythDisplay, truncateDecimals } from "../sdk/lyth-display";
 import {
+  AutovoteBatchError,
   autovoteModeMeta,
   buildAutovotePlan,
   fetchClusterDiversities,
@@ -1130,10 +1131,11 @@ export function Delegate() {
       // value = 0: a shortfall here is entirely fee, never "the amount plus".
       errorContext: { amountLythoshi: 0n },
       // Without this the drawer skips recordOperationFailure entirely, so a
-      // batch that died mid-run left only a transient error pane. Plan-level:
-      // the descriptor is built before execution and cannot know which
-      // allocation will fail. The ones that LANDED are recorded individually as
-      // they land, below.
+      // batch that died mid-run left only a transient error pane. Plan-level
+      // HERE, because the descriptor is built before execution; the allocation
+      // that actually fails is named from execute's catch via `refineNotify`,
+      // which is the only place it is known. The ones that LANDED are recorded
+      // individually as they land, below.
       notify: {
         kind: "delegate",
         amountDecimal: "0",
@@ -1228,6 +1230,25 @@ export function Delegate() {
             // Deliberately no txHash: each submission was already tracked as it
             // landed, and returning one here would track the last a second time.
           };
+        } catch (cause) {
+          // The one fact the descriptor could not carry. Written in the SAME
+          // vocabulary the landed submissions use above — cluster, name, weight
+          // — so a half-applied batch reads as one sequence rather than precise
+          // rows beside a bare "a delegation failed". Nothing new is persisted:
+          // these are fields the record already had, reaching the failure path
+          // for the first time.
+          const failed =
+            cause instanceof AutovoteBatchError
+              ? plan.allocations[cause.failedIndex]
+              : undefined;
+          if (failed) {
+            ctx.refineNotify?.({
+              clusterId: failed.clusterId,
+              clusterName: names.get(failed.clusterId),
+              delegationWeightBps: failed.weightBps,
+            });
+          }
+          throw cause;
         } finally {
           setAutovoteBusy(false);
         }

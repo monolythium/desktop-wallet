@@ -44,6 +44,7 @@ import { PasswordInput } from "../components/PasswordInput";
 import type { Route } from "../components/types";
 import type {
   OperationExecutionContext,
+  OperationNotifyMeta,
   OperationDescriptor,
   OperationResult,
   OperationStage,
@@ -236,8 +237,21 @@ export function OperationsDrawer({ descriptor, onClose, onNavigate }: Props) {
     setStage("executing");
     setErrorRaw(null);
     let resultTxHash: string | undefined;
+    // What `execute` learned about its own subject while running. Empty for
+    // every single-submission operation, which is already complete at
+    // descriptor time; a batch fills it in its catch, where the failing
+    // allocation is the one fact the descriptor could not carry. Held in a plain
+    // local rather than state — it is read once, below, and never rendered.
+    let notifyPatch: Partial<OperationNotifyMeta> = {};
+    const notifyMeta = (): OperationNotifyMeta | undefined =>
+      descriptor.notify && { ...descriptor.notify, ...notifyPatch };
     try {
-      const r = await descriptor.execute(ctx);
+      const r = await descriptor.execute({
+        ...ctx,
+        refineNotify: (patch) => {
+          notifyPatch = { ...notifyPatch, ...patch };
+        },
+      });
       resultTxHash = r.txHash;
       setResult(r);
       setStage("done");
@@ -248,8 +262,9 @@ export function OperationsDrawer({ descriptor, onClose, onNavigate }: Props) {
       // state (recording "confirmed" on an on-chain observation, "failed" on a
       // reverted receipt) even after this drawer closes. The Done pane shows
       // the broadcast immediately; the notification comes from the reconciler.
-      if (descriptor.notify && resultTxHash) {
-        void trackOperationTx(descriptor.notify, resultTxHash, r.nonce);
+      const accepted = notifyMeta();
+      if (accepted && resultTxHash) {
+        void trackOperationTx(accepted, resultTxHash, r.nonce);
       }
     } catch (cause) {
       setErrorRaw(extractSendError(cause));
@@ -259,9 +274,10 @@ export function OperationsDrawer({ descriptor, onClose, onNavigate }: Props) {
       // hash exists to key it on). On an admission reject the tx was signed +
       // submitted, so its hash is known locally even though it never landed;
       // record the refused attempt with its classified reason.
-      if (descriptor.notify) {
+      const failed = notifyMeta();
+      if (failed) {
         const hash = resultTxHash ?? rejectedSubmitTxHash(cause);
-        void recordOperationFailure(descriptor.notify, hash, cause);
+        void recordOperationFailure(failed, hash, cause);
       }
     } finally {
       ctx.vaultSeed?.fill(0);

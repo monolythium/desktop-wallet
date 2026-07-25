@@ -45,6 +45,11 @@ export interface OperationNotifyContext {
   /** For delegation kinds: the target cluster (optional). */
   clusterId?: number;
   clusterName?: string;
+  /** Delegation weight in basis points, so a failed delegation states the same
+   *  percent its landed siblings do. Optional + already carried by the record —
+   *  the tracked-tx path has always written it, and this closes the one door
+   *  that dropped it. */
+  delegationWeightBps?: number;
 }
 
 /** Record a terminal FAILURE for an operation that threw. Honest + immediate:
@@ -83,6 +88,7 @@ export async function recordOperationFailure(
     counterparty: meta.counterparty,
     clusterId: meta.clusterId,
     clusterName: meta.clusterName,
+    delegationWeightBps: meta.delegationWeightBps,
     reason,
     reasonCode,
   });

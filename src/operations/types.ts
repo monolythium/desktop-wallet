@@ -112,6 +112,25 @@ export interface OperationNotifyMeta {
 export interface OperationExecutionContext {
   /** Present only after `auth: "keychain"` succeeds. */
   vaultSeed?: Uint8Array;
+  /**
+   * Add facts to this operation's notification metadata that only `execute`
+   * can know.
+   *
+   * A descriptor is written before the work runs, so a MULTI-SUBMISSION
+   * operation can only describe its plan there — it cannot say which of N
+   * allocations will be the one to fail. That fact exists exactly once, inside
+   * the catch, and this is how it reaches the record instead of dying with the
+   * throw.
+   *
+   * MERGED OVER the descriptor's own metadata, never replacing it: the
+   * plan-level facts stay true and the subject-level ones are added. A patch
+   * carries only fields {@link OperationNotifyMeta} already defines, so
+   * refining a record changes what it SAYS, never its shape.
+   *
+   * Single-submission operations — every other caller — leave it untouched and
+   * record exactly what their descriptor declared.
+   */
+  refineNotify?: (patch: Partial<OperationNotifyMeta>) => void;
 }
 
 export interface OperationResult {
