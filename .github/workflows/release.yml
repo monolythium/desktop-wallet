@@ -142,8 +142,8 @@ jobs:
       # updater signatures. Refresh those signatures against the final,
       # Authenticode-signed installers so the updater verifies the exact files
       # users download. This is also safe when Azure signing is unavailable: it
-      # deterministically replaces the original signatures with equivalent
-      # signatures over the unchanged installers.
+          # replaces the original signatures with valid signatures over the
+          # unchanged installers.
       - name: Refresh Windows updater signatures after installer signing
         if: matrix.os == 'windows-latest'
         shell: bash
@@ -222,6 +222,23 @@ jobs:
         env:
           TAG: ${{ github.event.inputs.tag || github.ref_name }}
         run: node scripts/check-versions.mjs "${TAG#v}"
+
+      # A manual dispatch checks out the selected workflow ref, not necessarily
+      # the commit named by the supplied release tag. Refuse to attach artifacts
+      # from one commit to a tag that points at another.
+      - name: Assert manual release ref matches the tag commit
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.tag != ''
+        env:
+          TAG: ${{ github.event.inputs.tag }}
+        run: |
+          set -euo pipefail
+          git fetch --force origin "refs/tags/${TAG}:refs/tags/${TAG}"
+          tag_commit=$(git rev-list -n 1 "$TAG")
+          head_commit=$(git rev-parse HEAD)
+          if [ "$tag_commit" != "$head_commit" ]; then
+            echo "::error::Manual release ref ${head_commit} does not match ${TAG} at ${tag_commit}." >&2
+            exit 1
+          fi
 
       - uses: actions/download-artifact@v4
         with:
@@ -303,7 +320,7 @@ jobs:
           PLATFORMS_JSON="{}"
           add_platform() {
             local key="$1" bundle="$2" sig="$3"
-            if [ -n "$bundle" ] && [ -s "$sig" ]; then
+            if [ -n "$bundle" ] && [ -s "$bundle" ] && [ -s "$sig" ]; then
               local sig_data asset_url
               sig_data=$(read_sig "$sig")
               asset_url=$(jq -rn --arg base "$BASE" --arg name "$bundle" '$base + "/" + ($name | @uri)')

@@ -68,7 +68,8 @@ Two ways to trigger `release.yml`:
 - **Tag push (normal):** `git tag vX.Y.Z && git push origin vX.Y.Z`
 - **Manual:** *Actions → Release → Run workflow*, set `tag` to `vX.Y.Z`
   (leaving `tag` empty does a **dry-run build with no upload** — useful to smoke the
-  matrix without publishing). Optionally set `windows_trusted_signing_account`.
+  matrix without publishing). The selected workflow ref must be the exact commit
+  already named by that tag. Optionally set `windows_trusted_signing_account`.
 
 The **build** job (matrix, `fail-fast: false`) runs per OS:
 `macos aarch64`, `macos x86_64`, `linux x86_64`, `windows x86_64` — builds, signs
