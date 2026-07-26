@@ -138,6 +138,30 @@ jobs:
           timestamp-rfc3161: http://timestamp.acs.microsoft.com
           timestamp-digest: SHA256
 
+      # Azure signing mutates the installer bytes after Tauri emitted its
+      # updater signatures. Refresh those signatures against the final,
+      # Authenticode-signed installers so the updater verifies the exact files
+      # users download. This is also safe when Azure signing is unavailable: it
+          # replaces the original signatures with valid signatures over the
+          # unchanged installers.
+      - name: Refresh Windows updater signatures after installer signing
+        if: matrix.os == 'windows-latest'
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          bundle_dir="src-tauri/target/${{ matrix.target }}/release/bundle"
+          signed=0
+          while IFS= read -r -d '' installer; do
+            rm -f "${installer}.sig"
+            pnpm exec tauri signer sign "${installer}"
+            test -s "${installer}.sig"
+            signed=$((signed + 1))
+          done < <(find "$bundle_dir" -type f \( -name '*.exe' -o -name '*.msi' \) -print0)
+          test "$signed" -ge 1
+
       - name: Collect artifacts
         shell: bash
         run: |
@@ -145,17 +169,30 @@ jobs:
           mkdir -p dist-release
           # macOS runners default to bash 3.2 which doesn't support
           # `shopt -s globstar`, so we use `find` for portability.
-          # User-facing installers + the updater bundles + their .sig files.
-          # The .sig files are produced when TAURI_SIGNING_PRIVATE_KEY is set;
-          # the latest-json job downstream reads them to build the manifest.
+          # Prefix every asset with the matrix platform. Tauri gives both macOS
+          # updater archives the same basename, so flattening unprefixed matrix
+          # artifacts would overwrite one architecture in the release job.
+          # Normalize the basename with the same character policy GitHub applies
+          # to release assets. latest.json can then point at the filename we
+          # upload instead of a pre-normalization name that would 404.
+          # Tauri 2 emits direct AppImage/NSIS/MSI updater signatures when
+          # createUpdaterArtifacts=true; retain those as well as the legacy
+          # archive forms so the manifest generator is forward/back compatible.
           bundle_dir="src-tauri/target/${{ matrix.target }}/release/bundle"
+          platform="${{ matrix.platform }}"
           find "$bundle_dir" -type f \
             \( -name '*.dmg' -o -name '*.app.tar.gz' -o -name '*.app.tar.gz.sig' \
-               -o -name '*.deb' -o -name '*.AppImage' \
+               -o -name '*.deb' -o -name '*.deb.sig' \
+               -o -name '*.AppImage' -o -name '*.AppImage.sig' \
                -o -name '*.AppImage.tar.gz' -o -name '*.AppImage.tar.gz.sig' \
-               -o -name '*.msi' -o -name '*.msi.zip' -o -name '*.msi.zip.sig' \
-               -o -name '*.exe' -o -name '*.nsis.zip' -o -name '*.nsis.zip.sig' \) \
-            -exec cp -f {} dist-release/ \;
+               -o -name '*.msi' -o -name '*.msi.sig' \
+               -o -name '*.msi.zip' -o -name '*.msi.zip.sig' \
+               -o -name '*.exe' -o -name '*.exe.sig' \
+               -o -name '*.nsis.zip' -o -name '*.nsis.zip.sig' \) \
+            -print0 | while IFS= read -r -d '' asset; do
+              asset_name=$(basename "$asset" | sed -E 's/[^A-Za-z0-9_-]/./g; s/\.\.+/./g')
+              cp -f "$asset" "dist-release/${platform}--${asset_name}"
+            done
           ls -la dist-release/
 
       - uses: actions/upload-artifact@v4
@@ -165,13 +202,10 @@ jobs:
 
   release:
     needs: build
-    # `!cancelled()` (not `always()`) lets the release land when SOME matrix
-    # entries succeed and one fails (e.g. Windows, blocked on Azure Trusted
-    # Signing credential config) — the upload step has
-    # fail_on_unmatched_files=false so a missing platform is non-fatal — while
-    # skipping a cancelled run. A FULLY failed matrix produces no artifacts; the
-    # guard step below then fails the job, so a release is never cut with nothing
-    # in it.
+    # `!cancelled()` lets this job inspect artifacts even when a matrix leg
+    # fails, while still skipping a cancelled run. The manifest guard below
+    # requires every supported updater platform, so an incomplete matrix yields
+    # a precise failure and can never publish a partial release.
     if: ${{ !cancelled() && (startsWith(github.ref, 'refs/tags/') || github.event.inputs.tag != '') }}
     runs-on: ubuntu-latest
     steps:
@@ -188,6 +222,23 @@ jobs:
         env:
           TAG: ${{ github.event.inputs.tag || github.ref_name }}
         run: node scripts/check-versions.mjs "${TAG#v}"
+
+      # A manual dispatch checks out the selected workflow ref, not necessarily
+      # the commit named by the supplied release tag. Refuse to attach artifacts
+      # from one commit to a tag that points at another.
+      - name: Assert manual release ref matches the tag commit
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.tag != ''
+        env:
+          TAG: ${{ github.event.inputs.tag }}
+        run: |
+          set -euo pipefail
+          git fetch --force origin "refs/tags/${TAG}:refs/tags/${TAG}"
+          tag_commit=$(git rev-list -n 1 "$TAG")
+          head_commit=$(git rev-parse HEAD)
+          if [ "$tag_commit" != "$head_commit" ]; then
+            echo "::error::Manual release ref ${head_commit} does not match ${TAG} at ${tag_commit}." >&2
+            exit 1
+          fi
 
       - uses: actions/download-artifact@v4
         with:
@@ -233,41 +284,65 @@ jobs:
             fi
           }
 
-          # Find each platform's updater bundle + sig. Tauri produces:
-          #   macOS:   <name>.app.tar.gz + .sig
-          #   Linux:   <name>.AppImage.tar.gz + .sig
-          #   Windows: <name>.nsis.zip + .sig  (or .msi.zip + .sig)
-          DARWIN_ARM_BUNDLE=$(ls *aarch64*.app.tar.gz 2>/dev/null | head -1 || true)
-          DARWIN_ARM_SIG="${DARWIN_ARM_BUNDLE}.sig"
-          DARWIN_X64_BUNDLE=$(ls *x86_64*.app.tar.gz 2>/dev/null | head -1 || true)
-          DARWIN_X64_SIG="${DARWIN_X64_BUNDLE}.sig"
-          LINUX_BUNDLE=$(ls *.AppImage.tar.gz 2>/dev/null | head -1 || true)
-          LINUX_SIG="${LINUX_BUNDLE}.sig"
-          WIN_BUNDLE=$(ls *.nsis.zip 2>/dev/null | head -1 || ls *.msi.zip 2>/dev/null | head -1 || true)
-          WIN_SIG="${WIN_BUNDLE}.sig"
+          first_asset() {
+            local pattern candidate
+            for pattern in "$@"; do
+              candidate=$(find . -maxdepth 1 -type f -name "$pattern" -printf '%f\n' | LC_ALL=C sort | head -1)
+              if [ -n "$candidate" ]; then
+                printf '%s\n' "$candidate"
+                return 0
+              fi
+            done
+            return 0
+          }
 
-          # Build per-platform entries only when a signed bundle exists,
-          # so a partial release (e.g. macOS-only) still produces a
-          # valid manifest the plugin can parse.
+          # Tauri 2 signs the direct AppImage/NSIS/MSI installers. macOS uses
+          # the signed .app.tar.gz updater archive. Legacy archive names remain
+          # accepted as fallbacks for reproducibility across Tauri patch bumps.
+          DARWIN_ARM_BUNDLE=$(first_asset 'macos-arm64--*.app.tar.gz')
+          DARWIN_ARM_SIG="${DARWIN_ARM_BUNDLE}.sig"
+          DARWIN_X64_BUNDLE=$(first_asset 'macos-x64--*.app.tar.gz')
+          DARWIN_X64_SIG="${DARWIN_X64_BUNDLE}.sig"
+          LINUX_APPIMAGE_BUNDLE=$(first_asset 'linux-x64--*.AppImage' 'linux-x64--*.AppImage.tar.gz')
+          LINUX_APPIMAGE_SIG="${LINUX_APPIMAGE_BUNDLE}.sig"
+          LINUX_DEB_BUNDLE=$(first_asset 'linux-x64--*.deb')
+          LINUX_DEB_SIG="${LINUX_DEB_BUNDLE}.sig"
+          WIN_NSIS_BUNDLE=$(first_asset 'windows-x64--*.exe' 'windows-x64--*.nsis.zip')
+          WIN_NSIS_SIG="${WIN_NSIS_BUNDLE}.sig"
+          WIN_MSI_BUNDLE=$(first_asset 'windows-x64--*.msi' 'windows-x64--*.msi.zip')
+          WIN_MSI_SIG="${WIN_MSI_BUNDLE}.sig"
+          WIN_PRIMARY_BUNDLE="${WIN_NSIS_BUNDLE:-$WIN_MSI_BUNDLE}"
+          WIN_PRIMARY_SIG="${WIN_PRIMARY_BUNDLE}.sig"
+
+          # Emit both Tauri's legacy os-arch key and its installer-aware
+          # os-arch-bundle key. The generic Windows key intentionally prefers
+          # NSIS, matching the wallet's user-facing installer.
           PLATFORMS_JSON="{}"
           add_platform() {
             local key="$1" bundle="$2" sig="$3"
-            if [ -n "$bundle" ] && [ -f "$sig" ]; then
-              local sig_data
+            if [ -n "$bundle" ] && [ -s "$bundle" ] && [ -s "$sig" ]; then
+              local sig_data asset_url
               sig_data=$(read_sig "$sig")
+              asset_url=$(jq -rn --arg base "$BASE" --arg name "$bundle" '$base + "/" + ($name | @uri)')
               PLATFORMS_JSON=$(jq \
                 --arg k "$key" \
                 --arg s "$sig_data" \
-                --arg u "${BASE}/${bundle}" \
+                --arg u "$asset_url" \
                 '. + {($k): {signature: $s, url: $u}}' \
                 <<<"$PLATFORMS_JSON")
             fi
           }
 
           add_platform "darwin-aarch64" "$DARWIN_ARM_BUNDLE" "$DARWIN_ARM_SIG"
-          add_platform "darwin-x86_64"  "$DARWIN_X64_BUNDLE" "$DARWIN_X64_SIG"
-          add_platform "linux-x86_64"   "$LINUX_BUNDLE"      "$LINUX_SIG"
-          add_platform "windows-x86_64" "$WIN_BUNDLE"        "$WIN_SIG"
+          add_platform "darwin-aarch64-app" "$DARWIN_ARM_BUNDLE" "$DARWIN_ARM_SIG"
+          add_platform "darwin-x86_64" "$DARWIN_X64_BUNDLE" "$DARWIN_X64_SIG"
+          add_platform "darwin-x86_64-app" "$DARWIN_X64_BUNDLE" "$DARWIN_X64_SIG"
+          add_platform "linux-x86_64" "$LINUX_APPIMAGE_BUNDLE" "$LINUX_APPIMAGE_SIG"
+          add_platform "linux-x86_64-appimage" "$LINUX_APPIMAGE_BUNDLE" "$LINUX_APPIMAGE_SIG"
+          add_platform "linux-x86_64-deb" "$LINUX_DEB_BUNDLE" "$LINUX_DEB_SIG"
+          add_platform "windows-x86_64" "$WIN_PRIMARY_BUNDLE" "$WIN_PRIMARY_SIG"
+          add_platform "windows-x86_64-nsis" "$WIN_NSIS_BUNDLE" "$WIN_NSIS_SIG"
+          add_platform "windows-x86_64-msi" "$WIN_MSI_BUNDLE" "$WIN_MSI_SIG"
 
           jq -n \
             --arg v "$VERSION" \
@@ -280,18 +355,23 @@ jobs:
           echo "=== latest.json ==="
           cat latest.json
 
-          # An empty platforms map means NO signed updater bundle was collected
-          # for ANY OS — the app would fetch this manifest and silently find
-          # nothing to install. That happens if createUpdaterArtifacts is off
-          # (tauri.conf.json) or TAURI_SIGNING_PRIVATE_KEY is unset, so the .sig
-          # files were never produced. Fail loudly rather than publish a dead
-          # updater manifest.
+          # This release is an all-platform, all-installer candidate. Refuse to
+          # publish if any target is absent. Otherwise an installed DEB/MSI/NSIS
+          # client could fall back to a generic entry for a different bundle
+          # type and reject the downloaded bytes during installation.
           platform_count=$(jq '.platforms | length' latest.json)
           echo "latest.json describes ${platform_count} platform(s)."
-          if [ "${platform_count}" -eq 0 ]; then
-            echo "::error::latest.json has an empty platforms map — no signed updater bundle was collected. Refusing to publish a dead updater manifest. Check bundle.createUpdaterArtifacts and TAURI_SIGNING_PRIVATE_KEY." >&2
-            exit 1
-          fi
+          for required in \
+            darwin-aarch64 darwin-aarch64-app \
+            darwin-x86_64 darwin-x86_64-app \
+            linux-x86_64 linux-x86_64-appimage linux-x86_64-deb \
+            windows-x86_64 windows-x86_64-nsis windows-x86_64-msi
+          do
+            jq -e --arg required "$required" '.platforms[$required].signature | length > 0' latest.json >/dev/null || {
+              echo "::error::latest.json is missing signed updater target ${required}." >&2
+              exit 1
+            }
+          done
 
       # Publish a SHA256SUMS asset so a user can verify any file they download
       # from the release page (integrity — independent of the OS code-signing

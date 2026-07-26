@@ -18,7 +18,7 @@ repo; confirm they are set in **Settings → Secrets and variables → Actions**
 
 | Secret | Purpose | Effect if missing |
 |---|---|---|
-| `TAURI_SIGNING_PRIVATE_KEY` + `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | Minisign key that signs the updater bundles; its public half is pinned as `plugins.updater.pubkey`. | **No `.sig` files → empty `latest.json` → the release job now fails loudly** (dead-manifest guard). Auto-update cannot work without it. |
+| `TAURI_SIGNING_PRIVATE_KEY` + `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | Minisign key that signs the updater bundles; its public half is pinned as `plugins.updater.pubkey`. | **Missing `.sig` files for any supported OS → the release job fails loudly** (dead/partial-manifest guard). Auto-update cannot work without them. |
 | `APPLE_CERTIFICATE_BASE64`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`, `APPLE_TEAM_ID`, `APPSTORE_CONNECT_ISSUER_ID`, `APPSTORE_CONNECT_KEY_ID`, `APPSTORE_CONNECT_KEY_BASE64` | macOS Developer ID codesign + notarization (App Store Connect API key). | Both macOS legs fail and drop from the release. |
 | `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `AZURE_CERT_PROFILE` | Windows Azure Trusted Signing. | Windows installer is built **unsigned** with a loud `::warning::` (auto-update still works via the minisign `.sig`; only first-install SmartScreen is affected). Set them to sign. |
 
@@ -68,7 +68,8 @@ Two ways to trigger `release.yml`:
 - **Tag push (normal):** `git tag vX.Y.Z && git push origin vX.Y.Z`
 - **Manual:** *Actions → Release → Run workflow*, set `tag` to `vX.Y.Z`
   (leaving `tag` empty does a **dry-run build with no upload** — useful to smoke the
-  matrix without publishing). Optionally set `windows_trusted_signing_account`.
+  matrix without publishing). The selected workflow ref must be the exact commit
+  already named by that tag. Optionally set `windows_trusted_signing_account`.
 
 The **build** job (matrix, `fail-fast: false`) runs per OS:
 `macos aarch64`, `macos x86_64`, `linux x86_64`, `windows x86_64` — builds, signs
@@ -79,12 +80,14 @@ which is set).
 The **release** job then:
 1. downloads every platform's artifacts,
 2. refuses to proceed if **zero** artifacts were produced (fully-failed matrix),
-3. generates `latest.json` from the collected `.sig` files, and **fails loudly if its
-   `platforms` map is empty** (no signed bundle for any OS = a dead updater),
+3. generates `latest.json` from the collected `.sig` files, and **fails loudly if
+   any supported architecture/bundle entry is missing** (macOS app, Linux
+   AppImage/DEB, or Windows NSIS/MSI); a partial manifest could strand users or
+   make an installed bundle type reject bytes from a generic fallback,
 4. uploads everything — including `latest.json` — as a **draft** GitHub release.
 
-A partial matrix is tolerated: if one OS leg fails, the others still publish (that
-platform is simply absent from `latest.json`).
+The matrix still completes every independent leg when one OS fails, but the release
+does not publish until every supported updater target is present.
 
 ---
 
@@ -96,11 +99,11 @@ release** — a draft is not publicly reachable, so the updater endpoint 404s (t
 shows "up to date") until you publish.
 
 On the draft (*Releases → the drafted `vX.Y.Z`*):
-1. Confirm all four platforms' installers are present (or consciously accept a
-   missing/unsigned one — check the run log for the Windows-signing warning).
-2. Open `latest.json` and confirm it has a `platforms` entry **with a non-empty
-   `signature`** for each OS you intend to ship.
-3. Write/curate the release notes (the body is empty by default today).
+1. Confirm all four platforms' installers are present and check the run log for
+   any Windows-signing warning.
+2. Open `latest.json` and confirm every generic and installer-aware `platforms`
+   entry has a non-empty `signature` and points at the matching release asset.
+3. Review/curate the generated release notes.
 4. Ensure it will be the **latest, non-prerelease** release, then **Publish**.
 
 The moment it publishes, `…/releases/latest/download/latest.json` resolves and
