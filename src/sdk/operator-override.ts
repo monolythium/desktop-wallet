@@ -1,8 +1,8 @@
 // User-authored operator override store — a validated, persisted replacement for
 // the default operator (RPC endpoint) list the wallet dials.
 //
-// The wallet's default fleet is the SDK registry (the public gateway + the
-// testnet-69420 operators). A power user (developer build only, per build-mode
+// The wallet's default fleet is the SDK registry (the canonical public gateway).
+// A power user (developer build only, per build-mode
 // law 3) may override it with their own nodes. This module owns the storage
 // contract and the whole-list validation; the hardened-build dial rule
 // (hardenedOperators / overrideWithinFleet) lives alongside it and the
@@ -25,8 +25,7 @@ export interface OperatorEntry {
 }
 
 /** Upper bound on an override list, so a tampered or hand-edited stored value can
- *  never materialize an unbounded array. The live fleet (40 operators + gateway)
- *  is well under this. */
+ * never materialize an unbounded array. */
 export const MAX_OPERATORS = 64;
 
 /** localStorage key for the user's operator override. Global scope (operator

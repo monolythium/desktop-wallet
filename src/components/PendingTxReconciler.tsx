@@ -24,6 +24,7 @@ import { useEffect } from "react";
 import { subscribeActiveChain } from "../sdk/chains";
 import { reconcilePendingOnce } from "../sdk/reconcile";
 import { hasPendingTxs, subscribePendingTxs } from "../sdk/pending-tx-store";
+import { useChainHealthView } from "../sdk/ChainHealthProvider";
 
 /** Base cadence between reconcile ticks while txs are outstanding. Exported so
  *  the gate matrix can be driven on the real cadence, as IncomingPoller does. */
@@ -35,7 +36,14 @@ export const RECONCILE_BASE_MS = 4_000;
 const RECONCILE_MAX_MS = 30_000;
 
 export function PendingTxReconciler() {
+  const chainKind = useChainHealthView().health.kind;
+
   useEffect(() => {
+    // Genesis-scoped pending state can only be opened after the active endpoint
+    // passes the chain/genesis trust probe. Re-running on kind transitions means
+    // an offline cold start automatically hydrates and resumes once live.
+    if (chainKind !== "live") return;
+
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
     let delay = RECONCILE_BASE_MS;
@@ -151,7 +159,7 @@ export function PendingTxReconciler() {
       unsubscribe();
       unsubscribeChain();
     };
-  }, []);
+  }, [chainKind]);
 
   return null;
 }

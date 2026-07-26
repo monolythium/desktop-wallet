@@ -132,6 +132,17 @@ describe("hydratePendingTxs — on-mount disk warm", () => {
     expect(pendingTxsSnapshot()).toEqual([]);
     expect(await hasPendingTxs()).toBe(false);
   });
+
+  it("fails closed without rejecting when the live genesis is unavailable", async () => {
+    await enqueuePendingTx(tx({ txHash: "0xold-genesis" }));
+    expect(pendingTxsSnapshot()).toHaveLength(1);
+    __setGenesisIdentityResolverForTests(async () => null);
+
+    await expect(hydratePendingTxs()).resolves.toBeUndefined();
+
+    expect(pendingTxsSnapshot()).toEqual([]);
+    expect(await hasPendingTxs()).toBe(false);
+  });
 });
 
 describe("genesis scoping", () => {

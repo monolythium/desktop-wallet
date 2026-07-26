@@ -546,7 +546,7 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
       }
       ops.open({
         title: `Send ${token.symbol}`,
-        subtitle: "MRC-20 transfer · plaintext",
+        subtitle: "MRC-20 transfer · canonical RPC gateway",
         auth: "keychain",
         diff: [
           { k: "From", v: fromBech32m },
@@ -575,7 +575,7 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
           },
           { text: "Unlocks the local vault for this operation only." },
           {
-            text: "Submits the signed transaction over the plaintext mesh_submitTx path — the inclusion path that confirms on this chain.",
+            text: "Submits the signed transaction through the canonical HTTPS RPC gateway; backend relays use native-PQ transport.",
           },
         ],
         notify: { kind: "send", amountDecimal: shown, unit: token.symbol, counterparty: toBech32m },
@@ -623,7 +623,7 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
 
     ops.open({
       title: `Send ${amountLyth} LYTH`,
-      subtitle: "Native ML-DSA send · plaintext",
+      subtitle: "Native ML-DSA send · canonical RPC gateway",
       auth: "keychain",
       diff: [
         { k: "From", v: fromBech32m },
@@ -649,7 +649,7 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
         { text: "Unlocks the local vault for this operation only." },
         { text: "Derives an ML-DSA-65 signer with @monolythium/core-sdk/crypto." },
         {
-          text: "Submits the signed transaction over the plaintext mesh_submitTx path — the inclusion path that confirms on this chain.",
+          text: "Submits the signed transaction through the canonical HTTPS RPC gateway; backend relays use native-PQ transport.",
         },
       ],
       notify: { kind: "send", amountDecimal: amountLyth, counterparty: toBech32m },
@@ -1345,4 +1345,3 @@ const inputStyle: React.CSSProperties = {
   color: "var(--fg-100)",
   outline: "none",
 };
-

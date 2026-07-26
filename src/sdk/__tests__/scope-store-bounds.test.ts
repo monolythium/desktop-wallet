@@ -38,9 +38,13 @@ import {
   __resetChainHealthStoreForTests,
   purgeScopesForAddress as purgeChainHealth,
 } from "../chain-health-store";
+import { __setGenesisIdentityResolverForTests } from "../chain-identity";
+
+const GENESIS = `0x${"11".repeat(32)}`;
 
 beforeEach(() => {
   backing.clear();
+  __setGenesisIdentityResolverForTests(async () => GENESIS);
   __resetNotificationsStoreForTests();
   __resetActivityCacheStoreForTests();
   __resetChainHealthStoreForTests();
@@ -64,7 +68,8 @@ describe("appendNotifiedIdCapped — the dedupe-set bound", () => {
 describe("purgeScopesForAddress — drops exactly one vault's scopes, no cross-vault damage", () => {
   it("notifications: removes this address's history / notified-set / watermark, leaves others (incl. a longer address that shares the prefix)", async () => {
     backing.set("notifications.v1.json::state", {
-      version: 1,
+      version: 2,
+      genesisIdentity: GENESIS,
       scopes: {
         "mono.notifications.history.mono1a.0x10f2c.v1": { schemaVersion: 0, entries: [] },
         "mono.notifications.notified.mono1a.0x10f2c.v1": { schemaVersion: 0, ids: ["x"] },
@@ -82,7 +87,8 @@ describe("purgeScopesForAddress — drops exactly one vault's scopes, no cross-v
 
   it("activity cache: removes this address's entries, leaves others", async () => {
     backing.set("activity.v1.json::state", {
-      version: 1,
+      version: 2,
+      genesisIdentity: GENESIS,
       confirmed: {
         "mono.activity.mono1a.0x10f2c.v1": { a: 1 },
         "mono.activity.mono1b.0x10f2c.v1": { b: 1 },

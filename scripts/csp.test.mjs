@@ -3,6 +3,7 @@ import {
   connectSrc,
   devCsp,
   operatorOrigins,
+  productionRpcOrigins,
   prodCsp,
   FIXED_HOSTS,
   IPC_SOURCE,
@@ -29,19 +30,42 @@ describe("operatorOrigins", () => {
     ]);
   });
 
-  it("preserves the http scheme (the operators are plaintext — never upgraded)", () => {
+  it("preserves the supplied scheme for development/custom-origin validation", () => {
     expect(operatorOrigins(["http://1.2.3.4:8545"])[0].startsWith("http://")).toBe(true);
+  });
+});
+
+describe("productionRpcOrigins", () => {
+  it("accepts the canonical HTTPS gateway and secure build-time overrides", () => {
+    expect(
+      productionRpcOrigins(
+        ["https://rpc.monolythium.com"],
+        ["https://override.example:9443"],
+      ),
+    ).toEqual(["https://rpc.monolythium.com", "https://override.example:9443"]);
+  });
+
+  it("fails closed if an official registry origin is plaintext", () => {
+    expect(() =>
+      productionRpcOrigins(["https://rpc.monolythium.com", "http://1.2.3.4:8545"]),
+    ).toThrow(/refusing insecure official RPC origin/);
+  });
+
+  it("excludes a plaintext build-time override from the packaged policy", () => {
+    expect(
+      productionRpcOrigins(["https://rpc.monolythium.com"], ["http://127.0.0.1:8545"]),
+    ).toEqual(["https://rpc.monolythium.com"]);
   });
 });
 
 describe("connectSrc", () => {
   it("includes self, the IPC origin, the fixed https hosts, and every operator", () => {
-    const cs = connectSrc(["http://1.2.3.4:8545", "http://5.6.7.8:8545"]);
+    const cs = connectSrc(["https://rpc-1.example", "https://rpc-2.example"]);
     expect(cs).toContain("'self'");
     expect(cs).toContain(IPC_SOURCE);
     for (const h of FIXED_HOSTS) expect(cs).toContain(h);
-    expect(cs).toContain("http://1.2.3.4:8545");
-    expect(cs).toContain("http://5.6.7.8:8545");
+    expect(cs).toContain("https://rpc-1.example");
+    expect(cs).toContain("https://rpc-2.example");
   });
 
   it("adds the Vite HMR sources ONLY in dev", () => {
@@ -69,8 +93,9 @@ describe("connectSrc", () => {
   });
 });
 
-describe("prodCsp — tight, and never blocks the http operators", () => {
-  const csp = prodCsp(connectSrc(["http://1.2.3.4:8545"]));
+describe("prodCsp — tight canonical HTTPS gateway policy", () => {
+  const sources = connectSrc(["https://rpc.monolythium.com"]);
+  const csp = prodCsp(sources);
 
   it("is a tight baseline (default-src self; lockables 'none'; base-uri self)", () => {
     expect(csp).toContain("default-src 'self'");
@@ -88,16 +113,15 @@ describe("prodCsp — tight, and never blocks the http operators", () => {
     expect(csp).not.toContain("'unsafe-eval'");
   });
 
-  it("uses NO upgrade-insecure-requests and allows the http operator origin", () => {
+  it("contains no plaintext RPC or websocket origin", () => {
     expect(csp).not.toContain("upgrade-insecure-requests");
     expect(csp).not.toContain("block-all-mixed-content");
-    expect(csp).toContain("http://1.2.3.4:8545");
+    expect(csp).not.toContain(":8545");
+    expect(csp).not.toContain("ws://");
+    expect(sources.filter((source) => source.startsWith("http://"))).toEqual([]);
   });
 
   it("carries NO bare scheme source (http:/https:) and NO wildcard in connect-src [19a]", () => {
-    // Assert at the token level: the prod string contains "http://..." operator
-    // origins, so a naive substring check would false-positive — split instead.
-    const sources = connectSrc(["http://1.2.3.4:8545"]); // dev:false
     expect(sources).not.toContain("http:");
     expect(sources).not.toContain("https:");
     expect(sources).not.toContain("*");

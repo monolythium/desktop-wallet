@@ -5,7 +5,7 @@
 // (which would assert a false value). No network, no mock, no fabricated number
 // anywhere in this file.
 //
-// ORACLE STATUS (verified 2026-07-19 against @monolythium/core-sdk 0.6.8 and
+// ORACLE STATUS (verified 2026-07-25 against @monolythium/core-sdk 0.6.10 and
 // mono-core; unchanged from the 0.6.7 reading): the SDK DOES expose a generic
 // multi-signer price oracle —
 // precompile 0x1009, read via `lythOracleLatestPrice` / `lythOracleFeedConfig` /

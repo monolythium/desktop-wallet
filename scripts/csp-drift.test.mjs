@@ -1,14 +1,13 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { getRpcEndpoints } from "@monolythium/core-sdk";
+import { getChainInfo, getRpcEndpoints } from "@monolythium/core-sdk";
 import { operatorOrigins, FIXED_HOSTS, IPC_SOURCE } from "./csp.mjs";
 
-// Drift guard: the COMMITTED src-tauri/tauri.conf.json connect-src must cover
-// every current operator origin from getRpcEndpoints. Because the operators
-// drift on a @monolythium/core-sdk bump, a bump that adds/changes an operator
-// makes this fail in CI → re-run `pnpm gen:csp`. This is what keeps the policy
-// from silently blocking a new RPC node.
+// Drift guard: the COMMITTED src-tauri/tauri.conf.json connect-src must match
+// the canonical Posture-C gateway from getRpcEndpoints. Because the registry
+// drifts on a @monolythium/core-sdk bump, a bump that changes topology makes
+// this fail in CI → re-run `pnpm gen:csp`.
 
 // vitest runs with cwd = the project root (import.meta.url is not a file: scheme
 // under the transform, so resolve against cwd instead).
@@ -32,14 +31,32 @@ describe("tauri.conf.json CSP — drift guard vs the SDK operator set", () => {
     expect(missing).toEqual([]);
   });
 
+  it("pins the accepted Posture-C V16 R5 registry and gateway topology", () => {
+    const info = getChainInfo("testnet-69420");
+    const endpoints = getRpcEndpoints("testnet-69420");
+    expect(info.chain_id).toBe(69420);
+    expect(info.genesis_hash).toBe(
+      "0x8dfc309dfe8e35b4ca036631c7dc25b29e618ac8a9694e0e2bbe23d0f98ab1fe",
+    );
+    expect(endpoints).toHaveLength(1);
+    expect(endpoints[0]?.url).toBe("https://rpc.monolythium.com");
+    expect(endpoints[0]?.ws_url).toBe("wss://rpc.monolythium.com/ws");
+  });
+
   it("covers the fixed https hosts + the Tauri IPC origin", () => {
     for (const h of FIXED_HOSTS) expect(csp).toContain(h);
     expect(csp).toContain(IPC_SOURCE);
   });
 
-  it("never adds upgrade-insecure-requests / block-all-mixed-content (would kill the http operators)", () => {
+  it("contains no direct plaintext node RPC or websocket origin", () => {
     expect(csp).not.toContain("upgrade-insecure-requests");
     expect(csp).not.toContain("block-all-mixed-content");
+    expect(csp).not.toContain(":8545");
+    expect(csp).not.toContain("ws://");
+    const connectDirective = csp.split("connect-src ")[1].split(";")[0].split(" ");
+    expect(connectDirective.filter((source) => source.startsWith("http://"))).toEqual([
+      "http://ipc.localhost",
+    ]);
   });
 
   it("stays tight: no 'unsafe-inline' / 'unsafe-eval' in the prod policy", () => {

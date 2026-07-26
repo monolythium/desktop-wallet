@@ -1,6 +1,6 @@
 // The builtin chain record must agree with the SDK registry it is a record OF.
 //
-// Surfaced by the 0.6.7 → 0.6.8 bump ritual. The TRUST anchor is already
+// Surfaced by the SDK bump ritual. The TRUST anchor is already
 // registry-sourced: `chain-trust.ts` reads `getChainInfo(NETWORK_SLUG).chain_id`
 // and `.genesis_hash` for the builtin branch, so a chain that disagreed with the
 // pin would fail closed. But `chains.ts` carries the builtin chain's id as
@@ -83,10 +83,10 @@ describe("the builtin chain record agrees with the SDK registry", () => {
 // the one moment someone is looking. It lives in a test precisely so the scan
 // above — which excludes __tests__ — still forbids a second anchor in shipped
 // source.
-// Reviewed 2026-07-25 against core-sdk 0.6.8: confirmed identical to
-// lyth_chainStats.genesisHash on all 41 live operators (chain id 69420).
+// Reviewed 2026-07-25 against core-sdk 0.6.10, the accepted Posture-C V16 R5
+// evidence, and the canonical gateway's lyth_chainStats response (chain 69420).
 const REVIEWED_GENESIS_HASH =
-  "0xe22733f4d7e013b93f0f825667fcf852cbf7ad1ca31a42a1bfcf1ab6d79c89a3";
+  "0x8dfc309dfe8e35b4ca036631c7dc25b29e618ac8a9694e0e2bbe23d0f98ab1fe";
 
 const REPIN_GUIDANCE = [
   "The chain registry's genesis_hash no longer matches the value recorded here.",

@@ -15,15 +15,21 @@ import {
   subscribePendingTxs,
 } from "./pending-tx-store";
 import type { PendingTx } from "./pending-tx";
+import { useChainHealthView } from "./ChainHealthProvider";
 
 /** Subscribe to the durable tracked-tx store. Triggers a one-time disk
  *  hydration on first mount; returns an empty array until hydration resolves
  *  and whenever no tx is outstanding. The array reference is stable between
  *  renders while the set is unchanged. */
 export function usePendingTxs(): ReadonlyArray<PendingTx> {
+  const chainKind = useChainHealthView().health.kind;
   useEffect(() => {
+    // The store namespace is the live block-0 identity, resolved through the
+    // trust-gated provider. Wait until the health probe has verified the active
+    // endpoint; depending on chainKind also retries after offline boot/recovery.
+    if (chainKind !== "live") return;
     void hydratePendingTxs();
-  }, []);
+  }, [chainKind]);
   return useSyncExternalStore(
     subscribePendingTxs,
     pendingTxsSnapshot,

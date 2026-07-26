@@ -302,7 +302,15 @@ export function pendingTxsSnapshot(): ReadonlyArray<PendingTx> {
  *  no-op. Best-effort — an unreadable store degrades to an empty set. */
 export async function hydratePendingTxs(): Promise<void> {
   const before = snapshot;
-  await loadEnvelope();
+  try {
+    await loadEnvelope();
+  } catch {
+    // Live identity is unavailable (or the store failed before it could be
+    // normalized). Fail closed: an earlier-genesis snapshot must not remain
+    // visible merely because the current chain cannot be identified.
+    cache = null;
+    snapshot = [];
+  }
   if (snapshot !== before) notifySubscribers();
 }
 

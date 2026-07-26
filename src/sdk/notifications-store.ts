@@ -296,7 +296,11 @@ export async function purgeScopesForAddress(addressLower: string): Promise<void>
       if (prefixes.some((p) => k.startsWith(p))) continue;
       nextScopes[k] = v;
     }
-    await saveState({ version: 1, scopes: nextScopes });
+    await saveState({
+      version: 2,
+      genesisIdentity: state.genesisIdentity,
+      scopes: nextScopes,
+    });
   } catch {
     // Best-effort — a purge failure just leaves the (now-unreferenced) scopes.
   }

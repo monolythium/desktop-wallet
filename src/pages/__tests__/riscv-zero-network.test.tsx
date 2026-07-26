@@ -114,7 +114,9 @@ describe("§F.3 — the honesty intro", () => {
 
   it("every other claim matches what the page actually does", () => {
     expect(RISCV_CONSOLE_INTRO).toContain("ML-DSA-65");
-    expect(RISCV_CONSOLE_INTRO).toContain("mesh_submitTx");
+    expect(RISCV_CONSOLE_INTRO).toContain("canonical HTTPS RPC gateway");
+    expect(RISCV_CONSOLE_INTRO).toContain("native-PQ transport");
+    expect(RISCV_CONSOLE_INTRO).not.toMatch(/plaintext/i);
     expect(RISCV_CONSOLE_INTRO).toContain("inclusion shows up in Activity");
     // No receipt polling exists here, so it may not be claimed.
     expect(RISCV_CONSOLE_INTRO).not.toMatch(/receipt/i);

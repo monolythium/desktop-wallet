@@ -1,8 +1,8 @@
 // Peer (RPC endpoint) catalogue, probing, and selection.
 //
-// The wallet talks to one `mono-core` node at a time. This module enumerates
-// the endpoints the wallet can switch between (the public gateway plus the
-// official testnet-69420 endpoints from the SDK registry), probes them for
+// The wallet talks to one RPC endpoint at a time. This module enumerates the
+// endpoints the wallet can switch between (currently the canonical public
+// gateway from the testnet-69420 SDK registry), probes them for
 // reachability + latency + chain-id match, and picks the fastest eligible one.
 //
 // HONESTY: a peer that responds but reports the wrong chain id is surfaced as
@@ -82,9 +82,9 @@ function labelFromNotes(notes: string | undefined, provider: string): string {
 }
 
 /**
- * The peer catalogue: the public gateway first (the wallet's default), then the
- * official SDK endpoints. De-duped by URL so the gateway is never listed twice
- * if it also appears in the registry.
+ * The peer catalogue: the public gateway first (the wallet's default), then any
+ * additional official SDK endpoints. De-duped by URL so the canonical gateway
+ * is listed once when it also appears in the registry.
  */
 export function listPeers(): Peer[] {
   const peers: Peer[] = [

@@ -25,7 +25,7 @@ import {
  * a guarantee the page never made.
  */
 export const RISCV_CONSOLE_INTRO =
-  "Build and submit RISC-V (MRV native) deploy and call transactions. Submission signs with ML-DSA-65 and broadcasts over plaintext mesh_submitTx; the wallet reports the transaction hash (and the expected contract address for a deploy), and inclusion shows up in Activity. This console does not prove live RISC-V execution.";
+  "Build and submit RISC-V (MRV native) deploy and call transactions. Submission signs with ML-DSA-65 and uses the canonical HTTPS RPC gateway; its backend relays use native-PQ transport. The wallet reports the transaction hash (and the expected contract address for a deploy), and inclusion shows up in Activity. This console does not prove live RISC-V execution.";
 
 interface RiscvContractsProps {
   goto: (r: Route) => void;
@@ -77,7 +77,7 @@ export function RiscvContracts({ goto }: RiscvContractsProps) {
       ],
       effects: [
         { text: "Submits an MRV deploy payload from the unlocked vault." },
-        { text: "Uses plaintext ML-DSA submission (mesh_submitTx) — the confirming path; native lythoshi fee fields." },
+        { text: "Uses the canonical HTTPS RPC gateway (native-PQ backend relay) and native lythoshi fee fields." },
       ],
       execute: async (ctx) => {
         if (!ctx?.vaultSeed) throw new Error("vault seed unavailable after keychain authorization");
@@ -196,7 +196,7 @@ export function RiscvContracts({ goto }: RiscvContractsProps) {
           <div className="w-card__head">
             <h3>Deploy</h3>
             <div className="w-card__head__spacer" />
-            <span className="w-live-pill is-muted">plaintext</span>
+            <span className="w-live-pill is-muted">gateway</span>
           </div>
           <div className="w-card__body">
             <div className="w-form-stack">
@@ -239,7 +239,7 @@ export function RiscvContracts({ goto }: RiscvContractsProps) {
           <div className="w-card__head">
             <h3>Call</h3>
             <div className="w-card__head__spacer" />
-            <span className="w-live-pill is-muted">plaintext</span>
+            <span className="w-live-pill is-muted">gateway</span>
           </div>
           <div className="w-card__body">
             <div className="w-form-stack">

@@ -4,12 +4,12 @@
 // vitest test both import it. The generator turns these into the `csp` / `devCsp`
 // strings written to src-tauri/tauri.conf.json; see scripts/gen-csp.mjs.
 //
-// The make-or-break directive is connect-src. The 40 RPC operators are all
-// plaintext `http://<IP>:8545`, have no shared domain (CSP has no CIDR wildcard),
-// and DRIFT on every @monolythium/core-sdk bump — so their origins are derived
-// from getRpcEndpoints (by the generator) and NEVER hardcoded here. The policy
-// must therefore allow those http origins explicitly and MUST NOT use
-// `upgrade-insecure-requests` or an `https:`-only rule (either blocks all 40).
+// The make-or-break directive is connect-src. Posture-C exposes one canonical
+// HTTPS/WSS gateway; native-PQ transport begins behind that edge. The gateway
+// origin still DRIFTS with @monolythium/core-sdk, so it is derived from
+// getRpcEndpoints (by the generator) and NEVER hardcoded into the generated
+// portion of the policy. The production generator rejects an insecure official
+// origin and excludes an insecure build-time override.
 
 /** The fixed https hosts the webview fetches: the RPC gateway, the blog RSS, and
  *  the live chain-registry (raw.githubusercontent.com). The GitHub updater is
@@ -60,6 +60,23 @@ export function operatorOrigins(endpoints) {
 }
 
 /**
+ * Compose the production RPC origin set. Official registry origins are a trust
+ * boundary and therefore fail closed unless every one is HTTPS. An insecure
+ * build-time override is omitted from production (it may still be passed to the
+ * dev CSP by the generator).
+ */
+export function productionRpcOrigins(officialOrigins, extraOrigins = []) {
+  const isHttps = (origin) => new URL(origin).protocol === "https:";
+  const insecureOfficial = (officialOrigins ?? []).filter((origin) => !isHttps(origin));
+  if (insecureOfficial.length > 0) {
+    throw new Error(
+      `refusing insecure official RPC origin(s): ${insecureOfficial.join(", ")}`,
+    );
+  }
+  return [...(officialOrigins ?? []), ...(extraOrigins ?? []).filter(isHttps)];
+}
+
+/**
  * Assemble the connect-src source list: `'self'` + IPC + the fixed https hosts +
  * the generated operator origins (+ any build-time `extra`, e.g. VITE_MONO_RPC_URL)
  * (+ the Vite HMR sources in dev). Deduped, order preserved.
@@ -73,8 +90,7 @@ export function connectSrc(operators, { dev = false, extra = [] } = {}) {
 /**
  * The tight PROD CSP as a single string. `default-src 'self'` baseline; the
  * lockable directives at `'none'`; NO `'unsafe-inline'` / `'unsafe-eval'` (React
- * inline styles apply via per-property CSSOM writes, which CSP does not govern);
- * NO `upgrade-insecure-requests` (the http operators must resolve).
+ * inline styles apply via per-property CSSOM writes, which CSP does not govern).
  */
 export function prodCsp(connectSources) {
   return [

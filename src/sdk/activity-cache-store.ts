@@ -146,7 +146,11 @@ export async function purgeScopesForAddress(addressLower: string): Promise<void>
       if (k.startsWith(prefix)) continue;
       confirmed[k] = v;
     }
-    await saveState({ version: 1, confirmed });
+    await saveState({
+      version: 2,
+      genesisIdentity: state.genesisIdentity,
+      confirmed,
+    });
   } catch {
     // Best-effort — a purge failure just leaves the (now-unreferenced) entries.
   }

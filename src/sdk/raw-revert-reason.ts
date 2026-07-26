@@ -3,7 +3,7 @@
 // WORKAROUND: `eth_getTransactionReceipt` carries the chain's `revert_reason`
 // on the wire (verified live), and the SDK type `TransactionReceipt` even
 // DECLARES `revertReason?` — but the pinned SDK's `normalizeTransactionReceipt`
-// (0.6.8) builds {tx_hash, block_hash, block_number, tx_index, status,
+// (0.6.10) builds {tx_hash, block_hash, block_number, tx_index, status,
 // executionUnitsUsed} and silently DROPS the reason. So `client.ethGetTransaction-
 // Receipt(...)` can never surface it. This module makes a single raw JSON-RPC
 // call to read that ONE field. It is NOT a general second RPC path — nothing

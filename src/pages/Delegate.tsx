@@ -670,7 +670,7 @@ export function Delegate() {
         { text: "Unlocks the local vault for this operation only." },
         { text: "Encodes delegate(uint32 clusterId, uint16 weightBps) calldata via @monolythium/core-sdk." },
         { text: "Sends value = 0 — NO tokens are escrowed. Your effective weight = balance × weightBps; the LYTH stays in your wallet and remains spendable." },
-        { text: "Signs the native tx with ML-DSA-65 and submits via the plaintext mesh_submitTx path." },
+        { text: "Signs the native tx with ML-DSA-65 and submits through the canonical HTTPS RPC gateway; backend relays use native-PQ transport." },
         {
           text: "Chain rejects at the precompile gate if delegation is gated off, the cluster is inactive, the per-cluster cap would be exceeded, or any value is attached (UnexpectedValue) — verbatim error surfaces here.",
           level: "warn",

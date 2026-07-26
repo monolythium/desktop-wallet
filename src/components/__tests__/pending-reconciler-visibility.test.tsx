@@ -23,10 +23,18 @@ const reconcilePendingOnce = vi.hoisted(() =>
 const hasPendingTxs = vi.hoisted(() => vi.fn(async () => true));
 const subscribePendingTxs = vi.hoisted(() => vi.fn(() => () => {}));
 const subscribeActiveChain = vi.hoisted(() => vi.fn(() => () => {}));
+const health = vi.hoisted(() => ({ kind: "live" as "live" | "loading" | "offline" }));
 
 vi.mock("../../sdk/reconcile", () => ({ reconcilePendingOnce }));
 vi.mock("../../sdk/pending-tx-store", () => ({ hasPendingTxs, subscribePendingTxs }));
 vi.mock("../../sdk/chains", () => ({ subscribeActiveChain }));
+vi.mock("../../sdk/ChainHealthProvider", () => ({
+  useChainHealthView: () => ({
+    health: { kind: health.kind },
+    chainId: health.kind === "live" ? 69420 : null,
+    endpoint: health.kind === "live" ? "https://rpc.monolythium.com" : null,
+  }),
+}));
 
 import { PendingTxReconciler, RECONCILE_BASE_MS } from "../PendingTxReconciler";
 
@@ -52,6 +60,7 @@ async function settle() {
 beforeEach(() => {
   vi.useFakeTimers();
   visibility = "visible";
+  health.kind = "live";
   vi.spyOn(document, "visibilityState", "get").mockImplementation(() => visibility);
   reconcilePendingOnce.mockClear();
   hasPendingTxs.mockClear();
@@ -65,6 +74,23 @@ afterEach(() => {
 });
 
 describe("the reconcile poller does not dispatch while the window is hidden", () => {
+  it("stays idle until chain identity is verified, then resumes on the live transition", async () => {
+    health.kind = "loading";
+    const view = render(<PendingTxReconciler />);
+    await settle();
+    await advance(RECONCILE_BASE_MS * 2);
+    expect(hasPendingTxs).not.toHaveBeenCalled();
+    expect(reconcilePendingOnce).not.toHaveBeenCalled();
+
+    health.kind = "live";
+    view.rerender(<PendingTxReconciler />);
+    await settle();
+    await advance(RECONCILE_BASE_MS);
+
+    expect(hasPendingTxs).toHaveBeenCalled();
+    expect(reconcilePendingOnce).toHaveBeenCalled();
+  });
+
   it("skips its reads while hidden", async () => {
     render(<PendingTxReconciler />);
     await settle();
