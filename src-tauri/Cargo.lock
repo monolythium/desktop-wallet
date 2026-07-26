@@ -975,7 +975,7 @@ dependencies = [
 
 [[package]]
 name = "desktop-wallet"
-version = "0.0.17"
+version = "0.0.18"
 dependencies = [
  "argon2",
  "axum",
