@@ -6,7 +6,7 @@
 //        \-> error  (from any stage)
 //
 // Every chain-touching or keychain-touching action routes through this surface.
-// Reuse the same drawer for swap, stake, send, sign, and any future write path.
+// Reuse the same drawer for swap, delegate, send, sign, and any future write path.
 //
 // The drawer does NOT do the work itself — it owns UI state and calls
 // `descriptor.execute()` once auth completes. That keeps the chain logic
@@ -18,15 +18,33 @@ import {
   fetchAndUnlockVault,
   getActiveAccount,
 } from "../sdk/keychain";
-import { VaultCallError } from "../sdk/vault";
+import { VaultCallError, isWrongPasswordFailure } from "../sdk/vault";
 import { captureAddressOnUnlock } from "../sdk/vaultCatalog";
-import { readExperimentalEnabled } from "../sdk/feature-flags";
 import { recordOperationFailure } from "../sdk/notifications-record";
+import { rejectedSubmitTxHash } from "../sdk/submit";
 import { trackOperationTx } from "../sdk/reconcile";
 import { useAutoLock } from "../sdk/auto-lock";
+import {
+  clearUnlockLockout,
+  lockoutRemainingMs,
+  readLockoutState,
+  recordWrongUnlockAttempt,
+} from "../sdk/unlock-lockout";
 import { MlDsa65Backend } from "@monolythium/core-sdk/crypto";
+import {
+  classifySendError,
+  errorLinksOperators,
+  extractSendError,
+  formatSendError,
+  severityColours,
+  type SendErrorInput,
+} from "../sdk/send-error";
+import { readDeveloperMode } from "../sdk/feature-flags";
+import { PasswordInput } from "../components/PasswordInput";
+import type { Route } from "../components/types";
 import type {
   OperationExecutionContext,
+  OperationNotifyMeta,
   OperationDescriptor,
   OperationResult,
   OperationStage,
@@ -35,6 +53,10 @@ import type {
 interface Props {
   descriptor: OperationDescriptor;
   onClose: () => void;
+  /** Optional route callback — when present, the classified error card renders
+   *  its "Operators" mention as a link that closes the drawer and routes there.
+   *  Absent ⇒ the word stays plain text. */
+  onNavigate?: (route: Route) => void;
 }
 
 const STAGE_ORDER: ReadonlyArray<Exclude<OperationStage, "error">> = [
@@ -63,10 +85,11 @@ type AuthError =
   | { kind: "keychain"; cause: KeychainCallError }
   | { kind: "vault"; cause: VaultCallError };
 
-export function OperationsDrawer({ descriptor, onClose }: Props) {
+export function OperationsDrawer({ descriptor, onClose, onNavigate }: Props) {
   const [stage, setStage] = useState<OperationStage>("preview");
   const [result, setResult] = useState<OperationResult | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  // The raw thrown error (message + optional JSON-RPC code), classified at render.
+  const [errorRaw, setErrorRaw] = useState<SendErrorInput | null>(null);
   // Auth-specific error state. We keep this separate from the global
   // `error` so the Auth pane can show a "try again" hint without dropping
   // the user into the terminal Error stage. Only `runExecute` failures
@@ -74,6 +97,8 @@ export function OperationsDrawer({ descriptor, onClose }: Props) {
   const [authError, setAuthError] = useState<AuthError | null>(null);
   const [authBusy, setAuthBusy] = useState(false);
   const [password, setPassword] = useState("");
+  const [lockoutUntil, setLockoutUntil] = useState(0);
+  const [now, setNow] = useState(() => Date.now());
   const { pauseTimer, resumeTimer } = useAutoLock();
 
   // Suspend the idle auto-lock timer while this drawer is open so a long
@@ -82,6 +107,30 @@ export function OperationsDrawer({ descriptor, onClose }: Props) {
     pauseTimer();
     return resumeTimer;
   }, [pauseTimer, resumeTimer]);
+
+  // Honor the same brute-force lockout the full-screen lock gate enforces: an
+  // in-progress lockout — from earlier wrong passwords, here or at the gate —
+  // blocks this per-operation password prompt too, so the drawer can't be used
+  // as a lockout-bypass surface. Re-checked against the wall clock on mount.
+  useEffect(() => {
+    setLockoutUntil(readLockoutState().lockoutUntil);
+  }, []);
+
+  // Tick while a lockout window is active so the countdown updates and the
+  // prompt re-enables the instant it elapses.
+  useEffect(() => {
+    if (lockoutUntil <= Date.now()) return;
+    const id = window.setInterval(() => {
+      const t = Date.now();
+      setNow(t);
+      if (t >= lockoutUntil) window.clearInterval(id);
+    }, 500);
+    return () => window.clearInterval(id);
+  }, [lockoutUntil]);
+
+  const remainingMs = lockoutRemainingMs(lockoutUntil, now);
+  const lockedOut = remainingMs > 0;
+  const remainingSec = Math.ceil(remainingMs / 1000);
 
   // Esc closes the drawer except mid-execute (don't let users abandon a tx
   // we may have already broadcast).
@@ -115,6 +164,9 @@ export function OperationsDrawer({ descriptor, onClose }: Props) {
   };
 
   const advanceFromAuth = async () => {
+    // Refuse to attempt a decrypt while a brute-force lockout is in force — the
+    // Authorize button is disabled too, this guards the Enter-key path.
+    if (lockedOut) return;
     // Stage 4 wires the keychain-vault path.
     if (descriptor.auth === "keychain") {
       if (!password) {
@@ -142,6 +194,14 @@ export function OperationsDrawer({ descriptor, onClose }: Props) {
           // Never let an address-backfill failure break the unlock path.
         }
       } catch (cause) {
+        if (isWrongPasswordFailure(cause)) {
+          // Feed the same escalating brute-force lockout the lock gate uses, so
+          // repeated wrong passwords at this prompt throttle identically; the
+          // window (if a threshold is met) then disables the prompt below.
+          const next = recordWrongUnlockAttempt();
+          setLockoutUntil(next.lockoutUntil);
+          setNow(Date.now());
+        }
         if (cause instanceof KeychainCallError) {
           setAuthError({ kind: "keychain", cause });
         } else if (cause instanceof VaultCallError) {
@@ -155,6 +215,10 @@ export function OperationsDrawer({ descriptor, onClose }: Props) {
         setAuthBusy(false);
         return;
       }
+      // A correct password clears the brute-force counter — same reset-on-success
+      // discipline as the lock gate.
+      clearUnlockLockout();
+      setLockoutUntil(0);
       setAuthBusy(false);
       // Clear the password from state immediately on success.
       setPassword("");
@@ -162,7 +226,7 @@ export function OperationsDrawer({ descriptor, onClose }: Props) {
       return;
     }
     if (descriptor.auth === "passkey") {
-      setError("Passkey signing is unavailable in this build.");
+      setErrorRaw({ message: "Passkey signing is unavailable in this build.", code: null });
       setStage("error");
       return;
     }
@@ -171,10 +235,23 @@ export function OperationsDrawer({ descriptor, onClose }: Props) {
 
   const runExecute = async (ctx: OperationExecutionContext = {}) => {
     setStage("executing");
-    setError(null);
+    setErrorRaw(null);
     let resultTxHash: string | undefined;
+    // What `execute` learned about its own subject while running. Empty for
+    // every single-submission operation, which is already complete at
+    // descriptor time; a batch fills it in its catch, where the failing
+    // allocation is the one fact the descriptor could not carry. Held in a plain
+    // local rather than state — it is read once, below, and never rendered.
+    let notifyPatch: Partial<OperationNotifyMeta> = {};
+    const notifyMeta = (): OperationNotifyMeta | undefined =>
+      descriptor.notify && { ...descriptor.notify, ...notifyPatch };
     try {
-      const r = await descriptor.execute(ctx);
+      const r = await descriptor.execute({
+        ...ctx,
+        refineNotify: (patch) => {
+          notifyPatch = { ...notifyPatch, ...patch };
+        },
+      });
       resultTxHash = r.txHash;
       setResult(r);
       setStage("done");
@@ -185,18 +262,22 @@ export function OperationsDrawer({ descriptor, onClose }: Props) {
       // state (recording "confirmed" on an on-chain observation, "failed" on a
       // reverted receipt) even after this drawer closes. The Done pane shows
       // the broadcast immediately; the notification comes from the reconciler.
-      if (descriptor.notify && resultTxHash && readExperimentalEnabled()) {
-        void trackOperationTx(descriptor.notify, resultTxHash);
+      const accepted = notifyMeta();
+      if (accepted && resultTxHash) {
+        void trackOperationTx(accepted, resultTxHash, r.nonce);
       }
     } catch (cause) {
-      const message = (cause as Error)?.message ?? String(cause);
-      setError(message);
+      setErrorRaw(extractSendError(cause));
       setStage("error");
       // Terminal transition: the node / precompile / SDK rejected the
       // submission — a genuine failure, recorded immediately (when a canonical
-      // hash exists to key it on).
-      if (descriptor.notify && readExperimentalEnabled()) {
-        void recordOperationFailure(descriptor.notify, resultTxHash);
+      // hash exists to key it on). On an admission reject the tx was signed +
+      // submitted, so its hash is known locally even though it never landed;
+      // record the refused attempt with its classified reason.
+      const failed = notifyMeta();
+      if (failed) {
+        const hash = resultTxHash ?? rejectedSubmitTxHash(cause);
+        void recordOperationFailure(failed, hash, cause);
       }
     } finally {
       ctx.vaultSeed?.fill(0);
@@ -241,11 +322,20 @@ export function OperationsDrawer({ descriptor, onClose }: Props) {
               setPassword={setPassword}
               onSubmit={() => void advanceFromAuth()}
               busy={authBusy}
+              lockedOut={lockedOut}
+              remainingSec={remainingSec}
             />
           ) : null}
           {stage === "executing" ? <ExecutingPane descriptor={descriptor} /> : null}
           {stage === "done" && result ? <DonePane descriptor={descriptor} result={result} /> : null}
-          {stage === "error" ? <ErrorPane error={error ?? "Unknown error"} /> : null}
+          {stage === "error" ? (
+            <ErrorPane
+              input={errorRaw ?? { message: "Unknown error", code: null }}
+              context={descriptor.errorContext}
+              onNavigate={onNavigate}
+              onClose={onClose}
+            />
+          ) : null}
         </div>
 
         <div className="w-drawer__foot">
@@ -273,9 +363,9 @@ export function OperationsDrawer({ descriptor, onClose }: Props) {
                 className="btn btn--primary"
                 style={{ marginLeft: "auto" }}
                 onClick={() => void advanceFromAuth()}
-                disabled={authBusy || descriptor.auth === "passkey" || (descriptor.auth === "keychain" && !password)}
+                disabled={authBusy || lockedOut || descriptor.auth === "passkey" || (descriptor.auth === "keychain" && !password)}
               >
-                {authBusy ? "Unlocking…" : "Authorize"}
+                {lockedOut ? `Locked — ${remainingSec}s` : authBusy ? "Unlocking…" : "Authorize"}
               </button>
             </>
           ) : null}
@@ -345,6 +435,18 @@ function PreviewPane({ descriptor }: { descriptor: OperationDescriptor }) {
                       style={line.kind === "warn" ? { color: "var(--warn)" } : undefined}>
                   {line.v}
                 </span>
+                {/* Additive sibling — muted with a colour token, never opacity.
+                    The `.v` span above keeps its class list, styling and text
+                    byte-identical whether or not this renders. */}
+                {line.fiat !== undefined && (
+                  <span
+                    className="v-fiat"
+                    data-testid="diff-fiat"
+                    style={{ color: "var(--fg-400)", fontWeight: 400, marginLeft: 6 }}
+                  >
+                    ({line.fiat})
+                  </span>
+                )}
               </div>
             ))
           )}
@@ -376,6 +478,8 @@ interface AuthPaneProps {
   setPassword: (next: string) => void;
   onSubmit: () => void;
   busy: boolean;
+  lockedOut: boolean;
+  remainingSec: number;
 }
 
 function AuthPane({
@@ -385,6 +489,8 @@ function AuthPane({
   setPassword,
   onSubmit,
   busy,
+  lockedOut,
+  remainingSec,
 }: AuthPaneProps) {
   if (descriptor.auth === "passkey") {
     return (
@@ -404,19 +510,31 @@ function AuthPane({
       </div>
       <label className="w-onboarding__field" style={{ marginTop: 12 }}>
         <span className="cap">Password</span>
-        <input
-          type="password"
+        {/* Lockout layer 1 of 3: the field (and the Authorize button) go
+            disabled. Layer 2 is the Enter guard below; layer 3 is the
+            early-return in advanceFromAuth. All three stay, so the drawer can
+            never be used as a way around the unlock screen's lockout. */}
+        <PasswordInput
           autoFocus
           autoComplete="current-password"
           value={password}
-          onChange={(e) => setPassword(e.target.value)}
+          onChange={setPassword}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && !busy && password) onSubmit();
+            if (e.key === "Enter" && !busy && !lockedOut && password) onSubmit();
           }}
-          disabled={busy}
+          disabled={busy || lockedOut}
         />
       </label>
-      {authError ? <AuthErrorBanner error={authError} /> : null}
+      {lockedOut ? (
+        <div className="w-banner error" style={{ marginTop: 12 }}>
+          <div style={{ fontWeight: 600, marginBottom: 4 }}>Too many wrong attempts</div>
+          <div style={{ fontSize: 12, color: "var(--w-text-2)" }}>
+            Locked for {remainingSec}s. This is the same lockout as the unlock screen.
+          </div>
+        </div>
+      ) : authError ? (
+        <AuthErrorBanner error={authError} />
+      ) : null}
     </>
   );
 }
@@ -506,11 +624,99 @@ function DonePane({ descriptor, result }: { descriptor: OperationDescriptor; res
   );
 }
 
-function ErrorPane({ error }: { error: string }) {
+function ErrorPane({
+  input,
+  context,
+  onNavigate,
+  onClose,
+}: {
+  input: SendErrorInput;
+  context?: import("../sdk/send-error").SendErrorContext;
+  onNavigate?: (route: Route) => void;
+  onClose: () => void;
+}) {
+  const display = formatSendError(input);
+  // A failure a subsystem already classified keeps its own words; the rule table
+  // only runs on messages nothing has interpreted yet.
+  const c = classifySendError(display, context, input.classified);
+  const colours = severityColours[c.severity];
+  // Dev-gated raw detail — hidden when off, and pointless for `unknown` (its body
+  // IS the raw message). Read live (never cached at mount).
+  const showTechnical = readDeveloperMode() && c.kind !== "unknown";
+  // The "Operators" mention becomes a link only when a route callback exists AND
+  // this is a network-class error (genesis / quarantine / offline).
+  const linkable = onNavigate !== undefined && errorLinksOperators(c.kind);
+
   return (
-    <div className="w-banner error">
-      <div style={{ fontWeight: 600, marginBottom: 4 }}>Operation failed</div>
-      <div style={{ fontFamily: "var(--f-mono)", fontSize: 11.5, wordBreak: "break-all" }}>{error}</div>
+    <div
+      style={{
+        padding: "12px 14px",
+        borderRadius: 10,
+        background: colours.cardBg,
+        border: `1px solid ${colours.border}`,
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+        <span aria-hidden style={{ color: colours.fg }}>{c.severity === "info" ? "ⓘ" : "⚠"}</span>
+        <div style={{ fontWeight: 600, color: colours.fg }}>{c.headline}</div>
+      </div>
+      <div style={{ fontSize: 12.5, lineHeight: 1.6, color: "var(--w-text-2)" }}>
+        {linkable ? (
+          <BodyWithOperatorsLink
+            body={c.body}
+            onActivate={() => {
+              onClose();
+              onNavigate?.("operators");
+            }}
+          />
+        ) : (
+          c.body
+        )}
+      </div>
+      {showTechnical ? (
+        <details style={{ marginTop: 10 }}>
+          <summary style={{ fontSize: 11, color: "var(--w-text-3)", cursor: "pointer" }}>Technical details</summary>
+          <div
+            style={{
+              marginTop: 6,
+              fontFamily: "var(--f-mono)",
+              fontSize: 11,
+              color: "var(--w-text-3)",
+              wordBreak: "break-all",
+            }}
+          >
+            {input.message}
+          </div>
+        </details>
+      ) : null}
     </div>
+  );
+}
+
+/** Render a body, turning the LAST literal "Operators" into a link-styled button. */
+function BodyWithOperatorsLink({ body, onActivate }: { body: string; onActivate: () => void }) {
+  const word = "Operators";
+  const idx = body.lastIndexOf(word);
+  if (idx === -1) return <>{body}</>;
+  return (
+    <>
+      {body.slice(0, idx)}
+      <button
+        type="button"
+        onClick={onActivate}
+        style={{
+          background: "none",
+          border: "none",
+          padding: 0,
+          font: "inherit",
+          color: "var(--w-accent, #7aa2f7)",
+          textDecoration: "underline",
+          cursor: "pointer",
+        }}
+      >
+        {word}
+      </button>
+      {body.slice(idx + word.length)}
+    </>
   );
 }

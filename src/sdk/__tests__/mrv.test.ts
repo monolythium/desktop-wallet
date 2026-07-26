@@ -58,6 +58,7 @@ function mockRpc(options: {
   chainId?: bigint;
   nonce?: bigint;
   executionFee?: bigint;
+  priorityTip?: bigint;
 } = {}): {
   client: RpcClient;
   calls: CapturedCall[];
@@ -66,6 +67,8 @@ function mockRpc(options: {
   let nonce = options.nonce ?? 7n;
   const chainId = options.chainId ?? 69_420n;
   const executionFee = options.executionFee ?? 25n;
+  // The live chain's priority-tip floor is >= 1 gwei; it never returns 0.
+  const priorityTip = options.priorityTip ?? 1_000_000_000n;
 
   const fetchStub: typeof fetch = async (_url, init) => {
     if (typeof init?.body !== "string") {
@@ -93,7 +96,7 @@ function mockRpc(options: {
         result = {
           executionUnitPriceLythoshi: executionFee.toString(),
           basePricePerExecutionUnitLythoshi: executionFee.toString(),
-          priorityTipLythoshi: "0",
+          priorityTipLythoshi: priorityTip.toString(),
           blockNumber: 1,
           source: "test",
         };
@@ -178,6 +181,20 @@ describe("MRV desktop-wallet SDK layer", () => {
       "lyth_getTransactionCount",
       "lyth_executionUnitPrice",
     ]);
+  });
+
+  it("defaults the priority tip to the live height-aware floor, not a hardcoded 1 gwei", async () => {
+    // A milestone that raises the floor above 1 gwei must be tracked: the tip
+    // default reads lyth_executionUnitPrice.priorityTipLythoshi, not a constant.
+    const { client } = mockRpc({ executionFee: 25n, priorityTip: 2_000_000_000n });
+    const plan = await buildMrvDeployPayloadTransactionPlan({
+      client,
+      seed: seed(),
+      artifactBytes: CODE,
+      artifactMetadata: validMetadata(),
+      executionUnitLimit: 100_000n,
+    });
+    expect(plan.nativeTx.priorityTipLythoshi).toBe("2000000000");
   });
 
   it("builds a call plan and normalizes hex contract addresses to MRV typed addresses", async () => {

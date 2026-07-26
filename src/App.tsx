@@ -10,14 +10,22 @@
 // We tolerate non-Tauri runtimes (browser preview via `pnpm dev`) by
 // skipping the probe entirely and treating the wallet as already set up.
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { ApprovalOverlay } from "./components/ApprovalOverlay";
 import { Onboarding } from "./components/Onboarding";
 import { PendingTxReconciler } from "./components/PendingTxReconciler";
+import { IncomingPoller } from "./components/IncomingPoller";
+import { ChainHealthBanner } from "./components/ChainHealthBanner";
+import { DelegationRejectedBanner } from "./components/DelegationRejectedBanner";
+import { DelegationRejectionProvider } from "./sdk/DelegationRejectionProvider";
+import { ErrorBoundary, PageErrorFallback } from "./components/ErrorBoundary";
 import { Sidebar } from "./components/Sidebar";
 import { Topbar } from "./components/Topbar";
 import { UpdateBanner } from "./components/UpdateBanner";
-import { checkForUpdate, type UpdateAvailable } from "./sdk/updater";
+import { ChainHealthProvider } from "./sdk/ChainHealthProvider";
+import { readWalletVersion } from "./sdk/about";
+import { syncWalletUpdateState, type UpdateSurfaceState } from "./sdk/update-check";
+import { About } from "./pages/About";
 import { Activity } from "./pages/Activity";
 import { Agents } from "./pages/Agents";
 import { AiTrading } from "./pages/AiTrading";
@@ -28,14 +36,21 @@ import { Inbox } from "./pages/Inbox";
 import { News } from "./pages/News";
 import { MonoStudio } from "./pages/MonoStudio";
 import { Notifications } from "./pages/Notifications";
+import { Operators } from "./pages/Operators";
+import { OperatorManagement } from "./pages/OperatorManagement";
+import { Networks } from "./pages/Networks";
+import { NetworkStatus } from "./pages/NetworkStatus";
 import { Provider } from "./pages/Provider";
+import { Resources } from "./pages/Resources";
+import { Help } from "./pages/Help";
 import { RiscvContracts } from "./pages/RiscvContracts";
 import { Settings } from "./pages/Settings";
-import { Stake } from "./pages/Stake";
+import { Delegate } from "./pages/Delegate";
 import { Stele } from "./pages/Stele";
 import { TokenDetail } from "./pages/TokenDetail";
 import { Tokens } from "./pages/Tokens";
 import { Trade } from "./pages/Trade";
+import { WhyMonolythium } from "./pages/WhyMonolythium";
 import { Wallets } from "./pages/Wallets";
 import { OperationsProvider } from "./operations/context";
 import { LockProvider, LockBoundary } from "./sdk/auto-lock";
@@ -50,19 +65,22 @@ import {
   ensureLegacyVaultRegistered,
   loadCatalog,
 } from "./sdk/vaultCatalog";
-import { readDeveloperMode, writeDeveloperMode } from "./sdk/studio-host";
 import {
+  readDeveloperMode,
   readExperimentalEnabled,
   readSteleEnabled,
+  stampDeveloperModeFirstSeenAt,
+  writeDeveloperMode,
   writeExperimentalEnabled,
   writeSteleEnabled,
 } from "./sdk/feature-flags";
+import { DeveloperModeProvider } from "./sdk/developer-mode";
 import "./styles/tokens.css";
 import "./styles/wallet.css";
 // Loaded last so the html[data-theme="…"] palette overrides win over the
 // native :root tokens (the default "monolythium" theme uses no attribute).
 import "./styles/themes.css";
-import { ALL_ROUTES, type Route } from "./components/types";
+import { resolveRoute, type Route } from "./components/types";
 
 const ROUTE_KEY = "wallet.route";
 
@@ -74,12 +92,13 @@ type BootState =
 
 function readRoute(): Route {
   try {
-    const v = localStorage.getItem(ROUTE_KEY);
-    if (v && (ALL_ROUTES as string[]).includes(v)) return v as Route;
+    // resolveRoute degrades an unknown/stale route (e.g. a persisted "stake"
+    // from before the delegate rename) to "home" rather than throwing.
+    return resolveRoute(localStorage.getItem(ROUTE_KEY));
   } catch {
     // localStorage unavailable — fall through.
+    return "home";
   }
-  return "home";
 }
 
 /**
@@ -99,20 +118,35 @@ export function App() {
   const [boot, setBoot] = useState<BootState>(() =>
     isTauri() ? { kind: "probing" } : { kind: "ready" },
   );
-  // Pending self-update, if the launch-time check found one. Banner
-  // renders only when set; dismissal clears it until the next launch.
-  const [pendingUpdate, setPendingUpdate] = useState<UpdateAvailable | null>(null);
+  // The folded update verdict, from the shared cache. Null until the boot
+  // orchestration resolves.
+  const [updateState, setUpdateState] = useState<UpdateSurfaceState | null>(null);
+  const [runningVersion, setRunningVersion] = useState<string | null>(null);
+  // "Later" hides the banner for this session only. Deliberately NOT persisted:
+  // the About row still shows the verdict, and the banner returns next launch
+  // while it stands.
+  const [updateHidden, setUpdateHidden] = useState(false);
 
   // Self-update check — fires once the wallet is ready (post-boot,
   // post-onboarding). We don't run it during onboarding so the user
   // never sees an update banner on their first-ever launch screen.
+  //
+  // `syncWalletUpdateState` owns the ordering (reconcile → read → gate →
+  // check → fold → persist) so this surface and the About row cannot grow two
+  // different ones.
   useEffect(() => {
     if (boot.kind !== "ready") return;
     let cancelled = false;
-    void checkForUpdate().then((result) => {
-      if (cancelled || !result.available) return;
-      setPendingUpdate(result);
-    });
+    void (async () => {
+      const version = await readWalletVersion();
+      if (cancelled) return;
+      setRunningVersion(version);
+      const state = await syncWalletUpdateState({
+        now: Date.now(),
+        runningVersion: version,
+      });
+      if (!cancelled) setUpdateState(state);
+    })();
     return () => {
       cancelled = true;
     };
@@ -174,13 +208,10 @@ export function App() {
     try { localStorage.setItem(ROUTE_KEY, route); } catch { /* ignore */ }
   }, [route]);
 
-  useEffect(() => {
-    writeDeveloperMode(developerModeEnabled);
-    if (!developerModeEnabled && route === "studio") {
-      setRoute("settings");
-    }
-  }, [developerModeEnabled, route]);
-
+  // Developer mode persists + stamps firstSeenAt through the control below, and
+  // its gated pages (Studio, RISC-V) render an in-place stub when off — so there
+  // is no route bounce to enforce here (unlike stele/experimental, which have no
+  // stub and bounce home).
   useEffect(() => {
     writeSteleEnabled(steleEnabled);
     if (!steleEnabled && (route === "stele" || route === "inbox" || route === "provider")) {
@@ -190,15 +221,31 @@ export function App() {
 
   useEffect(() => {
     writeExperimentalEnabled(experimentalEnabled);
-    if (!experimentalEnabled && (route === "agents" || route === "ai-trade" || route === "notifications")) {
+    if (!experimentalEnabled && (route === "agents" || route === "ai-trade")) {
       setRoute("home");
     }
   }, [experimentalEnabled, route]);
 
-  const setDeveloperModeEnabled = (enabled: boolean) => {
-    setDeveloperModeEnabledState(enabled);
-    writeDeveloperMode(enabled);
-  };
+  // The guarded developer-mode control (§2). Enabling persists first and only
+  // flips + stamps firstSeenAt on a successful write, resolving false otherwise
+  // so the toggle can surface the failure. Disabling flips immediately and
+  // persists best-effort — turning it off is never blocked on storage.
+  const setDeveloperMode = useCallback(async (enabled: boolean): Promise<boolean> => {
+    if (enabled) {
+      if (!writeDeveloperMode(true)) return false;
+      stampDeveloperModeFirstSeenAt(Date.now());
+      setDeveloperModeEnabledState(true);
+      return true;
+    }
+    writeDeveloperMode(false);
+    setDeveloperModeEnabledState(false);
+    return true;
+  }, []);
+
+  const developerModeControl = useMemo(
+    () => ({ enabled: developerModeEnabled, setEnabled: setDeveloperMode }),
+    [developerModeEnabled, setDeveloperMode],
+  );
 
   const setSteleEnabled = (enabled: boolean) => {
     setSteleEnabledState(enabled);
@@ -209,6 +256,18 @@ export function App() {
     setExperimentalEnabledState(enabled);
     writeExperimentalEnabled(enabled);
   };
+
+  // Settings hub + its sidebar shortcuts (Display & Preferences / Recovery
+  // phrase / Reset) all render the same page, opened on the right sub-page.
+  const settingsPage = (initialSubPage?: "appearance" | "reveal" | "reset") => (
+    <Settings
+      steleEnabled={steleEnabled}
+      setSteleEnabled={setSteleEnabled}
+      experimentalEnabled={experimentalEnabled}
+      setExperimentalEnabled={setExperimentalEnabled}
+      initialSubPage={initialSubPage}
+    />
+  );
 
   if (boot.kind === "probing") {
     return <BootSplash label="Checking keychain…" />;
@@ -223,7 +282,10 @@ export function App() {
   return (
     <LockProvider>
       <LockBoundary locked={<UnlockGate />}>
-      <OperationsProvider>
+      <DeveloperModeProvider value={developerModeControl}>
+      <OperationsProvider onNavigate={setRoute}>
+      <ChainHealthProvider>
+      <DelegationRejectionProvider>
       <div className="w-app">
         <Sidebar
           route={route}
@@ -232,52 +294,77 @@ export function App() {
           steleEnabled={steleEnabled}
           experimentalEnabled={experimentalEnabled}
         />
-        <Topbar route={route} setRoute={setRoute} experimentalEnabled={experimentalEnabled} />
+        <Topbar route={route} setRoute={setRoute} />
         <main className="w-main">
+          <ChainHealthBanner
+            onReview={() => setRoute("operators")}
+            onLearnMore={() => setRoute("help")}
+          />
+          {/* Sits above the route body so a rejection raised on Delegate is
+              still there after the user navigates away looking for the weight
+              that never changed. */}
+          <DelegationRejectedBanner />
+          {/* Home route only — the About "Update" row covers the rest of the
+              app, so the banner doesn't follow the user everywhere. */}
+          {route === "home" &&
+          !updateHidden &&
+          updateState?.updateAvailable &&
+          runningVersion !== null ? (
+            <UpdateBanner
+              offeredVersion={updateState.offeredVersion}
+              runningVersion={runningVersion}
+              onLater={() => setUpdateHidden(true)}
+              onVerdictCleared={() =>
+                setUpdateState({ ...updateState, updateAvailable: false, offeredVersion: null })
+              }
+            />
+          ) : null}
+          <ErrorBoundary
+            resetKey={route}
+            fallback={(retry) => (
+              <PageErrorFallback onHome={() => setRoute("home")} onRetry={retry} />
+            )}
+          >
           {route === "home" ? <Home goto={setRoute} /> : null}
-          {route === "activity" ? <Activity experimentalEnabled={experimentalEnabled} /> : null}
+          {route === "activity" ? <Activity /> : null}
           {route === "wallets" ? <Wallets /> : null}
           {route === "tokens" ? <Tokens goto={setRoute} /> : null}
           {route === "token-detail" ? <TokenDetail goto={setRoute} /> : null}
-          {route === "stake" ? <Stake experimentalEnabled={experimentalEnabled} /> : null}
-          {route === "bridges" ? <Bridges experimentalEnabled={experimentalEnabled} /> : null}
+          {route === "delegate" ? <Delegate /> : null}
+          {route === "bridges" ? <Bridges experimentalEnabled={experimentalEnabled} goto={setRoute} /> : null}
           {route === "agents" && experimentalEnabled ? <Agents /> : null}
           {route === "contacts" ? <Contacts /> : null}
-          {route === "riscv" ? <RiscvContracts /> : null}
-          {route === "studio" ? (
-            <MonoStudio
-              developerModeEnabled={developerModeEnabled}
-              setRouteSettings={() => setRoute("settings")}
-            />
-          ) : null}
+          {route === "operators" ? <Operators goto={setRoute} /> : null}
+          {route === "operator-management" ? <OperatorManagement goto={setRoute} /> : null}
+          {route === "networks" ? <Networks /> : null}
+          {route === "network-status" ? <NetworkStatus /> : null}
+          {route === "riscv" ? <RiscvContracts goto={setRoute} /> : null}
+          {route === "studio" ? <MonoStudio goto={setRoute} /> : null}
           {route === "trade" ? <Trade /> : null}
           {route === "ai-trade" ? <AiTrading /> : null}
           {route === "news" ? <News /> : null}
           {route === "stele" && steleEnabled ? <Stele /> : null}
           {route === "inbox" && steleEnabled ? <Inbox /> : null}
           {route === "provider" && steleEnabled ? <Provider /> : null}
-          {route === "notifications" && experimentalEnabled ? <Notifications /> : null}
-          {route === "settings" ? (
-            <Settings
-              developerModeEnabled={developerModeEnabled}
-              setDeveloperModeEnabled={setDeveloperModeEnabled}
-              steleEnabled={steleEnabled}
-              setSteleEnabled={setSteleEnabled}
-              experimentalEnabled={experimentalEnabled}
-              setExperimentalEnabled={setExperimentalEnabled}
-            />
-          ) : null}
+          {route === "notifications" ? <Notifications /> : null}
+          {route === "about" ? <About goto={setRoute} /> : null}
+          {route === "resources" ? <Resources /> : null}
+          {route === "why-monolythium" ? <WhyMonolythium /> : null}
+          {route === "help" ? <Help goto={setRoute} /> : null}
+          {route === "settings" ? settingsPage() : null}
+          {route === "display" ? settingsPage("appearance") : null}
+          {route === "recovery" ? settingsPage("reveal") : null}
+          {route === "reset" ? settingsPage("reset") : null}
+          </ErrorBoundary>
         </main>
         {steleEnabled ? <ApprovalOverlay /> : null}
-        {experimentalEnabled ? <PendingTxReconciler /> : null}
-        {pendingUpdate ? (
-          <UpdateBanner
-            update={pendingUpdate}
-            onDismiss={() => setPendingUpdate(null)}
-          />
-        ) : null}
+        <PendingTxReconciler />
+        <IncomingPoller />
       </div>
+      </DelegationRejectionProvider>
+      </ChainHealthProvider>
       </OperationsProvider>
+      </DeveloperModeProvider>
       </LockBoundary>
     </LockProvider>
   );

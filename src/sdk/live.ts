@@ -1,7 +1,7 @@
 import {
+  addressToTypedBech32,
   ApiClient,
   CLAIMED_EVENT_TOPIC0,
-  clusterApyPercent,
   decodeClaimedEvent,
   formatLyth,
 } from "@monolythium/core-sdk";
@@ -22,14 +22,17 @@ import type {
 } from "@monolythium/core-sdk";
 import { MlDsa65Backend } from "@monolythium/core-sdk/crypto";
 import { getProvider } from "./client";
+import { isMethodDisabled, METHOD_UNAVAILABLE_LABEL } from "./rpc-availability";
 import { getNativeTransactionCount } from "./native-rpc";
 import { requireTypedUserAddress, requireTypedUserAddressHex } from "./address";
 import { selectNativeSpotMarket, type SelectedNativeSpotMarket } from "./market";
 import { walletFetch } from "./http";
 import {
+  earliestRetainedFrom,
   normaliseActivityCoverageKind,
   type ActivityCoverageKind,
 } from "./activity-coverage";
+import { NATIVE_LYTH_TOKEN_ID } from "./lyth-display";
 
 export interface RpcOutcome<T> {
   ok: boolean;
@@ -62,7 +65,7 @@ export interface LiveClusterRow {
   active: boolean;
 }
 
-export interface LiveStakeStatus {
+export interface LiveDelegationStatus {
   endpoint: string;
   clusters: RpcOutcome<LiveClusterRow[]>;
   activeClusters: RpcOutcome<LiveClusterRow[]>;
@@ -75,7 +78,22 @@ export interface LiveStakeStatus {
 export interface LiveTokenStatus {
   endpoint: string;
   nativeBalance: RpcOutcome<string>;
-  tokenBalances: RpcOutcome<Array<{ tokenId: string; balance: string; updatedAtBlock: bigint }>>;
+  /** Raw native balance as an exact lythoshi integer string — the same
+   *  `eth_getBalance` read `nativeBalance` formats, kept un-converted so a
+   *  caller can format it at its own precision via the exact bigint formatter
+   *  (never re-truncating a float-tailed decimal). */
+  nativeBalanceLythoshi: RpcOutcome<string>;
+  tokenBalances: RpcOutcome<
+    Array<{
+      tokenId: string;
+      balance: string;
+      updatedAtBlock: bigint;
+      /** Native MRC identity when the row came from a native MRC event — the
+       *  `assetId` keys the per-token `lyth_mrcMetadata` (decimals/symbol) read.
+       *  For factory-origin MRC-20 the assetId equals the tokenId. */
+      mrc?: { standard: string; assetId: string; tokenId?: string | null } | null;
+    }>
+  >;
   addressLabel: RpcOutcome<{ address: string; category: string; displayName: string | null; updatedAtBlock: bigint } | null>;
   assetPolicy: RpcOutcome<Record<string, unknown>>;
 }
@@ -192,7 +210,7 @@ export async function loadLiveNetworkStatus(): Promise<LiveNetworkStatus> {
   };
 }
 
-export async function loadLiveStakeStatus(wallet: string): Promise<LiveStakeStatus> {
+export async function loadLiveDelegationStatus(wallet: string): Promise<LiveDelegationStatus> {
   const client = getProvider().rpcClient;
   const typedWallet = requireTypedUserAddress(wallet, "wallet");
   const clusterPage = await capture(() => client.lythClusterDirectory(0, 100));
@@ -219,18 +237,28 @@ export async function loadLiveTokenStatus(wallet: string): Promise<LiveTokenStat
   const client = getProvider().rpcClient;
   const typedWallet = requireTypedUserAddress(wallet, "wallet");
   const walletHex = requireTypedUserAddressHex(wallet, "wallet");
-  const [nativeBalance, tokenBalances, addressLabel, assetPolicy] = await Promise.all([
+  const [nativeBalanceLythoshi, tokenBalances, addressLabel, assetPolicy] = await Promise.all([
     capture(async () => {
       const result = await client.ethGetBalance(walletHex);
-      return formatLyth(BigInt(normalizeBalanceHex(result)).toString(), { includeUnit: false });
+      return BigInt(normalizeBalanceHex(result)).toString();
     }),
     capture(() => client.lythGetTokenBalances(typedWallet)),
     capture(() => client.lythGetAddressLabel(typedWallet)),
-    capture(() => client.lythGetAssetPolicy("LYTH") as Promise<Record<string, unknown>>),
+    // The chain keys the asset-policy read by 32-byte token id, not the ticker;
+    // native LYTH is the all-zero id. Passing "LYTH" -32602s on every call.
+    capture(
+      () => client.lythGetAssetPolicy(NATIVE_LYTH_TOKEN_ID) as Promise<Record<string, unknown>>,
+    ),
   ]);
+  // Formatted (full-precision) LYTH for existing consumers, derived from the
+  // raw lythoshi so both share the one `eth_getBalance` read and can't diverge.
+  const nativeBalance: RpcOutcome<string> = nativeBalanceLythoshi.ok
+    ? { ok: true, value: formatLyth(nativeBalanceLythoshi.value ?? "0", { includeUnit: false }) }
+    : nativeBalanceLythoshi;
   return {
     endpoint: client.endpoint,
     nativeBalance,
+    nativeBalanceLythoshi,
     tokenBalances,
     addressLabel,
     assetPolicy,
@@ -297,18 +325,80 @@ export async function loadLiveTradeStatus(): Promise<LiveTradeStatus> {
   };
 }
 
-export async function loadLiveAddressActivity(wallet: string): Promise<RpcOutcome<LiveAddressActivityRow[]>> {
-  const typedWallet = requireTypedUserAddress(wallet, "wallet");
+/** Rows per page — the initial read AND every older page. */
+export const ACTIVITY_PAGE_SIZE = 30;
+
+/** One page of address activity plus the cursor for the next (older) page. */
+export interface ActivityPage {
+  rows: LiveAddressActivityRow[];
+  /** Opaque `0x` keyset string, round-tripped verbatim. Null = no more pages. */
+  nextCursor: string | null;
+}
+
+/**
+ * Pull the next-page cursor out of the activity envelope.
+ *
+ * The cursor is an OPAQUE `0x`-prefixed keyset string — the wallet never parses
+ * or constructs one, it only round-trips it. Tolerant: absent, non-string, or
+ * malformed yields null (treated as "no more pages"), which degrades to today's
+ * single-page behaviour rather than paging into nonsense. Pure.
+ */
+export function activityCursorFrom(raw: unknown): string | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const cursor = (raw as Record<string, unknown>).nextCursor;
+  if (typeof cursor !== "string") return null;
+  const trimmed = cursor.trim();
+  if (trimmed === "" || !trimmed.startsWith("0x")) return null;
+  return trimmed;
+}
+
+/**
+ * One page of activity. `cursor` absent = the newest page.
+ *
+ * Rows are re-sliced to `ACTIVITY_PAGE_SIZE` client-side BEFORE mapping, so a
+ * misbehaving operator cannot grow wallet memory by over-answering.
+ */
+export async function loadLiveActivityPage(
+  wallet: string,
+  cursor?: string,
+): Promise<RpcOutcome<ActivityPage>> {
   return capture(async () => {
+    // Validated INSIDE capture: a malformed address is an outcome, not a
+    // rejection — every caller of this reader treats it as a fallible read.
+    const typedWallet = requireTypedUserAddress(wallet, "wallet");
     const client = getProvider().rpcClient;
     // The node returns a paginated envelope ({ activity, nextCursor, ... }); read
     // it tolerantly and enrich here. (We do not call the SDK's enrich helper — it
     // assumes a bare array and throws on the envelope.)
-    const raw = (await client.lythGetAddressActivity(typedWallet, 30)) as unknown;
-    const entries = activityEntriesFrom(raw);
-    if (entries.length === 0) return [];
-    return enrichActivityEntries(client, entries);
+    const raw = (await (cursor === undefined
+      ? client.lythGetAddressActivity(typedWallet, ACTIVITY_PAGE_SIZE)
+      : client.lythGetAddressActivity(typedWallet, ACTIVITY_PAGE_SIZE, cursor))) as unknown;
+    const entries = activityEntriesFrom(raw).slice(0, ACTIVITY_PAGE_SIZE);
+    const nextCursor = activityCursorFrom(raw);
+    if (entries.length === 0) return { rows: [], nextCursor };
+    return { rows: await enrichActivityEntries(client, entries), nextCursor };
   });
+}
+
+/** The newest page's ROWS only — the long-standing shape every non-paging
+ *  consumer (Send familiarity, Home preview, the incoming poller) still uses.
+ *  A thin wrapper over {@link loadLiveActivityPage}, so there is exactly one
+ *  RPC implementation behind both shapes. */
+export async function loadLiveAddressActivity(wallet: string): Promise<RpcOutcome<LiveAddressActivityRow[]>> {
+  const page = await loadLiveActivityPage(wallet);
+  if (!page.ok) return { ok: false, error: page.error };
+  return { ok: true, value: page.value?.rows ?? [] };
+}
+
+/** An OLDER page. Read-only and additive by contract: no cache write, no
+ *  coverage probe, no incoming detection, no notification write, no pending
+ *  reconcile. A transient error surfaces verbatim — it is NEVER masked as
+ *  "no more pages", which would silently truncate the user's history. */
+export async function loadOlderActivityPage(
+  wallet: string,
+  cursor: string,
+): Promise<RpcOutcome<ActivityPage>> {
+  return loadLiveActivityPage(wallet, cursor);
 }
 
 /** Normalize the node's address-activity response to the raw entry array. The
@@ -380,14 +470,27 @@ export function toActivityBaseRow(raw: unknown): LiveAddressActivityRow | null {
  *  empty state. */
 export async function loadAddressActivityKind(
   wallet: string,
-): Promise<ActivityCoverageKind> {
+): Promise<ActivityCoverage> {
   try {
     const typedWallet = requireTypedUserAddress(wallet, "wallet");
-    const res = await getProvider().rpcClient.lythAddressActivityKind(typedWallet);
-    return normaliseActivityCoverageKind(res.kind);
+    const res = (await getProvider().rpcClient.lythAddressActivityKind(
+      typedWallet,
+    )) as unknown as { kind?: unknown };
+    return {
+      kind: normaliseActivityCoverageKind(res.kind as string),
+      earliestRetained: earliestRetainedFrom(res),
+    };
   } catch {
-    return "not_found";
+    // Fail-safe: never alarm on a probe failure.
+    return { kind: "not_found", earliestRetained: null };
   }
+}
+
+/** The coverage probe's answer: why the feed is empty, plus the retention floor
+ *  when the indexer reports one. */
+export interface ActivityCoverage {
+  kind: ActivityCoverageKind;
+  earliestRetained: string | null;
 }
 
 /** Read a block's header timestamp + ordered tx-hash array via the raw
@@ -490,32 +593,25 @@ export async function loadLiveSupplyStatus(): Promise<LiveSupplyStatus> {
   };
 }
 
-/** Live per-cluster APY (percent). Wraps `lyth_clusterApr` + the SDK's
- *  `clusterApyPercent` helper. Returns `null` — not a misleading "0.00%" —
- *  when no reward has accrued in the window (the reward-index delta is 0, which
- *  is the current testnet reality) or when the read fails. Becomes a real
- *  number automatically once rewards flow. */
-export async function loadLiveClusterApy(
+/** Raw baseline APR in basis points for a cluster (`lyth_clusterApr` →
+ *  `aprBps`). `0` is a REAL chain value ("no reward accrued in the window"),
+ *  distinct from `null` (the read failed / is unavailable). Never fabricates. */
+export async function loadLiveClusterAprBps(
   clusterId: number,
   windowBlocks?: number,
 ): Promise<number | null> {
   try {
-    const apr = await getProvider().rpcClient.lythClusterApr(clusterId, windowBlocks);
-    const apy = clusterApyPercent(apr);
-    // No yield accrued in the window → aprBps/delta is zero → APY collapses to
-    // 0; surface null so the UI shows an honest "—" rather than "0.00%".
-    if (!Number.isFinite(apy) || apy <= 0) return null;
-    return apy;
+    const res = await getProvider().rpcClient.lythClusterApr(clusterId, windowBlocks);
+    const n = Number(res.aprBps);
+    return Number.isFinite(n) ? n : null;
   } catch {
     return null;
   }
 }
 
-/** Fan out `loadLiveClusterApy` over a set of cluster ids. Returns a map of
- *  clusterId → APY percent (only entries that resolved to a real, non-zero
- *  number are included — a missing key means "no yield yet / unavailable", so
- *  callers render "—"). Tolerant of per-cluster failures. */
-export async function loadLiveClusterApys(
+/** Fan out {@link loadLiveClusterAprBps}. Map of clusterId → raw aprBps; a real
+ *  `0` IS included (renders "0.00%"), only a failed read is omitted (→ "—"). */
+export async function loadLiveClusterAprBpsMap(
   clusterIds: number[],
   windowBlocks?: number,
 ): Promise<Map<number, number>> {
@@ -523,11 +619,78 @@ export async function loadLiveClusterApys(
   const unique = Array.from(new Set(clusterIds));
   await Promise.all(
     unique.map(async (id) => {
-      const apy = await loadLiveClusterApy(id, windowBlocks);
-      if (apy !== null) out.set(id, apy);
+      const bps = await loadLiveClusterAprBps(id, windowBlocks);
+      if (bps !== null) out.set(id, bps);
     }),
   );
   return out;
+}
+
+/** Best-effort cluster operating entity (`lyth_getClusterEntity` → `entity`,
+ *  e.g. "mono-labs" / "independent"). Null when unresolved / the read fails —
+ *  the caller renders an honest "—". */
+export async function loadLiveClusterEntity(clusterId: number): Promise<string | null> {
+  try {
+    const res = await getProvider().rpcClient.lythGetClusterEntity(clusterId);
+    return res.entity && res.entity.length > 0 ? res.entity : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Fan out {@link loadLiveClusterEntity}. Map of clusterId → entity label (only
+ *  resolved clusters appear; a missing key renders "—"). */
+export async function loadLiveClusterEntities(
+  clusterIds: number[],
+): Promise<Map<number, string>> {
+  const out = new Map<number, string>();
+  const unique = Array.from(new Set(clusterIds));
+  await Promise.all(
+    unique.map(async (id) => {
+      const entity = await loadLiveClusterEntity(id);
+      if (entity !== null) out.set(id, entity);
+    }),
+  );
+  return out;
+}
+
+/** Live operator counts for a cluster's detail view (`lyth_clusterStatus`).
+ *  Best-effort — null when the read fails, so the detail shows honest "—". */
+export interface LiveClusterOperatorStatus {
+  live: number;
+  offline: number;
+  lagging: number;
+  maintenance: number;
+}
+
+export async function loadLiveClusterStatus(
+  clusterId: number,
+): Promise<LiveClusterOperatorStatus | null> {
+  try {
+    const res = await getProvider().rpcClient.lythClusterStatus(clusterId);
+    return {
+      live: res.live,
+      offline: res.offline,
+      lagging: res.lagging,
+      maintenance: res.maintenance,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Delegator (demand) count for a cluster (`lyth_getClusterDelegators` →
+ *  `count`). Null when the read fails — the detail renders an honest "—".
+ *  A real `0` (no delegators) is returned as `0`, not null. */
+export async function loadLiveClusterDelegatorCount(
+  clusterId: number,
+): Promise<number | null> {
+  try {
+    const res = await getProvider().rpcClient.lythGetClusterDelegators(clusterId);
+    return typeof res.count === "number" ? res.count : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Best-effort confirmation depth for a tx hash (`lyth_txConfirmations`).
@@ -576,10 +739,22 @@ export async function loadLiveClusterNames(
   return out;
 }
 
+/** Ceiling above which a decoded claim is not a claim.
+ *
+ *  200,000,000 LYTH is twice the genesis supply, so any single reward
+ *  settlement at or beyond it is a rogue or buggy operator echo rather than
+ *  money that moved. Such a value is treated as UNDECODABLE — never clamped
+ *  down to the ceiling, which would turn a bogus reading into a plausible
+ *  figure and hide the fact that the answer was garbage. */
+export const MAX_PLAUSIBLE_CLAIM_LYTHOSHI = 200_000_000n * 10n ** 18n;
+
 /** Decode the settled reward amount (LYTH decimal) from a confirmed claim tx's
- *  `Claimed` log via `lyth_decodeTx`. Returns null when no Claimed log is present
- *  or any read/decode fails — the caller falls back to the claimable amount
- *  captured at submit (honest absence, never a fabricated number). */
+ *  `Claimed` log via `lyth_decodeTx`.
+ *
+ *  Returns null when there is no Claimed log, the read/decode fails, or the
+ *  amount is implausible. Null means the surfaces show the bare title — the
+ *  submit-time claimable is a DIFFERENT quantity (execution settles further
+ *  rewards) and is never substituted. */
 export async function decodeClaimedAmount(txHash: string): Promise<string | null> {
   try {
     const decoded = await getProvider().rpcClient.lythDecodeTx(txHash);
@@ -587,7 +762,9 @@ export async function decodeClaimedAmount(txHash: string): Promise<string | null
     for (const log of logs) {
       if (log.topics?.[0] === CLAIMED_EVENT_TOPIC0) {
         const event = decodeClaimedEvent(log.topics, log.data);
-        return formatLyth(event.amount.toString(), { includeUnit: false });
+        const amount = event.amount;
+        if (amount > MAX_PLAUSIBLE_CLAIM_LYTHOSHI) return null;
+        return formatLyth(amount.toString(), { includeUnit: false });
       }
     }
     return null;
@@ -596,8 +773,40 @@ export async function decodeClaimedAmount(txHash: string): Promise<string | null
   }
 }
 
+/** Decode the network fee (raw lythoshi string) from a confirmed tx via
+ *  `lyth_decodeTx`. Returns null when the fee can't be decoded — the caller
+ *  omits the fee row (honest absence, never a fabricated 0). */
+export async function decodeTxFeeLythoshi(txHash: string): Promise<string | null> {
+  try {
+    const decoded = await getProvider().rpcClient.lythDecodeTx(txHash);
+    const total = decoded.fee?.total_lythoshi;
+    if (typeof total !== "string" || total.length === 0) return null;
+    // A zero (or unparseable) fee is treated as absent — a confirmed tx's fee is
+    // never a real 0, so omit the row rather than render a fabricated "0 LYTH".
+    try {
+      if (BigInt(total) <= 0n) return null;
+    } catch {
+      return null;
+    }
+    return total;
+  } catch {
+    return null;
+  }
+}
+
 export async function loadAccountPolicy(address: string) {
   return getProvider().rpcClient.lythGetAccountPolicy(requireTypedUserAddress(address, "account policy address"));
+}
+
+/** Raw native balance as an exact lythoshi integer string via `eth_getBalance`
+ *  (SDK 0.6.0 `AccountProofResponse.value`, normalized). The single balance read
+ *  the Delegate page derives its effective-weight LYTH figures from. Throws on
+ *  RPC failure — wrap in {@link capture}. */
+export async function loadNativeBalanceLythoshi(address: string): Promise<string> {
+  const client = getProvider().rpcClient;
+  const addressHex = requireTypedUserAddressHex(address, "wallet");
+  const balance = await client.ethGetBalance(addressHex);
+  return BigInt(normalizeBalanceHex(balance)).toString();
 }
 
 export async function loadLiveWalletBalance(address: string): Promise<LiveWalletBalance> {
@@ -617,18 +826,46 @@ export async function loadLiveWalletBalance(address: string): Promise<LiveWallet
   };
 }
 
+/**
+ * Derive the live wallet identity from a vault seed.
+ *
+ * THE ADDRESS FORM IS CONVERTED HERE, and this function is the reason why. The
+ * SDK backend returns a raw `0x` address; this wallet retired that form
+ * everywhere — the recipient parser rejects it, the spending policy
+ * canonicalises away from it, and every reader validates through
+ * `requireTypedUserAddress*`. So the derivation seam is where the SDK's form
+ * becomes the wallet's.
+ *
+ * Converting at the call site instead would have fixed one caller and left the
+ * trap armed for the next: the identity previously flowed straight into
+ * `loadLiveWalletBalance`, whose first act is that validator, which threw
+ * "raw 0x addresses are retired" on the wallet's own address — and the panel
+ * reported balance and nonce as unavailable when the request had simply never
+ * been made.
+ */
 export function deriveLiveWalletIdentity(seed: Uint8Array): LiveWalletIdentity {
   const backend = MlDsa65Backend.fromSeed(seed);
   const publicKey = backend.publicKey();
   return {
-    address: backend.getAddress(),
+    address: addressToTypedBech32("user", backend.getAddress()),
     publicKeyHex: bytesToHex(publicKey),
     publicKeyBytes: publicKey.length,
   };
 }
 
+/**
+ * Render an outcome for display.
+ *
+ * Three answers, not two. A read that FAILED shows its error, a read that
+ * SUCCEEDED shows its value — and a method the endpoint declines to serve shows
+ * neither, because it is a different fact from both. Handled here at the shared
+ * seam rather than per surface, so every consumer gets the same answer instead
+ * of each solving it locally and drifting apart.
+ */
 export function formatOutcome<T>(outcome: RpcOutcome<T>, render: (value: T) => string): string {
-  if (!outcome.ok) return outcome.error ?? "unavailable";
+  if (!outcome.ok) {
+    return isMethodDisabled(outcome.error) ? METHOD_UNAVAILABLE_LABEL : outcome.error ?? "unavailable";
+  }
   return render(outcome.value as T);
 }
 
@@ -654,11 +891,18 @@ function nativeMarketOrderBookDeltasQuery(filter: {
   };
 }
 
-function normalizeBalanceHex(balance: unknown): string {
+/** Normalize an `eth_getBalance` result to a BigInt-parsable balance string.
+ *  SDK 0.6.0 returns an `AccountProofResponse` whose balance is the `value`
+ *  field (a 0x-hex string), not a bare hex string nor a `balance` key — reading
+ *  the wrong shape yielded a constant 0. Accepts the bare string + the legacy
+ *  `balance` key too; anything unrecognized falls back to "0x0". Exported for
+ *  unit tests. */
+export function normalizeBalanceHex(balance: unknown): string {
   if (typeof balance === "string") return balance;
-  if (balance && typeof balance === "object" && "balance" in balance) {
-    const raw = (balance as { balance?: unknown }).balance;
-    if (typeof raw === "string") return raw;
+  if (balance && typeof balance === "object") {
+    const obj = balance as { value?: unknown; balance?: unknown };
+    if (typeof obj.value === "string") return obj.value;
+    if (typeof obj.balance === "string") return obj.balance;
   }
   return "0x0";
 }

@@ -7,12 +7,15 @@
 
 import { useEffect, useState } from "react";
 import { TokenRow } from "../components/TokenRow";
+import { RefreshButton } from "../components/RefreshButton";
 import type { Route } from "../components/types";
 import { useActiveWallet } from "../sdk/active-wallet";
 import { errorMessage, loadLiveTokenStatus, type LiveTokenStatus } from "../sdk/live";
 import { MONOSCAN_GET_LYTH_URL } from "../sdk/monoscan";
+import { ExternalLink } from "../components/ExternalLink";
 import { NATIVE_TOKEN_REF, writeSelectedToken } from "../sdk/selected-token";
 import { liveTokenStatusToRows } from "../sdk/token-rows";
+import { loadTokenMetaMap, type TokenMeta } from "../sdk/token-metadata";
 
 interface Props {
   goto: (r: Route) => void;
@@ -22,6 +25,7 @@ export function Tokens({ goto }: Props) {
   const wallet = useActiveWallet();
   const walletAddress = wallet.status === "ready" ? wallet.address : "";
   const [live, setLive] = useState<LiveTokenStatus | null>(null);
+  const [tokenMeta, setTokenMeta] = useState<Map<string, TokenMeta>>(new Map());
   const [busy, setBusy] = useState(false);
 
   const refresh = async () => {
@@ -31,11 +35,19 @@ export function Tokens({ goto }: Props) {
     }
     setBusy(true);
     try {
-      setLive(await loadLiveTokenStatus(walletAddress));
+      const status = await loadLiveTokenStatus(walletAddress);
+      setLive(status);
+      // Fetch each listed token's metadata (cached) so amounts render at their
+      // real decimals; until it resolves, MRC-20 amounts show an honest "—".
+      if (status.tokenBalances.ok && status.tokenBalances.value) {
+        const ids = status.tokenBalances.value.map((r) => r.mrc?.assetId ?? r.tokenId);
+        setTokenMeta(await loadTokenMetaMap(ids));
+      }
     } catch (cause) {
       setLive({
         endpoint: "unavailable",
         nativeBalance: { ok: false, error: errorMessage(cause) },
+        nativeBalanceLythoshi: { ok: false, error: errorMessage(cause) },
         tokenBalances: { ok: false, error: errorMessage(cause) },
         addressLabel: { ok: false, error: errorMessage(cause) },
         assetPolicy: { ok: false, error: errorMessage(cause) },
@@ -49,7 +61,7 @@ export function Tokens({ goto }: Props) {
     void refresh();
   }, [walletAddress]);
 
-  const rows = liveTokenStatusToRows(live);
+  const rows = liveTokenStatusToRows(live, tokenMeta);
   // Token references aligned to `rows`: row 0 is native; the rest are the raw
   // MRC-20 token ids in the same indexer order `liveTokenStatusToRows` used.
   // Clicking a row stores its ref and opens the token-detail page.
@@ -83,18 +95,14 @@ export function Tokens({ goto }: Props) {
               the canonical monoscan sale page externally, the same honest link
               the Home hero and the token-detail action bar use. We never ship a
               fake in-app card/bank/exchange on-ramp. */}
-          <a
+          <ExternalLink
             className="btn btn--sm"
             href={MONOSCAN_GET_LYTH_URL}
-            target="_blank"
-            rel="noopener noreferrer"
             style={{ textDecoration: "none" }}
           >
             Buy
-          </a>
-          <button className="btn btn--sm" onClick={refresh} disabled={busy}>
-            {busy ? "Refreshing…" : "Refresh"}
-          </button>
+          </ExternalLink>
+          <RefreshButton busy={busy} onClick={refresh} />
         </div>
         <div className="w-card__body">
           {!walletAddress ? (

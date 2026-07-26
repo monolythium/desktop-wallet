@@ -23,11 +23,12 @@
 // The tracked-tx core treats `lyth_txStatus="found"` / a success receipt as
 // the confirmed signal and only ever persists explicit "confirmed" / "failed".
 
-import { MONOLYTHIUM_TESTNET_CHAIN_ID } from "@monolythium/core-sdk";
 import { loadActiveWallet } from "./active-wallet";
+import { scopeChainKey } from "./chains";
 import { recordNotification } from "./notifications-store";
 import { toastTerminalNotification } from "./os-toast";
 import type { TxOpKind } from "./notifications";
+import { classifySendError, extractSendError } from "./send-error";
 
 /** Lowercased scope address. The wallet's active typed bech32m address is the
  *  notification scope's address dimension (the recipient of every record it
@@ -37,11 +38,6 @@ async function scopeAddressLower(): Promise<string | null> {
   return wallet.status === "ready" ? wallet.address.toLowerCase() : null;
 }
 
-/** Hex chain id for the scope key — `0x10f2c` for testnet-69420. */
-function scopeChainIdHex(): string {
-  return `0x${MONOLYTHIUM_TESTNET_CHAIN_ID.toString(16)}`;
-}
-
 export interface OperationNotifyContext {
   kind: TxOpKind;
   amountDecimal: string;
@@ -49,6 +45,11 @@ export interface OperationNotifyContext {
   /** For delegation kinds: the target cluster (optional). */
   clusterId?: number;
   clusterName?: string;
+  /** Delegation weight in basis points, so a failed delegation states the same
+   *  percent its landed siblings do. Optional + already carried by the record —
+   *  the tracked-tx path has always written it, and this closes the one door
+   *  that dropped it. */
+  delegationWeightBps?: number;
 }
 
 /** Record a terminal FAILURE for an operation that threw. Honest + immediate:
@@ -58,13 +59,27 @@ export interface OperationNotifyContext {
 export async function recordOperationFailure(
   meta: OperationNotifyContext,
   txHash: string | undefined,
+  cause?: unknown,
 ): Promise<void> {
   if (!txHash) return;
   const addressLower = await scopeAddressLower();
   if (!addressLower) return;
+  // Classify the rejection into a BOUNDED token (a SendErrorKind), never the raw
+  // node string — a node error can carry an endpoint, a path, or unbounded text.
+  // The numeric JSON-RPC code is carried when the node supplied one.
+  let reason: string | undefined;
+  let reasonCode: number | undefined;
+  if (cause !== undefined) {
+    const extracted = extractSendError(cause);
+    reason = classifySendError(extracted.message).kind;
+    reasonCode =
+      typeof extracted.code === "number" && Number.isFinite(extracted.code)
+        ? extracted.code
+        : undefined;
+  }
   const { added, record } = await recordNotification({
     addressLower,
-    chainIdHex: scopeChainIdHex(),
+    chainIdHex: scopeChainKey(),
     txHash,
     status: "failed",
     blockNumber: null,
@@ -73,6 +88,9 @@ export async function recordOperationFailure(
     counterparty: meta.counterparty,
     clusterId: meta.clusterId,
     clusterName: meta.clusterName,
+    delegationWeightBps: meta.delegationWeightBps,
+    reason,
+    reasonCode,
   });
   // Raise an OS toast ONLY for a genuinely-new record (added === true), reusing
   // the store's `${chainIdHex}:${txHash}` dedupe. Best-effort + flag-gated

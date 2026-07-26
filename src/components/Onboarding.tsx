@@ -27,8 +27,11 @@ import { registerVault } from "../sdk/vaultCatalog";
 import { explainImportError } from "../lib/import-error";
 import { MnemonicGrid } from "./MnemonicGrid";
 import { VerifyPhrase } from "./VerifyPhrase";
+import { WalletLogo } from "./WalletLogo";
+import { PreferencesPanel } from "./PreferencesPanel";
 import { PasswordStrengthMeter } from "./PasswordStrengthMeter";
-import { isPasswordValid, getPasswordStrength } from "../lib/password-validation";
+import { PasswordInput } from "./PasswordInput";
+import { isPasswordValid } from "../lib/password-validation";
 
 interface Props {
   onDone: () => void;
@@ -55,12 +58,10 @@ export function Onboarding({ onDone }: Props) {
   const [importDraft, setImportDraft] = useState("");
   const [importError, setImportError] = useState<string | null>(null);
 
+  // The one binding gate. The strength meter is visual and blocks nothing —
+  // a band conjunct here would be a second policy hidden behind a progress bar.
   const canSubmit =
-    !busy &&
-    isPasswordValid(password) &&
-    getPasswordStrength(password) !== "weak" &&
-    password === confirm &&
-    acknowledged;
+    !busy && isPasswordValid(password) && password === confirm && acknowledged;
 
   const importWordCount = useMemo(
     () => importDraft.trim().split(/\s+/).filter(Boolean).length,
@@ -213,17 +214,9 @@ export function Onboarding({ onDone }: Props) {
         {step === "choose-path" ? (
           <>
             <div style={{ textAlign: "center", marginBottom: 22 }}>
-              <div
-                aria-hidden="true"
-                style={{
-                  width: 52,
-                  height: 52,
-                  margin: "0 auto 14px",
-                  borderRadius: 13,
-                  background: "var(--gold)",
-                  boxShadow: "0 0 16px rgba(var(--gold-glow), 0.4)",
-                }}
-              />
+              <div style={{ display: "flex", justifyContent: "center", marginBottom: 14 }}>
+                <WalletLogo size={52} />
+              </div>
               <h1 style={{ margin: "0 0 6px" }}>Welcome to Monolythium</h1>
               <div
                 style={{
@@ -248,6 +241,20 @@ export function Onboarding({ onDone }: Props) {
                 wallet or restore one from its 24-word recovery phrase.
               </p>
             </div>
+            {/* The SAME panel Settings renders. It applies immediately, adds no
+                step, and never gates either path — it touches no vault, keychain
+                or RPC, so it is safe here in the pre-vault boot state. */}
+            <PreferencesPanel />
+            <div
+              style={{
+                margin: "10px 0 18px",
+                textAlign: "center",
+                fontSize: 12,
+                color: "var(--fg-400)",
+              }}
+            >
+              {"You can change these anytime in Settings."}
+            </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               <button
                 className="btn btn--primary"
@@ -261,7 +268,7 @@ export function Onboarding({ onDone }: Props) {
                 onClick={beginImport}
                 style={{ width: "100%" }}
               >
-                I already have a recovery phrase
+                Import existing wallet
               </button>
             </div>
           </>
@@ -344,8 +351,9 @@ export function Onboarding({ onDone }: Props) {
             <div className="cap" style={{ marginBottom: 8 }}>Recovery phrase</div>
             <h1 style={{ margin: "0 0 8px" }}>Write this down</h1>
             <p style={{ margin: "0 0 14px", color: "var(--w-text-2)", fontSize: 13 }}>
-              This recovery phrase is the only recovery path for the encrypted
-              local vault. It will not be shown again.
+              These 24 words are the only way to restore this wallet. Write them
+              down and keep them offline — you can view them again later in
+              Settings, but treat them as secret.
             </p>
             <div
               style={{
@@ -360,21 +368,6 @@ export function Onboarding({ onDone }: Props) {
               ML-DSA-65 · {RECOVERY_WORDS} words
             </div>
             <MnemonicGrid mnemonic={mnemonic} />
-            <div
-              style={{
-                marginTop: 14,
-                padding: "10px 12px",
-                borderRadius: 10,
-                background: "rgba(242,180,65,0.08)",
-                border: "1px solid rgba(242,180,65,0.4)",
-                color: "var(--fg-100)",
-                fontSize: 12,
-                lineHeight: 1.5,
-              }}
-            >
-              Anyone with these words controls your funds — store them offline
-              and never share them. Monolythium cannot recover them for you.
-            </div>
             <div style={{ display: "flex", marginTop: 24 }}>
               <button
                 className="btn btn--primary"
@@ -394,18 +387,17 @@ export function Onboarding({ onDone }: Props) {
             <p style={{ margin: "0 0 24px", color: "var(--w-text-2)", fontSize: 13 }}>
               The password unwraps a signing key encrypted with Argon2id and
               XChaCha20-Poly1305. We never store the password itself, only the
-              encrypted vault. Use at least 12 characters with a mix of upper
-              and lower case, a number, and a symbol.
+              encrypted vault. Use at least 15 characters — there are no other
+              composition rules.
             </p>
 
             <label className="w-onboarding__field">
               <span className="cap">Password</span>
-              <input
-                type="password"
+              <PasswordInput
                 autoFocus
                 autoComplete="new-password"
                 value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                onChange={setPassword}
                 onKeyDown={(e) => {
                   if (e.key === "Enter") void submit();
                 }}
@@ -414,11 +406,10 @@ export function Onboarding({ onDone }: Props) {
 
             <label className="w-onboarding__field">
               <span className="cap">Confirm</span>
-              <input
-                type="password"
+              <PasswordInput
                 autoComplete="new-password"
                 value={confirm}
-                onChange={(e) => setConfirm(e.target.value)}
+                onChange={setConfirm}
                 onKeyDown={(e) => {
                   if (e.key === "Enter") void submit();
                 }}

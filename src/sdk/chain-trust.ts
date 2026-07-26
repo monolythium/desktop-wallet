@@ -1,0 +1,349 @@
+// Genesis + chain-id trust for the chain-health machine.
+//
+// Enforces (fail-closed) that the operator the wallet reads from is on the
+// pinned chain id AND proves the pinned genesis hash, per the status
+// specification §F: a different chain id → UNTRUSTED OPERATOR; the right chain
+// id but a different (or unproven) genesis → ALL OPERATORS UNTRUSTED
+// (re-genesis / stale pin). The pin is the SDK chain registry
+// (`getChainInfo(...).chain_id` / `.genesis_hash`) — the same value the About /
+// Settings / News surfaces already display, now enforced.
+//
+// The degraded cause is resolved by F1's tested `classifyNoOperatorReason`
+// (precedence regenesis > untrusted > quarantined > unreachable) — this module
+// only supplies the real per-operator signals; it does NOT re-derive precedence.
+// Quarantine detection reuses the SDK's `isQuarantineError` (`-32047`).
+//
+// This pass verifies the ACTIVE operator (single endpoint). The fleet probe +
+// failover that make OPERATOR QUARANTINED derivable are a follow-up.
+
+import { RpcClient, getChainInfo, isQuarantineError } from "@monolythium/core-sdk";
+import type { ChainStatsResponse } from "@monolythium/core-sdk";
+import { currentEndpoint, getProviderUnchecked } from "./client";
+import { rpcClientOptions } from "./http";
+import { isCanonicalHash } from "./submit";
+import { withDeadline } from "./with-deadline";
+import { activeFleet } from "./fleet";
+import { activeChainRecord } from "./chains";
+import {
+  classifyNoOperatorReason,
+  type DegradedCause,
+  type FleetTrustSignals,
+} from "./chain-health";
+
+/** The registry network this build pins its chain identity to. */
+export const NETWORK_SLUG = "testnet-69420";
+
+/**
+ * Wall-clock bound on ONE trust read (ms).
+ *
+ * The SDK client exposes no timeout — `RpcClientOptions` is `{fetch?, headers?}`
+ * and its bundle contains no abort signal — so a wedged operator would otherwise
+ * hold a health tick open forever, and with it the trust verdict every read and
+ * broadcast is gated on. Every other probe path in this wallet is already
+ * bounded (peer reachability 4 000, operator inspection 6 000, spend guard
+ * 2 500); this one is the tightest of them because it is the only one that runs
+ * unattended every {@link HEALTH_TICK_MS}, and because a tick spends its budget
+ * TWICE in the worst case — the active operator, then the failover fan-out. At
+ * 2 000 both legs still complete inside one 5 000 ms period, which is the
+ * property {@link resolveHeadOverFleet}'s tests pin.
+ */
+export const CHAIN_TRUST_TIMEOUT_MS = 2_000;
+
+/** One operator's trust verdict — the real signals fed to
+ *  {@link classifyNoOperatorReason}. A quarantined operator answered a `-32047`
+ *  and could not report its chain id/genesis (so `wrongChainId` / `genesisMismatch`
+ *  stay false — it is not "wrong chain", it is refusing to serve). */
+export interface OperatorVerdict {
+  url: string;
+  /** Reachable and answered a DIFFERENT chain id (→ untrusted). */
+  wrongChainId: boolean;
+  /** Right chain id but a definitively different genesis hash (→ regenesis). */
+  genesisMismatch: boolean;
+  /** Answered a `-32047` "chain quarantined" rejection. */
+  quarantined: boolean;
+  /** Right chain id AND the genesis hash matches the pin. */
+  trusted: boolean;
+  /** Head height + identity, only meaningful when reachable on the right chain. */
+  height: number | null;
+  headId: string | null;
+  /** The genesis hash the operator reported, recorded for the inspection UI —
+   *  never consumed by the trust decision. Null when the operator answered no
+   *  genesis, was quarantined, or was unreachable. */
+  observedGenesis: string | null;
+  /** The chain id the operator reported, recorded for the inspection UI — never
+   *  consumed by the trust decision. Null when quarantined/unreachable. */
+  observedChainId: number | null;
+}
+
+/** The resolved head for a tick: a trusted operator's head, or a degraded cause
+ *  (the exact shape {@link reduceHealth} consumes as an observation, plus the
+ *  `url` the read came from so the view reflects the read path). */
+export type TrustedHead =
+  | { ok: true; url: string; height: number; headId: string; chainId: number }
+  | { ok: false; cause: DegradedCause; reason?: string };
+
+// ── DECIDED AGAINST: a block-0 hash as a second identity signal (A7) ────────
+//
+// The specification argues for corroborating the genesis hash with the hash of
+// block 0, so an operator that does not expose `genesisHash` can still be
+// identified. This wallet deliberately does not, and the reasoning is recorded
+// here — beside the comparison it would have changed — so it reads as a
+// considered choice rather than an omission.
+//
+//  1. TWO FIELDS FROM ONE OPERATOR ARE NOT TWO OPINIONS. An operator that
+//     fabricates the identity hash in one response can fabricate a block hash in
+//     another. A second field bought from the same source is not independent
+//     evidence, and treating it as such is the error the whole idea rests on.
+//  2. IT COVERS ONLY AN IMPLEMENTATION GAP. Against a lying operator it adds
+//     nothing (see 1), so all it really addresses is an operator that does not
+//     expose the identity hash at all. Every fleet member currently exposes it.
+//  3. IT WOULD BE A SECOND PINNED CONSTANT, immediately after a pass spent
+//     establishing that the wallet should have exactly ONE anchor — and the
+//     specification's own note warns the two values must never be compared
+//     against each other, which is a second rule to keep correct forever.
+//  4. THE TRANSPORT DEFEATS IT. On the one this fleet actually uses, an on-path
+//     rewrite changes both fields in the same body.
+//
+// REVISIT WHEN: a fleet member stops exposing the identity hash. At that point
+// reason 2 is no longer hypothetical and this becomes worth having.
+
+/**
+ * Build a trust verdict from one operator's `lyth_chainStats` (pure).
+ *
+ * With a NON-NULL pin (the builtin chain): fail-closed genesis proof — a
+ * null/absent `genesisHash` is NOT a pass (it proves nothing, so `trusted` stays
+ * false); genesis is compared case-insensitively (§F.2).
+ *
+ * With a NULL pin (a custom chain, §15): chain-id-only trust — there is no
+ * genesis to prove and no pin to mismatch against, so `trusted = chainIdOk` and
+ * `genesisMismatch` can NEVER fire (regenesis is unreachable on a custom chain).
+ * The observed genesis is still recorded for display; it is not judged on.
+ *
+ * ONLY A WELL-FORMED HASH CAN PROVE A RE-GENESIS (A6). `genesisMismatch` is a
+ * claim about the CHAIN — that this operator serves a chain which re-genesised
+ * under our chain id — and a value that is not a 32-byte hash cannot support it.
+ * Such a value says the operator is broken or answering something that is not a
+ * genesis hash, which is a claim about the OPERATOR. Both refuse, so this buys a
+ * correct LABEL rather than a protection; the label is what a user reads.
+ * A malformed value therefore lands exactly where an ABSENT one does:
+ * non-definitive, unproven, untrusted. Shape is judged by the same
+ * {@link isCanonicalHash} the submit seam uses, so there is one answer in this
+ * wallet to what a well-formed chain hash is.
+ *
+ * The head identity is the block hash, or the height when the hash is null
+ * (fail-closed).
+ */
+export function verdictFromStats(
+  stats: ChainStatsResponse,
+  pinChainId: number,
+  pinGenesis: string | null,
+  url = "",
+): OperatorVerdict {
+  const chainIdOk = stats.chainId === pinChainId;
+  const observed = stats.genesisHash;
+  const genesisOk =
+    pinGenesis === null
+      ? chainIdOk
+      : chainIdOk && observed != null && observed.toLowerCase() === pinGenesis.toLowerCase();
+  return {
+    url,
+    wrongChainId: !chainIdOk,
+    genesisMismatch:
+      pinGenesis !== null && chainIdOk && isCanonicalHash(observed) && !genesisOk,
+    quarantined: false,
+    trusted: genesisOk,
+    height: stats.latestHeight,
+    headId: stats.latestBlockHash ?? String(stats.latestHeight),
+    observedGenesis: observed,
+    observedChainId: stats.chainId,
+  };
+}
+
+/** A verdict for an operator that answered a `-32047` quarantine rejection. */
+export function quarantinedVerdict(url = ""): OperatorVerdict {
+  return {
+    url,
+    wrongChainId: false,
+    genesisMismatch: false,
+    quarantined: true,
+    trusted: false,
+    height: null,
+    headId: null,
+    observedGenesis: null,
+    observedChainId: null,
+  };
+}
+
+/** A verdict for an operator that could not be reached at all (transport fault). */
+export function unreachableVerdict(url = ""): OperatorVerdict {
+  return {
+    url,
+    wrongChainId: false,
+    genesisMismatch: false,
+    quarantined: false,
+    trusted: false,
+    height: null,
+    headId: null,
+    observedGenesis: null,
+    observedChainId: null,
+  };
+}
+
+/** Reduce per-operator verdicts to the fleet signals (pure). `allQuarantined`
+ *  requires a non-empty active set every member of which is quarantined
+ *  (§G unanimity; empty ⇒ never quarantined). */
+export function fleetSignals(verdicts: readonly OperatorVerdict[]): FleetTrustSignals {
+  return {
+    activeCount: verdicts.length,
+    anyGenesisMismatch: verdicts.some((v) => v.genesisMismatch),
+    anyWrongChainId: verdicts.some((v) => v.wrongChainId),
+    allQuarantined: verdicts.length > 0 && verdicts.every((v) => v.quarantined),
+  };
+}
+
+/**
+ * Resolve the active-set verdicts to a trusted head or a degraded cause (pure).
+ * The first fully-trusted operator wins (§O5: one trusted+reachable operator ⇒
+ * a healthy read, regardless of another operator being degraded). When none
+ * qualifies, the cause comes from F1's `classifyNoOperatorReason` — precedence
+ * is NOT re-implemented here.
+ */
+export function resolveFleet(
+  verdicts: readonly OperatorVerdict[],
+  pinChainId: number,
+): TrustedHead {
+  const trusted = verdicts.find((v) => v.trusted);
+  if (trusted && trusted.height != null && trusted.headId != null) {
+    return { ok: true, url: trusted.url, height: trusted.height, headId: trusted.headId, chainId: pinChainId };
+  }
+  return { ok: false, cause: classifyNoOperatorReason(fleetSignals(verdicts)) };
+}
+
+/**
+ * Turn one operator's `lyth_chainStats` read into a trust verdict. A `-32047`
+ * quarantine rejection and a transport fault each become their own verdict
+ * (fail-closed) rather than throwing. Reused for the active operator (shared
+ * client seam) and each fleet operator (a transient client).
+ */
+async function verdictForClient(
+  client: Pick<RpcClient, "lythChainStats">,
+  url: string,
+  pinChainId: number,
+  pinGenesis: string | null,
+): Promise<OperatorVerdict> {
+  try {
+    const stats = await client.lythChainStats();
+    return verdictFromStats(stats, pinChainId, pinGenesis, url);
+  } catch (err) {
+    return isQuarantineError(err) ? quarantinedVerdict(url) : unreachableVerdict(url);
+  }
+}
+
+/** Probe one fleet operator by URL over a transient client bound to it (the same
+ *  fetch seam — no second RPC path). */
+export async function probeOperator(
+  url: string,
+  pinChainId: number,
+  pinGenesis: string | null,
+): Promise<OperatorVerdict> {
+  return verdictForClient(new RpcClient(url, rpcClientOptions()), url, pinChainId, pinGenesis);
+}
+
+/**
+ * Resolve a trusted head across the operator fleet, fail-closed (§F/§G/§K).
+ *
+ * Fast path: verify the ACTIVE operator (the user's / last failover's choice)
+ * through the shared client seam. `lyth_chainStats` carries BOTH the chain id
+ * and the genesis hash, so every steady-state tick re-confirms trust in one
+ * read — there is no window where a silently-forked operator reads LIVE.
+ *
+ * If the active operator is not trusted, probe the rest of the effective fleet
+ * (`activeFleet` — the override-aware dial set) in PARALLEL and select the first
+ * trusted operator to fail over to (§O5: one
+ * trusted+reachable operator ⇒ a healthy read). When none qualifies, the
+ * degraded cause comes from F1's `classifyNoOperatorReason` over the whole
+ * active set — so OPERATOR QUARANTINED requires unanimity (§G).
+ *
+ * `probe` is injectable for tests; production uses {@link probeOperator}.
+ */
+export async function resolveTrustedHead(
+  probe: typeof probeOperator = probeOperator,
+): Promise<TrustedHead> {
+  const { chainId, genesis } = activeChainPin();
+  return resolveHeadOverFleet(chainId, genesis, probe);
+}
+
+/**
+ * The identity the ACTIVE chain is verified against.
+ *
+ * Builtin chain: the pin ALWAYS comes from the SDK registry symbol (a non-null
+ * genesis) — genesis is enforced, and the null-pin custom branch is structurally
+ * unreachable there. Custom chain (§15): chain-id-only trust, no genesis pin.
+ *
+ * One derivation, so every place that decides whether an operator may be trusted
+ * asks the same question — the tick, and the switch-time gate below.
+ */
+export function activeChainPin(): { chainId: number; genesis: string | null } {
+  const record = activeChainRecord();
+  if (record.builtin) {
+    const info = getChainInfo(NETWORK_SLUG);
+    return { chainId: info.chain_id, genesis: info.genesis_hash };
+  }
+  return { chainId: record.chainIdNum, genesis: null };
+}
+
+/**
+ * Verify one candidate operator against the active chain's pin, for a caller
+ * about to point the read path at it.
+ *
+ * The seam already fails closed on a switch ({@link setEndpoint} drops the
+ * verdict), so this is not what makes a switch safe — it is what makes a switch
+ * HONEST: the user gets the verdict before the endpoint moves, instead of a
+ * switch that silently reverts on the next tick. A caller that skips it is safe
+ * but slower to tell the truth.
+ *
+ * `probe` is injectable for tests; production uses {@link probeOperator}.
+ */
+export async function probeActiveChainOperator(
+  url: string,
+  probe: typeof probeOperator = probeOperator,
+): Promise<OperatorVerdict> {
+  const { chainId, genesis } = activeChainPin();
+  return probe(url, chainId, genesis);
+}
+
+/** Resolve a trusted head over the effective fleet for a given pin (pure I/O
+ *  shape — the pin choice is made by {@link resolveTrustedHead}). */
+async function resolveHeadOverFleet(
+  pinChain: number,
+  pinGenesis: string | null,
+  probe: typeof probeOperator,
+): Promise<TrustedHead> {
+  const active = currentEndpoint();
+
+  // Both legs are bounded by CHAIN_TRUST_TIMEOUT_MS and fold to `unreachable` on
+  // expiry — fail-closed, and the SAME shape a transport fault already produces,
+  // so a wedged operator is indistinguishable from an absent one rather than
+  // being able to hold the verdict open. Without this the tick has no upper
+  // bound and a never-settling read freezes the trust flag at its last value.
+  const bounded = (p: Promise<OperatorVerdict>, url: string): Promise<OperatorVerdict> =>
+    withDeadline(p, CHAIN_TRUST_TIMEOUT_MS, unreachableVerdict(url));
+
+  // The health probe re-checks the active operator even while it is untrusted
+  // (to detect recovery), so it reads through the UNCHECKED provider.
+  const activeVerdict = await bounded(
+    verdictForClient(getProviderUnchecked().rpcClient, active, pinChain, pinGenesis),
+    active,
+  );
+  if (activeVerdict.trusted) {
+    return resolveFleet([activeVerdict], pinChain);
+  }
+
+  const others = await Promise.all(
+    activeFleet()
+      .map((peer) => peer.url)
+      .filter((url) => url !== active)
+      .map((url) => bounded(probe(url, pinChain, pinGenesis), url)),
+  );
+  return resolveFleet([activeVerdict, ...others], pinChain);
+}

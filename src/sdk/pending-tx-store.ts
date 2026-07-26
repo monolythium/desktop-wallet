@@ -1,9 +1,12 @@
 // Tauri-store-backed durable tracked-tx store.
 //
 // The tracked-tx set is persisted on top of `@tauri-apps/plugin-store` (its own
-// `pending-tx.v1.json` file under `mono.activity.pending.*` keys), reusing the
+// `pending-tx.v1.json` file under a versioned key), reusing the
 // singleton-store + in-memory-cache pattern from `notifications-store.ts`, so a
 // tx that confirms while every surface is closed still notifies.
+// The store root is bound to the live block-0 hash. Chain id alone cannot
+// distinguish two incarnations of testnet-69420, and an old pending hash must
+// never be reconciled against a post-regenesis network.
 //
 // Why durable: the old desktop design polled `lyth_txStatus` inside the
 // OperationsDrawer with a ~15s budget that died the moment the drawer closed,
@@ -36,11 +39,18 @@ import {
   type PendingTx,
   type PendingTxEnvelope,
 } from "./pending-tx";
+import { requireLiveGenesisIdentity } from "./chain-identity";
 
-const STORE_FILE = "pending-tx.v1.json";
+export const STORE_FILE = "pending-tx.v1.json";
 
 let storePromise: Promise<Store> | null = null;
-let cache: PendingTxEnvelope | null = null;
+interface PendingTxStoreState {
+  version: 2;
+  genesisIdentity: string;
+  envelope: PendingTxEnvelope;
+}
+
+let cache: PendingTxStoreState | null = null;
 const subscribers = new Set<() => void>();
 
 // Referentially-stable snapshot of the tracked set for `useSyncExternalStore`.
@@ -61,27 +71,45 @@ async function getStore(): Promise<Store> {
 /** Point the shared snapshot at the cache's current rows. The cache is the
  *  source of truth; the snapshot is the render-safe view of it. */
 function syncSnapshot(): void {
-  snapshot = cache ? cache.txs : [];
+  snapshot = cache ? cache.envelope.txs : [];
 }
 
 async function loadEnvelope(): Promise<PendingTxEnvelope> {
-  if (cache) return cache;
+  const genesisIdentity = await requireLiveGenesisIdentity();
+  if (cache?.genesisIdentity === genesisIdentity) return cache.envelope;
   try {
     const store = await getStore();
-    const raw = await store.get<PendingTxEnvelope>(PENDING_TX_STORE_KEY);
-    cache = parsePendingTxEnvelope(raw) ?? { schemaVersion: 0, txs: [] };
+    const raw = await store.get<unknown>(PENDING_TX_STORE_KEY);
+    const root =
+      raw && typeof raw === "object"
+        ? (raw as Record<string, unknown>)
+        : null;
+    const envelope =
+      root?.version === 2 && root.genesisIdentity === genesisIdentity
+        ? parsePendingTxEnvelope(root.envelope)
+        : null;
+    cache = {
+      version: 2,
+      genesisIdentity,
+      envelope: envelope ?? { schemaVersion: 0, txs: [] },
+    };
   } catch {
-    cache = { schemaVersion: 0, txs: [] };
+    cache = {
+      version: 2,
+      genesisIdentity,
+      envelope: { schemaVersion: 0, txs: [] },
+    };
   }
   syncSnapshot();
-  return cache;
+  return cache.envelope;
 }
 
 async function saveEnvelope(env: PendingTxEnvelope): Promise<void> {
-  cache = env;
+  const genesisIdentity = await requireLiveGenesisIdentity();
+  cache = { version: 2, genesisIdentity, envelope: env };
   syncSnapshot();
   const store = await getStore();
-  await store.set(PENDING_TX_STORE_KEY, env);
+  await store.set(PENDING_TX_STORE_KEY, cache);
   await store.save();
   notifySubscribers();
 }
@@ -182,21 +210,70 @@ export async function bridgePendingTx(
   }
 }
 
+/** Mark a tracked tx as observed INCLUDED (`lyth_txStatus` `found`) while its
+ *  outcome is still unestablished (the receipt was unreadable). Persisted so the
+ *  time-ladder never ages a possibly-succeeded, included tx into a false
+ *  "didn't confirm" (see `classifyStalePending`). Idempotent — already-flagged
+ *  is a no-op. Best-effort. */
+export async function markPendingIncluded(
+  chainIdHex: string,
+  txHash: string,
+): Promise<{ marked: boolean }> {
+  try {
+    const env = await loadEnvelope();
+    let changed = false;
+    const next = env.txs.map((t) => {
+      if (t.chainIdHex !== chainIdHex || t.txHash !== txHash) return t;
+      if (t.seenIncluded === true) return t;
+      changed = true;
+      return { ...t, seenIncluded: true };
+    });
+    if (changed) await saveEnvelope({ schemaVersion: 0, txs: next });
+    return { marked: changed };
+  } catch {
+    return { marked: false };
+  }
+}
+
 /** Recompute each tracked tx's lifecycle and drop rows past the terminal-
  *  retention window, persisting ONLY when something changed (so a no-op tick is
  *  free and doesn't churn subscribers). Returns the count silently removed.
  *  Best-effort. */
 export async function applyPendingTransition(
   now: number,
+  committedNonces: ReadonlyMap<string, number | null> = new Map(),
+  scopeChainIdHex?: string,
 ): Promise<{ removed: number }> {
   try {
     const env = await loadEnvelope();
     const before = env.txs.length;
-    const { next, changed } = transitionPending(env.txs, now);
+    const { next, changed } = transitionPending(
+      env.txs,
+      committedNonces,
+      now,
+      scopeChainIdHex,
+    );
     if (changed) await saveEnvelope({ schemaVersion: 0, txs: next });
     return { removed: before - next.length };
   } catch {
     return { removed: 0 };
+  }
+}
+
+/** Drop every tracked tx owned by `addressLower`, ACROSS ALL CHAINS — called
+ *  from the vault-removal cleanup so a removed vault leaves no in-flight tx
+ *  history behind (the same data-hygiene contract the other scoped stores keep).
+ *  Address compared case-folded; a no-op when nothing matches. Best-effort. */
+export async function purgeScopesForAddress(addressLower: string): Promise<void> {
+  const scope = addressLower.toLowerCase();
+  if (scope.length === 0) return;
+  try {
+    const env = await loadEnvelope();
+    const next = env.txs.filter((t) => t.addressLower.toLowerCase() !== scope);
+    if (next.length === env.txs.length) return;
+    await saveEnvelope({ schemaVersion: 0, txs: next });
+  } catch {
+    // Best-effort — a failed purge never blocks vault removal.
   }
 }
 
@@ -225,7 +302,15 @@ export function pendingTxsSnapshot(): ReadonlyArray<PendingTx> {
  *  no-op. Best-effort — an unreadable store degrades to an empty set. */
 export async function hydratePendingTxs(): Promise<void> {
   const before = snapshot;
-  await loadEnvelope();
+  try {
+    await loadEnvelope();
+  } catch {
+    // Live identity is unavailable (or the store failed before it could be
+    // normalized). Fail closed: an earlier-genesis snapshot must not remain
+    // visible merely because the current chain cannot be identified.
+    cache = null;
+    snapshot = [];
+  }
   if (snapshot !== before) notifySubscribers();
 }
 

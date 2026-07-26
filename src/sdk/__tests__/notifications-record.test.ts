@@ -37,11 +37,15 @@ import {
   listAllNotifications,
 } from "../notifications-store";
 import { recordOperationFailure } from "../notifications-record";
+import { __setGenesisIdentityResolverForTests } from "../chain-identity";
+
+const GENESIS = `0x${"11".repeat(32)}`;
 
 beforeEach(() => {
   (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {};
   backing.clear();
   seedActiveVault();
+  __setGenesisIdentityResolverForTests(async () => GENESIS);
   __resetNotificationsStoreForTests();
   toastSpy.mockClear();
 });
@@ -87,6 +91,26 @@ describe("recordOperationFailure", () => {
     await recordOperationFailure(meta, undefined);
     expect(await listAllNotifications()).toHaveLength(0);
     expect(toastSpy).not.toHaveBeenCalled();
+  });
+
+  it("classifies the cause into a BOUNDED reason token + code, never the raw string", async () => {
+    // The node's raw error carries unbounded text + a path; only the classified
+    // SendErrorKind and the numeric code are persisted.
+    const cause = {
+      message: "upstream unavailable: mempool: insufficient funds at /var/run/node.sock",
+      code: -32047,
+    };
+    await recordOperationFailure(meta, "0xcls", cause);
+    const notes = await listAllNotifications();
+    expect(notes[0]!.reason).toBe("insufficient-funds");
+    expect(notes[0]!.reasonCode).toBe(-32047);
+    // The raw message is NOT persisted anywhere on the record.
+    expect(JSON.stringify(notes[0]!)).not.toContain("/var/run/node.sock");
+  });
+
+  it("omits the reason when no cause is supplied (legacy call site)", async () => {
+    await recordOperationFailure(meta, "0xnocause");
+    expect((await listAllNotifications())[0]!.reason).toBeUndefined();
   });
 
   it("does NOT re-toast a hash already recorded (dedupe)", async () => {

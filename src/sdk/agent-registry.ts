@@ -13,7 +13,7 @@
 
 import { Store } from "@tauri-apps/plugin-store";
 
-const STORE_FILE = "agents.v1.json";
+export const STORE_FILE = "agents.v1.json";
 const STATE_KEY = "state";
 
 export interface AgentEntry {

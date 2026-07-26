@@ -3,7 +3,10 @@
 // wallet-local addressbook via addressbookLookup(); search filters
 // client-side by name or address.
 //
-// Built on this wallet's local addressbook shape.
+// Rows render in STORE order (most-recently-used first) — the component
+// deliberately does not re-sort, so the ordering the user sees here matches the
+// Contacts page. Addresses render in full: a picker is exactly where a
+// truncated address could let the wrong recipient look right.
 
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -172,14 +175,14 @@ export function ContactsPickerModal({ onSelect, onClose }: Props) {
                 <div style={{ fontSize: 13, fontWeight: 500 }}>
                   {entry.name}
                 </div>
+                {/* Full address, wrapped — an ellipsis here would hide the
+                    characters that distinguish one recipient from another. */}
                 <div
                   className="mono"
                   style={{
                     fontSize: 11.5,
                     color: "var(--fg-400)",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
+                    wordBreak: "break-all",
                   }}
                   title={entry.address}
                 >

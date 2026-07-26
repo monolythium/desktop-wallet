@@ -11,6 +11,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { addressToTypedBech32 } from "@monolythium/core-sdk";
+import { useDeveloperMode } from "../sdk/developer-mode";
 
 /** Per-wallet live native-balance state. Each wallet tracks its own state so
  *  one RPC failure renders an honest per-row error rather than blanking the
@@ -24,6 +25,8 @@ import { useOperations } from "../operations/context";
 import { AddVaultModal } from "../components/AddVaultModal";
 import { notifyActiveWalletChanged } from "../sdk/active-wallet";
 import { formatLyth } from "@monolythium/core-sdk";
+import { formatFiatFromLythoshi, getLythFiatRate } from "../sdk/fiat";
+import { useDisplayCurrency } from "../sdk/display-prefs";
 import {
   deriveLiveWalletIdentity,
   errorMessage,
@@ -44,7 +47,12 @@ import {
   type VaultEntry,
 } from "../sdk/vaultCatalog";
 
+/** Why these cells show a symbol and a dash. The oracle precompile IS on-chain;
+ *  what is missing is a registered LYTH price feed, so no rate is obtainable. */
+const NO_PRICE_FEED_TITLE = "No LYTH price feed is registered on-chain.";
+
 export function Wallets() {
+  const devMode = useDeveloperMode();
   const ops = useOperations();
   const [identity, setIdentity] = useState<LiveWalletIdentity | null>(null);
   const [balance, setBalance] = useState<LiveWalletBalance | null>(null);
@@ -59,10 +67,32 @@ export function Wallets() {
   );
   const [activeSlot, setActiveSlot] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
+  // Subscribed so a currency change updates both est-value slots in-session.
+  const currency = useDisplayCurrency();
   const [renamingSlot, setRenamingSlot] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
   const [removingSlot, setRemovingSlot] = useState<string | null>(null);
   const [catalogError, setCatalogError] = useState<string | null>(null);
+  /** Slot whose address was just copied — drives the transient "Copied" label. */
+  const [copiedSlot, setCopiedSlot] = useState<string | null>(null);
+
+  /** Copy a wallet's FULL bech32m. The row displays an ellipsized form; copying
+   *  that would hand the user a string that is not an address. */
+  const onCopyAddress = useCallback(async (slot: string, address: string) => {
+    try {
+      await navigator.clipboard.writeText(address);
+      setCopiedSlot(slot);
+    } catch {
+      // Clipboard denied — silent; the address is still selectable and the
+      // title carries the full string.
+    }
+  }, []);
+
+  useEffect(() => {
+    if (copiedSlot === null) return;
+    const t = setTimeout(() => setCopiedSlot(null), 1500);
+    return () => clearTimeout(t);
+  }, [copiedSlot]);
 
   const refreshCatalog = useCallback(async () => {
     setCatalogError(null);
@@ -158,6 +188,7 @@ export function Wallets() {
     }
     return {
       lyth: formatLyth(lythoshi.toString(), { includeUnit: false }),
+      lythoshi,
       loaded,
       pending,
       errored,
@@ -276,7 +307,11 @@ export function Wallets() {
               </div>
               <div className="w-wallet-totals__cell">
                 <span className="k">Est. value</span>
-                <span className="v" title="No price oracle is available on-chain.">—</span>
+                {/* The partial-sum caveat is already disclosed by the counter
+                    cell beside this one, exactly as the LYTH total relies on. */}
+                <span className="v" title={NO_PRICE_FEED_TITLE} data-testid="fiat-totals">
+                  {formatFiatFromLythoshi(totals.lythoshi, currency, getLythFiatRate(currency))}
+                </span>
               </div>
               <div className="w-wallet-totals__cell">
                 <span className="k">Wallets</span>
@@ -380,9 +415,13 @@ export function Wallets() {
                     <div
                       className="row-help"
                       style={{ marginTop: 2, fontSize: 10.5 }}
-                      title="No price oracle is available on-chain."
+                      title={NO_PRICE_FEED_TITLE}
                     >
-                      —
+                      {/* Only a `ready` row has an amount to price. Every other
+                          state keeps the plain dash: the amount itself is
+                          unknown, which is a different fact from having an
+                          amount and no rate. */}
+                      {rowEstValue(balances.get(v.slot), currency)}
                     </div>
                   </div>
                 </div>
@@ -438,6 +477,20 @@ export function Wallets() {
                       >
                         Rename
                       </button>
+                      {/* The row's address is ellipsized to keep the row
+                          compact, which is permitted only as an expand
+                          affordance — and an affordance whose copy action is
+                          missing is a dead end. This copies the FULL bech32m,
+                          never the truncated form the row shows. */}
+                      {bech32m ? (
+                        <button
+                          className="btn btn--sm btn--ghost"
+                          aria-label={`Copy address for ${v.name}`}
+                          onClick={() => void onCopyAddress(v.slot, bech32m)}
+                        >
+                          {copiedSlot === v.slot ? "Copied" : "Copy address"}
+                        </button>
+                      ) : null}
                       <button
                         className="btn btn--sm btn--ghost"
                         style={{ color: "var(--err)" }}
@@ -466,6 +519,24 @@ export function Wallets() {
         </div>
       </div>
 
+      {/* DEVELOPER-GATED, and trimmed to what only this panel can answer — so
+          a later reader does not have to guess at either decision.
+          Four of the six fields it used to carry were copies of facts already
+          on screen: the vault slot and the typed address are on every
+          catalogue row above, the balance is on the right of the same row, and
+          the algorithm is a constant stated both on About and in this page's
+          own unlock drawer. A second copy of a fact is a second thing to keep
+          true, and a diagnostic that restates the page around it buries the
+          part that is actually diagnostic.
+          What remains appears nowhere else in the wallet: the account nonce
+          and the public-key size, both wanted by someone debugging a stuck
+          transaction or a key, neither needed in order to spend.
+          It is NOT gated because it was broken: the address-form fix landed
+          first and the panel was confirmed reading a real balance and nonce
+          against the live chain before this gate was added.
+          UNGATE IF: a field here becomes something a normal user needs and
+          cannot get from the catalogue rows, Receive, or Home. */}
+      {devMode ? (
       <div className="w-card">
         <div className="w-card__head">
           <h3>Live active-wallet preview</h3>
@@ -476,13 +547,6 @@ export function Wallets() {
           </button>
         </div>
         <div className="w-card__body">
-          <LiveLine k="Vault slot" v={activeSlot ?? "(none)"} mono />
-          <LiveLine k="Algorithm" v="ML-DSA-65" />
-          <LiveLine
-            k="Address"
-            v={identity?.address ?? "Unlock to derive from vault"}
-            mono
-          />
           <LiveLine
             k="Public key"
             v={
@@ -497,15 +561,6 @@ export function Wallets() {
             v={balance ? balance.nonce.toString() : "unavailable until unlock + RPC"}
             mono
           />
-          <LiveLine
-            k="Balance"
-            v={
-              balance
-                ? `${balance.balanceLyth} LYTH`
-                : "unavailable until unlock + RPC"
-            }
-            mono
-          />
           {identityError && (
             <div className="w-live-error">
               RPC preview unavailable: {identityError}
@@ -513,6 +568,7 @@ export function Wallets() {
           )}
         </div>
       </div>
+      ) : null}
 
       {showAdd && (
         <AddVaultModal
@@ -522,6 +578,15 @@ export function Wallets() {
       )}
     </div>
   );
+}
+
+/** A row's estimated value. `ready` is the only state carrying an amount, so
+ *  every other one keeps the plain em-dash — "{symbol}—" there would assert that
+ *  the balance is known and merely unpriced, which is false while it is still
+ *  loading, underived, or unavailable. */
+function rowEstValue(state: WalletBalanceState | undefined, currency: string): string {
+  if (state?.status !== "ready") return "—";
+  return formatFiatFromLythoshi(state.balance.balanceLythoshi, currency, getLythFiatRate(currency));
 }
 
 /** One wallet's native balance, rendered from its per-wallet fetch state.

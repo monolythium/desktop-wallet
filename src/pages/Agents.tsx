@@ -18,13 +18,22 @@ import { useEffect, useState } from "react";
 import {
   addressToTypedBech32,
   formatLyth,
-  parseLythToLythoshi,
 } from "@monolythium/core-sdk";
 import type { SpendingPolicyArgs, SpendingPolicyView } from "@monolythium/core-sdk";
 import { useOperations } from "../operations/context";
 import { fetchAndUnlockVault } from "../sdk/keychain";
 import { errorMessage, loadLiveWalletBalance } from "../sdk/live";
 import { getActiveVault } from "../sdk/vaultCatalog";
+import {
+  COMMON_PASSWORD_HINT,
+  PasswordStrengthMeter,
+} from "../components/PasswordStrengthMeter";
+import { PasswordInput } from "../components/PasswordInput";
+import { RefreshButton } from "../components/RefreshButton";
+import {
+  MIN_PASSWORD_LENGTH,
+  passwordRejectReason,
+} from "../lib/password-validation";
 import {
   createAgentSubAccount,
   fundAgentSubAccount,
@@ -46,8 +55,39 @@ import {
   removeAgent,
   type AgentEntry,
 } from "../sdk/agent-registry";
+import {
+  FUND_DEFAULT_AMOUNT,
+  NO_PRINCIPAL_MESSAGE,
+  POLICY_FORM_DEFAULTS,
+  balanceCheckFailedMessage,
+  insufficientBalanceMessage,
+  validateFundAmount,
+  validatePolicyForm,
+  type PolicyFields,
+  type PolicyFormInput,
+} from "../sdk/agent-forms";
 
 const PRECOMPILE_LABEL = "0x…110c";
+
+/** The policy form's rows, in the order the sequential prompts asked them, with
+ *  each prompt's wording carried over verbatim. Keeping the order matters
+ *  beyond nostalgia: the validator reports the FIRST problem it finds, so a
+ *  form whose fields disagree with the check order would highlight one field
+ *  while complaining about another. */
+const POLICY_FIELD_ROWS: {
+  key: Exclude<keyof PolicyFormInput, "agentPassword">;
+  label: string;
+}[] = [
+  { key: "perTx", label: "Per-transaction cap in LYTH (blank = no cap)" },
+  { key: "daily", label: "Daily cap in LYTH (blank = no cap)" },
+  { key: "weekly", label: "Weekly cap in LYTH (blank = no cap)" },
+  { key: "monthly", label: "Monthly cap in LYTH (blank = no cap)" },
+  {
+    key: "window",
+    label: "Time-of-day window as START-END hours 0-23 (blank = any time, e.g. 9-17)",
+  },
+  { key: "expiry", label: "Policy expiry as ISO date (blank = never, e.g. 2027-01-01)" },
+];
 
 function hexCapToLyth(hex: string): string {
   if (!hex || hex === "0x" || hex === "0x0") return "—";
@@ -55,6 +95,33 @@ function hexCapToLyth(hex: string): string {
     return `${formatLyth(BigInt(hex).toString(), { includeUnit: false })} LYTH`;
   } catch {
     return hex;
+  }
+}
+
+/** The absolute millisecond value `new Date()` accepts (ECMAScript time-value
+ *  range); beyond it `new Date(ms).toISOString()` throws a RangeError. */
+export const MAX_DATE_MS = 8_640_000_000_000_000;
+
+/** Parse anything into a bigint, defaulting to 0n on a malformed value instead
+ *  of throwing (`BigInt("garbage")` / `BigInt(undefined)` throw). Pure. */
+export function safeBigInt(v: unknown): bigint {
+  try {
+    return BigInt((v ?? 0n) as string | number | bigint);
+  } catch {
+    return 0n;
+  }
+}
+
+/** Format a Unix-seconds expiry as an ISO string, or an em-dash for a value that
+ *  would overflow the Date range — a huge on-chain expiry must never white-screen
+ *  the page via a `RangeError` during render. Pure. */
+export function expiryUnixToIso(seconds: bigint): string {
+  const ms = Number(seconds) * 1000;
+  if (!Number.isFinite(ms) || Math.abs(ms) > MAX_DATE_MS) return "—";
+  try {
+    return new Date(ms).toISOString();
+  } catch {
+    return "—";
   }
 }
 
@@ -87,6 +154,34 @@ export function Agents() {
   // does the operation route through the drawer. `isUpdate` picks the
   // no-claim setPolicy path (existing policy) over setPolicyClaim (fresh).
   const [review, setReview] = useState<PolicyReviewState | null>(null);
+
+  // In-app funding form. Replaces a window.prompt + two window.alerts + a
+  // window.confirm. `unverified` holds the balance-read-failed question: when
+  // set, funding requires a second, deliberate click — the in-app form of the
+  // old confirm, never inferred from the first one.
+  const [fund, setFund] = useState<{
+    agent: AgentEntry;
+    amount: string;
+    error: string | null;
+    unverified: string | null;
+    busy: boolean;
+  } | null>(null);
+
+  // In-app policy form. Replaces the seven-prompt chain plus four alerts.
+  const [policyForm, setPolicyForm] = useState<{
+    agent: AgentEntry;
+    existing: boolean;
+    input: PolicyFormInput;
+    error: string | null;
+  } | null>(null);
+
+  /** Page-level error for conditions with no form to attach to (e.g. no
+   *  principal resolved). Replaces a window.alert. */
+  const [pageError, setPageError] = useState<string | null>(null);
+
+  /** The agent whose Forget is awaiting confirmation. Two-step inline, the
+   *  wallet's own pattern — never a native confirm. */
+  const [forgetting, setForgetting] = useState<AgentEntry | null>(null);
 
   const refresh = async () => {
     setBusy(true);
@@ -132,6 +227,18 @@ export function Agents() {
       setCreateError("Enter a password to protect the new agent vault.");
       return;
     }
+    // An agent vault holds spendable funds like any other, so it gets the same
+    // creation policy. Making agent sub-wallets deliberately lighter-weight would
+    // have to be an explicit product decision, not a gap left here.
+    const reason = passwordRejectReason(createPassword);
+    if (reason !== null) {
+      setCreateError(
+        reason === "too_short"
+          ? `Use at least ${MIN_PASSWORD_LENGTH} characters — there are no other composition rules.`
+          : COMMON_PASSWORD_HINT,
+      );
+      return;
+    }
     setCreateBusy(true);
     try {
       const result = await createAgentSubAccount(createPassword);
@@ -158,53 +265,64 @@ export function Agents() {
     }
   };
 
-  const openFund = async (agent: AgentEntry) => {
-    let amountLyth = "10";
-    // The amount prompt is intentionally minimal: a window.prompt keeps the
-    // funding flow one tap; the OperationsDrawer is the real confirmation.
-    const entered = window.prompt(
-      `Fund ${agent.label} — amount in LYTH to transfer from the principal`,
-      amountLyth,
-    );
-    if (entered === null) return;
-    amountLyth = entered.trim();
-    let amountLythoshi: bigint;
-    try {
-      amountLythoshi = parseLythToLythoshi(amountLyth);
-    } catch {
-      window.alert("Enter a valid LYTH amount.");
+  /** Open the in-app funding form. Nothing is validated or read yet — the
+   *  form is input capture, exactly as the prompt was. */
+  const openFund = (agent: AgentEntry) => {
+    setFund({ agent, amount: FUND_DEFAULT_AMOUNT, error: null, unverified: null, busy: false });
+  };
+
+  /**
+   * Validate and, if it passes, hand off to the drawer.
+   *
+   * Same checks, same order, same wording as the prompt chain — they live in
+   * `validateFundAmount` now so the conversion has something to be measured
+   * against. `acceptUnverified` is the in-app form of the old
+   * "Continue anyway?" confirm: it is set only by an explicit second click,
+   * never inferred.
+   */
+  const submitFund = async (acceptUnverified: boolean) => {
+    if (fund === null) return;
+    const { agent } = fund;
+
+    const verdict = validateFundAmount(fund.amount);
+    if (!verdict.ok) {
+      setFund({ ...fund, error: verdict.error, unverified: null });
       return;
     }
-    if (amountLythoshi <= 0n) {
-      window.alert("Enter a positive LYTH amount.");
-      return;
-    }
+    const { amountLyth, amountLythoshi } = verdict;
 
     // Sufficiency check BEFORE opening the drawer: read the principal's live
     // native balance and refuse to open an execute that the chain would reject
     // for insufficient funds. A balance-read failure (RPC offline) only warns
     // — we don't block the user from trying, since the drawer surfaces the
     // real on-chain error verbatim either way.
-    if (principalBech32m) {
+    if (principalBech32m && !acceptUnverified) {
+      setFund({ ...fund, busy: true, error: null, unverified: null });
       try {
         const bal = await loadLiveWalletBalance(principalBech32m);
         const have = BigInt(bal.balanceLythoshi);
         if (have < amountLythoshi) {
-          window.alert(
-            `Insufficient balance. The principal holds ${bal.balanceLyth} LYTH ` +
-              `but ${amountLyth} LYTH is needed (plus fees). Fund the principal first.`,
-          );
+          setFund({
+            ...fund,
+            busy: false,
+            error: insufficientBalanceMessage(bal.balanceLyth, amountLyth),
+            unverified: null,
+          });
           return;
         }
       } catch (cause) {
-        const proceed = window.confirm(
-          `Could not check the principal's balance (${errorMessage(cause)}). ` +
-            `Continue anyway? The transaction will fail on-chain if funds are short.`,
-        );
-        if (!proceed) return;
+        // Ask, don't refuse — and require a deliberate second action.
+        setFund({
+          ...fund,
+          busy: false,
+          error: null,
+          unverified: balanceCheckFailedMessage(errorMessage(cause)),
+        });
+        return;
       }
     }
 
+    setFund(null);
     ops.open({
       title: `Fund ${agent.label}`,
       subtitle: `Transfer ${amountLyth} LYTH to the agent sub-account`,
@@ -240,30 +358,55 @@ export function Agents() {
   // open the WYSIWYS review surface. NOTHING is signed or submitted here — the
   // review must show every signed term first (the §25 WYSIWYS requirement).
   // `existing` decides the eventual selector.
+  /** Open the in-app policy form. The seven sequential prompts became one
+   *  form, so a user can see and correct every term before submitting rather
+   *  than discovering at prompt 6 that prompt 2 was wrong. */
   const openRegister = (agent: AgentEntry) => {
     if (!principalBech32m) {
-      window.alert("No active principal wallet address resolved.");
+      setPageError(NO_PRINCIPAL_MESSAGE);
       return;
     }
-    const existing = policies.get(agent.slot)?.exists === true;
-    const form = collectPolicyForm(existing);
-    if (!form) return;
+    setPageError(null);
+    setPolicyForm({
+      agent,
+      existing: policies.get(agent.slot)?.exists === true,
+      input: { ...POLICY_FORM_DEFAULTS, agentPassword: "" },
+      error: null,
+    });
+  };
+
+  /** Validate the policy form and, if it passes, open the WYSIWYS review.
+   *  NOTHING is signed here — the review shows every signed term first. */
+  const submitPolicyForm = () => {
+    if (policyForm === null || !principalBech32m) return;
+    const { agent, existing, input } = policyForm;
+
+    const verdict = validatePolicyForm(input, existing);
+    if (!verdict.ok) {
+      setPolicyForm({ ...policyForm, error: verdict.error });
+      return;
+    }
+
     let args: SpendingPolicyArgs;
     try {
       args = buildSpendingPolicyArgs({
-        ...form.fields,
+        ...verdict.fields,
         subAccount: agent.bech32m,
         principal: principalBech32m,
       });
     } catch (cause) {
-      window.alert(errorMessage(cause));
+      // The canonical-args builder's own rejection, verbatim — it names the
+      // term that is wrong, which a generic sentence would throw away.
+      setPolicyForm({ ...policyForm, error: errorMessage(cause) });
       return;
     }
+
+    setPolicyForm(null);
     setReview({
       agent,
       principalBech32m,
-      fields: form.fields,
-      agentPassword: form.agentPassword,
+      fields: verdict.fields,
+      agentPassword: verdict.agentPassword,
       args,
       isUpdate: existing,
     });
@@ -310,9 +453,7 @@ export function Agents() {
           k: "Expiry",
           v:
             fields.policyExpiryUnixSeconds && fields.policyExpiryUnixSeconds > 0n
-              ? new Date(
-                  Number(fields.policyExpiryUnixSeconds) * 1000,
-                ).toISOString()
+              ? expiryUnixToIso(fields.policyExpiryUnixSeconds)
               : "never",
         },
         { k: "Precompile", v: PRECOMPILE_LABEL },
@@ -447,11 +588,12 @@ export function Agents() {
     });
   };
 
+  /** Two-step in-app confirm. Destructive to local state only — the on-chain
+   *  policy survives, which is exactly why the consequence copy has to be
+   *  read rather than clicked past. */
   const onForget = async (agent: AgentEntry) => {
-    const ok = window.confirm(
-      `Forget ${agent.label} from this device? The on-chain policy is NOT revoked — use Revoke first if you want to disable spend. The agent vault stays in the keychain.`,
-    );
-    if (!ok) return;
+    if (forgetting?.slot !== agent.slot) return;
+    setForgetting(null);
     await removeAgent(agent.slot);
     await refresh();
   };
@@ -465,6 +607,15 @@ export function Agents() {
           {PRECOMPILE_LABEL}
         </div>
       </div>
+
+      {/* Conditions with no form to attach to. Previously a window.alert; an
+          inline line is dismissible by fixing the condition rather than by
+          clicking OK on a dialog that then leaves no trace of what was wrong. */}
+      {pageError ? (
+        <div className="w-live-error" role="alert">
+          {pageError}
+        </div>
+      ) : null}
 
       {freshMnemonic ? (
         <div className="w-card" style={{ borderColor: "var(--gold)" }}>
@@ -506,13 +657,7 @@ export function Agents() {
         <div className="w-card__head">
           <h3>Agent sub-accounts</h3>
           <span className="w-card__head__spacer" />
-          <button
-            className="btn btn--sm"
-            onClick={() => void refresh()}
-            disabled={busy}
-          >
-            {busy ? "Refreshing…" : "Refresh"}
-          </button>
+          <RefreshButton busy={busy} onClick={() => void refresh()} />
           <button
             className="btn btn--sm btn--primary"
             onClick={() => {
@@ -548,15 +693,16 @@ export function Agents() {
                 style={inputStyle}
               />
               <label className="cap">Password for the new agent vault</label>
-              <input
-                type="password"
+              <PasswordInput
+                autoComplete="new-password"
                 value={createPassword}
-                onChange={(e) => {
-                  setCreatePassword(e.target.value);
+                onChange={(next) => {
+                  setCreatePassword(next);
                   setCreateError(null);
                 }}
                 style={inputStyle}
               />
+              <PasswordStrengthMeter password={createPassword} />
               {createError ? (
                 <div className="row-help" style={{ color: "var(--err)" }}>
                   {createError}
@@ -634,9 +780,20 @@ export function Agents() {
                     ) : (
                       <div className="row-help">loading policy…</div>
                     )}
+                    {/* The confirm's entire content was this sentence, so it
+                        stays visible while the confirm is pending. A user who
+                        forgets an agent without revoking leaves a live on-chain
+                        spend allowance behind — the one thing they must read. */}
+                    {forgetting?.slot === agent.slot ? (
+                      <div className="w-warn-prominent">
+                        Forget {agent.label} from this device? The on-chain policy is
+                        NOT revoked — use Revoke first if you want to disable spend.
+                        The agent vault stays in the keychain.
+                      </div>
+                    ) : null}
                   </div>
                   <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
-                    <button className="btn btn--sm" onClick={() => void openFund(agent)}>
+                    <button className="btn btn--sm" onClick={() => openFund(agent)}>
                       Fund
                     </button>
                     <button
@@ -661,13 +818,31 @@ export function Agents() {
                         Enable
                       </button>
                     ) : null}
-                    <button
-                      className="btn btn--sm btn--ghost"
-                      onClick={() => void onForget(agent)}
-                      title="Remove from this device (does not revoke on-chain)"
-                    >
-                      Forget
-                    </button>
+                    {forgetting?.slot === agent.slot ? (
+                      <>
+                        <button
+                          className="btn btn--sm"
+                          onClick={() => setForgetting(null)}
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          className="btn btn--sm"
+                          style={{ color: "var(--err)", borderColor: "var(--err)" }}
+                          onClick={() => void onForget(agent)}
+                        >
+                          Confirm forget
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        className="btn btn--sm btn--ghost"
+                        onClick={() => setForgetting(agent)}
+                        title="Remove from this device (does not revoke on-chain)"
+                      >
+                        Forget
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
@@ -681,6 +856,159 @@ export function Agents() {
           </div>
         </div>
       </div>
+
+      {policyForm ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={`${policyForm.existing ? "Update" : "Register"} policy for ${policyForm.agent.label}`}
+          className="w-card"
+          style={{ position: "fixed", inset: "auto 24px 24px auto", maxWidth: 460, zIndex: 30 }}
+        >
+          <div className="w-card__head">
+            <h3>
+              {policyForm.existing ? "Update policy" : "Register policy"} ·{" "}
+              {policyForm.agent.label}
+            </h3>
+          </div>
+          <div className="w-card__body">
+            {/* One form rather than seven sequential prompts: every term is
+                visible and correctable before submitting, instead of the user
+                discovering at prompt 6 that prompt 2 was wrong. Blank still
+                means "no cap" / "any time" / "never", as the prompts did. */}
+            {POLICY_FIELD_ROWS.map((row) => (
+              <label key={row.key} style={{ display: "block", marginBottom: 10 }}>
+                <span className="row-help">{row.label}</span>
+                <input
+                  type="text"
+                  autoComplete="off"
+                  aria-label={row.label}
+                  value={policyForm.input[row.key]}
+                  onChange={(e) =>
+                    setPolicyForm({
+                      ...policyForm,
+                      input: { ...policyForm.input, [row.key]: e.target.value },
+                      error: null,
+                    })
+                  }
+                  style={{ ...inputStyle, width: "100%", marginTop: 4 }}
+                />
+              </label>
+            ))}
+
+            {/* Only a FRESH policy needs the agent key: an update takes the
+                no-claim path signed by the principal alone. */}
+            {!policyForm.existing ? (
+              <label style={{ display: "block", marginBottom: 10 }}>
+                <span className="row-help">
+                  Agent vault password (to sign the policy claim with the agent key)
+                </span>
+                <PasswordInput
+                  autoComplete="current-password"
+                  ariaLabel="Agent vault password"
+                  value={policyForm.input.agentPassword}
+                  onChange={(v) =>
+                    setPolicyForm({
+                      ...policyForm,
+                      input: { ...policyForm.input, agentPassword: v },
+                      error: null,
+                    })
+                  }
+                />
+              </label>
+            ) : null}
+
+            {policyForm.error ? (
+              <div className="row-help" style={{ color: "var(--err)", marginTop: 4 }}>
+                {policyForm.error}
+              </div>
+            ) : null}
+
+            <div style={{ display: "flex", gap: 6, marginTop: 12 }}>
+              <button
+                type="button"
+                className="btn btn--sm"
+                onClick={() => setPolicyForm(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn--sm btn--primary"
+                onClick={submitPolicyForm}
+              >
+                Review policy
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {fund ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={`Fund ${fund.agent.label}`}
+          className="w-card"
+          style={{ position: "fixed", inset: "auto 24px 24px auto", maxWidth: 420, zIndex: 30 }}
+        >
+          <div className="w-card__head">
+            <h3>Fund {fund.agent.label}</h3>
+          </div>
+          <div className="w-card__body">
+            <label className="row-help" htmlFor="fund-amount">
+              Amount in LYTH to transfer from the principal
+            </label>
+            <input
+              id="fund-amount"
+              type="text"
+              inputMode="decimal"
+              autoComplete="off"
+              aria-label="Amount in LYTH to transfer from the principal"
+              value={fund.amount}
+              onChange={(e) =>
+                setFund({ ...fund, amount: e.target.value, error: null, unverified: null })
+              }
+              style={{ ...inputStyle, width: "100%", marginTop: 6 }}
+            />
+
+            {fund.error ? (
+              <div className="row-help" style={{ color: "var(--err)", marginTop: 8 }}>
+                {fund.error}
+              </div>
+            ) : null}
+
+            {/* The balance read failed. The old flow asked the same question in
+                a window.confirm; here it needs a second, deliberate click. */}
+            {fund.unverified ? (
+              <div className="w-warn-prominent">{fund.unverified}</div>
+            ) : null}
+
+            <div style={{ display: "flex", gap: 6, marginTop: 12 }}>
+              <button
+                type="button"
+                className="btn btn--sm"
+                onClick={() => setFund(null)}
+                disabled={fund.busy}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn--sm btn--primary"
+                disabled={fund.busy}
+                onClick={() => void submitFund(fund.unverified !== null)}
+              >
+                {fund.busy
+                  ? "Checking balance…"
+                  : fund.unverified !== null
+                    ? "Continue anyway"
+                    : "Review transfer"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {review ? (
         <PolicyReviewModal
@@ -705,103 +1033,7 @@ interface PolicyReviewState {
   isUpdate: boolean;
 }
 
-interface PolicyFields {
-  perTxCapLythoshi: bigint;
-  dailyCapLythoshi: bigint;
-  weeklyCapLythoshi?: bigint;
-  monthlyCapLythoshi?: bigint;
-  timeWindow?: { enabled: boolean; startHour: number; endHour: number };
-  policyExpiryUnixSeconds?: bigint;
-}
 
-/**
- * Collect the policy form via sequential prompts. Kept minimal on purpose:
- * the WYSIWYS review surface confirms the signed terms and the
- * OperationsDrawer is the auth gate; this is just input capture. Returns null
- * if the user cancels at any step.
- *
- * `existing` (an already-bound policy) skips the agent-vault password prompt:
- * the no-claim `setPolicy` UPDATE path is signed by the principal alone, so no
- * fresh agent signature — and therefore no agent unlock — is needed.
- */
-function collectPolicyForm(
-  existing: boolean,
-): { fields: PolicyFields; agentPassword: string } | null {
-  const perTx = window.prompt("Per-transaction cap in LYTH (blank = no cap)", "1");
-  if (perTx === null) return null;
-  const daily = window.prompt("Daily cap in LYTH (blank = no cap)", "10");
-  if (daily === null) return null;
-  const weekly = window.prompt("Weekly cap in LYTH (blank = no cap)", "");
-  if (weekly === null) return null;
-  const monthly = window.prompt("Monthly cap in LYTH (blank = no cap)", "");
-  if (monthly === null) return null;
-  const windowRaw = window.prompt(
-    "Time-of-day window as START-END hours 0-23 (blank = any time, e.g. 9-17)",
-    "",
-  );
-  if (windowRaw === null) return null;
-  const expiryRaw = window.prompt(
-    "Policy expiry as ISO date (blank = never, e.g. 2027-01-01)",
-    "",
-  );
-  if (expiryRaw === null) return null;
-  let agentPassword = "";
-  if (!existing) {
-    const entered = window.prompt(
-      "Agent vault password (to sign the policy claim with the agent key)",
-      "",
-    );
-    if (entered === null || entered.length === 0) return null;
-    agentPassword = entered;
-  }
-
-  const toLythoshi = (s: string): bigint => {
-    const t = s.trim();
-    if (t.length === 0) return 0n;
-    return parseLythToLythoshi(t);
-  };
-
-  let fields: PolicyFields;
-  try {
-    fields = {
-      perTxCapLythoshi: toLythoshi(perTx),
-      dailyCapLythoshi: toLythoshi(daily),
-      weeklyCapLythoshi: toLythoshi(weekly),
-      monthlyCapLythoshi: toLythoshi(monthly),
-    };
-  } catch {
-    window.alert("Caps must be valid LYTH amounts.");
-    return null;
-  }
-
-  const wt = windowRaw.trim();
-  if (wt.length > 0) {
-    const m = wt.match(/^(\d{1,2})\s*-\s*(\d{1,2})$/);
-    if (!m) {
-      window.alert("Time window must be START-END, e.g. 9-17.");
-      return null;
-    }
-    const startHour = Number(m[1]);
-    const endHour = Number(m[2]);
-    if (startHour > 23 || endHour > 23) {
-      window.alert("Hours must be 0-23.");
-      return null;
-    }
-    fields.timeWindow = { enabled: true, startHour, endHour };
-  }
-
-  const et = expiryRaw.trim();
-  if (et.length > 0) {
-    const ms = Date.parse(et);
-    if (Number.isNaN(ms)) {
-      window.alert("Expiry must be a valid ISO date.");
-      return null;
-    }
-    fields.policyExpiryUnixSeconds = BigInt(Math.floor(ms / 1000));
-  }
-
-  return { fields, agentPassword };
-}
 
 /**
  * WYSIWYS policy-review surface (the §25 requirement). Before
@@ -856,9 +1088,8 @@ function PolicyReviewModal({
     ? `${String(twBytes[30]).padStart(2, "0")}:00–${String(twBytes[31]).padStart(2, "0")}:00`
     : "Any time";
 
-  const expiry = BigInt(args.policyExpiry ?? 0n);
-  const expiryLine =
-    expiry > 0n ? new Date(Number(expiry) * 1000).toISOString() : "Never";
+  const expiry = safeBigInt(args.policyExpiry);
+  const expiryLine = expiry > 0n ? expiryUnixToIso(expiry) : "Never";
 
   return (
     <div

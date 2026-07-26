@@ -37,6 +37,22 @@ export type { BridgeRouteDisclosure, BridgeRouteAssessment, BridgeDrainStatus };
  * Fetch the trusted bridge route disclosures from the connected node.
  * The chain returns the catalogue under either `routes` or
  * `bridgeRouteDisclosures` depending on the path; normalise to one list.
+ *
+ * OMITTING `intent` IS CORRECT FOR A CATALOGUE READ — do not "fix" it by
+ * inventing one. The method answers two questions at once: what disclosures
+ * exist, and which route a given transfer should take. `intent` is optional by
+ * SDK contract, and both callers here are listing the catalogue, not selecting
+ * a route: the token view filters the returned list by asset client-side, and
+ * the registry view shows all of it. Neither has an amount, a destination chain
+ * or a recipient, so constructing an intent would mean fabricating a transfer
+ * the user never expressed.
+ *
+ * The cost of asking without one is a single extra entry in the response's
+ * `blockedReasons` — "bridge route selection requires transfer intent" — which
+ * describes the selection half nobody asked for. Verified against the deployed
+ * chain: supplying a well-formed intent removes exactly that reason and returns
+ * the same empty catalogue. Callers listing disclosures should read `routes`
+ * and ignore the selection verdict, which is what they do.
  */
 export async function fetchBridgeRoutes(
   intent?: BridgeTransferIntent,
@@ -66,9 +82,23 @@ export function rankRoutes(routes: readonly BridgeRouteDisclosure[]) {
 }
 
 /**
- * Live per-route drain bucket for one `(bridgeId, wrappedAsset)`. The
- * `remaining` field is the headroom left in the current rolling window
- * before the bridge's drain-cap circuit-breaker trips.
+ * Live per-route drain bucket for one `(bridgeId, wrappedAsset)`.
+ *
+ * NO CALLER, AND IT CANNOT GAIN ONE FROM THE DISCLOSURE PATH. Two independent
+ * reasons, either sufficient:
+ *
+ *  - the key does not exist. `BridgeRouteDisclosure` (what `lyth_bridgeRoutes`
+ *    returns) carries no `bridgeId`; that field belongs to the separate
+ *    catalogue-route shape. This is structural, not a consequence of the
+ *    registry being empty.
+ *  - the answer would be zero anyway. The bucket lives in the retired `0x1008`
+ *    namespace, which only the removed precompile could ever write, so every
+ *    slot in it is permanently zero.
+ *
+ * Kept because the chain kept the method — it is still served, for wire
+ * compatibility with pre-removal clients — and deleting the wrapper would only
+ * move the question rather than answer it. Do not re-wire it into a view
+ * without first establishing that a real `bridgeId` reaches the call site.
  */
 export async function fetchDrainStatus(
   bridgeId: string,
@@ -83,6 +113,11 @@ export async function fetchDrainStatus(
 /**
  * Page the global bridge-health set — each record's `circuitBreaker`
  * answers "is this route paused / rate-limited" in one round-trip.
+ *
+ * NO CALLER, for the same two reasons as {@link fetchDrainStatus}: the records
+ * are keyed by `bridgeId`, which the disclosure shape does not carry, and the
+ * set is served from the retired `0x1008` state and is permanently empty. A
+ * route's own `circuitBreaker` field is the posture the panel renders instead.
  */
 export async function fetchBridgeHealth(
   cursor?: string | null,

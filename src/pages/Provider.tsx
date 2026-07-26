@@ -3,6 +3,7 @@
 // Provider surface: agent-wallet management and attestation list.
 
 import { useCallback, useEffect, useState } from "react";
+import { typedNameConfirms } from "../sdk/agent-forms";
 import {
   agentWalletCreate,
   agentWalletDelete,
@@ -100,11 +101,30 @@ function AgentWalletsCard() {
     }
   };
 
+  // In-app typed-name delete. A native prompt carries no wallet chrome and no
+  // theming, so it is exactly the dialog a look-alike can imitate — at the one
+  // moment the user is authorising destruction. The gate itself is unchanged:
+  // the exact name, compared without trimming or case folding, and the typed
+  // value is what gets passed to the API.
+  const [deleting, setDeleting] = useState<string | null>(null);
+  const [deleteTyped, setDeleteTyped] = useState("");
+
+  const startDelete = (name: string) => {
+    setDeleting(name);
+    setDeleteTyped("");
+  };
+
+  const cancelDelete = () => {
+    // Performs nothing and leaves no partial state.
+    setDeleting(null);
+    setDeleteTyped("");
+  };
+
   const onDelete = async (name: string) => {
-    const confirm = window.prompt(`Type "${name}" to confirm delete:`);
-    if (confirm !== name) return;
+    if (!typedNameConfirms(deleteTyped, name)) return;
     try {
-      await agentWalletDelete(name, confirm);
+      await agentWalletDelete(name, deleteTyped);
+      cancelDelete();
       await refresh();
     } catch (cause) {
       setError(cause instanceof AgentWalletCallError ? cause.message : String(cause));
@@ -140,14 +160,52 @@ function AgentWalletsCard() {
                   </div>
                 </div>
                 {w.name ? (
-                  <div style={{ display: "flex", gap: 6 }}>
-                    <button type="button" className="btn btn--sm" onClick={() => onPause(w.name!)}>
-                      Pause
-                    </button>
-                    <button type="button" className="btn btn--sm" onClick={() => onDelete(w.name!)}>
-                      Delete
-                    </button>
-                  </div>
+                  deleting === w.name ? (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6, minWidth: 0 }}>
+                      <label className="row-help" htmlFor={`del-${w.name}`}>
+                        Type <strong>{w.name}</strong> to confirm delete:
+                      </label>
+                      <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                        <input
+                          id={`del-${w.name}`}
+                          type="text"
+                          autoComplete="off"
+                          aria-label={`Type ${w.name} to confirm delete`}
+                          value={deleteTyped}
+                          onChange={(e) => setDeleteTyped(e.target.value)}
+                          style={inputStyle()}
+                        />
+                        <button type="button" className="btn btn--sm" onClick={cancelDelete}>
+                          Cancel
+                        </button>
+                        {/* Disabled until the typed name matches EXACTLY — an
+                            in-app confirm is only as strong as this condition. */}
+                        <button
+                          type="button"
+                          className="btn btn--sm"
+                          style={{ color: "var(--err)", borderColor: "var(--err)" }}
+                          disabled={!typedNameConfirms(deleteTyped, w.name)}
+                          onClick={() => void onDelete(w.name!)}
+                        >
+                          Confirm delete
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <button type="button" className="btn btn--sm" onClick={() => onPause(w.name!)}>
+                        Pause
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn--sm"
+                        style={{ color: "var(--err)" }}
+                        onClick={() => startDelete(w.name!)}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  )
                 ) : null}
               </div>
             ))}

@@ -1,46 +1,102 @@
-// Floating banner that appears when an update is available.
+// The update banner — Home route only, gold warning family.
 //
-// Layout: sits at the bottom of the viewport, full width, dismissible.
-// While the user clicks Install we show a progress bar; on completion
-// the app relaunches automatically and this component unmounts with it.
+// It renders from the CACHED verdict, not from a live check, so it can appear
+// immediately at boot before any network I/O. That has one consequence worth
+// stating: after a restart the verdict stands but the live `Update` handle does
+// not, so Install re-acquires one first. A user-initiated action may always hit
+// the network — the 12-hour gate exists to stop unattended polling, not the
+// user.
+//
+// The re-check has three outcomes and each is handled as itself:
+//   available   → install
+//   no_update   → the staged release was withdrawn; the verdict clears and this
+//                 banner unmounts. Not an error — a real answer.
+//   unavailable → an inline error, and the verdict is KEPT. A blip must not
+//                 clear a standing update.
 
 import { useState } from "react";
 import {
   dismissPendingUpdate,
   downloadAndInstallUpdate,
-  type UpdateAvailable,
+  hasPendingUpdate,
 } from "../sdk/updater";
+import { syncWalletUpdateState } from "../sdk/update-check";
+
+export const UPDATE_UNREACHABLE_MESSAGE =
+  "Couldn't reach the update service — try again later.";
+
+/** The banner headline. Exported so a test pins the copy at its source rather
+ *  than restating it. */
+export function updateBannerTitle(offeredVersion: string | null): string {
+  return offeredVersion === null
+    ? "A wallet update is available"
+    : `A wallet update is available — Monolythium Wallet v${offeredVersion}`;
+}
 
 interface UpdateBannerProps {
-  update: UpdateAvailable;
-  onDismiss: () => void;
+  offeredVersion: string | null;
+  /** The running version — stamped into the cache by a re-check. */
+  runningVersion: string;
+  /** Hide for this app session. Does NOT write the cache: the About row still
+   *  shows the verdict, and the banner returns next launch while it stands. */
+  onLater: () => void;
+  /** A re-check answered "no update" — the verdict is gone, not hidden. */
+  onVerdictCleared: () => void;
 }
 
 type State =
   | { kind: "idle" }
+  | { kind: "checking" }
   | { kind: "installing"; downloaded: number; total: number | undefined }
   | { kind: "error"; message: string };
 
-export function UpdateBanner({ update, onDismiss }: UpdateBannerProps) {
+export function UpdateBanner({
+  offeredVersion,
+  runningVersion,
+  onLater,
+  onVerdictCleared,
+}: UpdateBannerProps) {
   const [state, setState] = useState<State>({ kind: "idle" });
 
   const install = async () => {
+    // Re-acquire a handle if this verdict came from the cache.
+    if (!hasPendingUpdate()) {
+      setState({ kind: "checking" });
+      const next = await syncWalletUpdateState({
+        now: Date.now(),
+        runningVersion,
+        force: true,
+      });
+      if (!next.updateAvailable) {
+        // A real "no update" answer — the release was withdrawn.
+        onVerdictCleared();
+        return;
+      }
+      if (!hasPendingUpdate()) {
+        // Verdict kept (a non-answer), but there is nothing to install now.
+        setState({ kind: "error", message: UPDATE_UNREACHABLE_MESSAGE });
+        return;
+      }
+    }
+
     setState({ kind: "installing", downloaded: 0, total: undefined });
     try {
       await downloadAndInstallUpdate((downloaded, total) => {
         setState({ kind: "installing", downloaded, total });
       });
-      // Relaunch fires inside downloadAndInstallUpdate; if execution
-      // continues here something went wrong on relaunch.
+      // Relaunch fires inside downloadAndInstallUpdate; reaching here means it
+      // did not.
     } catch (cause) {
+      // The real message, verbatim — a generic sentence would leave the user
+      // with nothing to act on and nothing to report.
       const message = (cause as Error)?.message ?? String(cause);
       setState({ kind: "error", message });
     }
   };
 
-  const handleDismiss = () => {
+  const handleLater = () => {
     dismissPendingUpdate();
-    onDismiss();
+    onLater();
   };
 
   const percent =
@@ -48,45 +104,30 @@ export function UpdateBanner({ update, onDismiss }: UpdateBannerProps) {
       ? Math.min(100, Math.round((state.downloaded / state.total) * 100))
       : null;
 
+  const busy = state.kind === "installing" || state.kind === "checking";
+
   return (
     <div
       role="alert"
       style={{
-        position: "fixed",
-        left: 0,
-        right: 0,
-        bottom: 0,
-        zIndex: 40,
-        padding: "12px 18px",
-        background: "rgba(20, 20, 28, 0.95)",
-        backdropFilter: "blur(12px)",
-        borderTop: "1px solid rgba(255,255,255,0.08)",
         display: "flex",
         alignItems: "center",
-        gap: 16,
+        gap: 14,
+        padding: "10px 14px",
+        marginBottom: 16,
+        borderRadius: 10,
+        // Accent family — the text is var(--gold), so the tint is the gold
+        // triplet (Law 4.3). Tokenized so it tracks the active theme.
+        background:
+          "linear-gradient(90deg, rgba(var(--gold-glow), 0.18), rgba(var(--gold-glow), 0.04))",
+        border: "1px solid rgba(var(--gold-glow), 0.3)",
+        color: "var(--gold)",
         fontSize: 13,
-        color: "var(--w-text-1, #e5e5ea)",
       }}
     >
+      <span aria-hidden="true" style={{ fontSize: 15 }}>⬆</span>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontWeight: 600 }}>
-          Update available — Monolythium Wallet {update.version}
-        </div>
-        {update.notes ? (
-          <div
-            style={{
-              marginTop: 2,
-              fontSize: 12,
-              color: "var(--w-text-2, #a8a8b0)",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-            }}
-            title={update.notes}
-          >
-            {update.notes}
-          </div>
-        ) : null}
+        <div style={{ fontWeight: 600 }}>{updateBannerTitle(offeredVersion)}</div>
         {state.kind === "installing" && (
           <div
             style={{
@@ -113,42 +154,8 @@ export function UpdateBanner({ update, onDismiss }: UpdateBannerProps) {
           </div>
         )}
       </div>
-      {state.kind !== "installing" && (
-        <>
-          <button
-            type="button"
-            onClick={handleDismiss}
-            style={{
-              padding: "6px 12px",
-              borderRadius: 8,
-              border: "1px solid rgba(255,255,255,0.12)",
-              background: "transparent",
-              color: "var(--w-text-1)",
-              fontSize: 12.5,
-              cursor: "pointer",
-            }}
-          >
-            Later
-          </button>
-          <button
-            type="button"
-            onClick={() => void install()}
-            style={{
-              padding: "6px 14px",
-              borderRadius: 8,
-              border: "none",
-              background: "var(--gold, #F2B441)",
-              color: "#0d0d12",
-              fontSize: 12.5,
-              fontWeight: 600,
-              cursor: "pointer",
-            }}
-          >
-            Install &amp; relaunch
-          </button>
-        </>
-      )}
-      {state.kind === "installing" && (
+
+      {state.kind === "installing" ? (
         <div
           style={{
             fontSize: 12,
@@ -158,6 +165,30 @@ export function UpdateBanner({ update, onDismiss }: UpdateBannerProps) {
         >
           {percent !== null ? `${percent}%` : "Downloading…"}
         </div>
+      ) : (
+        <>
+          <button
+            type="button"
+            className="btn btn--sm btn--ghost"
+            onClick={handleLater}
+            disabled={busy}
+          >
+            Later
+          </button>
+          <button
+            type="button"
+            className="btn btn--sm"
+            onClick={() => void install()}
+            disabled={busy}
+            style={{
+              background: "var(--gold, #F2B441)",
+              color: "#0d0d12",
+              fontWeight: 600,
+            }}
+          >
+            {state.kind === "checking" ? "Checking…" : "Install & relaunch"}
+          </button>
+        </>
       )}
     </div>
   );

@@ -173,7 +173,7 @@ export function ApprovalOverlay() {
 
           <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
             <div>
-              <div className="row-label" style={{ fontSize: 11, opacity: 0.7 }}>Reject reason (optional)</div>
+              <div className="row-label" style={{ fontSize: 11, color: "var(--fg-300)" }}>Reject reason (optional)</div>
               <input
                 type="text"
                 placeholder="Why you're rejecting"

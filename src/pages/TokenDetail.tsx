@@ -15,12 +15,15 @@
 import { useEffect, useMemo, useState } from "react";
 import { BridgeRiskPanel } from "../components/BridgeRiskPanel";
 import { ReceiveModal } from "../components/ReceiveModal";
-import { SendComposeModal } from "../components/SendComposeModal";
+import { RefreshButton } from "../components/RefreshButton";
+import { SendComposeModal, type SendTokenContext } from "../components/SendComposeModal";
+import { isSupportedTokenDecimals } from "../sdk/token-send-compose";
 import { TxRow } from "../components/TxRow";
-import { fmt } from "../components/format";
 import type { Route } from "../components/types";
 import { useActiveWallet } from "../sdk/active-wallet";
 import { activityRowToTx } from "../sdk/activity-rows";
+import { confirmedRowKey } from "../sdk/activity-cache";
+import { formatLythDisplay, isNativeLythTokenId } from "../sdk/lyth-display";
 import {
   assessRoute,
   fetchBridgeRoutes,
@@ -38,8 +41,12 @@ import {
 } from "../sdk/live";
 import { NATIVE_LYTH_DECIMALS, formatLyth } from "@monolythium/core-sdk";
 import { MONOSCAN_GET_LYTH_URL } from "../sdk/monoscan";
+import { ExternalLink } from "../components/ExternalLink";
 import { isNativeRef, readSelectedToken } from "../sdk/selected-token";
+import { useDeveloperMode } from "../sdk/developer-mode";
 import { selectTokenDetailFacts } from "../sdk/token-detail";
+import { nativeFracDigits } from "../sdk/token-rows";
+import { loadTokenMetaMap, type TokenMeta } from "../sdk/token-metadata";
 
 interface Props {
   goto: (r: Route) => void;
@@ -57,6 +64,7 @@ export function TokenDetail({ goto }: Props) {
   const [tab, setTab] = useState<DetailTab>("activity");
 
   const [live, setLive] = useState<LiveTokenStatus | null>(null);
+  const [tokenMeta, setTokenMeta] = useState<Map<string, TokenMeta>>(new Map());
   const [activity, setActivity] = useState<RpcOutcome<LiveAddressActivityRow[]> | null>(null);
   // Native LYTH supply stats (circulating + burned). Only loaded/shown for the
   // native row — MRC-20 has no such read. Null until the first load resolves.
@@ -86,6 +94,12 @@ export function TokenDetail({ goto }: Props) {
       setLive(tokens);
       setActivity(act);
       setSupply(sup);
+      // Fetch the selected MRC-20's metadata (cached) so the balance renders at
+      // its real decimals. Native LYTH needs none (fixed 18-decimal path).
+      if (!isNativeRef(ref) && tokens.tokenBalances.ok && tokens.tokenBalances.value) {
+        const found = tokens.tokenBalances.value.find((r) => r.tokenId === ref);
+        setTokenMeta(await loadTokenMetaMap([found?.mrc?.assetId ?? ref]));
+      }
     } catch (cause) {
       setLive(null);
       setActivity({ ok: false, error: errorMessage(cause) });
@@ -100,8 +114,45 @@ export function TokenDetail({ goto }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [walletAddress]);
 
-  const facts = selectTokenDetailFacts(live, ref);
-  const fracDigits = facts.balanceAmount >= 100 ? 2 : facts.balanceAmount >= 1 ? 3 : 4;
+  const facts = selectTokenDetailFacts(live, ref, tokenMeta);
+  const fracDigits = nativeFracDigits(facts.balanceAmount);
+  // Native LYTH formats from the EXACT decimal string at the magnitude-picked
+  // precision — not from the parsed float, which rounds: a balance of
+  // 99.999… would render as "100.00" and overstate the funds. An MRC-20 row
+  // uses its decimals-correct `balanceText` (or "—" when the scale is unknown),
+  // never the raw base-units figure.
+  const balanceLabel =
+    facts.balanceDisplay === null
+      ? "—"
+      : facts.isNative
+        ? formatLythDisplay(facts.balanceDisplay, fracDigits) ?? "—"
+        : facts.balanceText ?? "—";
+
+  // A token is sendable only when it is a fungible MRC-20 (standard mrc20 —
+  // excludes 721/1155/4626), its decimals are known (never guess a scale), and a
+  // balance row exists. The modal then encodes the amount at these real decimals.
+  const sendableToken: SendTokenContext | null =
+    !facts.isNative &&
+    facts.standard === "mrc20" &&
+    isSupportedTokenDecimals(facts.decimals) &&
+    facts.tokenId !== null &&
+    facts.balanceDisplay !== null
+      ? {
+          tokenId: facts.tokenId,
+          symbol: facts.ticker,
+          decimals: facts.decimals,
+          balanceBaseUnits: facts.balanceDisplay,
+        }
+      : null;
+  // Honest reason a non-native row's Send is disabled.
+  const sendDisabledReason =
+    facts.isNative || sendableToken !== null
+      ? undefined
+      : facts.standard !== null && facts.standard !== "mrc20"
+        ? "Only fungible MRC-20 tokens can be sent from the wallet."
+        : !isSupportedTokenDecimals(facts.decimals)
+          ? "This token's decimals aren't available yet — can't send safely."
+          : "This token can't be sent right now.";
 
   return (
     <div className="w-page w-token-detail">
@@ -141,7 +192,7 @@ export function TokenDetail({ goto }: Props) {
           <div className="w-tok-bal__cell">
             <div className="w-tok-bal__lbl">Your balance</div>
             <div className="w-tok-bal__val">
-              {facts.balanceDisplay === null ? "—" : fmt(facts.balanceAmount, fracDigits)}
+              {balanceLabel}
               <span className="tok">{facts.ticker}</span>
             </div>
             {/* No USD price feed — value can't be shown honestly. */}
@@ -159,16 +210,16 @@ export function TokenDetail({ goto }: Props) {
           </div>
         </div>
         <div className="w-tok-bal__actions">
-          {/* Send / Receive / Convert reuse the existing wallet surfaces.
-              Native LYTH is the only asset the wallet can build a transfer
-              for today; MRC-20 send/convert are not wired, so those buttons
-              are honestly disabled for MRC rows rather than opening a modal
-              that can't complete. */}
+          {/* Send reuses the single SendComposeModal: native LYTH, or a fungible
+              MRC-20 with a known scale (factory-origin, standard mrc20, decimals
+              loaded). MRC-721/1155/4626 and unknown-decimals rows stay honestly
+              disabled with a reason rather than opening a send that can't
+              encode safely. Convert stays unwired. */}
           <button
             className="btn btn--primary"
             onClick={() => setSendOpen(true)}
-            disabled={!walletAddress || !facts.isNative}
-            title={facts.isNative ? undefined : "MRC-20 send is not wired in this build"}
+            disabled={!walletAddress || (!facts.isNative && sendableToken === null)}
+            title={sendDisabledReason}
           >
             Send
           </button>
@@ -186,20 +237,16 @@ export function TokenDetail({ goto }: Props) {
             Bridge
           </button>
           {facts.isNative ? (
-            <a
+            <ExternalLink
               className="btn"
               href={MONOSCAN_GET_LYTH_URL}
-              target="_blank"
-              rel="noopener noreferrer"
               style={{ textDecoration: "none" }}
             >
               Buy
-            </a>
+            </ExternalLink>
           ) : null}
           <span className="w-card__head__spacer" />
-          <button className="btn btn--sm" onClick={() => void refresh()} disabled={busy}>
-            {busy ? "Refreshing…" : "Refresh"}
-          </button>
+          <RefreshButton busy={busy} onClick={() => void refresh()} />
         </div>
       </div>
 
@@ -241,13 +288,18 @@ export function TokenDetail({ goto }: Props) {
           facts={facts}
           activity={activity}
           hasAddress={Boolean(walletAddress)}
+          tokenMeta={tokenMeta}
         />
       ) : null}
       {tab === "info" ? <InfoTab facts={facts} endpoint={live?.endpoint ?? "—"} supply={supply} /> : null}
       {tab === "bridges" ? <BridgesTab facts={facts} /> : null}
 
       {sendOpen && walletAddress ? (
-        <SendComposeModal fromBech32m={walletAddress} onClose={() => setSendOpen(false)} />
+        <SendComposeModal
+          fromBech32m={walletAddress}
+          token={sendableToken ?? undefined}
+          onClose={() => setSendOpen(false)}
+        />
       ) : null}
       {receiveOpen && walletAddress ? (
         <ReceiveModal address={walletAddress} onClose={() => setReceiveOpen(false)} />
@@ -260,17 +312,20 @@ function ActivityTab({
   facts,
   activity,
   hasAddress,
+  tokenMeta,
 }: {
   facts: ReturnType<typeof selectTokenDetailFacts>;
   activity: RpcOutcome<LiveAddressActivityRow[]> | null;
   hasAddress: boolean;
+  tokenMeta: Map<string, TokenMeta>;
 }) {
-  // Filter rows to this token where the indexer exposes a tokenId. Native LYTH
-  // rows carry no tokenId, so for the native view we show the wallet's full
-  // activity with an honest note rather than dropping every row.
+  // Filter rows to this token. Native LYTH rows carry the zero-address (or null)
+  // token id, so the native view (detected by isNativeLythTokenId) shows the
+  // wallet's full activity with an honest note rather than dropping every row; an
+  // MRC-20 view filters to its exact token id.
   const { rows, filtered } = useMemo(() => {
     const all = activity?.ok && activity.value ? activity.value : [];
-    if (facts.tokenId === null) {
+    if (isNativeLythTokenId(facts.tokenId)) {
       return { rows: all, filtered: false };
     }
     return { rows: all.filter((r) => r.tokenId === facts.tokenId), filtered: true };
@@ -301,8 +356,8 @@ function ActivityTab({
             ) : (
               rows.map((row) => (
                 <TxRow
-                  key={`${row.blockHeight}-${row.txIndex}-${row.logIndex}`}
-                  tx={activityRowToTx(row)}
+                  key={confirmedRowKey(row)}
+                  tx={activityRowToTx(row, tokenMeta)}
                 />
               ))
             )}
@@ -322,6 +377,7 @@ function InfoTab({
   endpoint: string;
   supply: LiveSupplyStatus | null;
 }) {
+  const devMode = useDeveloperMode();
   // Asset policy fields are only available for native LYTH (the live read
   // queries the LYTH policy). MRC rows show "—" rather than a fabricated
   // policy. There is no decimals read for an MRC row either, so native shows
@@ -341,7 +397,14 @@ function InfoTab({
         : "—";
   const rows: Array<{ k: string; v: string; mono?: boolean }> = [
     { k: "Token id", v: facts.isNative ? "native (LYTH)" : facts.tokenId ?? "—", mono: !facts.isNative },
-    { k: "Decimals", v: facts.isNative ? String(NATIVE_LYTH_DECIMALS) : "—" },
+    {
+      k: "Decimals",
+      v: facts.isNative
+        ? String(NATIVE_LYTH_DECIMALS)
+        : facts.decimals !== null
+          ? String(facts.decimals)
+          : "—",
+    },
     ...(facts.isNative
       ? [
           { k: "Circulating supply", v: circulating },
@@ -372,6 +435,13 @@ function InfoTab({
           <div className="row-help" style={{ marginTop: 10 }}>
             No price, supply, holder, or per-asset policy oracle is exposed for
             MRC-20 rows yet — those fields read as "—".
+          </div>
+        ) : null}
+        {devMode && facts.isNative && facts.assetPolicyError !== null ? (
+          // A failed policy read must not read as an honest absence: in developer
+          // mode show the raw error so a broken call is visible, not a bare "—".
+          <div className="w-live-error" style={{ marginTop: 10 }}>
+            asset policy read failed: {facts.assetPolicyError}
           </div>
         ) : null}
         <div className="row-help" style={{ marginTop: 10 }}>

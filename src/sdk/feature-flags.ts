@@ -24,12 +24,12 @@ export function writeSteleEnabled(enabled: boolean): void {
 
 // Experimental surfaces preview flag — DEFAULT OFF.
 //
-// Single switch for the not-yet-stable wallet surfaces: the Agents
-// (agent commerce / spending-policy sub-accounts) page, the bridge
-// per-route risk panel, and the Stake autovote planner. When off, every
-// one of those entry points is hidden / not mounted and the wallet's
-// visible behavior matches the pre-preview surface. Absence of the key
-// reads as off, so the default for every install is off.
+// Single switch for the not-yet-stable wallet surfaces: the Agents (agent
+// commerce / spending-policy sub-accounts) page, AI Trading, and the bridge
+// per-route risk panel. When off, those entry points are hidden / not mounted.
+// (The Delegate autovote planner and the notifications + activity system have
+// graduated to default-on and no longer sit behind this flag.) Absence of the
+// key reads as off, so the default for every install is off.
 export const EXPERIMENTAL_ENABLED_KEY = "wallet.experimentalEnabled";
 
 export function readExperimentalEnabled(): boolean {
@@ -115,22 +115,84 @@ export function writeNotificationDetails(enabled: boolean): void {
   }
 }
 
-// Notify-while-locked — DEFAULT ON, fail-open. When off, OS toasts for txs that
+// Notify-while-locked — DEFAULT OFF (opt-in). Now that notifications are a
+// default-on wallet feature, the conservative default is to NOT surface tx
+// toasts on a locked/unattended screen: when off, OS toasts for txs that
 // resolve while the wallet is locked are suppressed; the in-app record is still
-// written and surfaces on the next unlock.
+// written and surfaces on the next unlock. A user can turn it on in Settings.
 export const NOTIFY_WHILE_LOCKED_KEY = "wallet.notifyWhileLocked";
 
 export function readNotifyWhileLocked(): boolean {
   try {
-    return localStorage.getItem(NOTIFY_WHILE_LOCKED_KEY) !== "false";
+    return localStorage.getItem(NOTIFY_WHILE_LOCKED_KEY) === "true";
   } catch {
-    return true; // fail-open
+    return false; // default off — don't toast on a locked screen unless opted in
   }
 }
 
 export function writeNotifyWhileLocked(enabled: boolean): void {
   try {
     localStorage.setItem(NOTIFY_WHILE_LOCKED_KEY, enabled ? "true" : "false");
+  } catch {
+    // localStorage unavailable — fall through.
+  }
+}
+
+// Developer mode — DEFAULT OFF, device-scoped, fail-closed.
+//
+// The single switch that reveals the wallet's technical surfaces: raw RPC
+// endpoints, chain/genesis hashes, SDK/runtime build details, error codes, the
+// RISC-V console, and Mono Studio. It describes the operator of the machine, so
+// it is global — it survives lock/unlock and a wallet reset. Anything other than
+// the exact string "true" reads as OFF, and a storage exception reads as OFF, so
+// the read itself is the fail-closed gate with no async "resolving" window.
+export const DEVELOPER_MODE_KEY = "wallet.developerMode";
+
+// Stamped once (epoch-ms) on the FIRST successful enable, never rewritten while
+// a valid value exists, never cleared on disable. Reserved for a future
+// "new since you enabled this" affordance — nothing consumes it yet.
+export const DEVELOPER_MODE_FIRST_SEEN_KEY = "wallet.developerModeFirstSeenAt";
+
+export function readDeveloperMode(): boolean {
+  try {
+    return localStorage.getItem(DEVELOPER_MODE_KEY) === "true";
+  } catch {
+    return false; // fail-closed
+  }
+}
+
+/** Persist the flag and report whether the write landed. The guarded enable
+ *  flow awaits this result — a silently-swallowed failure is not acceptable for
+ *  the enable path (disable stays best-effort at the call site). */
+export function writeDeveloperMode(enabled: boolean): boolean {
+  try {
+    localStorage.setItem(DEVELOPER_MODE_KEY, enabled ? "true" : "false");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** The first-enabled timestamp, or null when absent or garbage. A non-finite or
+ *  non-positive stored value is treated as absent (and re-stamped next enable). */
+export function readDeveloperModeFirstSeenAt(): number | null {
+  try {
+    const raw = localStorage.getItem(DEVELOPER_MODE_FIRST_SEEN_KEY);
+    if (raw === null) return null;
+    const n = Number(raw);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Stamp the first-enabled timestamp, but only when none is already recorded, so
+ *  an off→on→off→on cycle keeps the original stamp. Best-effort: a stamp failure
+ *  never blocks the enable. */
+export function stampDeveloperModeFirstSeenAt(now: number): void {
+  try {
+    if (readDeveloperModeFirstSeenAt() !== null) return;
+    localStorage.setItem(DEVELOPER_MODE_FIRST_SEEN_KEY, String(now));
   } catch {
     // localStorage unavailable — fall through.
   }

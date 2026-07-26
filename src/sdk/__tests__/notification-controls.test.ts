@@ -48,10 +48,20 @@ describe("notificationToast detail redaction", () => {
 describe("notification control flags", () => {
   beforeEach(() => localStorage.clear());
 
-  it("default to ON when unset (fail-open)", () => {
+  it("system notifications + details default ON when unset (fail-open)", () => {
     expect(readNotificationsEnabled()).toBe(true);
     expect(readNotificationDetails()).toBe(true);
+  });
+
+  it("notify-while-locked defaults OFF when unset (opt-in — don't toast on a locked screen)", () => {
+    expect(readNotifyWhileLocked()).toBe(false);
+  });
+
+  it("honors an explicitly-saved notify-while-locked value in both directions", () => {
+    writeNotifyWhileLocked(true);
     expect(readNotifyWhileLocked()).toBe(true);
+    writeNotifyWhileLocked(false);
+    expect(readNotifyWhileLocked()).toBe(false);
   });
 
   it("round-trip each flag false then true", () => {

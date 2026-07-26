@@ -20,6 +20,10 @@ export function TokenRow({ token, onClick }: Props) {
   const fracDigits = t.amount >= 100 ? 2 : t.amount >= 1 ? 3 : 4;
   const priceLabel = t.priceUsd === null ? "—" : `$${t.priceUsd.toFixed(t.priceUsd < 1 ? 3 : 2)}`;
   const usdLabel = t.priceUsd === null ? "—" : `$${fmt(t.amount * t.priceUsd, 2)}`;
+  // Label a non-fungible standard so its "—" amount is not read as an MRC-20
+  // whose metadata simply hasn't loaded. MRC-20 (fungible) needs no badge.
+  const standardBadge =
+    t.standard && t.standard !== "mrc20" ? t.standard.replace(/^mrc/, "MRC-") : null;
   return (
     <div
       className={`w-asset${onClick ? " w-asset--clickable" : ""}`}
@@ -41,6 +45,7 @@ export function TokenRow({ token, onClick }: Props) {
       <div>
         <div className="w-asset__name">
           {t.name}<span className="ticker">{t.sym}</span>
+          {standardBadge ? <span className="w-asset__std">{standardBadge}</span> : null}
         </div>
         <div className="w-asset__sub">
           {priceLabel}
@@ -56,7 +61,10 @@ export function TokenRow({ token, onClick }: Props) {
         </div>
       </div>
       <div className="w-asset__amt">
-        <div className="primary">{fmt(t.amount, fracDigits)}</div>
+        {/* MRC-20 rows carry a preformatted, decimals-correct `displayAmount`
+            (authoritative); native LYTH has none and formats its numeric
+            `amount` at the magnitude-picked precision. */}
+        <div className="primary">{t.displayAmount ?? fmt(t.amount, fracDigits)}</div>
         <div className="usd">{usdLabel}</div>
       </div>
     </div>

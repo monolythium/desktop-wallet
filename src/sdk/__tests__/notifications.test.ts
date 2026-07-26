@@ -2,8 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   NOTIFICATION_HISTORY_CAP,
   NOTIFICATION_LABELS,
+  MAX_REASON_LEN,
+  REASON_UNAVAILABLE,
   appendCapped,
   delegationClusterLabel,
+  humanizeReason,
   isTxOpKind,
   isZeroAmount,
   notificationAmountLabel,
@@ -67,12 +70,15 @@ describe("notificationToast", () => {
 
   it("uses the failed title and respects status", () => {
     const t = notificationToast(rec({ kind: "delegate", status: "failed" }));
-    expect(t.title).toBe("Stake failed");
+    expect(t.title).toBe("Delegate failed");
   });
 
   it("omits the amount when it is zero (body = short address only)", () => {
+    // The subject here is the zero-amount rule, not the kind. It used to be
+    // written with `claim`, which now suppresses its body outright (§8c), so the
+    // case is expressed with a kind that still renders a counterparty.
     const t = notificationToast(
-      rec({ kind: "claim", status: "confirmed", amountDecimal: "0" }),
+      rec({ kind: "send", status: "confirmed", amountDecimal: "0" }),
     );
     expect(t.body).toBe("mono1qqqqq…qqqqqq");
     expect(t.body).not.toContain("LYTH");
@@ -98,7 +104,7 @@ describe("notificationToast", () => {
       rec({ kind: "send", status: "confirmed", amountDecimal: "12.50" }),
       false,
     );
-    // Generic app-name title — never the action (Sent/Staked/…) — and no body,
+    // Generic app-name title — never the action (Sent/Delegated/…) — and no body,
     // so neither the operation nor the amount/address leaks on a shared screen.
     expect(t.title).toBe("Monolythium Wallet");
     expect(t.title).not.toBe(notificationTitle("send", "confirmed"));
@@ -142,9 +148,14 @@ describe("notificationToast", () => {
     expect(t.body).toBe("+12.3456 LYTH");
   });
 
-  it("falls back to the plain claim body when no reward amount was decoded", () => {
+  it("shows the BARE TITLE for a claim with no decoded reward", () => {
+    // Behaviour change (§8c): this used to fall back to the submit-time
+    // claimable. That figure is measured before execution settles further
+    // rewards, so presenting it as the claimed amount under-reports income.
     const t = notificationToast(rec({ kind: "claim", amountDecimal: "5" }));
-    expect(t.body).toContain("5 LYTH");
+    expect(t.body).toBe("");
+    expect(t.body).not.toContain("5 LYTH");
+    expect(t.title).toBe("Rewards claimed");
   });
 });
 
@@ -160,8 +171,20 @@ describe("notificationAmountLabel", () => {
     expect(notificationAmountLabel(rec({ kind: "send", amountDecimal: "0" }))).toBeNull();
   });
 
-  it("falls back to the plain amount for a claim with no decoded reward", () => {
-    expect(notificationAmountLabel(rec({ kind: "claim", amountDecimal: "5" }))).toBe("5 LYTH");
+  it("shows NO amount for a claim with no decoded reward", () => {
+    // Behaviour change (§8c): the submit-time claimable is never shown as the
+    // claimed amount. See claim-figure-law.test.ts for the full law.
+    expect(notificationAmountLabel(rec({ kind: "claim", amountDecimal: "5" }))).toBeNull();
+  });
+
+  it("uses the token symbol as the unit for an MRC-20 send (not LYTH)", () => {
+    expect(notificationAmountLabel(rec({ kind: "send", amountDecimal: "1.5", unit: "USDC" }))).toBe(
+      "1.5 USDC",
+    );
+  });
+
+  it("defaults a unit-less (legacy) record to LYTH", () => {
+    expect(notificationAmountLabel(rec({ kind: "send", amountDecimal: "3.5" }))).toBe("3.5 LYTH");
   });
 });
 
@@ -193,7 +216,7 @@ describe("notificationTitle", () => {
   it("renders friendly titles per kind × status", () => {
     expect(notificationTitle("send", "confirmed")).toBe("Sent");
     expect(notificationTitle("send", "failed")).toBe("Send failed");
-    expect(notificationTitle("delegate", "confirmed")).toBe("Staked");
+    expect(notificationTitle("delegate", "confirmed")).toBe("Delegated");
     expect(notificationTitle("claim", "confirmed")).toBe("Rewards claimed");
     expect(notificationTitle("contract_call", "failed")).toBe("Transaction failed");
   });
@@ -202,8 +225,8 @@ describe("notificationTitle", () => {
 describe("pendingOpLabel", () => {
   it("renders a present-tense, in-flight label per kind", () => {
     expect(pendingOpLabel("send")).toBe("Sending…");
-    expect(pendingOpLabel("delegate")).toBe("Staking…");
-    expect(pendingOpLabel("undelegate")).toBe("Unstaking…");
+    expect(pendingOpLabel("delegate")).toBe("Delegating…");
+    expect(pendingOpLabel("undelegate")).toBe("Undelegating…");
     expect(pendingOpLabel("claim")).toBe("Claiming rewards…");
     expect(pendingOpLabel("contract_call")).toBe("Submitting transaction…");
   });
@@ -271,6 +294,63 @@ describe("parseHistoryEnvelope", () => {
     expect(withClaim?.entries[0]!.claimedAmount).toBe("7.5");
     const without = parseHistoryEnvelope({ schemaVersion: 0, entries: [rec()] });
     expect(without?.entries[0]!.claimedAmount).toBeUndefined();
+  });
+
+  it("round-trips feeLythoshi and tolerates its absence (legacy records)", () => {
+    const withFee = parseHistoryEnvelope({
+      schemaVersion: 0,
+      entries: [rec({ feeLythoshi: "2100000000000000" })],
+    });
+    expect(withFee?.entries[0]!.feeLythoshi).toBe("2100000000000000");
+    const without = parseHistoryEnvelope({ schemaVersion: 0, entries: [rec()] });
+    expect(without?.entries[0]!.feeLythoshi).toBeUndefined();
+  });
+
+  it("round-trips reason + reasonCode BOTH ways (a field-blind legacy record parses)", () => {
+    // Forward: a record carrying the new fields survives write -> read.
+    const withReason = parseHistoryEnvelope({
+      schemaVersion: 0,
+      entries: [rec({ status: "failed", reason: "transaction-reverted", reasonCode: -32047 })],
+    });
+    expect(withReason?.entries[0]!.reason).toBe("transaction-reverted");
+    expect(withReason?.entries[0]!.reasonCode).toBe(-32047);
+    // Backward: a legacy record without the fields still parses (undefined).
+    const legacy = parseHistoryEnvelope({ schemaVersion: 0, entries: [rec({ status: "failed" })] });
+    expect(legacy?.entries[0]!.reason).toBeUndefined();
+    expect(legacy?.entries[0]!.reasonCode).toBeUndefined();
+  });
+
+  it("carries the reserved REASON_UNAVAILABLE marker", () => {
+    const parsed = parseHistoryEnvelope({
+      schemaVersion: 0,
+      entries: [rec({ status: "failed", reason: REASON_UNAVAILABLE })],
+    });
+    expect(parsed?.entries[0]!.reason).toBe(REASON_UNAVAILABLE);
+  });
+
+  it("bounds the persisted reason: an over-length token is dropped, not stored", () => {
+    const parsed = parseHistoryEnvelope({
+      schemaVersion: 0,
+      entries: [rec({ status: "failed", reason: "x".repeat(MAX_REASON_LEN + 1) })],
+    });
+    // The record still parses (reason is optional), but the oversized token is
+    // discarded — no unbounded text ever lands in the store.
+    expect(parsed?.entries).toHaveLength(1);
+    expect(parsed?.entries[0]!.reason).toBeUndefined();
+  });
+});
+
+describe("humanizeReason", () => {
+  it("renders a hyphen-case token as a sentence-case phrase", () => {
+    expect(humanizeReason("transaction-reverted")).toBe("Transaction reverted");
+    expect(humanizeReason("insufficient-funds")).toBe("Insufficient funds");
+    expect(humanizeReason(REASON_UNAVAILABLE)).toBe("Reason unavailable");
+  });
+
+  it("returns null for an absent token (the no-reason absence)", () => {
+    expect(humanizeReason(undefined)).toBeNull();
+    expect(humanizeReason(null)).toBeNull();
+    expect(humanizeReason("")).toBeNull();
   });
 
   it("drops malformed entries but keeps the good ones", () => {

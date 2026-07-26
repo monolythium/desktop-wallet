@@ -7,6 +7,9 @@ import {
   type StudioHostStatus,
 } from "@monolythium/core-sdk";
 import { useOperations } from "../operations/context";
+import { useDeveloperMode } from "../sdk/developer-mode";
+import { DevModeStub } from "../components/DevModeStub";
+import type { Route } from "../components/types";
 import {
   drainSidecarMessages,
   loadStudioHostStatus,
@@ -31,8 +34,7 @@ import {
 } from "../sdk/studio-host";
 
 interface MonoStudioProps {
-  developerModeEnabled: boolean;
-  setRouteSettings: () => void;
+  goto: (r: Route) => void;
 }
 
 interface PendingApproval {
@@ -51,12 +53,22 @@ const STUDIO_COMMANDS: Array<{ command: NativeDevCommandName; label: string }> =
   { command: "deploy_plan", label: "Deploy Plan" },
 ];
 
-export function MonoStudio({ developerModeEnabled, setRouteSettings }: MonoStudioProps) {
+export function MonoStudio({ goto }: MonoStudioProps) {
+  const developerModeEnabled = useDeveloperMode();
   const ops = useOperations();
   const [channel, setChannel] = useState<NativeDevkitChannel>(() => readDevkitChannel());
   const [localPath, setLocalPath] = useState(() => readLocalDevkitPath() ?? "");
   const [manifestPath, setManifestPath] = useState("");
+  // What the developer typed, and the ONLY workspace value that is persisted.
+  // The canonical root a trust check resolves is deliberately kept out of this
+  // state: every backend command canonicalises its own argument, so the
+  // canonical form is derived at use time and storing it would put a value that
+  // came out of a trust decision into local storage for no gain.
   const [workspacePath, setWorkspacePath] = useState(() => readStudioWorkspacePath() ?? "");
+  // The resolved root from the last trust round-trip, shown but never stored.
+  // Cleared as soon as the typed path changes, since it then describes a path
+  // the developer is no longer asking about.
+  const [resolvedRoot, setResolvedRoot] = useState<string | null>(null);
   const [trustedRoots, setTrustedRoots] = useState<string[]>([]);
   const [workspaceTrusted, setWorkspaceTrusted] = useState(false);
   const [sidecarEvents, setSidecarEvents] = useState<SidecarEventRecord[]>([]);
@@ -73,6 +85,8 @@ export function MonoStudio({ developerModeEnabled, setRouteSettings }: MonoStudi
   const sidecarLabel = sidecarDisplayStatus(status, sidecarAction);
 
   useEffect(() => {
+    // Zero-network law: no host/sidecar read while the page is stubbed.
+    if (!developerModeEnabled) return;
     let cancelled = false;
     setBusy(true);
     loadStudioHostStatus({
@@ -105,6 +119,9 @@ export function MonoStudio({ developerModeEnabled, setRouteSettings }: MonoStudi
   }, [workspacePath]);
 
   useEffect(() => {
+    // Zero-network law: the workspace-trust probe is a backend call — never run
+    // it while the page is stubbed.
+    if (!developerModeEnabled) return;
     let cancelled = false;
     const refresh = async () => {
       try {
@@ -129,7 +146,7 @@ export function MonoStudio({ developerModeEnabled, setRouteSettings }: MonoStudi
     return () => {
       cancelled = true;
     };
-  }, [workspacePath]);
+  }, [workspacePath, developerModeEnabled]);
 
   const chooseLocal = async () => {
     if (!localPath.trim()) {
@@ -206,7 +223,7 @@ export function MonoStudio({ developerModeEnabled, setRouteSettings }: MonoStudi
     setSidecarAction("starting");
     try {
       const trusted = await assertWorkspaceTrusted(workspacePath.trim());
-      setWorkspacePath(trusted.root);
+      setResolvedRoot(trusted.root);
       setWorkspaceTrusted(true);
       await startDevkitSidecar({
         installPath: status.devkit.installPath,
@@ -229,6 +246,7 @@ export function MonoStudio({ developerModeEnabled, setRouteSettings }: MonoStudi
   };
 
   useEffect(() => {
+    if (!developerModeEnabled) return;
     if (status.devkit.sidecarStatus !== "running") return;
     let cancelled = false;
     const drain = async () => {
@@ -258,7 +276,7 @@ export function MonoStudio({ developerModeEnabled, setRouteSettings }: MonoStudi
       cancelled = true;
       window.clearInterval(id);
     };
-  }, [status.devkit.sidecarStatus]);
+  }, [status.devkit.sidecarStatus, developerModeEnabled]);
 
   const stopSidecar = async () => {
     if (!status.devkit.installPath) return;
@@ -288,7 +306,7 @@ export function MonoStudio({ developerModeEnabled, setRouteSettings }: MonoStudi
     setBusy(true);
     try {
       const result = await trustWorkspace(workspacePath.trim());
-      setWorkspacePath(result.root);
+      setResolvedRoot(result.root);
       setWorkspaceTrusted(true);
       setTrustedRoots(result.trustedRoots);
       setError(null);
@@ -304,6 +322,7 @@ export function MonoStudio({ developerModeEnabled, setRouteSettings }: MonoStudi
     setBusy(true);
     try {
       const result = await removeWorkspaceTrust(workspacePath.trim());
+      setResolvedRoot(null);
       setWorkspaceTrusted(false);
       setTrustedRoots(result.trustedRoots);
       setError(null);
@@ -450,22 +469,12 @@ export function MonoStudio({ developerModeEnabled, setRouteSettings }: MonoStudi
       <div className="w-page">
         <div className="w-page__header">
           <h1>Mono Studio</h1>
-          <div className="sub">Developer Mode is disabled.</div>
+          <div className="sub">Native project tooling and approval review.</div>
         </div>
-        <div className="w-card">
-          <div className="w-card__head"><h3>Studio Host disabled</h3></div>
-          <div className="w-card__body">
-            <div className="w-setting-row">
-              <div>
-                <div className="row-label">Enable Mono Studio</div>
-                <div className="row-help">
-                  Developer Mode controls the Studio Host and on-demand DevKit checks.
-                </div>
-              </div>
-              <button className="btn btn--primary" onClick={setRouteSettings}>Open Settings</button>
-            </div>
-          </div>
-        </div>
+        <DevModeStub
+          body="Mono Studio is a developer tool. Turn on developer mode to use it."
+          goto={goto}
+        />
       </div>
     );
   }
@@ -560,7 +569,10 @@ export function MonoStudio({ developerModeEnabled, setRouteSettings }: MonoStudi
                 <span>Project root</span>
                 <input
                   value={workspacePath}
-                  onChange={(event) => setWorkspacePath(event.target.value)}
+                  onChange={(event) => {
+                    setWorkspacePath(event.target.value);
+                    setResolvedRoot(null);
+                  }}
                   placeholder="/path/to/project"
                 />
               </label>
@@ -587,6 +599,10 @@ export function MonoStudio({ developerModeEnabled, setRouteSettings }: MonoStudi
               <div className="w-kv-list">
                 <KV k="Sidecar state" v={sidecarLabel} />
                 <KV k="Trusted roots" v={String(trustedRoots.length)} />
+                {/* What the backend resolved the typed path to. The field used
+                    to be overwritten with this; showing it here says the same
+                    thing without putting it into the value that is stored. */}
+                {resolvedRoot ? <KV k="Resolved root" v={resolvedRoot} mono /> : null}
               </div>
             </div>
           </div>

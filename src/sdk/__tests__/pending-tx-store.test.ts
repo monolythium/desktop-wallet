@@ -35,11 +35,16 @@ import {
   hydratePendingTxs,
   listPendingTxs,
   pendingTxsSnapshot,
+  purgeScopesForAddress,
   removePendingTx,
   subscribePendingTxs,
 } from "../pending-tx-store";
+import { __setGenesisIdentityResolverForTests } from "../chain-identity";
 
 const CHAIN = "0x10f2c";
+const GENESIS_A = `0x${"11".repeat(32)}`;
+const GENESIS_B = `0x${"22".repeat(32)}`;
+let genesisIdentity = GENESIS_A;
 
 function tx(over: Partial<PendingTx> = {}): PendingTx {
   return {
@@ -56,6 +61,8 @@ function tx(over: Partial<PendingTx> = {}): PendingTx {
 
 beforeEach(() => {
   backing.clear();
+  genesisIdentity = GENESIS_A;
+  __setGenesisIdentityResolverForTests(async () => genesisIdentity);
   __resetPendingTxStoreForTests();
 });
 
@@ -84,8 +91,12 @@ describe("hydratePendingTxs — on-mount disk warm", () => {
   it("loads a persisted set into the snapshot", async () => {
     // Seed the backing store as if a prior session left a tracked tx.
     backing.set(PENDING_TX_STORE_KEY, {
-      schemaVersion: 0,
-      txs: [tx({ txHash: "0xpersisted" })],
+      version: 2,
+      genesisIdentity: GENESIS_A,
+      envelope: {
+        schemaVersion: 0,
+        txs: [tx({ txHash: "0xpersisted" })],
+      },
     });
     expect(pendingTxsSnapshot()).toEqual([]);
 
@@ -95,8 +106,12 @@ describe("hydratePendingTxs — on-mount disk warm", () => {
 
   it("notifies subscribers when hydration changes the set, and stays warm on a re-hydrate", async () => {
     backing.set(PENDING_TX_STORE_KEY, {
-      schemaVersion: 0,
-      txs: [tx({ txHash: "0xp" })],
+      version: 2,
+      genesisIdentity: GENESIS_A,
+      envelope: {
+        schemaVersion: 0,
+        txs: [tx({ txHash: "0xp" })],
+      },
     });
     let hits = 0;
     const unsub = subscribePendingTxs(() => {
@@ -114,6 +129,42 @@ describe("hydratePendingTxs — on-mount disk warm", () => {
 
   it("degrades to an empty set on an unreadable / absent store", async () => {
     await hydratePendingTxs();
+    expect(pendingTxsSnapshot()).toEqual([]);
+    expect(await hasPendingTxs()).toBe(false);
+  });
+
+  it("fails closed without rejecting when the live genesis is unavailable", async () => {
+    await enqueuePendingTx(tx({ txHash: "0xold-genesis" }));
+    expect(pendingTxsSnapshot()).toHaveLength(1);
+    __setGenesisIdentityResolverForTests(async () => null);
+
+    await expect(hydratePendingTxs()).resolves.toBeUndefined();
+
+    expect(pendingTxsSnapshot()).toEqual([]);
+    expect(await hasPendingTxs()).toBe(false);
+  });
+});
+
+describe("genesis scoping", () => {
+  it("drops the old tracked set when block 0 changes", async () => {
+    await enqueuePendingTx(tx({ txHash: "0xsame" }));
+    expect(await listPendingTxs()).toHaveLength(1);
+
+    genesisIdentity = GENESIS_B;
+
+    expect(await listPendingTxs()).toEqual([]);
+    expect(pendingTxsSnapshot()).toEqual([]);
+    expect((await enqueuePendingTx(tx({ txHash: "0xsame" }))).added).toBe(true);
+  });
+
+  it("ignores the legacy v1 chain-id-only key", async () => {
+    backing.set("mono.pending-tx.v1", {
+      schemaVersion: 0,
+      txs: [tx({ txHash: "0xold" })],
+    });
+
+    await hydratePendingTxs();
+
     expect(pendingTxsSnapshot()).toEqual([]);
     expect(await hasPendingTxs()).toBe(false);
   });
@@ -157,5 +208,40 @@ describe("subscribePendingTxs — mutation fan-out drives the snapshot", () => {
     expect(hits).toBe(0);
     expect(pendingTxsSnapshot()).toHaveLength(1);
     unsub();
+  });
+});
+
+describe("purgeScopesForAddress — vault-removal cleanup", () => {
+  it("removes every tracked tx for the address across all chains, leaving others", async () => {
+    await enqueuePendingTx(tx({ txHash: "0xa1", addressLower: "mono1gone", chainIdHex: "0x10f2c" }));
+    await enqueuePendingTx(tx({ txHash: "0xa2", addressLower: "mono1gone", chainIdHex: "0x539" }));
+    await enqueuePendingTx(tx({ txHash: "0xb1", addressLower: "mono1keep", chainIdHex: "0x10f2c" }));
+
+    await purgeScopesForAddress("mono1gone");
+
+    // Both of the removed vault's rows are gone (both chains); the other survives.
+    expect((await listPendingTxs()).map((t) => t.txHash)).toEqual(["0xb1"]);
+  });
+
+  it("matches the address case-insensitively", async () => {
+    await enqueuePendingTx(tx({ txHash: "0xu", addressLower: "MONO1GONE" }));
+    await purgeScopesForAddress("mono1gone");
+    expect(await listPendingTxs()).toEqual([]);
+  });
+
+  it("is a no-op (no write) when nothing matches", async () => {
+    await enqueuePendingTx(tx({ txHash: "0xkeep", addressLower: "mono1keep" }));
+    let notified = 0;
+    const unsub = subscribePendingTxs(() => notified++);
+    await purgeScopesForAddress("mono1other");
+    expect(notified).toBe(0);
+    expect((await listPendingTxs()).map((t) => t.txHash)).toEqual(["0xkeep"]);
+    unsub();
+  });
+
+  it("does nothing for an empty scope", async () => {
+    await enqueuePendingTx(tx({ txHash: "0xkeep", addressLower: "mono1keep" }));
+    await purgeScopesForAddress("");
+    expect(await listPendingTxs()).toHaveLength(1);
   });
 });

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   activityEntriesFrom,
+  normalizeBalanceHex,
   toActivityBaseRow,
   toBlockBigInt,
 } from "../live";
@@ -36,6 +37,25 @@ describe("activityEntriesFrom — tolerant of the node's response shape", () => 
     expect(activityEntriesFrom(42)).toEqual([]);
     expect(activityEntriesFrom("nope")).toEqual([]);
     expect(activityEntriesFrom({ activity: "not-an-array" })).toEqual([]);
+  });
+});
+
+describe("normalizeBalanceHex — eth_getBalance shape (SDK 0.6.0)", () => {
+  it("reads the AccountProofResponse.value (0x-hex), not a 'balance' key", () => {
+    const r = normalizeBalanceHex({ value: "0x7b", state_root: "0x", block_number: 1n });
+    expect(r).toBe("0x7b");
+    expect(BigInt(r)).toBe(123n); // the caller BigInt()s it — no longer a constant 0
+  });
+
+  it("accepts a bare hex string and the legacy {balance} shape", () => {
+    expect(normalizeBalanceHex("0x10")).toBe("0x10");
+    expect(normalizeBalanceHex({ balance: "0x20" })).toBe("0x20");
+  });
+
+  it("falls back to 0x0 for an unrecognized shape (never undefined)", () => {
+    expect(normalizeBalanceHex({})).toBe("0x0");
+    expect(normalizeBalanceHex(null)).toBe("0x0");
+    expect(normalizeBalanceHex(42)).toBe("0x0");
   });
 });
 

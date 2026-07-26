@@ -1,0 +1,136 @@
+name: CI
+
+# Fast PR gate. The multi-OS SIGNED bundle lives in release.yml (tag-triggered);
+# this stays single-OS (Linux) and unsigned — it never needs signing secrets.
+on:
+  pull_request:
+    branches: [master, dev]
+  push:
+    branches: [master, dev]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # pnpm version is read from package.json `packageManager`; do not pass a
+      # `version:` here or pnpm/action-setup@v4 errors on the duplicate spec.
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ./src-tauri -> target
+
+      # webkit2gtk et al. are needed to compile the Tauri crate for cargo check.
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libudev-dev
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # The three version sources (package.json / tauri.conf.json / Cargo.toml)
+      # must agree — they drifted once (Cargo.toml lagged a patch).
+      - name: Check version consistency
+        run: node scripts/check-versions.mjs
+
+      # `pnpm build` is `tsc --noEmit && vite build` — typecheck + build in one,
+      # and it produces ../dist which the Rust build script embeds, so it must
+      # run before the cargo steps below.
+      - name: Typecheck and build
+        run: pnpm build
+
+      # Sequential: the repo's forks pool starves under parallel/overlap runs.
+      - name: Test
+        run: pnpm test --no-file-parallelism
+
+      # cargo check, NOT a full `tauri build` — bundling + signing belong to the
+      # release pipeline; the PR gate stays fast and needs no signing secrets.
+      - name: Rust check
+        working-directory: src-tauri
+        run: cargo check
+
+      - name: Rust tests
+        working-directory: src-tauri
+        run: cargo test
+
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Hard gate: fail anything that puts a high-severity advisory in the JS
+      # dependency tree. Advisories below `high` are reported, not fatal.
+      # Versions the resolver will not reach on its own are forced from the
+      # `pnpm.overrides` block in package.json (currently form-data, postcss).
+      #
+      # This describes the rule on purpose, not how clean the tree is. The
+      # previous wording asserted the tree was "clean at `high` today"; an
+      # advisory published months later made that false while the comment went
+      # on claiming it. A date would only have slowed the decay — the run's own
+      # exit code is the only answer that stays current.
+      - name: pnpm audit (fail on high)
+        run: pnpm audit --audit-level high
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+
+      # Hard gate: fail a PR that introduces a Rust vulnerability. The two real
+      # advisories are remediated by dependency bumps (committed Cargo.lock), so
+      # nothing real is ignored to force green:
+      #  - quick-xml RUSTSEC-2026-0194/0195 (high, DoS) — fixed by bumping plist
+      #    (-> 0.41.0) and tauri-winrt-notification; no longer present.
+      #  - anyhow RUSTSEC-2026-0190 (unsound) — fixed by bumping anyhow to 1.0.103.
+      # Ignore list = exactly the accepted set:
+      #  - RUSTSEC-2024-0429 (glib VariantStrIter unsoundness): a transitive of
+      #    the GTK3 stack Tauri needs on Linux, no upstream fix, not reachable in
+      #    the wallet's usage. It is a non-failing warning; kept ignored so the
+      #    accepted decision is explicit and survives an advisory re-classification.
+      # The remaining gtk-rs "unmaintained" notices are warnings that do not fail
+      # `cargo audit` (no `--deny warnings`), so they need no ignore entry.
+      #
+      # What this gate CANNOT see. cargo-audit reads RUSTSEC; the repository's
+      # dependency alerts read the GitHub Advisory Database. The two do not
+      # cover the same crates, and both directions have already bitten us:
+      #  - serde_with GHSA-7gcf-g7xr-8hxj sat open as an alert for weeks while
+      #    this gate stayed green. No configuration here could have caught it —
+      #    RUSTSEC carries no serde_with advisory at all. Closed by a lockfile
+      #    bump to 3.21.0.
+      #  - quick-xml RUSTSEC-2026-0194/0195 and anyhow RUSTSEC-2026-0190 exist
+      #    only in RUSTSEC, so remediating them moved the alert count by zero.
+      # So a green run here means "no RUSTSEC vulnerability", NOT "no
+      # outstanding Rust advisory". The alert list is a separate read:
+      # `gh api repos/<owner>/<repo>/dependabot/alerts?state=open`. Treating
+      # green here as the whole answer is what left an alert unexamined.
+      - name: cargo audit (fail on vulnerabilities)
+        working-directory: src-tauri
+        run: cargo audit --ignore RUSTSEC-2024-0429

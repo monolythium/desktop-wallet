@@ -6,7 +6,8 @@ import {
 } from "./pending-nonce";
 
 const A = "0xAbC0000000000000000000000000000000000001";
-const CHAIN = 69420;
+const CHAIN = "0x10f2c"; // the active-chain key from scopeChainKey()
+const CHAIN_OTHER = "0x539"; // a second (custom) chain
 
 describe("pending-nonce tracker", () => {
   beforeEach(() => _resetPendingNonces());
@@ -29,11 +30,13 @@ describe("pending-nonce tracker", () => {
     expect(nextSendNonce(A, CHAIN, 9n)).toBe(9n);
   });
 
-  it("is keyed per (address, chainId)", () => {
+  it("is keyed per (address, chain)", () => {
     recordSubmittedNonce(A, CHAIN, 5n);
     expect(nextSendNonce(A, CHAIN, 5n)).toBe(6n);
     expect(nextSendNonce("0xdeadbeef00000000000000000000000000000002", CHAIN, 5n)).toBe(5n);
-    expect(nextSendNonce(A, 1, 5n)).toBe(5n);
+    // A different chain is a different entry — a nonce submitted on one chain
+    // must never advance the nonce the wallet signs on another.
+    expect(nextSendNonce(A, CHAIN_OTHER, 5n)).toBe(5n);
   });
 
   it("is address-case-insensitive", () => {

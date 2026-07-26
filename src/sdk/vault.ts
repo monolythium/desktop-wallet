@@ -52,6 +52,15 @@ function normalizeError(raw: unknown): VaultCallError {
   return new VaultCallError({ code: "backend", message });
 }
 
+/** A vault-unlock failure counts toward the brute-force lockout ONLY when it is
+ *  a wrong password — a real guess. Keychain/backend/argument failures are
+ *  operational errors, not guesses, and must never escalate the counter or lock
+ *  the user out. Shared by the lock gate and the per-operation drawer so both
+ *  signing surfaces throttle identically. Pure. */
+export function isWrongPasswordFailure(cause: unknown): boolean {
+  return cause instanceof VaultCallError && cause.cause.code === "wrong_password";
+}
+
 /**
  * Build a fresh vault sealed with `password`. The seed is generated
  * inside Rust via `OsRng` and never returned — the caller stores the
@@ -70,8 +79,9 @@ export async function createVault(password: string): Promise<Uint8Array> {
 }
 
 /**
- * Seal a caller-provided 32-byte seed. New wallet creation uses this after
- * deriving the seed from a BIP-39 mnemonic in the TypeScript SDK.
+ * Seal a caller-provided 32-byte seed. This function only seals; the seed is
+ * derived upstream from a BIP-39 mnemonic by the TypeScript SDK crypto module
+ * (`mnemonicToMlDsa65Seed`), never here.
  */
 export async function createVaultFromSeed(password: string, seed: Uint8Array): Promise<Uint8Array> {
   if (!password) {

@@ -29,8 +29,9 @@
 // that fills in lazily on first unlock.
 
 import { Store } from "@tauri-apps/plugin-store";
+import { purgeVaultScopes } from "./scope-cleanup";
 
-const STORE_FILE = "vaults.v1.json";
+export const STORE_FILE = "vaults.v1.json";
 const STATE_KEY = "state";
 
 export type VaultKind = "local";
@@ -194,12 +195,17 @@ export async function renameVault(slot: string, newName: string): Promise<void> 
 
 export async function removeVaultFromCatalog(slot: string): Promise<void> {
   const state = await loadCatalog();
-  if (!(slot in state.vaults)) return;
+  const entry = state.vaults[slot];
+  if (!entry) return;
   delete state.vaults[slot];
   if (state.activeSlot === slot) {
     state.activeSlot = Object.keys(state.vaults)[0] ?? null;
   }
   await saveCatalog(state);
+  // Drop the removed vault's per-(address, chain) scoped state (notifications /
+  // activity cache / warm-start heads) so it can't accumulate on disk. Scoped to
+  // this vault's own address, so it never touches another vault's data.
+  await purgeVaultScopes(entry.addressHex);
 }
 
 /** Generate a fresh `kc:lyth:<short-id>:v1` slot id. */

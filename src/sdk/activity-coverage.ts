@@ -44,7 +44,11 @@ export function emptyActivityCopy(kind: ActivityCoverageKind): {
     case "indexer_disabled":
       return {
         title: "Activity history is unavailable",
-        body: "This network's indexer is turned off, so past transactions can't be listed here. Your balance and new transfers are unaffected.",
+        // The last sentence is the one addition taken from the behaviour
+        // specification, and it names THIS wallet's own surface rather than the
+        // specification's, which points at a location that does not exist here.
+        // Without it the user is told what is wrong and given nothing to do.
+        body: "This network's indexer is turned off, so past transactions can't be listed here. Your balance and new transfers are unaffected. Another operator may serve it — you can switch on the Operators page.",
       };
     case "pruned":
       return {
@@ -65,4 +69,66 @@ export function emptyActivityCopy(kind: ActivityCoverageKind): {
         body: "The indexer has no transactions for this address. Sent and received transfers appear here once they confirm.",
       };
   }
+}
+
+/**
+ * The label a feed owes the user when its rows came from the saved cache
+ * because the live read did not land.
+ *
+ * PROVENANCE — why these rows may be shown at all. Every live read the feed
+ * makes goes through the trust-gated provider, which refuses while the active
+ * operator is untrusted, and the cache is written only after such a read
+ * succeeds. So a degraded chain yields a FAILED read rather than rows from an
+ * unverifiable operator, and everything the cache holds was verified when it was
+ * fetched. Hiding it because the network is unreachable now would erase the
+ * user's own verified past to no honest end.
+ *
+ * WHAT IT DOES NOT SAY. Not why the chain is degraded. The chain-health banner
+ * already names untrusted / re-genesised / quarantined / offline and what to do
+ * about each; a second telling here would be a second vocabulary for one
+ * condition, and the two would drift. This states only what the ROWS are.
+ *
+ * The consequence clause is the load-bearing half: "saved" alone is a label a
+ * user has no reason to act on, whereas "newer transactions may be missing"
+ * says what it costs them.
+ */
+export const SAVED_HISTORY_NOTICE =
+  "Showing saved history. The wallet couldn't refresh this list from the network just now, so newer transactions may be missing.";
+
+/**
+ * The pruned empty state's optional third line.
+ *
+ * Renders ONLY for the `pruned` kind with a known retention floor. A null value
+ * renders nothing — an honest absence, never a fabricated block number, which
+ * on this surface would read as a specific claim about what the indexer still
+ * holds. Pure.
+ */
+export function prunedRetentionLine(
+  kind: ActivityCoverageKind,
+  earliestRetained: string | null,
+): string | null {
+  if (kind !== "pruned") return null;
+  if (earliestRetained === null || earliestRetained.trim() === "") return null;
+  return `Showing activity from block ${earliestRetained.trim()} onward.`;
+}
+
+/**
+ * Tolerant coercion of the probe envelope's retention floor to a decimal string.
+ * String / number / bigint are accepted; absent, malformed, or a null retention
+ * yields null — the line is then simply omitted. Pure.
+ */
+export function earliestRetainedFrom(raw: unknown): string | null {
+  if (!raw || typeof raw !== "object") return null;
+  const retention = (raw as Record<string, unknown>).retention;
+  if (!retention || typeof retention !== "object") return null;
+  const value = (retention as Record<string, unknown>).earliestRetained;
+  if (typeof value === "bigint") return value >= 0n ? value.toString() : null;
+  if (typeof value === "number") {
+    return Number.isInteger(value) && value >= 0 ? String(value) : null;
+  }
+  if (typeof value === "string") {
+    const t = value.trim();
+    return /^[0-9]+$/.test(t) ? t : null;
+  }
+  return null;
 }

@@ -125,6 +125,9 @@ html[data-layout="topbar"] .w-nav {
 }
 html[data-layout="topbar"] .w-nav--main { margin-top: 0; }
 html[data-layout="topbar"] .w-nav--footer { margin-top: 0; margin-left: auto; }
+/* The category groups flatten into the horizontal row (captions hidden). */
+html[data-layout="topbar"] .w-nav__group { flex-direction: row; align-items: center; gap: 2px; }
+html[data-layout="topbar"] .w-nav__cat { display: none; }
 html[data-layout="topbar"] .w-nav__item {
   width: auto;
   padding: 6px 12px;
@@ -193,6 +196,51 @@ html[data-layout="topbar"] .w-main > * {
 }
 .w-nav__item__icon { display: grid; place-items: center; opacity: 0.75; width: 16px; }
 .w-nav__item.is-active .w-nav__item__icon { opacity: 1; }
+.w-nav__item__label { flex: 1; text-align: left; }
+
+/* Category caption above a nav group; hidden when the rail is collapsed. */
+.w-nav__cat {
+  font-family: var(--f-mono); font-size: 9.5px;
+  color: var(--fg-400); letter-spacing: 0.14em; text-transform: uppercase;
+  padding: 12px 12px 4px;
+}
+/* One category group (an optional caption + its items). */
+.w-nav__group { display: flex; flex-direction: column; gap: 2px; }
+/* Danger items (Lock / Reset). */
+.w-nav__item--danger { color: var(--err); }
+.w-nav__item--danger:hover { color: var(--err); background: rgba(255,90,90,0.08); }
+
+/* ============ Collapsible rail ============
+   The hamburger toggle collapses the rail to an icons-only strip; the grid
+   column shrinks so the main content reflows. Default is expanded (no
+   attribute). Scoped out of the horizontal `topbar` layout, which reflows the
+   rail differently. */
+.w-side__top {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 8px;
+}
+.w-side__toggle {
+  display: grid; place-items: center;
+  width: 30px; height: 30px; flex: 0 0 auto;
+  border: none; border-radius: 8px;
+  background: transparent; color: var(--fg-300);
+  cursor: pointer; transition: all 160ms var(--e-out);
+}
+.w-side__toggle:hover { color: var(--fg-100); background: rgba(255,255,255,0.05); }
+
+html[data-sidebar="collapsed"]:not([data-layout="topbar"]) .w-app {
+  grid-template-columns: 66px 1fr;
+}
+html[data-sidebar="collapsed"]:not([data-layout="topbar"]) .w-side { padding: 20px 8px; }
+html[data-sidebar="collapsed"]:not([data-layout="topbar"]) .w-side__top { justify-content: center; }
+html[data-sidebar="collapsed"]:not([data-layout="topbar"]) .w-brand__mark,
+html[data-sidebar="collapsed"]:not([data-layout="topbar"]) .w-brand__text,
+html[data-sidebar="collapsed"]:not([data-layout="topbar"]) .w-nav__item__label,
+html[data-sidebar="collapsed"]:not([data-layout="topbar"]) .w-nav__item__badge,
+html[data-sidebar="collapsed"]:not([data-layout="topbar"]) .w-nav__cat,
+html[data-sidebar="collapsed"]:not([data-layout="topbar"]) .w-side__footer { display: none; }
+html[data-sidebar="collapsed"]:not([data-layout="topbar"]) .w-nav__item {
+  justify-content: center; padding: 9px 0; gap: 0;
+}
 
 .w-side__footer {
   margin-top: auto; padding: 14px 10px; border-top: 1px solid var(--fg-700);
@@ -215,6 +263,17 @@ html[data-layout="topbar"] .w-main > * {
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
   gap: 12px;
+  /* The `backdrop-filter` above CREATES A STACKING CONTEXT. Everything inside
+     this bar is therefore ordered relative to the bar and not to the page, so
+     the peer popover's own `z-index: 200` cannot lift it over `.w-main` — and
+     `.w-main`'s cards each create a stacking context of their own (they carry
+     a backdrop-filter too) and come later in DOM order, so they paint on top
+     and the popover opens behind the page. Raising the popover's number is
+     powerless against this; the trapping context is the only thing that can
+     be ordered, which is what this does.
+     10 is deliberately below `.w-overlay` (100) and `.w-toast` (200) so
+     dialogs, the operations drawer and toasts still cover the bar. */
+  z-index: 10;
 }
 .w-top__title {
   font-size: 16px; font-weight: 600;
@@ -241,6 +300,8 @@ html[data-layout="topbar"] .w-main > * {
 }
 .w-top__sync .dot.is-stale { background: var(--warn); box-shadow: 0 0 8px var(--warn); }
 .w-top__sync .dot.is-down  { background: var(--err);  box-shadow: 0 0 8px var(--err); }
+/* CONNECTING — muted, and the only dot with NO glow (status specification §M). */
+.w-top__sync .dot.is-muted { background: var(--fg-400); box-shadow: none; }
 .w-top__sync__caret { display: inline-flex; opacity: 0.65; margin-left: 1px; }
 
 /* ============ Peer popover (sync-peer switcher) ============ */
@@ -282,7 +343,11 @@ html[data-layout="topbar"] .w-main > * {
   background: rgba(255,255,255,0.05);
   border-color: var(--fg-700);
 }
-.w-peer-row.is-disabled { cursor: default; opacity: 0.6; }
+/* An ineligible peer row is a DIV, not a control (it drops its button role),
+   so the WCAG disabled-control exemption does not cover it. The cue is the
+   muted border and the cursor; the text stays at a readable tier, because an
+   operator the user cannot switch to is still an operator they need to read. */
+.w-peer-row.is-disabled { cursor: default; border-color: var(--fg-700); color: var(--fg-300); }
 .w-peer-row.is-disabled:hover { background: transparent; }
 .w-peer-row__main { flex: 1; min-width: 0; }
 .w-peer-row__label {
@@ -316,6 +381,15 @@ html[data-layout="topbar"] .w-main > * {
 .w-peer-row__check {
   display: flex; align-items: center; justify-content: center;
   width: 16px; color: var(--gold);
+}
+/* A peer that failed the chain-identity check. Stated where the choice was
+   made, so a refused switch is never a click that appears to do nothing. */
+.w-peer-pop__error {
+  padding: 8px 12px;
+  border-top: 1px solid var(--fg-700);
+  color: var(--err);
+  font-size: var(--fs-11);
+  line-height: 1.45;
 }
 .w-peer-pop__foot {
   padding: 10px 12px;
@@ -553,6 +627,19 @@ html[data-layout="topbar"] .w-main > * {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
 }
+.w-form-grid-2 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+/* Operator-override editor draft rows. */
+.w-op-draft-row { padding: 10px 0; border-top: 1px solid var(--w-line); }
+.w-op-draft-row:first-of-type { border-top: none; padding-top: 0; }
+.w-op-draft-line { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.w-op-draft-line__k { flex: 0 0 46px; font-size: 9px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--w-text-3); font-family: var(--font-mono, ui-monospace, monospace); }
+.w-op-draft-line input { flex: 1 1 auto; min-width: 0; }
+.w-op-draft-icon { flex: 0 0 auto; background: none; border: 1px solid var(--w-line); border-radius: 6px; width: 26px; height: 26px; cursor: pointer; color: inherit; line-height: 1; }
+.w-op-draft-icon:disabled { cursor: default; }
 @media (max-width: 980px) {
   .w-form-grid-3 { grid-template-columns: 1fr; }
 }
@@ -583,6 +670,30 @@ html[data-layout="topbar"] .w-main > * {
   font-size: 14px;
   color: var(--fg-400);
   font-weight: 400;
+}
+/* The fraction of the hero figure — a styling hook at the same colour as the
+   integer part (do not invent a different tint). */
+.w-hero__amount .frac { color: var(--fg-100); }
+
+/* A figure the wallet remembers but has not re-confirmed this session. Dimmed
+   by TOKEN TIER, never by opacity — opacity-dimmed text is the readability law's
+   named failure. Stale is a label, never a change to the value. */
+.w-hero__amount.is-stale { color: var(--fg-400); }
+.w-hero__stale {
+  margin-top: 6px;
+  font-family: var(--f-mono);
+  font-size: 10px;
+  color: var(--fg-500);
+}
+
+/* Fiat estimate under the hero figure. Muted with a colour token, never with
+   opacity — hierarchy comes from token tiers (readability law). */
+.w-hero__fiat {
+  margin-top: 6px;
+  font-family: var(--f-mono);
+  font-size: 12px;
+  color: var(--fg-400);
+  letter-spacing: 0.04em;
 }
 .w-hero__meta {
   margin-top: 14px;
@@ -675,6 +786,11 @@ html[data-layout="topbar"] .w-main > * {
   font-family: var(--f-mono); font-size: 10.5px;
   color: var(--fg-400); text-transform: uppercase; letter-spacing: 0.06em;
 }
+.w-asset__std {
+  font-family: var(--f-mono); font-size: 9.5px; font-weight: 600;
+  color: var(--fg-500); border: 1px solid var(--fg-700, var(--fg-500));
+  border-radius: 4px; padding: 0 4px; letter-spacing: 0.04em;
+}
 .w-asset__sub { font-size: 11.5px; color: var(--fg-400); margin-top: 2px; }
 .w-asset__amt { text-align: right; }
 .w-asset__amt .primary { font-size: 13px; }
@@ -697,8 +813,121 @@ html[data-layout="topbar"] .w-main > * {
   display: grid; place-items: center;
   background: var(--w-bg); border: 1px solid var(--w-line);
 }
+/* ============ News — the blog reading list ============
+   An editorial list, not cards: this feed carries no images, and an imageless
+   card is a box. Rules between rows, one accent on hover, no motion beyond a
+   colour change. The row's texture is its TAXONOMY — the richest thing the feed
+   actually publishes. */
+.w-news-list { display: flex; flex-direction: column; }
+.w-news-item {
+  display: block;
+  padding: 16px 4px;
+  border-top: 1px solid var(--fg-700);
+  transition: background 140ms var(--e-out);
+}
+.w-news-item:first-child { border-top: none; }
+.w-news-item:hover { background: rgba(255,255,255,0.02); }
+.w-news-item:focus-visible { outline: 2px solid var(--gold); outline-offset: -2px; }
+.w-news-item__head {
+  display: flex; align-items: baseline; gap: 14px;
+  justify-content: space-between;
+}
+.w-news-item__title {
+  font-size: 14px; font-weight: 600; line-height: 1.35;
+  color: var(--fg-100);
+  transition: color 140ms var(--e-out);
+}
+.w-news-item:hover .w-news-item__title { color: var(--gold); }
+/* Monospace, matching how the wallet renders every other datum. */
+.w-news-item__date {
+  flex: 0 0 auto;
+  font-family: var(--f-mono); font-size: 10.5px;
+  color: var(--fg-500); white-space: nowrap;
+}
+.w-news-item__summary {
+  margin: 6px 0 0;
+  font-size: 12.5px; line-height: 1.6;
+  color: var(--fg-300);
+  max-width: 68ch; /* a comfortable measure — this is reading text */
+}
+.w-news-item__tags {
+  margin-top: 8px;
+  font-family: var(--f-mono); font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--fg-500);
+  line-height: 1.7;
+}
+/* Separators, not pills: these are labels the publisher chose, not controls the
+   reader can act on, and a pill invites a click that does nothing. */
+.w-news-item__sep { color: var(--fg-700); }
+
+/* Loading / empty / error — considered, not a failure of the page. */
+.w-news-state { padding: 18px 4px; }
+.w-news-state__title {
+  font-size: 13px; font-weight: 600; color: var(--fg-100); margin-bottom: 4px;
+}
+.w-news-state__body {
+  font-size: 12px; line-height: 1.6; color: var(--fg-400);
+}
+.w-news-more {
+  margin-top: 14px; padding-top: 12px;
+  border-top: 1px solid var(--fg-700);
+  font-size: 11.5px; color: var(--fg-400);
+}
+
+/* ============ Network-status answer line ============
+   The reachability answer: a state dot and the chain-health label. Tone comes
+   from the same dot classes the top-bar indicator uses, so one vocabulary
+   drives both. */
+.w-net-answer { display: flex; align-items: center; gap: 9px; margin-bottom: 8px; }
+.w-net-answer__dot {
+  width: 9px; height: 9px; border-radius: 50%;
+  background: var(--ok); box-shadow: 0 0 8px var(--ok);
+  flex: 0 0 auto;
+}
+.w-net-answer__dot.is-stale { background: var(--warn); box-shadow: 0 0 8px var(--warn); }
+.w-net-answer__dot.is-down  { background: var(--err);  box-shadow: 0 0 8px var(--err); }
+/* CONNECTING — muted, and the only dot with no glow, matching the chip. */
+.w-net-answer__dot.is-muted { background: var(--fg-500); box-shadow: none; }
+.w-net-answer__label {
+  font-family: var(--f-mono); font-size: 12px;
+  letter-spacing: 0.06em; color: var(--fg-100);
+}
+
+/* ============ Row glyph badge (activity-icons) ============
+   The kind glyph plus its corner status mark. Status is carried by SHAPE — a
+   distinct mark per state — with tone only reinforcing it, so the distinction
+   survives a colour-vision deficiency and a forced-colours mode. */
+.w-glyph-badge { position: relative; display: inline-flex; }
+.w-glyph-badge__mark {
+  position: absolute; right: -3px; bottom: -3px;
+  width: 11px; height: 11px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 50%;
+  border: 1.5px solid var(--w-bg, var(--bg-100));
+  box-sizing: border-box;
+}
+.w-glyph-badge__mark.is-failed  { background: var(--err);  color: #fff; }
+.w-glyph-badge__mark.is-stalled { background: var(--warn); color: #1a1300; }
+/* In flight: a ring with a gap, spinning. Never green — green is reserved for
+   an observed confirmation, and a premature green is a claim we have not
+   earned. */
+.w-glyph-badge__mark.is-pending {
+  background: none;
+  border-color: var(--warn);
+  border-top-color: transparent;
+  animation: w-spin 900ms linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .w-glyph-badge__mark.is-pending { animation: none; opacity: 0.6; }
+}
+
 .w-tx__dir.in  { color: var(--ok); }
 .w-tx__dir.out { color: var(--alert); }
+/* Directionless — the chain reported no movement direction for this row. Muted
+   and deliberately colourless: green or red here would be the wallet answering
+   a question the chain did not. */
+.w-tx__dir.none { color: var(--fg-400); }
 /* Outgoing + confirmed gets the brand accent on the icon only; the amount
    keeps its directional colour. Incoming/failed/pending are untouched. */
 .w-tx__dir.out.sent-ok { color: var(--gold); }
@@ -714,6 +943,8 @@ html[data-layout="topbar"] .w-main > * {
 .w-tx__amt { font-size: 13px; }
 .w-tx__amt.in  { color: var(--ok); }
 .w-tx__amt.out { color: var(--alert); }
+/* Directionless figure — neutral, matching its badge. */
+.w-tx__amt.none { color: var(--fg-100); }
 .w-tx__amt.private { color: var(--fg-300); font-style: italic; }
 .w-tx__amt .tok { margin-left: 4px; font-size: 10.5px; color: var(--fg-400); }
 .w-tx__usd { font-size: 11px; color: var(--fg-400); margin-top: 2px; }
@@ -739,6 +970,67 @@ html[data-layout="topbar"] .w-main > * {
 .btn--primary:hover:not(:disabled) { background: var(--gold-hi); }
 .btn--full { width: 100%; justify-content: center; }
 
+/* ============ Disclosure (CollapsibleSection) ============
+   One pattern for Operators / Settings / Help. The heading IS the trigger; it
+   keeps the card head's metrics so a collapsible card and a plain one line up. */
+.w-disclosure__heading { margin: 0; font-size: inherit; font-weight: inherit; }
+.w-disclosure__trigger {
+  display: flex; align-items: center; gap: 12px;
+  width: 100%;
+  padding: 14px 18px;
+  background: none; border: none;
+  text-align: left; cursor: pointer;
+  color: inherit; font: inherit;
+}
+.w-disclosure__trigger:hover { background: rgba(255,255,255,0.02); }
+.w-disclosure__trigger:focus-visible { outline: 2px solid var(--gold); outline-offset: -2px; }
+.w-disclosure__title { font-size: 14px; font-weight: 600; color: var(--fg-100); }
+.w-disclosure__value {
+  margin-left: auto;
+  display: inline-flex; align-items: center; gap: 6px;
+  min-width: 0;
+  font-size: 12px; font-weight: 450; color: var(--fg-300);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.w-disclosure__chev {
+  display: inline-flex; flex: 0 0 auto;
+  color: var(--fg-400);
+  transition: transform 150ms var(--e-out);
+}
+.w-disclosure__value + .w-disclosure__chev { margin-left: 0; }
+.w-disclosure__trigger > .w-disclosure__chev:nth-child(2) { margin-left: auto; }
+.w-disclosure__chev.is-open { transform: rotate(90deg); }
+@media (prefers-reduced-motion: reduce) {
+  .w-disclosure__chev { transition: none; }
+}
+/* Always-visible slot: sits under the heading, above the collapsible body. */
+.w-disclosure__always { padding-top: 0; padding-bottom: 0; }
+.w-disclosure__always:not(:empty) { padding-bottom: 12px; }
+
+/* Chrome-less variant — a disclosure row inside an existing card. */
+.w-disclosure--flush + .w-disclosure--flush { border-top: 1px solid var(--fg-700); }
+.w-disclosure--flush .w-disclosure__trigger { padding: 12px 0; }
+.w-disclosure--flush .w-disclosure__title { font-size: 13.5px; }
+.w-disclosure--flush .w-card__body { padding: 0 0 14px; }
+
+/* ============ Icon-only button (RefreshButton) ============
+   Square-ish so the glyph sits centred rather than in a text-shaped box. The
+   name lives in aria-label/title, never on the face. */
+.w-icon-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  gap: 0;
+  width: 28px; height: 28px;
+  padding: 0;
+  flex: 0 0 auto;
+}
+.w-icon-btn:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+.w-icon-btn__glyph { display: block; }
+.w-icon-btn__glyph.is-spinning { animation: w-spin 900ms linear infinite; }
+@keyframes w-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .w-icon-btn__glyph.is-spinning { animation: none; opacity: 0.55; }
+}
+
 /* ============ OperationsDrawer ============ */
 .w-overlay {
   position: fixed; inset: 0;
@@ -750,6 +1042,123 @@ html[data-layout="topbar"] .w-main > * {
   animation: overlayIn 180ms var(--e-out) both;
 }
 @keyframes overlayIn { from { opacity: 0; } to { opacity: 1; } }
+
+/* Centered variant of the overlay for confirm dialogs (vs the flex-end drawer). */
+.w-overlay--center { justify-content: center; align-items: center; padding: 20px; }
+.w-confirm { width: min(440px, 92vw); box-shadow: var(--shadow-3); }
+.w-confirm__title {
+  margin: 0; display: flex; align-items: center; gap: 8px;
+  color: var(--w-text); font-size: var(--fs-16);
+}
+.w-confirm__title svg { color: var(--gold); flex: none; }
+.w-confirm__error {
+  margin-top: 12px; padding: 8px 10px; border-radius: var(--r-6);
+  border: 1px solid var(--w-red); color: var(--w-red);
+  background: rgba(255,138,154,0.10); font-size: var(--fs-11);
+}
+.w-confirm__actions { display: flex; gap: 10px; margin-top: 16px; }
+.w-confirm__actions .btn { flex: 1; justify-content: center; }
+
+/* Operator risk chip (shared by rows + legend). Tinted backgrounds are fixed
+   alphas because the token set defines no tinted surfaces. */
+.w-risk-chip {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 9px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em;
+  border-radius: 3px; padding: 1px 5px; border: 1px solid transparent; white-space: nowrap;
+}
+.w-risk-chip--err { color: var(--err); background: rgba(220,80,80,0.12); border-color: rgba(220,80,80,0.4); }
+.w-risk-chip--warn { color: var(--warn); background: rgba(220,180,80,0.12); border-color: rgba(220,180,80,0.4); }
+.w-risk-chip--info { color: var(--fg-300); background: rgba(120,160,220,0.08); border-color: rgba(120,160,220,0.3); }
+
+/* Operators screen. */
+.w-op-summary { font-family: var(--font-mono, ui-monospace, monospace); font-size: var(--fs-11); color: var(--w-text-3); margin-bottom: 12px; }
+.w-op-strip { padding: 10px 12px; border: 1px solid var(--w-line); border-radius: var(--r-8); background: var(--w-surface); margin-bottom: 14px; }
+.w-op-strip__head { font-size: var(--fs-12); color: var(--w-text); }
+.w-op-strip__host { font-family: var(--font-mono, ui-monospace, monospace); color: var(--w-text-2); }
+.w-op-row { display: flex; align-items: flex-start; gap: 10px; padding: 10px 4px; border-top: 1px solid var(--w-line); cursor: pointer; }
+.w-op-row:first-child { border-top: none; }
+.w-op-row__dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 4px; flex: none; }
+.w-op-row__dot--ok { background: var(--ok); }
+.w-op-row__dot--bad { background: var(--err); }
+.w-op-row__main { flex: 1; min-width: 0; }
+.w-op-row__name { font-size: var(--fs-12); font-weight: 600; color: var(--w-text); }
+.w-op-row__region { font-size: 10.5px; color: var(--w-text-3); margin-left: 6px; }
+.w-op-row__chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.w-op-row__dev { font-family: var(--font-mono, ui-monospace, monospace); font-size: var(--fs-10); color: var(--w-text-3); margin-top: 4px; word-break: break-all; }
+.w-op-pill { display: inline-flex; align-items: center; gap: 5px; font-size: var(--fs-11); }
+.w-op-pill__dot { width: 6px; height: 6px; border-radius: 50%; }
+.w-op-detail { border-top: 1px dashed var(--w-line); margin-top: 8px; padding-top: 8px; }
+.w-op-detail__row { display: flex; justify-content: space-between; gap: 12px; font-size: var(--fs-11); padding: 2px 0; }
+.w-op-detail__k { color: var(--w-text-3); }
+.w-op-detail__v { color: var(--w-text-2); font-family: var(--font-mono, ui-monospace, monospace); text-align: right; word-break: break-all; }
+.w-legend-entry { padding: 8px 0; border-top: 1px solid var(--w-line); }
+.w-legend-entry:first-of-type { border-top: none; }
+.w-legend-entry__head { display: flex; align-items: center; gap: 8px; }
+.w-legend-entry__label { font-size: var(--fs-12); font-weight: 600; color: var(--w-text); }
+.w-legend-affected {
+  font-family: var(--font-mono, ui-monospace, monospace); font-size: 9px; font-weight: 600;
+  border-radius: 3px; padding: 1px 5px; cursor: pointer;
+  color: var(--err); background: rgba(220,80,80,0.12); border: 1px solid rgba(220,80,80,0.4);
+}
+.w-legend-list { margin-top: 6px; padding: 6px 8px; border-radius: var(--r-6); background: rgba(220,80,80,0.06); border: 1px solid rgba(220,80,80,0.25); }
+.w-legend-list__row { display: flex; align-items: baseline; padding: 2px 0; }
+
+/* About Chain card — full untruncated genesis pin + registry-drift banner. */
+.w-genesis-full { margin-top: 12px; }
+.w-genesis-full__hash {
+  display: block;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--fs-10); line-height: 1.5;
+  color: var(--w-text-2);
+  word-break: break-all;
+  background: var(--w-surface); border: 1px solid var(--w-line);
+  border-radius: var(--r-6); padding: 8px 10px;
+}
+.w-drift-banner {
+  margin-top: 12px; padding: 8px 10px; border-radius: var(--r-6);
+  border: 1px solid var(--warn); color: var(--warn);
+  background: var(--gold-bg); font-size: var(--fs-11); line-height: 1.5;
+}
+
+/* Developer-mode-required stub — centered card a gated page shows when off. */
+.w-devstub { display: flex; justify-content: center; padding: 32px 12px; }
+.w-devstub__card { width: min(420px, 96vw); text-align: center; }
+.w-devstub__card .w-card__body { padding: 32px 18px; }
+.w-devstub__glyph {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 28px; color: var(--w-text-3); margin-bottom: 10px;
+}
+.w-devstub__title { margin: 0 0 6px; font-size: var(--fs-13); font-weight: 600; color: var(--w-text); }
+.w-devstub__body { margin: 0 auto; max-width: 320px; }
+.w-devstub__actions { display: flex; gap: 10px; justify-content: center; margin-top: 16px; }
+.w-devstub__btn {
+  padding: 7px 16px; border-radius: var(--r-pill);
+  border: 1px solid var(--w-accent); color: var(--w-accent);
+  background: var(--w-accent-bg); font: inherit; font-size: var(--fs-11);
+  cursor: pointer;
+}
+.w-devstub__btn:hover { background: var(--gold-bg); }
+
+/* Slide switch — role="switch" toggle (developer mode, and future settings). */
+.w-switch {
+  position: relative; flex: none;
+  width: 40px; height: 22px; padding: 0;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--w-line);
+  background: var(--w-surface);
+  cursor: pointer;
+  transition: background 160ms var(--e-out), border-color 160ms var(--e-out);
+}
+.w-switch.is-on { background: var(--gold); border-color: var(--gold); }
+.w-switch:disabled { opacity: 0.6; cursor: default; }
+.w-switch__knob {
+  position: absolute; top: 2px; left: 2px;
+  width: 16px; height: 16px; border-radius: 50%;
+  background: #fff;
+  transition: transform 160ms var(--e-out);
+}
+.w-switch.is-on .w-switch__knob { transform: translateX(18px); }
+
 .w-drawer {
   width: min(440px, 96vw);
   height: 100%;
@@ -908,9 +1317,58 @@ html[data-layout="topbar"] .w-main > * {
   background: var(--w-bg);
   color: var(--fg-200);
 }
-.w-banner.warn  { border-color: rgba(244, 201, 122, 0.35); color: var(--warn); background: rgba(244, 201, 122, 0.08); }
+.w-banner.warn  { border-color: rgba(var(--warn-glow), 0.35); color: var(--warn); background: rgba(var(--warn-glow), 0.08); }
 .w-banner.error { border-color: rgba(255, 138, 154, 0.35); color: var(--alert); background: rgba(255, 138, 154, 0.08); }
 .w-banner.ok    { border-color: rgba(126, 227, 193, 0.35); color: var(--ok); background: rgba(126, 227, 193, 0.08); }
+
+/* ============ Prominent warning ============
+   The ONE loud warning box: limits, clamps, and irreversibility — the moments
+   a user must not skim past.
+
+   Escalation is EARNED. A quiet informational hint that is always on teaches
+   the eye to ignore that shape, so by the time the same shape carries "this
+   is as far as you can go", it is invisible. Informational notes stay muted;
+   only the boundary escalates to this.
+
+   Tinted through --warn-glow so it tracks the active theme rather than
+   matching whichever one it was authored against. */
+.w-warn-prominent {
+  font-family: var(--f-mono); font-size: 12px; font-weight: 600; line-height: 1.4;
+  color: var(--warn);
+  background: rgba(var(--warn-glow), 0.10);
+  border: 1px solid rgba(var(--warn-glow), 0.25);
+  border-radius: 8px; padding: 7px 10px; margin: 6px 0 0;
+  box-shadow: 0 0 12px rgba(var(--warn-glow), 0.25);
+}
+
+/* ============ Chain-health degraded banner ============ */
+.w-chain-banner {
+  position: sticky; top: 0; z-index: 5;
+  display: flex; align-items: center; gap: 12px;
+  margin-bottom: 14px;
+}
+/* OPAQUE, because this banner is STICKY.
+   `.w-banner.error` tints at 8% alpha, which is right for an error box sitting
+   ON a card — the surface underneath it is already solid. Here it is not: the
+   page scrolls beneath this banner, so at 8% the moving content reads straight
+   through the message. The tone still comes from the `.w-banner` variant's
+   border and text colour; only the surface is made solid, so no variant is
+   redefined and the ~20 in-card users of `.w-banner.error` are untouched.
+   Two class names because `.w-banner.error` is equally specific — this wins on
+   source order, which is why it must stay below it. */
+.w-chain-banner.w-banner {
+  background: var(--ink-200);
+}
+.w-chain-banner__text { flex: 1; min-width: 0; }
+.w-chain-banner__title { font-weight: 600; font-size: 12.5px; letter-spacing: 0.02em; }
+.w-chain-banner__body { margin-top: 3px; font-size: 11.5px; color: var(--fg-300); line-height: 1.5; }
+.w-chain-banner__action {
+  flex-shrink: 0; padding: 6px 10px; border-radius: 8px;
+  border: 1px solid var(--w-line); background: var(--w-bg); color: var(--fg-200);
+  font-size: 11.5px; font-family: inherit; cursor: pointer;
+  transition: border-color 160ms var(--e-out);
+}
+.w-chain-banner__action:hover { border-color: var(--fg-600); }
 
 /* ============ Settings rows ============ */
 .w-setting-row {

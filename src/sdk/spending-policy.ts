@@ -2,7 +2,7 @@
 // precompile (`0x…110C`) calldata encoders + the `lyth_getSpendingPolicy`
 // read.
 //
-// Mirrors `staking.ts` (encode → submit) verbatim: the only differences
+// Same shape as `delegation.ts` (encode → submit) verbatim: the only differences
 // are the precompile address, the calldata encoder, and the execution-unit
 // limit.
 //
@@ -16,7 +16,7 @@
 //
 // The precompile is GATEABLE on the connected network — a register /
 // enable / disable write may revert with the chain's typed precompile-gate
-// error. As with the staking seam, callers surface that error verbatim
+// error. As with the delegation seam, callers surface that error verbatim
 // through the OperationsDrawer (we never mask it here).
 
 import {

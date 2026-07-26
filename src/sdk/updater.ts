@@ -9,10 +9,13 @@
 //      streams progress; on completion we `relaunch()` so the freshly
 //      installed binary boots.
 //
-// Errors and the non-Tauri (browser preview) runtime both yield
-// `available: false` — the banner stays hidden. We don't propagate
-// network errors to the UI: failing to fetch the update manifest is
-// not user-actionable, and a noisy banner would be worse than silence.
+// The result is a three-way discriminated union: `available` (a newer release),
+// `none` (a real "you're current" answer, or the non-Tauri preview where the
+// updater can't run), and `error` (the manifest fetch/parse failed). The banner
+// only ever shows on `available` and stays silent on `error` — a failed fetch is
+// not user-actionable there. About is the one surface that tells the truth about
+// a failed check, so it needs to tell `none` from `error` (hence this union
+// instead of a single boolean that folds both into "not available").
 
 import type { Update } from "@tauri-apps/plugin-updater";
 
@@ -22,7 +25,7 @@ import type { Update } from "@tauri-apps/plugin-updater";
 let pendingUpdate: Update | null = null;
 
 export interface UpdateAvailable {
-  available: true;
+  kind: "available";
   /** The version string from `latest.json`. */
   version: string;
   /** Optional release notes (free-form, may be markdown). */
@@ -31,11 +34,17 @@ export interface UpdateAvailable {
   pubDate: string | null;
 }
 
-export interface UpdateUnavailable {
-  available: false;
+/** No newer release (a genuine current answer). */
+export interface UpdateNone {
+  kind: "none";
 }
 
-export type UpdateCheckResult = UpdateAvailable | UpdateUnavailable;
+/** The update manifest couldn't be fetched or parsed. */
+export interface UpdateError {
+  kind: "error";
+}
+
+export type UpdateCheckResult = UpdateAvailable | UpdateNone | UpdateError;
 
 /**
  * True iff we're running inside Tauri. Browser preview (pnpm dev with
@@ -46,23 +55,24 @@ function isTauri(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
 
-/** Hit the updater endpoint in tauri.conf.json. Returns `available:
- *  false` on any error or when no newer version is offered.  */
+/** Hit the updater endpoint in tauri.conf.json. `none` when there is no newer
+ *  release (or in the non-Tauri preview, where the updater can't run); `error`
+ *  when the manifest fetch/parse fails — never conflated with `none`. */
 export async function checkForUpdate(): Promise<UpdateCheckResult> {
-  if (!isTauri()) return { available: false };
+  if (!isTauri()) return { kind: "none" };
   try {
     const { check } = await import("@tauri-apps/plugin-updater");
     const update = await check();
-    if (update === null) return { available: false };
+    if (update === null) return { kind: "none" };
     pendingUpdate = update;
     return {
-      available: true,
+      kind: "available",
       version: update.version,
       notes: update.body ?? null,
       pubDate: update.date ?? null,
     };
   } catch {
-    return { available: false };
+    return { kind: "error" };
   }
 }
 
@@ -106,4 +116,13 @@ export async function downloadAndInstallUpdate(
  *  Dismiss button calls this; next `checkForUpdate` will re-fetch. */
 export function dismissPendingUpdate(): void {
   pendingUpdate = null;
+}
+
+/** Whether a live `Update` handle is currently held.
+ *
+ *  The verdict outlives the handle: the cache can say "update available" after
+ *  a restart while no handle exists in this process. Install must know the
+ *  difference so it can re-acquire one rather than throwing. */
+export function hasPendingUpdate(): boolean {
+  return pendingUpdate !== null;
 }

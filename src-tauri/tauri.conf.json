@@ -22,12 +22,14 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self' ipc: http://ipc.localhost https://rpc.monolythium.com https://monolythium.com https://raw.githubusercontent.com; worker-src 'none'; frame-src 'none'; child-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'",
+      "devCsp": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' ipc: http://ipc.localhost https://rpc.monolythium.com https://monolythium.com https://raw.githubusercontent.com ws://localhost:1420 http://localhost:1420 http: https:; worker-src 'none'; frame-src 'none'; child-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'"
     }
   },
   "bundle": {
     "active": true,
     "targets": "all",
+    "createUpdaterArtifacts": true,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -37,7 +39,7 @@
     ],
     "category": "Finance",
     "shortDescription": "Monolythium desktop wallet",
-    "longDescription": "Monolythium desktop wallet (macOS, Windows, Linux). Hold and move MNLX, manage keys via the OS keychain, and route every destructive action through a typed Operations drawer."
+    "longDescription": "Monolythium desktop wallet (macOS, Windows, Linux). Hold and move LYTH, manage keys via the OS keychain, and route every destructive action through a typed Operations drawer."
   },
   "plugins": {
     "updater": {

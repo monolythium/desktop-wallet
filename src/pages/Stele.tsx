@@ -14,7 +14,35 @@ import {
   type ConvertQuoteView,
 } from "../sdk/convert";
 import { flightSearch, FlightCallError, type FlightSearchInput } from "../sdk/flights";
-import { checkName, type NameCheckResult } from "../sdk/name-registry";
+import { ADDRESS_KIND_HRPS, nameRegistryAddressHex, typedBech32ToAddress } from "@monolythium/core-sdk";
+import {
+  checkAgentParentOwnership,
+  checkName,
+  isHumanName,
+  knownAgentChildren,
+  loadNameAvailability,
+  loadNameOwner,
+  loadNameQuote,
+  quoteUnchanged,
+  submitNameAcceptTransfer,
+  submitNameProposeTransfer,
+  submitNameRegistration,
+  type AgentParentVerdict,
+  type NameAvailabilityStatus,
+  type NameCheckResult,
+  type NameQuote,
+} from "../sdk/name-registry";
+import { classifyRecipientInput, resolveNameQuorum } from "../sdk/name-resolve";
+import { useOperations } from "../operations/context";
+import { useActiveWallet } from "../sdk/active-wallet";
+import { invalidateReverseNameFor, loadReverseName } from "../sdk/reverse-name";
+import { CategoryBadge } from "../components/CategoryBadge";
+import {
+  mergeMyNames,
+  readRegisteredNames,
+  recordRegisteredName,
+  type MyNameEntry,
+} from "../sdk/my-names";
 import {
   spendCoinsbeeGuide,
   spendCoinsbeeInvoice,
@@ -54,7 +82,7 @@ export function Stele() {
         </div>
       </div>
 
-      <NameChecker />
+      <NamesSection />
 
       <BrowseCard />
 
@@ -340,7 +368,7 @@ function ConvertCard() {
               onChange={(e) => setFromAmount(e.target.value)}
               style={{ ...inputStyle(), flex: 1 }}
             />
-            <span style={{ opacity: 0.6 }}>→</span>
+            <span style={{ color: "var(--fg-500)" }}>→</span>
             <select value={toCurrency} onChange={(e) => setToCurrency(e.target.value)} style={inputStyle()}>
               {CONVERT_CURRENCIES.map((c) => (
                 <option key={c.code} value={c.code}>{c.label}</option>
@@ -625,9 +653,19 @@ function HitRow({ hit }: { hit: ListingHit }) {
   );
 }
 
-function NameChecker() {
+function NameChecker({ onRegistered }: { onRegistered?: () => void }) {
+  const ops = useOperations();
+  const wallet = useActiveWallet();
+  const ownerAddress = wallet.status === "ready" ? wallet.address : "";
   const [name, setName] = useState("");
   const [result, setResult] = useState<NameCheckResult | null>(null);
+  // The real registration quote (SDK quoteNameRegistration). null = not loaded /
+  // unavailable → the UI shows an honest "—", never the old placeholder.
+  const [quote, setQuote] = useState<NameQuote | null>(null);
+  // Live availability (lyth_resolveName): null = not loaded yet.
+  const [availability, setAvailability] = useState<NameAvailabilityStatus | null>(null);
+  // For an agent name: whether the active wallet owns the parent human name.
+  const [parentVerdict, setParentVerdict] = useState<AgentParentVerdict | null>(null);
   const debounceRef = useRef<number | null>(null);
 
   // Debounce the check by 200ms so the user isn't hammering the Tauri
@@ -636,20 +674,98 @@ function NameChecker() {
     const trimmed = name.trim().toLowerCase();
     if (!trimmed) {
       setResult(null);
+      setQuote(null);
+      setAvailability(null);
+      setParentVerdict(null);
       return;
     }
     if (debounceRef.current !== null) {
       window.clearTimeout(debounceRef.current);
     }
+    setQuote(null);
+    setAvailability(null);
+    setParentVerdict(null);
     debounceRef.current = window.setTimeout(() => {
-      checkName(trimmed).then(setResult);
+      void checkName(trimmed).then((r) => {
+        setResult(r);
+        // Real chain-exact price + live availability for a structurally-valid name.
+        if (r.kind === "ok") {
+          void loadNameQuote(trimmed).then(setQuote);
+          void loadNameAvailability(trimmed).then(setAvailability);
+          // Agent names also need the parent-ownership check (chain-enforced).
+          if (r.availability.category === "agent" && ownerAddress) {
+            void checkAgentParentOwnership(trimmed, ownerAddress).then(setParentVerdict);
+          }
+        }
+      });
     }, 200);
     return () => {
       if (debounceRef.current !== null) {
         window.clearTimeout(debounceRef.current);
       }
     };
-  }, [name]);
+  }, [name, ownerAddress]);
+
+  // Register a human name: re-read the quote at submit (so a base-fee move can't
+  // cause a silent IncorrectFee) and submit value = the EXACT reviewed cost.
+  const openRegister = () => {
+    if (result?.kind !== "ok" || !quote || !ownerAddress) return;
+    const trimmed = name.trim().toLowerCase();
+    const category = result.availability.category;
+    const reviewedCost = quote.costLythoshi;
+    ops.open({
+      title: `Register ${trimmed}`,
+      subtitle: "Acquire this .mono name — one-time, permanent",
+      auth: "keychain",
+      diff: [
+        { k: "Name", v: trimmed },
+        { k: "Category", v: category },
+        { k: "Registration fee", v: `${quote.costLyth} LYTH`, kind: "fee" as const },
+        { k: "Owner", v: ownerAddress },
+        { k: "Precompile", v: "0x…110E" },
+      ],
+      effects: [
+        { text: "Unlocks the local vault for this operation only." },
+        { text: "Encodes register(string,address) via @monolythium/core-sdk — the signing wallet becomes the owner." },
+        { text: "Names are permanent: no expiry, no renewal. This is a one-time fee." },
+        {
+          text: "The fee is re-read at submit; if it changed you'll be asked to re-check. The chain reverts IncorrectFee on any fee mismatch and NameTaken if it was claimed first — verbatim errors surface here.",
+          level: "warn" as const,
+        },
+      ],
+      notify: {
+        kind: "contract_call" as const,
+        amountDecimal: "0",
+        counterparty: nameRegistryAddressHex(),
+      },
+      execute: async (ctx) => {
+        if (!ctx?.vaultSeed) {
+          throw new Error("vault seed unavailable after keychain authorization");
+        }
+        const fresh = await loadNameQuote(trimmed);
+        if (!fresh) {
+          throw new Error("Couldn't read the registration price — not submitting.");
+        }
+        if (!quoteUnchanged(reviewedCost, fresh.costLythoshi)) {
+          throw new Error("The registration price changed since review. Re-check and try again.");
+        }
+        const r = await submitNameRegistration({
+          seed: ctx.vaultSeed,
+          name: trimmed,
+          costLythoshi: reviewedCost,
+        });
+        // Record this device's registration so "My names" can show it (the
+        // chain has no enumerate RPC). Best-effort; the reverse read stays
+        // authoritative.
+        recordRegisteredName(ownerAddress, trimmed);
+        // Drop this address's cached reverse entry so the new name shows
+        // without waiting out the 30-minute TTL. Best-effort.
+        void invalidateReverseNameFor(ownerAddress);
+        onRegistered?.();
+        return { headline: `Registered ${trimmed}`, detail: r.txHash, txHash: r.txHash, nonce: r.nonce };
+      },
+    });
+  };
 
   const placeholder = "alice.mono";
 
@@ -677,7 +793,7 @@ function NameChecker() {
           <div style={{ flex: 1 }}>
             <div className="row-label">Name</div>
             <div className="row-help">
-              Local syntax check only. Live availability, registration, and pricing are not enabled in this build.
+              Syntax check, live availability, and the real chain registration price. Register a human name below.
             </div>
           </div>
           <input
@@ -700,13 +816,468 @@ function NameChecker() {
             }}
           />
         </div>
-        <NameDetail name={name} result={result} />
+        <NameDetail name={name} result={result} quote={quote} />
+        {result?.kind === "ok" && (
+          <div
+            style={{
+              marginTop: 12,
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+              flexWrap: "wrap",
+            }}
+          >
+            <span className="row-help">
+              {availability === null
+                ? "Checking availability…"
+                : availability === "available"
+                  ? "Available on-chain"
+                  : availability === "taken"
+                    ? "Already registered"
+                    : "Availability check unavailable"}
+            </span>
+            {result.availability.category === "human" ||
+            result.availability.category === "agent" ? (
+              <>
+                {result.availability.category === "agent" && (
+                  <span className="row-help">
+                    {parentVerdict === null
+                      ? "Checking parent ownership…"
+                      : parentVerdict === "owned"
+                        ? "You own the parent name"
+                        : parentVerdict === "not_owned"
+                          ? "You don't own the parent name"
+                          : parentVerdict === "parent_unregistered"
+                            ? "The parent name isn't registered yet"
+                            : "Parent-ownership check unavailable"}
+                  </span>
+                )}
+                <button
+                  className="btn btn--sm btn--primary"
+                  disabled={
+                    availability !== "available" ||
+                    !quote ||
+                    !ownerAddress ||
+                    (result.availability.category === "agent" && parentVerdict !== "owned")
+                  }
+                  onClick={openRegister}
+                >
+                  Register{quote ? ` · ${quote.costLyth} LYTH` : ""}
+                </button>
+              </>
+            ) : (
+              <span className="row-help">
+                {result.availability.category} names aren't user-registerable here.
+              </span>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
-function NameDetail({ name, result }: { name: string; result: NameCheckResult | null }) {
+/** The name checker + the honest "my names" view, sharing a refresh key so a
+ *  fresh registration shows up immediately. */
+function NamesSection() {
+  const [refreshKey, setRefreshKey] = useState(0);
+  return (
+    <>
+      <NameChecker onRegistered={() => setRefreshKey((k) => k + 1)} />
+      <MyNames refreshKey={refreshKey} />
+      <AcceptTransfer onAccepted={() => setRefreshKey((k) => k + 1)} />
+    </>
+  );
+}
+
+/** Accept a name transfer proposed to this wallet. The chain exposes no read to
+ *  enumerate pending transfers to an address (or to pre-confirm one), so the
+ *  recipient enters the name they were told is being transferred; the wallet
+ *  shows the current owner + the accept fee, and the chain enforces the
+ *  pending/recipient/24h checks on submit. The recipient PAYS the fee — same
+ *  exact-fee + confirm-time re-read discipline as registration. */
+function AcceptTransfer({ onAccepted }: { onAccepted?: () => void }) {
+  const ops = useOperations();
+  const [name, setName] = useState("");
+  // undefined = not looked up / loading; null = unregistered; string = owner.
+  const [owner, setOwner] = useState<string | null | undefined>(undefined);
+  const [quote, setQuote] = useState<NameQuote | null>(null);
+  const debounceRef = useRef<number | null>(null);
+
+  const trimmed = name.trim().toLowerCase();
+  const looksLikeName = trimmed.endsWith(".mono") && trimmed.length > ".mono".length;
+
+  useEffect(() => {
+    if (!looksLikeName) {
+      setOwner(undefined);
+      setQuote(null);
+      return;
+    }
+    if (debounceRef.current !== null) window.clearTimeout(debounceRef.current);
+    setOwner(undefined);
+    setQuote(null);
+    debounceRef.current = window.setTimeout(() => {
+      void loadNameOwner(trimmed).then(setOwner);
+      void loadNameQuote(trimmed).then(setQuote);
+    }, 200);
+    return () => {
+      if (debounceRef.current !== null) window.clearTimeout(debounceRef.current);
+    };
+  }, [trimmed, looksLikeName]);
+
+  const openAccept = () => {
+    if (!quote || !looksLikeName) return;
+    const reviewedCost = quote.costLythoshi;
+    ops.open({
+      title: `Accept ${trimmed}`,
+      subtitle: "Accept a name transfer proposed to you — you pay the fee",
+      auth: "keychain",
+      diff: [
+        { k: "Name", v: trimmed },
+        { k: "Current owner", v: owner ?? "—" },
+        { k: "Accept fee", v: `${quote.costLyth} LYTH`, kind: "fee" as const },
+        { k: "Precompile", v: "0x…110E" },
+      ],
+      effects: [
+        { text: "Unlocks the local vault for this operation only." },
+        { text: "Encodes acceptTransfer(string) via @monolythium/core-sdk. You pay the registration fee to receive the name." },
+        {
+          text: "The fee is re-read at submit; if it changed you'll be asked to re-check. The chain reverts if there's no pending transfer to you, it lapsed (over 24h), you're not the proposed recipient, or the fee mismatches — verbatim errors surface here.",
+          level: "warn" as const,
+        },
+      ],
+      notify: {
+        kind: "contract_call" as const,
+        amountDecimal: "0",
+        counterparty: nameRegistryAddressHex(),
+      },
+      execute: async (ctx) => {
+        if (!ctx?.vaultSeed) {
+          throw new Error("vault seed unavailable after keychain authorization");
+        }
+        const fresh = await loadNameQuote(trimmed);
+        if (!fresh) {
+          throw new Error("Couldn't read the accept fee — not submitting.");
+        }
+        if (!quoteUnchanged(reviewedCost, fresh.costLythoshi)) {
+          throw new Error("The accept fee changed since review. Re-check and try again.");
+        }
+        const r = await submitNameAcceptTransfer({
+          seed: ctx.vaultSeed,
+          name: trimmed,
+          costLythoshi: reviewedCost,
+        });
+        onAccepted?.();
+        return { headline: `Accepted ${trimmed}`, detail: r.txHash, txHash: r.txHash, nonce: r.nonce };
+      },
+    });
+  };
+
+  return (
+    <div className="w-card">
+      <div className="w-card__head">
+        <h3>Accept a name transfer</h3>
+      </div>
+      <div className="w-card__body">
+        <div className="row-help" style={{ marginBottom: 8, lineHeight: 1.5 }}>
+          Enter a name someone proposed transferring to you. You pay the
+          registration fee to accept, within 24h of the proposal.
+        </div>
+        <input
+          type="text"
+          placeholder="alice.mono"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          spellCheck={false}
+          autoCapitalize="off"
+          autoCorrect="off"
+          style={{
+            minWidth: 220,
+            padding: "8px 10px",
+            borderRadius: 6,
+            border: "1px solid var(--w-border, #2a2a2a)",
+            background: "var(--w-bg-2, #161616)",
+            color: "var(--w-text, #e6e6e6)",
+            fontFamily: "var(--w-font-mono, ui-monospace, monospace)",
+            fontSize: 13,
+          }}
+        />
+        {looksLikeName && (
+          <div style={{ marginTop: 10, display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+            <span className="row-help">
+              {owner === undefined
+                ? "Checking…"
+                : owner === null
+                  ? "Not registered"
+                  : `Current owner: ${owner}`}
+            </span>
+            <span className="row-help mono">Fee: {quote ? `${quote.costLyth} LYTH` : "—"}</span>
+            <button
+              className="btn btn--sm btn--primary"
+              disabled={!quote}
+              onClick={openAccept}
+            >
+              Accept{quote ? ` · ${quote.costLyth} LYTH` : ""}
+            </button>
+          </div>
+        )}
+        <div className="row-help" style={{ marginTop: 10, lineHeight: 1.5 }}>
+          No chain read exposes pending transfers to you, or lets the wallet
+          pre-confirm a specific one, so a wrong name or no live proposal is
+          rejected on submit. (A pending-transfers read would be a nice-to-have.)
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** My names — HONEST within the chain's limits. Shows the chain's reverse-latest
+ *  name (`lyth_nameOf`, authoritative) plus names registered from THIS device,
+ *  and states plainly that the chain can't enumerate every name an address owns.
+ *  Never a fabricated complete list. */
+function MyNames({ refreshKey }: { refreshKey: number }) {
+  const ops = useOperations();
+  const wallet = useActiveWallet();
+  const ownerAddress = wallet.status === "ready" ? wallet.address : "";
+  const [entries, setEntries] = useState<MyNameEntry[]>([]);
+  // Per-name transfer form: which name's form is open, the recipient, and the
+  // deliberate cascade-delete acknowledgement (required for human names).
+  const [transferFor, setTransferFor] = useState<string | null>(null);
+  const [transferTo, setTransferTo] = useState("");
+  const [cascadeConfirmed, setCascadeConfirmed] = useState(false);
+  const [transferError, setTransferError] = useState<string | null>(null);
+  const [transferBusy, setTransferBusy] = useState(false);
+  const localNames = ownerAddress ? readRegisteredNames(ownerAddress) : [];
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!ownerAddress) {
+      setEntries([]);
+      return;
+    }
+    const local = readRegisteredNames(ownerAddress);
+    // Seed with the local record immediately; refine with the chain reverse read.
+    setEntries(mergeMyNames(null, local));
+    void loadReverseName(ownerAddress).then((reverse) => {
+      if (!cancelled) setEntries(mergeMyNames(reverse, local));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [ownerAddress, refreshKey]);
+
+  const openTransferFor = (name: string) => {
+    setTransferFor(transferFor === name ? null : name);
+    setTransferTo("");
+    setCascadeConfirmed(false);
+    setTransferError(null);
+  };
+
+  // Propose a transfer: resolve the recipient fail-closed, require the cascade
+  // acknowledgement for a human name, then submit proposeTransfer (free — the
+  // recipient pays on accept).
+  const proposeTransfer = async (name: string) => {
+    setTransferError(null);
+    const input = classifyRecipientInput(transferTo, ADDRESS_KIND_HRPS.user);
+    if (input.kind === "invalid") {
+      setTransferError(input.reason);
+      return;
+    }
+    if (isHumanName(name) && !cascadeConfirmed) {
+      setTransferError("Acknowledge the agent-sub-name deletion before transferring this human name.");
+      return;
+    }
+    setTransferBusy(true);
+    let recipient: string;
+    if (input.kind === "name") {
+      const verdict = await resolveNameQuorum(input.name);
+      if (!verdict.ok) {
+        setTransferBusy(false);
+        setTransferError(verdict.message);
+        return;
+      }
+      recipient = verdict.address;
+    } else {
+      recipient = input.address;
+    }
+    try {
+      typedBech32ToAddress(recipient, "user");
+    } catch {
+      setTransferBusy(false);
+      setTransferError("Recipient address is malformed — not proposing.");
+      return;
+    }
+    setTransferBusy(false);
+
+    const children = knownAgentChildren(localNames, name);
+    const human = isHumanName(name);
+    ops.open({
+      title: `Transfer ${name}`,
+      subtitle: "Propose a name transfer — the recipient accepts within 24h",
+      auth: "keychain",
+      diff: [
+        { k: "Name", v: name },
+        { k: "To", v: recipient },
+        { k: "Acceptance window", v: "24 hours" },
+        { k: "Precompile", v: "0x…110E" },
+      ],
+      effects: [
+        { text: "Unlocks the local vault for this operation only." },
+        { text: "Encodes proposeTransfer(string,address) via @monolythium/core-sdk. Proposing is free — the recipient pays the registration fee when they accept." },
+        { text: "The recipient must accept within 24 hours (21,600 blocks) or the proposal lapses. Re-proposing replaces a pending proposal." },
+        ...(human
+          ? [
+              {
+                text: `Transferring this human name PERMANENTLY DELETES all its agent sub-names when accepted${children.length ? ` (known here: ${children.join(", ")})` : ""}. No chain read exposes them, so any not listed are deleted too.`,
+                level: "warn" as const,
+              },
+            ]
+          : []),
+        {
+          text: "Chain rejects if you no longer own the name or the recipient is invalid — verbatim errors surface here.",
+          level: "warn" as const,
+        },
+      ],
+      notify: {
+        kind: "contract_call" as const,
+        amountDecimal: "0",
+        counterparty: nameRegistryAddressHex(),
+      },
+      execute: async (ctx) => {
+        if (!ctx?.vaultSeed) {
+          throw new Error("vault seed unavailable after keychain authorization");
+        }
+        const r = await submitNameProposeTransfer({ seed: ctx.vaultSeed, name, recipient });
+        return { headline: `Proposed transfer of ${name}`, detail: r.txHash, txHash: r.txHash, nonce: r.nonce };
+      },
+    });
+    setTransferFor(null);
+  };
+
+  if (!ownerAddress) return null;
+
+  return (
+    <div className="w-card">
+      <div className="w-card__head">
+        <h3>My names</h3>
+        <span className="w-todo__pill">{entries.length}</span>
+      </div>
+      <div className="w-card__body">
+        {entries.length === 0 ? (
+          <div className="row-help">No .mono names for this account yet.</div>
+        ) : (
+          <div style={{ display: "grid", gap: 6 }}>
+            {entries.map((e) => (
+              <div key={e.name} style={{ display: "grid", gap: 6 }}>
+                <div className="w-kv" style={{ fontSize: 13 }}>
+                  <span className="k mono">{e.name}</span>
+                  <span className="v" style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    <span className="row-help">
+                      {e.reverseLatest ? "latest (on-chain)" : "registered from this device"}
+                    </span>
+                    <button
+                      className={`btn btn--xs${transferFor === e.name ? " btn--primary" : " btn--ghost"}`}
+                      onClick={() => openTransferFor(e.name)}
+                    >
+                      Transfer
+                    </button>
+                  </span>
+                </div>
+                {transferFor === e.name && (
+                  <div
+                    style={{
+                      padding: 10,
+                      borderRadius: 8,
+                      background: "var(--surface-2, rgba(255,255,255,0.03))",
+                      border: "1px solid var(--border, rgba(255,255,255,0.08))",
+                      display: "grid",
+                      gap: 8,
+                    }}
+                  >
+                    <input
+                      type="text"
+                      placeholder={`recipient ${ADDRESS_KIND_HRPS.user}1… or alice.mono`}
+                      value={transferTo}
+                      onChange={(ev) => {
+                        setTransferTo(ev.target.value);
+                        setTransferError(null);
+                      }}
+                      spellCheck={false}
+                      autoCapitalize="off"
+                      autoCorrect="off"
+                      style={{
+                        padding: "8px 10px",
+                        borderRadius: 6,
+                        border: "1px solid var(--w-border, #2a2a2a)",
+                        background: "var(--w-bg-2, #161616)",
+                        color: "var(--w-text, #e6e6e6)",
+                        fontFamily: "var(--w-font-mono, ui-monospace, monospace)",
+                        fontSize: 13,
+                      }}
+                    />
+                    {isHumanName(e.name) && (
+                      <div className="w-banner error" style={{ lineHeight: 1.5 }}>
+                        <strong>Transferring deletes agent sub-names.</strong> When the recipient
+                        accepts, <strong>every</strong> agent sub-name of {e.name} is permanently
+                        deleted.
+                        {knownAgentChildren(localNames, e.name).length > 0
+                          ? ` Known here: ${knownAgentChildren(localNames, e.name).join(", ")}.`
+                          : ""}{" "}
+                        No chain read exposes them, so any not listed are deleted too.
+                        <label style={{ display: "block", marginTop: 8 }}>
+                          <input
+                            type="checkbox"
+                            checked={cascadeConfirmed}
+                            onChange={(ev) => setCascadeConfirmed(ev.target.checked)}
+                          />{" "}
+                          I understand this permanently deletes all agent sub-names.
+                        </label>
+                      </div>
+                    )}
+                    {transferError && (
+                      <div className="row-help" style={{ color: "var(--err)" }}>
+                        {transferError}
+                      </div>
+                    )}
+                    <div>
+                      <button
+                        className="btn btn--sm btn--primary"
+                        disabled={
+                          transferBusy ||
+                          !transferTo.trim() ||
+                          (isHumanName(e.name) && !cascadeConfirmed)
+                        }
+                        onClick={() => void proposeTransfer(e.name)}
+                      >
+                        {transferBusy ? "Resolving…" : "Propose transfer"}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="row-help" style={{ marginTop: 10, lineHeight: 1.5 }}>
+          The chain exposes only your <strong>most recent</strong> name
+          (lyth_nameOf); other names you own aren't enumerable on-chain, so this
+          also lists names registered from this device. It may not reflect names
+          registered elsewhere or transferred away.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function NameDetail({
+  name,
+  result,
+  quote,
+}: {
+  name: string;
+  result: NameCheckResult | null;
+  quote: NameQuote | null;
+}) {
   if (!name.trim() || !result) return null;
   switch (result.kind) {
     case "not_tauri":
@@ -727,11 +1298,11 @@ function NameDetail({ name, result }: { name: string; result: NameCheckResult | 
       const a = result.availability;
       return (
         <div style={{ marginTop: 8, display: "flex", gap: 16, flexWrap: "wrap", fontSize: 13 }}>
-          <Stat label="Category" value={a.category} />
+          <StatWithBadge label="Category" value={a.category} category={a.category} />
           <Stat label="Primary label" value={`${a.primary_label} · ${a.primary_label_len}ch`} />
           <Stat label="Length ×" value={String(a.length_multiplier)} />
           <Stat label="Category ×" value={String(a.category_multiplier)} />
-          <Stat label="Pricing" value="live quote unavailable" />
+          <Stat label="Price" value={quote ? `${quote.costLyth} LYTH` : "—"} />
         </div>
       );
     }
@@ -741,8 +1312,31 @@ function NameDetail({ name, result }: { name: string; result: NameCheckResult | 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <div className="row-label" style={{ fontSize: 11, opacity: 0.7 }}>{label}</div>
+      <div className="row-label" style={{ fontSize: 11, color: "var(--fg-300)" }}>{label}</div>
       <div style={{ fontFamily: "var(--w-font-mono, ui-monospace, monospace)" }}>{value}</div>
+    </div>
+  );
+}
+
+/** A {@link Stat} carrying the shared category pill. The badge renders only for
+ *  a known category — an unrecognised one shows the plain value rather than a
+ *  guessed badge. */
+function StatWithBadge({
+  label,
+  value,
+  category,
+}: {
+  label: string;
+  value: string;
+  category: string;
+}) {
+  return (
+    <div>
+      <div className="row-label" style={{ fontSize: 11, color: "var(--fg-300)" }}>{label}</div>
+      <div style={{ fontFamily: "var(--w-font-mono, ui-monospace, monospace)" }}>
+        {value}
+        <CategoryBadge category={category} />
+      </div>
     </div>
   );
 }

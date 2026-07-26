@@ -15,37 +15,68 @@
 // public row with no amount). Token labels are the raw indexer token id (no
 // name registry exists); native rows show "LYTH".
 
-import type { Tx } from "../data/types";
+import type { Tx, TxBucket } from "../data/types";
 import type { LiveAddressActivityRow } from "./live";
+import { confirmedRowKey } from "./activity-cache";
+import {
+  activityDirectionOf,
+  activityKindIsUnsigned,
+  activityKindOf,
+  type ActivityDirection,
+  type ActivityKind,
+} from "./activity-kind";
+import {
+  formatLythDisplay,
+  isNativeLythTokenId,
+  tokenUnitLabel,
+} from "./lyth-display";
 import type { NotificationRecord } from "./notifications";
 import type { PendingTx } from "./pending-tx";
+import { bpsToPercentLabel } from "./delegation-summary";
 import { txTypeLabelForActivity } from "./tx-type-label";
+import { tokenAmountDisplay, type TokenMeta } from "./token-metadata";
 
-/** Indexer kind → the `TxRow` icon/category bucket. Conservative: only the
- *  clearly-recognisable families map to reward/stake; everything else is a
- *  generic transfer (the eyebrow still shows the precise indexer kind). */
-export function activityKindToTxKind(kind: string): Tx["kind"] {
-  const k = kind.toLowerCase();
-  if (k.includes("reward")) return "reward";
-  if (k.includes("delegat") || k.includes("stake") || k.includes("undeleg")) return "stake";
-  return "transfer";
+/** Indexer kind → the coarse icon/category bucket.
+ *
+ *  DERIVED, not a second classifier: it collapses the real {@link ActivityKind}
+ *  onto the three-value bucket some older call sites still want. The taxonomy
+ *  and its match operands live in `activity-kind.ts`; this only widens them.
+ *  Kept because the bucket is genuinely what a categorical caller wants — but
+ *  new code should read the kind, which distinguishes the three delegation
+ *  operations this bucket flattens together. */
+export function activityKindToTxKind(kind: string): TxBucket {
+  return txBucketOf(activityKindOf({ kind }));
 }
 
-/** Direction from the indexer row, defaulting to "out" when absent (the icon
- *  has only two states; the eyebrow carries the precise kind regardless). */
-export function activityDirection(direction: string | null): Tx["direction"] {
-  return direction === "in" ? "in" : "out";
+/** Collapse a classified kind onto the coarse bucket. Exhaustive, no default. */
+export function txBucketOf(kind: ActivityKind): TxBucket {
+  switch (kind) {
+    case "claim":
+      return "reward";
+    case "delegate":
+    case "undelegate":
+    case "redelegate":
+      return "delegate";
+    case "tx_send":
+    case "tx_receive":
+    case "token_transfer":
+    case "unclassified":
+      return "transfer";
+  }
 }
 
-/** Parse a decimal amount string into a number, or `null` when the row carries
- *  no amount (e.g. a weight-only delegation). Non-numeric values collapse to
- *  `null` rather than 0 so TxRow renders an em-dash rather than a fake "0". */
-export function parseActivityAmount(amount: string | null): number | null {
-  if (amount === null) return null;
-  const cleaned = amount.replace(/,/g, "").trim();
-  if (cleaned === "") return null;
-  const n = Number(cleaned);
-  return Number.isFinite(n) ? n : null;
+/** Direction for an indexed row — classified, then derived from the kind.
+ *
+ *  Replaces the old field-reading helper that defaulted an ABSENT direction to
+ *  "out". That default was the wallet asserting a fund movement the chain never
+ *  stated; a row with no reported movement now renders directionless. */
+export function activityRowDirection(row: {
+  kind: string;
+  subKind?: string | null;
+  direction?: string | null;
+  tokenId?: string | null;
+}): ActivityDirection {
+  return activityDirectionOf(activityKindOf(row), row.direction ?? null);
 }
 
 /** Relative time from a block-header UNIX-second timestamp. Returns a human
@@ -93,18 +124,59 @@ export function activityCounterparty(row: LiveAddressActivityRow): string {
 
 /**
  * Map one indexed activity row onto a `Tx` for `TxRow`.
+ *
+ * Per-kind amount/unit resolution:
+ *  - delegation rows carry weight (basis points), not a LYTH amount —
+ *    render it as an unsigned percent with a "weight" unit (matching the
+ *    delegation summary), or an em-dash when the row carries no weight;
+ *  - native value + reward amounts are raw lythoshi converted to display LYTH;
+ *  - an MRC-20 amount stays in its base units with the token id as the unit
+ *    (there is no on-chain symbol registry).
  */
-export function activityRowToTx(row: LiveAddressActivityRow): Tx {
+export function activityRowToTx(
+  row: LiveAddressActivityRow,
+  tokenMeta?: Map<string, TokenMeta>,
+): Tx {
+  // Classified ONCE, here. The bucket, the sign and (from the next commit) the
+  // direction are all derived from this value rather than re-decided per site.
+  const kind = activityKindOf(row);
+  const bucket = txBucketOf(kind);
+  let amountText: string | null;
+  let unit: string;
+  if (bucket === "delegate") {
+    amountText = row.weightBps != null ? bpsToPercentLabel(row.weightBps) : null;
+    unit = "weight";
+  } else if (isNativeLythTokenId(row.tokenId)) {
+    amountText = formatLythDisplay(row.amount);
+    unit = "LYTH";
+  } else {
+    // MRC-20: scale the base-units amount by the token's real decimals when its
+    // metadata is loaded; unknown scale → null (TxRow shows "—"), never the raw
+    // base-units integer as a human figure. Prefer the real symbol as the unit.
+    const meta = tokenMeta?.get(row.tokenId!);
+    amountText = tokenAmountDisplay(row.amount, meta);
+    unit = meta?.symbol?.trim() || tokenUnitLabel(row.tokenId);
+  }
   return {
-    id: `${row.blockHeight}-${row.txIndex}-${row.logIndex}`,
+    // The (block, txIndex, logIndex) anchor is NOT unique. Native transfers all
+    // carry the same log-index sentinel, so the two legs the chain serves for a
+    // self-transfer share it entirely and differ only in direction. The cache
+    // already folds direction (and kind, and cluster) into its row identity for
+    // exactly this reason — reuse that one rule rather than keeping a second,
+    // weaker answer here.
+    id: confirmedRowKey(row),
     when: activityWhen(row),
-    amount: parseActivityAmount(row.amount),
-    token: row.tokenId ?? "LYTH",
-    direction: activityDirection(row.direction),
+    amountText,
+    unit,
+    // A delegation figure is a WEIGHT, not a token amount — it renders unsigned,
+    // because a sign there would claim a fund movement the row does not carry.
+    signed: !activityKindIsUnsigned(kind),
+    direction: activityDirectionOf(kind, row.direction),
+    kind,
+    bucket,
     counterparty: activityCounterparty(row),
     // The indexer stream carries no memo — left empty so TxRow omits it.
     memo: "",
-    kind: activityKindToTxKind(row.subKind ? `${row.kind} ${row.subKind}` : row.kind),
     typeLabel: txTypeLabelForActivity(row),
   };
 }

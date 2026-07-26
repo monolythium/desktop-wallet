@@ -4,12 +4,13 @@
 // mesh_submitTx path.
 
 import { useEffect, useState } from "react";
+import { RefreshButton } from "../components/RefreshButton";
 import type {
   ClobOrderBookResponse,
   NativeSpotMarketStateRecord,
   SpotLimitOrderSide,
 } from "@monolythium/core-sdk";
-import { findOrderBookStreamTopic } from "../sdk/market";
+import { findOrderBookStreamTopic, marketListingKnowledge } from "../sdk/market";
 import { formatOutcome, loadLiveTradeStatus, type LiveTradeStatus } from "../sdk/live";
 import { cancelClobOrder, placeClobLimitOrder } from "../sdk/clob-trade";
 import {
@@ -48,12 +49,37 @@ export function Trade() {
   const nativeState = status?.nativeMarketState.ok ? status.nativeMarketState.value ?? null : null;
   const marketRows = nativeState?.spotMarkets ?? [];
   const orderRows = nativeState?.spotOrders ?? [];
+  // What the wallet KNOWS about whether anything is listed — a successful zero
+  // and an unreadable list are different facts and are rendered differently.
+  const listing = marketListingKnowledge({
+    loaded: status !== null,
+    nativeOk: status?.nativeMarketState.ok === true,
+    indexedOk: status?.clobMarkets.ok === true,
+    selected: selected !== null,
+  });
 
   return (
     <div className="w-page">
       <div className="w-page__header">
         <h1>Trade</h1>
-        <div className="sub">Native spot CLOB readiness. Read-only until live market data is available.</div>
+        {/* The page is NOT read-only: it places and cancels limit orders below,
+            and cancelling needs only an order id, so it works with no market
+            listed. Saying "read-only" and then showing a submit button teaches
+            the user to distrust every other label on the screen.
+
+            The second clause is conditional for the same reason. "No market is
+            listed" is a claim about the CHAIN and may only be made when both
+            market reads actually succeeded; when one failed the wallet does not
+            know what is listed and says so instead of reporting a confident
+            zero it did not observe. */}
+        <div className="sub">
+          Native spot CLOB. Place and cancel limit orders
+          {listing === "none"
+            ? "; no market is listed yet, so there is nothing to trade against."
+            : listing === "unknown"
+              ? "; the market list could not be read, so what is listed is unknown."
+              : "."}
+        </div>
       </div>
 
       <div className="w-card">
@@ -61,9 +87,7 @@ export function Trade() {
           <h3>Native market readiness</h3>
           <span className="w-live-pill">read only</span>
           <span className="w-card__head__spacer" />
-          <button className="btn btn--sm" onClick={refresh} disabled={busy}>
-            {busy ? "Refreshing..." : "Refresh"}
-          </button>
+          <RefreshButton busy={busy} onClick={refresh} />
         </div>
         <div className="w-card__body">
           <div className="w-live-grid">
@@ -73,7 +97,13 @@ export function Trade() {
             />
             <LiveCell label="Spot markets" value={status ? formatOutcome(status.nativeMarketState, (state) => state.spotMarkets.length.toString()) : "loading"} />
             <LiveCell label="Indexed markets" value={status ? formatOutcome(status.clobMarkets, (rows) => rows.markets.length.toString()) : "loading"} />
-            <LiveCell label="Selected market" value={selected?.label ?? (status ? "none" : "loading")} />
+            {/* "none" is a confident answer and is reserved for the case where
+                both market reads succeeded. An unreadable list reports
+                "unknown" — the wallet has nothing to report, not zero. */}
+            <LiveCell
+              label="Selected market"
+              value={selected?.label ?? (listing === "loading" ? "loading" : listing)}
+            />
           </div>
           {status ? <div className="row-help">JSON-RPC endpoint: <span className="mono">{status.endpoint}</span></div> : null}
           {status ? <div className="row-help">REST endpoint: <span className="mono">{status.apiBaseUrl}</span></div> : null}
@@ -292,7 +322,7 @@ function PlaceLimitOrderCard({
     const expiryLabel = expiryBlocks === null ? "GTC" : `block ${resolvedExpiry.toString()}`;
     ops.open({
       title: `${side === "buy" ? "Buy" : "Sell"} ${qtyStr} @ ${priceStr}`,
-      subtitle: "Native CLOB placeLimitOrder, plaintext mesh_submitTx",
+      subtitle: "Native CLOB placeLimitOrder · canonical RPC gateway",
       auth: "keychain",
       diff: [
         { k: "Side", v: side === "buy" ? "BUY" : "SELL" },
@@ -308,7 +338,7 @@ function PlaceLimitOrderCard({
       effects: [
         { text: "Unlocks the local vault for this operation only." },
         { text: "Encodes placeLimitOrder calldata via @monolythium/core-sdk." },
-        { text: "Signs with ML-DSA-65 and posts via the plaintext mesh_submitTx path (CLOB @ 0x1001)." },
+        { text: "Signs with ML-DSA-65 and posts through the canonical HTTPS RPC gateway (CLOB @ 0x1001); backend relays use native-PQ transport." },
         { text: "Crossing fills emit OrderMatched -> swaps; remainder rests on the book." },
       ],
       execute: async (ctx) => {
@@ -337,7 +367,7 @@ function PlaceLimitOrderCard({
       <div className="w-card__head">
         <h3>Place limit order</h3>
         <span className={`w-live-pill ${marketId ? "" : "is-muted"}`}>
-          {marketId ? "plaintext submit" : "market required"}
+          {marketId ? "gateway submit" : "market required"}
         </span>
       </div>
       <div className="w-card__body" style={{ display: "grid", gap: 10 }}>
@@ -471,13 +501,13 @@ function CancelOrderCard() {
     }
     ops.open({
       title: `Cancel order ${trimmed.slice(0, 18)}…`,
-      subtitle: "Native CLOB cancelOrder, plaintext mesh_submitTx",
+      subtitle: "Native CLOB cancelOrder · canonical RPC gateway",
       auth: "keychain",
       diff: [{ k: "Order id", v: trimmed }],
       effects: [
         { text: "Unlocks the local vault for this operation only." },
         { text: "Encodes cancelOrder calldata via @monolythium/core-sdk." },
-        { text: "Signs with ML-DSA-65 and posts via the plaintext mesh_submitTx path (CLOB @ 0x1001)." },
+        { text: "Signs with ML-DSA-65 and posts through the canonical HTTPS RPC gateway (CLOB @ 0x1001); backend relays use native-PQ transport." },
         { text: "Emits OrderCancelled(orderId, owner, refundedBase, refundedQuote) — indexed into the events table." },
       ],
       execute: async (ctx) => {
@@ -496,7 +526,7 @@ function CancelOrderCard() {
     <div className="w-card">
       <div className="w-card__head">
         <h3>Cancel order</h3>
-        <span className="w-live-pill">plaintext submit</span>
+        <span className="w-live-pill">gateway submit</span>
       </div>
       <div className="w-card__body" style={{ display: "grid", gap: 10 }}>
         <label style={{ display: "grid", gap: 4 }}>

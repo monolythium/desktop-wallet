@@ -12,11 +12,13 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "gen:csp": "node scripts/gen-csp.mjs",
+    "pretauri": "node scripts/gen-csp.mjs",
     "tauri": "tauri",
     "precargo": "tsc --noEmit && vite build"
   },
   "dependencies": {
-    "@monolythium/core-sdk": "^0.6.7",
+    "@monolythium/core-sdk": "0.6.10",
     "@noble/ciphers": "2.2.0",
     "@noble/hashes": "2.2.0",
     "@noble/post-quantum": "0.6.1",
@@ -26,19 +28,30 @@
     "@tauri-apps/plugin-process": "2.3.1",
     "@tauri-apps/plugin-store": "2.4.3",
     "@tauri-apps/plugin-updater": "2.10.1",
+    "dompurify": "3.4.12",
     "qrcode.react": "4.2.0",
     "react": "19.2.5",
     "react-dom": "19.2.5"
   },
   "devDependencies": {
     "@tauri-apps/cli": "2.11.2",
+    "@testing-library/dom": "10.4.1",
+    "@testing-library/jest-dom": "6.6.4",
+    "@testing-library/react": "16.3.0",
+    "@testing-library/user-event": "14.6.1",
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react": "5.2.0",
     "jsdom": "25.0.1",
     "typescript": "5.9.3",
-    "vite": "6.4.2",
+    "vite": "6.4.3",
     "vitest": "4.1.5"
   },
-  "packageManager": "pnpm@10.28.2"
+  "packageManager": "pnpm@10.28.2",
+  "pnpm": {
+    "overrides": {
+      "form-data": "4.0.6",
+      "postcss": "8.5.23"
+    }
+  }
 }

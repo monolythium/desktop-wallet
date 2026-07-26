@@ -2,11 +2,13 @@ import { describe, expect, it } from "vitest";
 import type { LiveTokenStatus } from "../live";
 import { NATIVE_TOKEN_REF } from "../selected-token";
 import { selectTokenDetailFacts } from "../token-detail";
+import type { TokenMeta } from "../token-metadata";
 
 function status(partial: Partial<LiveTokenStatus>): LiveTokenStatus {
   return {
     endpoint: "http://node.test:8545",
     nativeBalance: { ok: true, value: "12.5" },
+    nativeBalanceLythoshi: { ok: true, value: "12500000000000000000" },
     tokenBalances: { ok: true, value: [] },
     addressLabel: { ok: true, value: null },
     assetPolicy: { ok: true, value: {} },
@@ -41,6 +43,26 @@ describe("selectTokenDetailFacts — native LYTH", () => {
       NATIVE_TOKEN_REF,
     );
     expect(facts.assetPolicy).toEqual({ mode: "open", allowTransparent: true });
+    expect(facts.assetPolicyError).toBeNull();
+  });
+
+  it("G1: a FAILED asset-policy read is distinguishable from an EMPTY one", () => {
+    // Empty (ok, no policy fields): null policy, no error — an honest absence.
+    const empty = selectTokenDetailFacts(
+      status({ assetPolicy: { ok: true, value: {} } }),
+      NATIVE_TOKEN_REF,
+    );
+    expect(empty.assetPolicy).toEqual({});
+    expect(empty.assetPolicyError).toBeNull();
+
+    // Failed read: null policy BUT the error is carried, so a broken call can
+    // never masquerade as "the chain has nothing for you".
+    const failed = selectTokenDetailFacts(
+      status({ assetPolicy: { ok: false, error: "invalid params: token id must be 32 bytes" } }),
+      NATIVE_TOKEN_REF,
+    );
+    expect(failed.assetPolicy).toBeNull();
+    expect(failed.assetPolicyError).toBe("invalid params: token id must be 32 bytes");
   });
 
   it("defaults to native facts when live status is null", () => {
@@ -48,6 +70,7 @@ describe("selectTokenDetailFacts — native LYTH", () => {
     expect(facts.isNative).toBe(true);
     expect(facts.balanceDisplay).toBeNull();
     expect(facts.assetPolicy).toBeNull();
+    expect(facts.assetPolicyError).toBeNull();
   });
 });
 
@@ -71,9 +94,70 @@ describe("selectTokenDetailFacts — MRC-20", () => {
     expect(facts.updatedAtBlock).toBe(42n);
     expect(facts.name).toContain("…");
     expect(facts.name).toBe(facts.ticker);
+    // No metadata loaded → unknown scale: an honest null balanceText/decimals
+    // (the page shows "—"), never the raw base-units string as a human figure.
+    expect(facts.balanceText).toBeNull();
+    expect(facts.decimals).toBeNull();
     // No per-MRC asset-policy read exists yet.
     expect(facts.assetPolicy).toBeNull();
     expect(facts.notFound).toBe(false);
+  });
+
+  it("renders the balance at real decimals and the real symbol/standard when metadata is present", () => {
+    const meta = new Map<string, TokenMeta>([
+      [tokenId, { decimals: 6, symbol: "USDC", name: "USD Coin", standard: "mrc20" }],
+    ]);
+    const facts = selectTokenDetailFacts(
+      status({
+        tokenBalances: { ok: true, value: [{ tokenId, balance: "1500000", updatedAtBlock: 42n }] },
+      }),
+      tokenId,
+      meta,
+    );
+    expect(facts.ticker).toBe("USDC");
+    expect(facts.name).toBe("USD Coin");
+    expect(facts.decimals).toBe(6);
+    expect(facts.standard).toBe("mrc20"); // gates the send flow
+    expect(facts.balanceText).toBe("1.5"); // 1500000 / 10^6
+    // The raw string is still available, but the page renders balanceText.
+    expect(facts.balanceDisplay).toBe("1500000");
+  });
+
+  it("falls back to the balance row's mrc standard when metadata isn't loaded", () => {
+    const facts = selectTokenDetailFacts(
+      status({
+        tokenBalances: {
+          ok: true,
+          value: [
+            {
+              tokenId,
+              balance: "1500000",
+              updatedAtBlock: 42n,
+              mrc: { standard: "mrc721", assetId: tokenId },
+            },
+          ],
+        },
+      }),
+      tokenId,
+    );
+    expect(facts.standard).toBe("mrc721"); // excluded from the send gate
+    expect(facts.decimals).toBeNull(); // no metadata → unknown scale
+  });
+
+  it("keeps balanceText null when metadata carries no decimals (honest '—')", () => {
+    const meta = new Map<string, TokenMeta>([
+      [tokenId, { decimals: null, symbol: "MYST", name: null }],
+    ]);
+    const facts = selectTokenDetailFacts(
+      status({
+        tokenBalances: { ok: true, value: [{ tokenId, balance: "1500000", updatedAtBlock: 42n }] },
+      }),
+      tokenId,
+      meta,
+    );
+    expect(facts.ticker).toBe("MYST");
+    expect(facts.balanceText).toBeNull();
+    expect(facts.decimals).toBeNull();
   });
 
   it("flags notFound when the selected id is absent from the balance list", () => {

@@ -80,17 +80,14 @@ describe("latencyBucket", () => {
 });
 
 describe("listPeers", () => {
-  it("lists the gateway first, then the official endpoints, de-duped", () => {
+  it("lists the canonical gateway once after registry de-duplication", () => {
     const peers = listPeers();
-    expect(peers.length).toBeGreaterThan(1);
+    expect(peers).toHaveLength(1);
     expect(peers[0]!.tier).toBe("gateway");
     expect(peers[0]!.label).toBe("Public gateway");
     const urls = peers.map((p) => p.url);
     expect(new Set(urls).size).toBe(urls.length); // no duplicates
-    // Official endpoints carry a region + a notes-derived label.
-    const official = peers.find((p) => p.tier === "official");
-    expect(official).toBeDefined();
-    expect(official!.region).toBeTruthy();
+    expect(urls).toEqual(["https://rpc.monolythium.com"]);
   });
 });
 

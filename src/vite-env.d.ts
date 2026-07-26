@@ -13,3 +13,12 @@ interface ImportMetaEnv {
 interface ImportMeta {
   readonly env: ImportMetaEnv;
 }
+
+/** Wallet version from package.json, injected by Vite's `define` at build time
+ *  (see vite.config.ts). The About page's fallback for the browser preview,
+ *  where Tauri's runtime getVersion() isn't reachable. */
+declare const __APP_VERSION__: string;
+
+/** Resolved @monolythium/core-sdk version, injected by Vite's `define` at build
+ *  time (see vite.config.ts). Surfaced in the About developer-mode rows. */
+declare const __SDK_VERSION__: string;

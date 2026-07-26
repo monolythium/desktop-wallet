@@ -148,7 +148,7 @@ The Stele runtime is intentionally separable — if you don't want any marketpla
 - The unlocked seed lives in service-worker-equivalent state in the Tauri host for the duration of one operation, then is zeroed.
 - Every destructive operation routes through the Operations drawer (`preview → auth → executing → done`) — no silent signing.
 - When the Stele feature is enabled, the loopback approval bridge requires a per-session bearer token + the user's explicit click for every destructive op forwarded by `lyth_mcp`.
-- The Tauri webview's CSP is currently `null` (Tauri-app practice for dynamic styles); the equivalent guarantees come from the IPC capability allowlist in `src-tauri/capabilities/`.
+- The Tauri webview runs a tight Content-Security-Policy (`default-src 'self'`, no `'unsafe-inline'`/`'unsafe-eval'`, no `upgrade-insecure-requests`). Its `connect-src` is generated from the SDK's operator set by `scripts/gen-csp.mjs` (`pnpm gen:csp`, run as a `pretauri` hook) and drift-guarded in CI, so it lists exactly the RPC endpoints the app talks to; a looser dev CSP covers Vite HMR only. The IPC capability allowlist in `src-tauri/capabilities/` is the second layer.
 
 The full set of in-scope vulnerability categories is enumerated in [`SECURITY.md`](./SECURITY.md).
 
@@ -158,9 +158,14 @@ The full set of in-scope vulnerability categories is enumerated in [`SECURITY.md
 
 - **macOS arm64 / x64**: Tauri build + Apple Developer ID signing + App Store Connect notarization (uses `secrets.APPLE_*` references).
 - **Linux x64**: Tauri build → `.deb` + `.AppImage` (unsigned today).
-- **Windows x64**: Tauri build + [Azure Trusted Signing](https://azure.microsoft.com/en-us/products/trusted-signing) for the `.exe` and `.msi` (uses `secrets.AZURE_*` references).
+- **Windows x64**: Tauri build + [Azure Trusted Signing](https://azure.microsoft.com/en-us/products/trusted-signing) for the `.exe` and `.msi` (uses `secrets.AZURE_*` references); when those secrets are absent the installer is built unsigned with a loud warning rather than dropped silently.
 
-The shape is in place; no tagged release has run it end-to-end yet.
+Signed updater bundles + the `latest.json` manifest are produced and published as a
+draft; publishing the draft activates self-update. The shape is in place and the
+config is release-correct; no tagged release has run it end-to-end yet.
+
+See [`docs/RELEASING.md`](./docs/RELEASING.md) for the full cut → review → publish →
+verify runbook (including the version-bump steps and the N→N+1 auto-update check).
 
 ## Related projects
 

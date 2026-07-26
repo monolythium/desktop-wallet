@@ -4,8 +4,8 @@
 // (lyth_getClusterDiversity → ClusterDiversityView) to turn one of four
 // delegator intents into a concrete {clusterId, weightBps} allocation plan.
 // The plan is then submitted as N sequential delegate calls reusing the
-// staking seam (buildDelegateCalldata + submitStakingTx) — there is no new
-// write path; autovote is a planner on top of delegate.
+// delegation seam (buildDelegateCalldata + submitDelegationTx) — there is no
+// new write path; autovote is a planner on top of delegate.
 //
 // NON-CUSTODIAL: the plan distributes a WEIGHT BUDGET (basis points of the
 // wallet's balance) across clusters. No principal is escrowed — each delegate
@@ -16,14 +16,129 @@ import type {
   ClusterDirectoryEntryResponse,
   ClusterDiversityView,
 } from "@monolythium/core-sdk";
+import { shake256 } from "@noble/hashes/sha3.js";
 import { getProvider } from "./client";
-import { buildDelegateCalldata, submitStakingTx } from "./staking";
+import { buildDelegateCalldata, submitDelegationTx } from "./delegation";
+import { preflightDelegationVerdict } from "./delegation-caps";
+import { isInertDelegation, minNonInertBps } from "./delegation-derive";
+import { LATE_REFUSAL_PREFIX } from "./delegation-preflight";
+import { withDelegationRevertCopy } from "./delegation-reverts";
+import { ClassifiedWalletError } from "./send-error";
+
+/** Domain tag mixed into the per-user shuffle seed so autovote entropy can't
+ *  collide with any other SHAKE256 use of the same address. */
+const AUTOVOTE_SHUFFLE_DOMAIN = "monolythium.autovote.v1";
+
+/** Deterministic per-user byte stream for the near-tie shuffle: SHAKE256 over
+ *  the user's own seed (their address/key) with a domain tag, extended to
+ *  `length` bytes. Same user → same bytes; different users → different bytes.
+ *  Pure (no Math.random), so the anti-concentration ordering is reproducible. */
+export function autovoteShuffleBytes(seed: string, length: number): Uint8Array {
+  const input = new TextEncoder().encode(`${AUTOVOTE_SHUFFLE_DOMAIN}:${seed.toLowerCase()}`);
+  return shake256(input, { dkLen: Math.max(1, length) });
+}
+
+/** Deterministic Fisher-Yates permutation of [0..n) driven by the SHAKE256
+ *  stream for `seed`. Same seed → same permutation; different seeds generally
+ *  differ. Consumes 4 seed bytes per swap. Pure. */
+export function seededPermutation(n: number, seed: string): number[] {
+  const idx = Array.from({ length: n }, (_, i) => i);
+  if (n <= 1) return idx;
+  const bytes = autovoteShuffleBytes(seed, n * 4);
+  for (let i = n - 1; i > 0; i--) {
+    const o = i * 4;
+    const r =
+      ((bytes[o]! << 24) | (bytes[o + 1]! << 16) | (bytes[o + 2]! << 8) | bytes[o + 3]!) >>> 0;
+    const j = r % (i + 1);
+    const tmp = idx[i]!;
+    idx[i] = idx[j]!;
+    idx[j] = tmp;
+  }
+  return idx;
+}
+
+/** Reorder a scored list so that near-tied entries (equal raw score) are
+ *  permuted deterministically per user, while strictly-ranked entries keep
+ *  their order. This is the WP §23.9 anti-concentration property: when clusters
+ *  are indistinguishable on the chosen signal (e.g. Max Yield with flat APR),
+ *  different users route weight — and the rounding remainder — to different
+ *  clusters, yet stably for any one user. No seed → input order unchanged. */
+export function reorderNearTies<T extends { raw: number }>(
+  scored: readonly T[],
+  seed: string | undefined,
+): T[] {
+  const sorted = [...scored].sort((a, b) => b.raw - a.raw);
+  if (!seed || sorted.length <= 1) return sorted;
+  const EPS = 1e-9;
+  const out: T[] = [];
+  let i = 0;
+  while (i < sorted.length) {
+    let j = i + 1;
+    while (j < sorted.length && Math.abs(sorted[j]!.raw - sorted[i]!.raw) <= EPS) j++;
+    const group = sorted.slice(i, j);
+    if (group.length > 1) {
+      // A per-group sub-seed so adjacent tie-groups don't share a permutation.
+      const perm = seededPermutation(group.length, `${seed}#${i}`);
+      out.push(...perm.map((k) => group[k]!));
+    } else {
+      out.push(group[0]!);
+    }
+    i = j;
+  }
+  return out;
+}
 
 export type AutovoteMode =
   | "maxYield"
   | "maxDiversity"
   | "maxDecentralization"
   | "custom";
+
+export interface AutovoteModeMeta {
+  mode: AutovoteMode;
+  label: string;
+  /** One-line description shown next to the mode. Honest about the real signals
+   *  each mode uses and about what is NOT used (no reputation weighting — there
+   *  is no cluster-level reputation read). */
+  description: string;
+}
+
+/** The four autovote modes with their user-facing copy. Ordered
+ *  decentralization-first (the network-health objective), then diversity,
+ *  yield, and manual — but the UI may present them in any order. */
+export const AUTOVOTE_MODES: readonly AutovoteModeMeta[] = [
+  {
+    mode: "maxDecentralization",
+    label: "Max Decentralization",
+    description:
+      "Routes weight toward balanced variance across every diversity dimension (ASN, region, hosting), penalising clusters concentrated on a single one. Uses the live lyth_getClusterDiversity read.",
+  },
+  {
+    mode: "maxDiversity",
+    label: "Max Diversity",
+    description:
+      "Spreads across clusters by their live diversity score, favouring the most independent operators. Uses the live lyth_getClusterDiversity read.",
+  },
+  {
+    mode: "maxYield",
+    label: "Max Yield",
+    description:
+      "Weights clusters by their real per-cluster APR (lyth_clusterApr). When APR is flat or zero it spreads evenly and lets the per-user shuffle settle near-ties — no reputation or health guesswork.",
+  },
+  {
+    mode: "custom",
+    label: "Custom",
+    description:
+      "Allocate weight to clusters yourself. The wallet still enforces the per-cluster cap and warns before signing an out-of-policy distribution.",
+  },
+] as const;
+
+/** The metadata for one mode (label + description). */
+export function autovoteModeMeta(mode: AutovoteMode): AutovoteModeMeta {
+  const found = AUTOVOTE_MODES.find((m) => m.mode === mode);
+  // Every AutovoteMode has an entry above; the fallback keeps this total.
+  return found ?? AUTOVOTE_MODES[AUTOVOTE_MODES.length - 1]!;
+}
 
 export interface AutovoteAllocation {
   clusterId: number;
@@ -36,8 +151,32 @@ export interface AutovotePlanInput {
   clusters: ClusterDirectoryEntryResponse[];
   /** Per-cluster diversity reads keyed by clusterId (maxDiversity / maxDecentralization). */
   diversities: Map<number, ClusterDiversityView>;
+  /**
+   * Real per-cluster APR in basis points (lyth_clusterApr → aprBps), keyed by
+   * clusterId — the ONLY Max-Yield signal. A missing key means the read was
+   * unavailable (treated as 0, no fabricated fallback); a real 0 is honest too.
+   * When every cluster is 0/absent (the current testnet reality) Max-Yield has
+   * no yield signal and falls back to an even split — the near-tie shuffle then
+   * spreads it deterministically per user.
+   */
+  aprBpsByCluster: Map<number, number>;
+  /**
+   * Optional real per-cluster liveness in basis points (lyth_clusterStatus →
+   * livenessScore) keyed by clusterId. Used ONLY when present as a mild
+   * Max-Yield multiplier; absent → no effect (never fabricated). livenessScore
+   * is null on the current testnet, so in practice this is empty and Max-Yield
+   * ranks on aprBps alone.
+   */
+  livenessByCluster?: Map<number, number>;
   /** Total weight budget (cap) the plan distributes + must not exceed, in basis points. */
   capBps: number;
+  /**
+   * Per-user shuffle seed (the wallet's own address/key, hex or bech32m). Seeds
+   * the deterministic near-tie shuffle so equally-ranked clusters are ordered
+   * differently per user (WP §23.9 anti-concentration) yet stably for one user.
+   * Absent → no shuffle (stable input order).
+   */
+  shuffleSeed?: string;
   /**
    * Pre-built per-cluster allocation for `custom` mode (passthrough).
    * Ignored for the three computed modes.
@@ -79,15 +218,26 @@ export async function fetchClusterDiversities(
   return out;
 }
 
-// `aggregateHealth` is a free-form chain label (e.g. "healthy", "degraded").
-// Map it to a coarse 0..1 proxy weight for the Max-Yield mode, which has
-// NO real APR source on-chain.
-function healthProxyWeight(label: string): number {
-  const l = label.toLowerCase();
-  if (l.includes("healthy") || l.includes("optimal")) return 1;
-  if (l.includes("degraded") || l.includes("warn")) return 0.5;
-  if (l.includes("offline") || l.includes("critical")) return 0.1;
-  return 0.7; // unknown — neutral-positive
+// Max-Yield score = the REAL per-cluster APR (aprBps), optionally discounted by
+// REAL liveness when a livenessScore is present. No mock APR fallback, no
+// health-label proxy, no reputation term — a missing/zero APR contributes 0 and
+// (if every cluster is 0) the caller's even-split fallback + near-tie shuffle
+// take over. `DIVERSITY_SCORE_MAX` (10000 bps) is also the bps scale for these.
+function yieldWeight(
+  clusterId: number,
+  aprBpsByCluster: Map<number, number>,
+  livenessByCluster: Map<number, number> | undefined,
+): number {
+  const apr = aprBpsByCluster.get(clusterId);
+  const base = typeof apr === "number" && apr > 0 ? apr / DIVERSITY_SCORE_MAX : 0;
+  const liveness = livenessByCluster?.get(clusterId);
+  // Real liveness, when present, gently discounts a less-live cluster (fully
+  // live keeps full weight); absent liveness leaves the APR weight untouched.
+  const mult =
+    typeof liveness === "number"
+      ? 0.5 + 0.5 * Math.max(0, Math.min(1, liveness / DIVERSITY_SCORE_MAX))
+      : 1;
+  return base * mult;
 }
 
 function diversityWeight(view: ClusterDiversityView | undefined): number {
@@ -145,30 +295,32 @@ export function buildAutovotePlan(input: AutovotePlanInput): AutovotePlan {
       case "maxDecentralization":
         return decentralizationWeight(view);
       case "maxYield":
-        // Live per-cluster APR/yield is not exposed to the wallet yet.
-        // Max Yield ranks by the aggregateHealth (+ reputation, via
-        // lythClusterStatus, when the page supplies it) liveness proxy.
-        return healthProxyWeight(c.aggregateHealth);
+        // Real APR only (+ real liveness where present). No proxy, no mock.
+        return yieldWeight(c.clusterId, input.aprBpsByCluster, input.livenessByCluster);
       default:
         // `custom` is handled by the early return above; never reached.
         return 0;
     }
   };
 
-  const scored = active.map((c) => ({ cluster: c, raw: scoreFor(c) }));
+  let scored = active.map((c) => ({ cluster: c, raw: scoreFor(c) }));
   let totalRaw = scored.reduce((s, x) => s + x.raw, 0);
 
   if (totalRaw <= 0) {
-    // Degenerate (e.g. every diversity read failed) — distribute evenly so
-    // the user still gets a usable, in-policy plan instead of an empty one.
+    // Degenerate (e.g. Max Yield with flat/zero APR, or every diversity read
+    // failed) — distribute evenly so the user still gets a usable, in-policy
+    // plan. Every cluster is now tied, so the per-user shuffle below decides
+    // the order (and which cluster takes the rounding remainder).
     warnings.push(
       "No scoring signal available for the selected mode — falling back to an even split across active clusters.",
     );
-    const even = scored.map((x) => ({ cluster: x.cluster, raw: 1 }));
-    scored.length = 0;
-    scored.push(...even);
+    scored = scored.map((x) => ({ cluster: x.cluster, raw: 1 }));
     totalRaw = scored.length;
   }
+
+  // Order strictly-ranked clusters by score, and permute near-ties per user so
+  // indistinguishable clusters aren't always weighted in the same order.
+  scored = reorderNearTies(scored, input.shuffleSeed);
 
   const allocations: AutovoteAllocation[] = [];
   let assignedBps = 0;
@@ -196,25 +348,313 @@ export function buildAutovotePlan(input: AutovotePlanInput): AutovotePlan {
   return { mode: input.mode, allocations, totalWeightBps, warnings };
 }
 
+export interface AutovotePreflightResult {
+  ok: boolean;
+  /** The first allocation that would revert, when blocked. */
+  clusterId?: number;
+  message?: string;
+}
+
+/** Pre-sign cap check for a WHOLE plan. Each delegate() stacks onto the wallet's
+ *  existing weight for that cluster and adds to the wallet total, so verify
+ *  every allocation against the per-cluster cap AND the 100% total, accumulating
+ *  as the plan applies. Reuses preflightDelegationVerdict — the exact gate the
+ *  per-row Delegate / Redelegate flows use — so a batch never signs a
+ *  guaranteed 0x0213 / 0x0205 revert. Blocks on the FIRST offending allocation.
+ *  `capBps` is the per-cluster cap (the aggregate cap when present, else null →
+ *  the 50% floor), NOT the autovote weight budget (the planner already bounds
+ *  the budget). Pure. */
+export function preflightAutovotePlan(args: {
+  allocations: readonly AutovoteAllocation[];
+  existingWeightByCluster: Map<number, number>;
+  currentTotalBps: number;
+  capBps: number | null;
+  /** Active delegation rows before the plan runs. Omitted → the row-limit check
+   *  is skipped for every allocation. */
+  currentDelegationCount?: number;
+}): AutovotePreflightResult {
+  let runningTotal = args.currentTotalBps;
+  // The row count ACCUMULATES across the plan the same way the total does: a
+  // batch that opens three new rows from a base of eight reaches eleven, and the
+  // chain rejects the eleventh even though each allocation looked fine alone.
+  let runningCount = args.currentDelegationCount;
+  for (const a of args.allocations) {
+    const dstExistingWeightBps = args.existingWeightByCluster.get(a.clusterId) ?? 0;
+    const verdict = preflightDelegationVerdict({
+      action: "delegate",
+      dstExistingWeightBps,
+      totalDelegatedBps: runningTotal,
+      moveBps: a.weightBps,
+      capBps: args.capBps,
+      currentDelegationCount: runningCount,
+    });
+    if (!verdict.ok) {
+      return { ok: false, clusterId: a.clusterId, message: verdict.message };
+    }
+    runningTotal += a.weightBps;
+    if (runningCount !== undefined && dstExistingWeightBps === 0) runningCount += 1;
+  }
+  return { ok: true };
+}
+
+/**
+ * Both plan verdicts re-run after the unlock, immediately before the FIRST
+ * submit.
+ *
+ * WHY ALL-OR-NOTHING, AND WHY HERE. The single paths re-check at the top of
+ * `execute` and refuse one transaction. A batch cannot re-check per call: a
+ * refusal BETWEEN submits leaves part of the plan on chain, with no way to undo
+ * what landed and nothing coherent to tell the user about a half-applied
+ * intention. Before the first submit is the only moment where refusing costs
+ * exactly nothing, so that is where the whole plan is judged.
+ *
+ * TWO QUESTIONS, BOTH RE-ASKED. The caps are one; whether the plan credits
+ * anything is the other, and it is measured against the BALANCE — which moves
+ * for reasons that have nothing to do with delegation state, including a spend
+ * from another surface while the passphrase prompt is open. Re-checking only the
+ * caps left the cheaper failure live: a plan reviewed against a balance that has
+ * since collapsed pays N fees and credits nothing, exactly what the review-time
+ * check exists to prevent.
+ *
+ * INERT IS ASKED FIRST, matching the single paths: at a collapsed balance its
+ * answer is terminal, where "reduce to the cap" would only send the user round
+ * again to the same wall.
+ *
+ * SAME GATES, NOT LOOSER ONES — `preflightAutovotePlan` with its accumulation
+ * intact, and `autovoteInertVerdict` verbatim — given fresher inputs. Each
+ * refusal names WHICH state moved, because a cap or balance sentence arriving
+ * after the passphrase is otherwise indistinguishable from a chain rejection,
+ * and neither carries wording the drawer's error classifier would rewrite as a
+ * chain revert.
+ *
+ * FAILS OPEN ON THE BALANCE, exactly as its review-time sibling does: an
+ * unreadable balance means the inert test CANNOT RUN, never that the plan is
+ * inert. It also cannot mean "untested" here — the review-time check already
+ * passed on a readable balance, so an unreadable one late is merely the absence
+ * of fresher evidence, and refusing on it would deny a plan already verified.
+ * The cap question is unaffected and still refuses on its own terms. Pure.
+ */
+export function lateBatchVerdict(args: {
+  allocations: readonly AutovoteAllocation[];
+  existingWeightByCluster: Map<number, number>;
+  currentTotalBps: number;
+  capBps: number | null;
+  currentDelegationCount?: number;
+  /** The freshest balance the caller could get. Absent/unreadable → the inert
+   *  question is not asked, and nothing is refused on account of it. */
+  balanceLythoshi?: string | null;
+}): { ok: true } | { ok: false; clusterId?: number; message: string } {
+  const inert = autovoteInertVerdict({
+    allocations: args.allocations,
+    balanceLythoshi: args.balanceLythoshi,
+  });
+  if (!inert.ok && inert.message !== undefined) {
+    return {
+      ok: false,
+      // Plan-level by construction — several allocations can be inert at once,
+      // and the verdict names them all rather than electing one.
+      message: lateRefusal(LATE_BALANCE_PREFIX, inert.message),
+    };
+  }
+  const verdict = preflightAutovotePlan(args);
+  if (verdict.ok) return { ok: true };
+  const reason = verdict.message ?? "this plan would exceed a delegation cap.";
+  return {
+    ok: false,
+    clusterId: verdict.clusterId,
+    message: lateRefusal(LATE_REFUSAL_PREFIX, reason),
+  };
+}
+
+/** What moved, when the thing that moved was the balance rather than the
+ *  delegation state. The sibling half of {@link LATE_REFUSAL_PREFIX}: a batch
+ *  can be refused late for either reason, and saying "your delegation state
+ *  changed" about a balance would send the user to look at the wrong thing. */
+export const LATE_BALANCE_PREFIX = "Your balance changed while this was open";
+
+/** One sentence shape for every late refusal, so the two questions cannot drift
+ *  apart in how they explain themselves: what moved, the verdict's own words,
+ *  and the fact that nothing reached the chain. */
+function lateRefusal(whatMoved: string, reason: string): string {
+  return `${whatMoved} — ${reason} Nothing was submitted.`;
+}
+
+export interface AutovoteInertVerdict {
+  ok: boolean;
+  /** The allocations that would credit nothing, when blocked. */
+  inertClusterIds?: number[];
+  message?: string;
+}
+
+/**
+ * Would any allocation in this plan credit nothing at all?
+ *
+ * NOT the single-path check run N times. A plan divides a budget across
+ * clusters, so each allocation is a FRACTION of it, and at a modest balance a
+ * split that looks reasonable makes every allocation floor to zero whole LYTH:
+ * every cap passes, N fees are paid, and nothing is credited anywhere. That
+ * failure exists only because the weight was divided, which makes it a property
+ * of the plan rather than of any one allocation.
+ *
+ * So detection is per-allocation and the verdict is plan-level. Refusing the
+ * whole plan is right on both counts: this surface offers no way to sign "just
+ * the ones that work", and the remedy — fewer clusters, or a larger budget — is
+ * a plan-level adjustment anyway. A batch refusal is also cheap to recover from;
+ * the user changes one number and reviews again.
+ *
+ * THE ADVICE MUST BE PLAN-LEVEL TOO. The single-path message quotes a minimum
+ * per-cluster weight, which is unfollowable across a split: four clusters each
+ * needing 5000 bps would be 20000 bps of a 10000 bps wallet. This one quotes how
+ * many clusters the budget can actually support.
+ *
+ * FAILS OPEN. An unreadable balance yields null from the arithmetic (A6) and
+ * every allocation reads as not-inert: null means *cannot test*, never *inert*.
+ * A zero balance is likewise not inert — there is nothing to round down. Pure.
+ */
+export function autovoteInertVerdict(args: {
+  allocations: readonly AutovoteAllocation[];
+  balanceLythoshi: string | null | undefined;
+}): AutovoteInertVerdict {
+  if (args.allocations.length === 0) return { ok: true };
+  const inertClusterIds = args.allocations
+    .filter((a) => isInertDelegation(args.balanceLythoshi, a.weightBps))
+    .map((a) => a.clusterId);
+  if (inertClusterIds.length === 0) return { ok: true };
+
+  const total = args.allocations.length;
+  const minBps = minNonInertBps(args.balanceLythoshi);
+  const head =
+    inertClusterIds.length === total
+      ? `None of these ${total} allocations would credit anything at your balance — each would earn nothing and cast no vote, and still cost a fee.`
+      : `${inertClusterIds.length} of ${total} allocations would credit nothing at your balance — each would earn nothing and cast no vote, and still cost a fee.`;
+
+  // No weight up to 100% reaches a whole LYTH, so no split of any budget does.
+  if (minBps === null) {
+    return {
+      ok: false,
+      inertClusterIds,
+      message: `${head} No split reaches a whole LYTH until your balance grows.`,
+    };
+  }
+  // How many clusters this budget can actually carry at that minimum. Integer
+  // division, never rounded up — a partial cluster is an inert one.
+  const budgetBps = args.allocations.reduce((sum, a) => sum + a.weightBps, 0);
+  const supported = Math.floor(budgetBps / minBps);
+  if (supported < 1) {
+    return {
+      ok: false,
+      inertClusterIds,
+      message: `${head} A cluster needs at least ${minBps} bps at this balance, more than this whole budget — raise the budget.`,
+    };
+  }
+  return {
+    ok: false,
+    inertClusterIds,
+    message: `${head} A cluster needs at least ${minBps} bps at this balance, so this budget supports ${supported} cluster${supported === 1 ? "" : "s"} — spread it across that many or fewer, or raise it.`,
+  };
+}
+
 export interface SubmitAutovotePlanResult {
   txHashes: string[];
 }
 
+/** One delegation that actually landed, reported the moment it did. */
+export interface AutovoteSubmission {
+  clusterId: number;
+  weightBps: number;
+  txHash: string;
+  nonce: number;
+  /** 1-based position in the plan. */
+  index: number;
+  total: number;
+}
+
+/**
+ * A batch that failed part-way, carrying what had already been submitted.
+ *
+ * Before this existed the hashes were local to the submit loop and died with the
+ * throw: real delegations sat on chain with no trace anywhere in the wallet, and
+ * the user was told only that "autovote failed". The boundary between what
+ * landed and what did not is the one fact a half-applied plan has to make
+ * legible, so it travels with the failure.
+ *
+ * The underlying reason stays reachable as `cause` — the classifier walks the
+ * chain for it — and this wrapper's own words add nothing the drawer's error
+ * classifier would rewrite.
+ */
+export class AutovoteBatchError extends ClassifiedWalletError {
+  readonly submittedTxHashes: string[];
+  readonly failedIndex: number;
+  readonly total: number;
+
+  constructor(args: {
+    cause: unknown;
+    submittedTxHashes: string[];
+    failedIndex: number;
+    total: number;
+  }) {
+    const landed = args.submittedTxHashes.length;
+    const reason = args.cause instanceof Error ? args.cause.message : String(args.cause);
+    super(
+      landed === 0
+        ? `${reason} Nothing was submitted.`
+        : `${reason} ${landed} of ${args.total} delegations were already submitted and stand; the rest were not sent.`,
+      { cause: args.cause },
+    );
+    this.name = "AutovoteBatchError";
+    this.submittedTxHashes = args.submittedTxHashes;
+    this.failedIndex = args.failedIndex;
+    this.total = args.total;
+  }
+}
+
 /**
  * Submit an autovote plan as N sequential delegate calls. Reuses the
- * staking seam verbatim — NON-CUSTODIAL, each delegate carries no value
+ * delegation seam verbatim — NON-CUSTODIAL, each delegate carries no value
  * (only weightBps). Sequential (not parallel) so each call lands on the
  * previous nonce.
  */
 export async function submitAutovotePlan(
   plan: AutovotePlan,
   seed: Uint8Array,
+  onProgress?: (submitted: number, total: number) => void,
+  /** Called the moment each delegation lands, so the caller can record it like a
+   *  single delegate rather than waiting for a whole-batch result that a
+   *  mid-batch failure never produces. */
+  onSubmitted?: (submission: AutovoteSubmission) => void,
 ): Promise<SubmitAutovotePlanResult> {
   const txHashes: string[] = [];
-  for (const a of plan.allocations) {
-    const calldata = buildDelegateCalldata(a.clusterId, a.weightBps);
-    const result = await submitStakingTx({ seed, data: calldata });
+  const total = plan.allocations.length;
+  for (let i = 0; i < total; i += 1) {
+    const a = plan.allocations[i]!;
+    const calldata = buildDelegateCalldata({ clusterId: a.clusterId, weightBps: a.weightBps });
+    let result: { txHash: string; nonce: number };
+    try {
+      // Each batch step classifies too — a plan that trips a cap or the row limit
+      // mid-run must say which wall it hit, not just that a step failed.
+      result = await withDelegationRevertCopy(() =>
+        submitDelegationTx({ seed, data: calldata }),
+      );
+    } catch (cause) {
+      // Everything before this point is on chain. Carry it out with the failure
+      // rather than losing it to the throw.
+      throw new AutovoteBatchError({
+        cause,
+        submittedTxHashes: [...txHashes],
+        failedIndex: i,
+        total,
+      });
+    }
     txHashes.push(result.txHash);
+    onSubmitted?.({
+      clusterId: a.clusterId,
+      weightBps: a.weightBps,
+      txHash: result.txHash,
+      nonce: result.nonce,
+      index: i + 1,
+      total,
+    });
+    onProgress?.(txHashes.length, total);
   }
   return { txHashes };
 }

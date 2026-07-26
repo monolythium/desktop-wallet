@@ -1,6 +1,5 @@
-// Activity-detail modal — a compact summary popup opened by clicking a row
-// in the Activity list (gated behind the experimental flag). Built around this
-// wallet's row shapes and design tokens.
+// Activity-detail modal — a compact summary popup opened by clicking a row in
+// the Activity list. Built around this wallet's row shapes and design tokens.
 //
 // Honest absence: a "View on Monoscan" link only appears when the row carries
 // a canonical tx hash. On desktop that is the pending-mempool row (it streams
@@ -17,10 +16,26 @@
 import { useEffect, useState } from "react";
 
 import { activityRelativeTime } from "../sdk/activity-rows";
-import { loadLiveTxConfirmations } from "../sdk/live";
-import { isZeroAmount, pendingOpLabel, type TxOpKind } from "../sdk/notifications";
+import { bpsToPercentLabel } from "../sdk/delegation-summary";
+import { decodeTxFeeLythoshi, loadLiveTxConfirmations } from "../sdk/live";
+import {
+  formatFeeLythDisplay,
+  formatLythDisplay,
+  isNativeLythTokenId,
+  tokenUnitLabel,
+} from "../sdk/lyth-display";
+import {
+  amountUnitLabel,
+  isZeroAmount,
+  pendingOpLabel,
+  suppressesSubmitTimeAmount,
+  type TxOpKind,
+} from "../sdk/notifications";
+import type { PendingLifecycle } from "../sdk/pending-tx";
 import { txTypeLabelForActivity } from "../sdk/tx-type-label";
-import { CopyableAddress, DRow, MonoscanTxButton, truncMiddle } from "./_detailModalParts";
+import { activityRowDirection } from "../sdk/activity-rows";
+import { tokenAmountDisplay, type TokenMeta } from "../sdk/token-metadata";
+import { CopyableAddress, DRow, MonoscanTxButton, NamedAddress, truncMiddle } from "./_detailModalParts";
 
 /** Pending-mempool row — carries the canonical tx hash, so it links out. */
 export interface PendingDetailRow {
@@ -41,7 +56,25 @@ export interface TrackedDetailRow {
   txHash: string;
   opKind: TxOpKind;
   amountDecimal: string;
+  /** Amount unit — the token symbol for an MRC-20 send; absent ⇒ LYTH. */
+  unit?: string;
   counterparty: string;
+  /** Carried so the modal can offer Dismiss for a TERMINAL row only. */
+  chainIdHex?: string;
+  lifecycle?: PendingLifecycle;
+  /** Receipt-confirmed ahead of the indexer — never dismissable. */
+  bridged?: boolean;
+}
+
+/** A tracked row may be dismissed only when it is genuinely terminal:
+ *  `dropped` / `expired` and not bridged. Anything else might still be moving,
+ *  and dismissing it would remove the user's only visibility into it. Pure. */
+export function isDismissableTracked(row: {
+  lifecycle?: PendingLifecycle;
+  bridged?: boolean;
+}): boolean {
+  if (row.bridged === true) return false;
+  return row.lifecycle === "dropped" || row.lifecycle === "expired";
 }
 
 /** Indexed activity row (from the enriched address-activity read). Enrichment
@@ -74,6 +107,13 @@ export interface ActivityDetailProps {
   row: DetailRow;
   /** The active wallet's own bech32m address (the From of sends). */
   walletAddr: string;
+  /** Cached per-token MRC metadata (decimals/symbol), keyed by token id, so an
+   *  MRC-20 amount renders at its real decimals. Absent → the amount shows an
+   *  honest "—" rather than raw base units. */
+  tokenMeta?: Map<string, TokenMeta>;
+  /** Offered only for a genuinely terminal tracked row (see
+   *  {@link isDismissableTracked}). */
+  onDismiss?: () => void;
   onClose: () => void;
 }
 
@@ -89,7 +129,68 @@ function modalTitle(row: DetailRow): string {
     kind: row.activityKind,
     subKind: row.subKind,
     direction: row.direction,
+    tokenId: row.tokenId,
   });
+}
+
+/** Is this indexed row a transaction THIS wallet paid the fee for? Only then may
+ *  a fee line render — a fee is the sender's debit, and showing someone else's
+ *  on an inbound row would assert a charge the user never paid.
+ *
+ *  Self-paid: an outgoing transfer, and the delegation-family / claim rows
+ *  (whose sender is this wallet by construction — they are precompile calls the
+ *  wallet itself signs). An inbound row NEVER is. Pure. */
+export function isSelfPaidIndexedRow(row: {
+  activityKind: string;
+  subKind: string | null;
+  direction: string | null;
+}): boolean {
+  if (row.direction === "in") return false;
+  const label = txTypeLabelForActivity({
+    kind: row.activityKind,
+    subKind: row.subKind,
+    direction: row.direction,
+  });
+  if (
+    label === "Delegate" ||
+    label === "Undelegate" ||
+    label === "Redelegate" ||
+    label === "Claim rewards"
+  ) {
+    return true;
+  }
+  return row.direction === "out";
+}
+
+/** Best-effort network fee for a self-paid indexed row. Shows the CHARGED total
+ *  the chain decoded — never a reservation or an estimate — and renders nothing
+ *  at all until it resolves (no skeleton, no dash: an absent fee is an honest
+ *  absence, and a zero/undecodable fee omits the row entirely).
+ *
+ *  Formatted through `formatFeeLythDisplay` — the FEE precision rule, which the
+ *  notification detail's fee row also uses, so one fee reads identically on both
+ *  surfaces. A fee below the balance convention's 4 dp shows its exact value
+ *  rather than the "0" that convention would print for a charge the chain
+ *  reported as strictly positive. */
+function IndexedTxFee({ txHash }: { txHash: string }) {
+  const [feeLythoshi, setFeeLythoshi] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void decodeTxFeeLythoshi(txHash).then((fee) => {
+      if (!cancelled) setFeeLythoshi(fee);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [txHash]);
+  if (feeLythoshi === null) return null;
+  // A fee has its own precision rule: at the balance's 4 dp a floor-priced fee
+  // renders as "0", which claims the wallet charged nothing for a charge it
+  // decoded. `formatFeeLythDisplay` shows the exact value instead, and returns
+  // null for a genuinely zero one so the row is omitted.
+  const display = formatFeeLythDisplay(feeLythoshi);
+  if (display === null) return null;
+  return <DRow label="Network fee" value={`${display} LYTH`} />;
 }
 
 /** Best-effort confirmation depth for an indexed row that resolved a tx hash.
@@ -116,7 +217,53 @@ function IndexedTxConfirmations({ txHash }: { txHash: string }) {
   );
 }
 
-function DetailBody({ row, walletAddr }: { row: DetailRow; walletAddr: string }) {
+/** The Amount row for an indexed activity entry. Native amounts are raw lythoshi
+ *  → display LYTH (unchanged); an MRC-20 amount is scaled by the token's real
+ *  decimals when its metadata is loaded, else an honest "—" — never the raw
+ *  base-units integer. The unit is LYTH for native, the token's real symbol when
+ *  known, else the raw token id. */
+function IndexedAmountRow({
+  row,
+  tokenMeta,
+}: {
+  row: IndexedDetailRow;
+  tokenMeta?: Map<string, TokenMeta>;
+}) {
+  const native = isNativeLythTokenId(row.tokenId);
+  const meta = native ? undefined : tokenMeta?.get(row.tokenId ?? "");
+  const display = native
+    ? formatLythDisplay(row.amount) ?? row.amount
+    : tokenAmountDisplay(row.amount, meta);
+  const unit = native ? "LYTH" : meta?.symbol?.trim() || tokenUnitLabel(row.tokenId);
+  // Sign only when there's a real figure — an unknown MRC-20 scale shows a bare
+  // "—" (never "+—").
+  //
+  // Derived from the SAME classified direction the feed row draws its arrow
+  // from, rather than re-read from the raw field: a claim reports no direction
+  // on the wire but IS incoming, so reading the field here showed "12.5" in the
+  // detail beside a "+12.5" in the row. A directionless row signs nothing.
+  //
+  // The minus is ASCII U+002D, not U+2212 — see the codepoint test.
+  const direction = activityRowDirection({
+    kind: row.activityKind,
+    subKind: row.subKind,
+    direction: row.direction,
+    tokenId: row.tokenId,
+  });
+  const sign =
+    display === null ? "" : direction === "out" ? "-" : direction === "in" ? "+" : "";
+  return <DRow label="Amount" value={`${sign}${display ?? "—"} ${unit}`} />;
+}
+
+function DetailBody({
+  row,
+  walletAddr,
+  tokenMeta,
+}: {
+  row: DetailRow;
+  walletAddr: string;
+  tokenMeta?: Map<string, TokenMeta>;
+}) {
   if (row.kind === "pending") {
     return (
       <div>
@@ -139,17 +286,21 @@ function DetailBody({ row, walletAddr }: { row: DetailRow; walletAddr: string })
   }
 
   if (row.kind === "tracked") {
-    const showAmount = !isZeroAmount(row.amountDecimal);
+    // A claim's figure comes only from the decoded Claimed log, which does not
+    // exist yet on an in-flight row — the stored amount is the submit-time
+    // claimable, a different quantity.
+    const showAmount =
+      !suppressesSubmitTimeAmount(row.opKind) && !isZeroAmount(row.amountDecimal);
     const showCp = row.counterparty.length > 0;
     return (
       <div>
         <DRow label="Status" value="Awaiting confirmation" />
         {showAmount ? (
-          <DRow label="Amount" value={`${row.amountDecimal} LYTH`} />
+          <DRow label="Amount" value={`${row.amountDecimal} ${amountUnitLabel(row.unit)}`} />
         ) : null}
         <DRow label="From" value={<CopyableAddress addr={walletAddr} />} />
         {showCp ? (
-          <DRow label="To" value={<CopyableAddress addr={row.counterparty} />} />
+          <DRow label="To" value={<NamedAddress addr={row.counterparty} />} />
         ) : null}
         <DRow
           label="Tx hash"
@@ -183,27 +334,26 @@ function DetailBody({ row, walletAddr }: { row: DetailRow; walletAddr: string })
       <DRow label="Type" value={row.subKind ? `${row.activityKind} · ${row.subKind}` : row.activityKind} />
       {relativeTime !== null ? <DRow label="Time" value={relativeTime} /> : null}
       {row.amount !== null ? (
-        <DRow
-          label="Amount"
-          value={`${row.direction === "out" ? "−" : row.direction === "in" ? "+" : ""}${row.amount}${
-            row.tokenId ? ` ${row.tokenId}` : " LYTH"
-          }`}
-        />
+        <IndexedAmountRow row={row} tokenMeta={tokenMeta} />
       ) : null}
-      {row.weightBps !== null ? <DRow label="Weight" value={`${row.weightBps} bps`} /> : null}
+      {/* Weight is user-facing, so it reads as a percent — raw bps belongs to
+          Developer-Mode surfaces only. */}
+      {row.weightBps !== null ? (
+        <DRow label="Weight" value={bpsToPercentLabel(row.weightBps)} />
+      ) : null}
       {clusterLabel !== null ? (
         <DRow label="Cluster" value={clusterLabel} />
       ) : null}
       {cp ? (
         isIn ? (
           <>
-            <DRow label="From" value={<CopyableAddress addr={cp} />} />
+            <DRow label="From" value={<NamedAddress addr={cp} />} />
             <DRow label="To" value={<CopyableAddress addr={walletAddr} />} />
           </>
         ) : (
           <>
             <DRow label="From" value={<CopyableAddress addr={walletAddr} />} />
-            <DRow label="To" value={<CopyableAddress addr={cp} />} />
+            <DRow label="To" value={<NamedAddress addr={cp} />} />
           </>
         )
       ) : null}
@@ -225,6 +375,9 @@ function DetailBody({ row, walletAddr }: { row: DetailRow; walletAddr: string })
           {/* Best-effort: shows the live confirmation depth when the chain
               reports it, otherwise stays silent (status already "Confirmed"). */}
           <IndexedTxConfirmations txHash={row.txHash} />
+          {/* Only for a tx this wallet paid for — an inbound row never fetches
+              a fee at all, let alone renders one. */}
+          {isSelfPaidIndexedRow(row) ? <IndexedTxFee txHash={row.txHash} /> : null}
           <MonoscanTxButton hash={row.txHash} />
         </>
       ) : null}
@@ -232,7 +385,7 @@ function DetailBody({ row, walletAddr }: { row: DetailRow; walletAddr: string })
   );
 }
 
-export function ActivityDetail({ row, walletAddr, onClose }: ActivityDetailProps) {
+export function ActivityDetail({ row, walletAddr, tokenMeta, onDismiss, onClose }: ActivityDetailProps) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -272,7 +425,24 @@ export function ActivityDetail({ row, walletAddr, onClose }: ActivityDetailProps
           </button>
         </div>
         <div className="w-card__body">
-          <DetailBody row={row} walletAddr={walletAddr} />
+          <DetailBody row={row} walletAddr={walletAddr} tokenMeta={tokenMeta} />
+          {/* Terminal tracked rows only — a row that might still be live can
+              never be dismissed away from here either. */}
+          {row.kind === "tracked" && isDismissableTracked(row) && onDismiss ? (
+            <div style={{ marginTop: 14 }}>
+              <button
+                type="button"
+                data-testid="dismiss-tracked-detail"
+                className="btn btn--sm btn--ghost"
+                onClick={() => {
+                  onDismiss();
+                  onClose();
+                }}
+              >
+                Dismiss
+              </button>
+            </div>
+          ) : null}
         </div>
       </div>
     </div>

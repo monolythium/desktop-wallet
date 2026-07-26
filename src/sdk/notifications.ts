@@ -6,9 +6,11 @@
 //
 // No `chrome.*`, no DOM, no Tauri IPC, no module-scope state — every helper
 // here is deterministic and unit-testable in vitest without runtime shims.
-// The Tauri-store round-trip lives in `notifications-store.ts`; the single
-// recording chokepoint (terminal transition of a tracked write) lives in the
-// OperationsDrawer.
+// The Tauri-store round-trip lives in `notifications-store.ts`. Records are
+// written from `reconcile.ts` (the terminal transition of a tracked write),
+// `notifications-record.ts` (a submission that failed synchronously), and
+// `incoming-detect.ts` (an inbound transfer) — all through the single
+// `recordNotification` chokepoint, which dedupes on `${chainIdHex}:${txHash}`.
 //
 // Invariants this module helps uphold:
 //   - Status fidelity: `NotificationRecord.status` is `"confirmed" | "failed"`
@@ -20,10 +22,28 @@
 //     blockNumber / kind / amountDecimal / counterparty / createdAtMs / read /
 //     schemaVersion — never a contact name.
 
+import { truncMiddle } from "./truncate";
+
 /** Max notification records retained per (address, chain) — newest-first,
  *  capped via `appendCapped`. 50 covers months of normal use; older records
  *  drop silently on append. */
 export const NOTIFICATION_HISTORY_CAP = 50;
+
+/** Max dedupe-set ids retained per (address, chain) — newest-first. Bounds the
+ *  set that was previously unbounded (it grew one id per notification forever,
+ *  re-serialising the whole file O(n) on every write). Kept comfortably larger
+ *  than {@link NOTIFICATION_HISTORY_CAP} and any realistic re-observation window:
+ *  a tx only needs its id in the set for as long as it could plausibly be seen
+ *  again, and the reconcile poller drops terminal txs from tracking while
+ *  incoming-detection advances a watermark past processed blocks, so an evicted
+ *  old id is never re-observed and can't re-fire a notification. */
+export const NOTIFIED_SET_CAP = 256;
+
+/** Append `id` to a dedupe-set, keeping the newest {@link NOTIFIED_SET_CAP}.
+ *  Pure. */
+export function appendNotifiedIdCapped(ids: readonly string[], id: string): string[] {
+  return [...ids, id].slice(-NOTIFIED_SET_CAP);
+}
 
 /** Operation classification attached to a recorded notification. Drives the
  *  friendly title via {@link notificationTitle}. `contract_call` is the
@@ -35,7 +55,7 @@ export type TxOpKind =
   | "undelegate"
   | "redelegate"
   | "claim"
-  | "emergency-key"
+  | "set-auto-compound"
   | "agent-policy"
   | "contract_call";
 
@@ -49,10 +69,36 @@ export function isTxOpKind(v: unknown): v is TxOpKind {
     v === "undelegate" ||
     v === "redelegate" ||
     v === "claim" ||
-    v === "emergency-key" ||
+    v === "set-auto-compound" ||
     v === "agent-policy" ||
     v === "contract_call"
   );
+}
+
+/** Reserved {@link NotificationRecord.reason} value: the failure IS a revert,
+ *  but its on-chain reason could not be read (the pinned SDK drops the receipt's
+ *  `revertReason`). Kept DISTINCT from an absent reason so a surface never
+ *  renders "no reason" and "a reason exists but we couldn't read it" the same. */
+export const REASON_UNAVAILABLE = "reason-unavailable";
+
+/** Longest `reason` token we persist — a defensive bound so a classified token
+ *  can never smuggle unbounded text into the store. All real tokens (the
+ *  `SendErrorKind`s and the reserved marker) are well under this. */
+export const MAX_REASON_LEN = 48;
+
+/** Longest chain-reason excerpt we persist in {@link NotificationRecord.reasonDetail}.
+ *  A chain-supplied revert reason is still a string from a node, so it is
+ *  sanitised and hard-capped here before it ever reaches the store. */
+export const MAX_REASON_DETAIL_LEN = 80;
+
+/** Render a stored `reason` token as a short human phrase (hyphen-case →
+ *  Sentence case: "transaction-reverted" → "Transaction reverted",
+ *  "reason-unavailable" → "Reason unavailable"). Pure; null for an absent token. */
+export function humanizeReason(reason: string | undefined | null): string | null {
+  if (!reason) return null;
+  const joined = reason.split("-").filter(Boolean).join(" ");
+  if (joined.length === 0) return null;
+  return joined.charAt(0).toUpperCase() + joined.slice(1);
 }
 
 /** One persisted notification — the row the Notifications page + detail modal
@@ -72,9 +118,13 @@ export interface NotificationRecord {
   blockNumber: number | null;
   /** Operation classification used to render the friendly title. */
   kind: TxOpKind;
-  /** Canonical LYTH amount string (already formatted decimal). NEVER a
-   *  BigInt — the store serializes JSON only. */
+  /** Canonical amount string (already formatted decimal). NEVER a BigInt — the
+   *  store serializes JSON only. */
   amountDecimal: string;
+  /** Amount unit — the token symbol for an MRC-20 send; absent for native LYTH
+   *  (renders "LYTH"). Optional + backward-compatible: records written before
+   *  this field read as LYTH. */
+  unit?: string;
   /** Typed bech32m counterparty — the recipient the user intended to send to,
    *  or the precompile target for contract calls. */
   counterparty: string;
@@ -83,12 +133,44 @@ export interface NotificationRecord {
    *  backward-compatible — records written before this field simply omit it. */
   clusterId?: number;
   clusterName?: string;
-  /** A reward claim's decoded settled amount (LYTH decimal), captured at the
-   *  confirmed terminal from the receipt's `Claimed` log (the tx value is 0x0,
-   *  so the amount lives in the log, not the value). Claim-only; optional +
-   *  legacy-safe — an absent record or an undecodable log falls back to the
-   *  claimable amount shown at submit. */
+  /** Delegation weight in basis points, captured at submit so the body can name
+   *  the percent. For a redelegate the cluster fields above are the SOURCE and
+   *  the two below the DESTINATION. All optional + backward-compatible —
+   *  records written before them simply omit them. Display-only: none of these
+   *  ever reach the signed calldata. */
+  delegationWeightBps?: number;
+  toClusterId?: number;
+  toClusterName?: string;
+  /** A settled-rewards amount (LYTH decimal) decoded at the confirmed terminal
+   *  from the receipt's `Claimed` log (the tx value is 0x0, so the amount lives
+   *  in the log, not the value). Written for a `claim` and for a
+   *  `set-auto-compound` that settled pending rewards in the same tx. Optional +
+   *  legacy-safe; an undecodable log leaves it absent. */
   claimedAmount?: string;
+  /** The tx's network fee in raw lythoshi, decoded from `lyth_decodeTx` at the
+   *  confirmed terminal. Optional + legacy-safe — an absent record or an
+   *  undecodable fee omits the fee row (honest absence, never a fabricated 0). */
+  feeLythoshi?: string;
+  /** Why a `failed` record failed — a BOUNDED classified token, never the raw
+   *  node string (which can carry an endpoint, a path, or unbounded text). It is
+   *  either a `SendErrorKind` (the classified admission-reject reason, populated
+   *  at submit) or the reserved {@link REASON_UNAVAILABLE}: the failure IS a
+   *  revert whose on-chain reason the wallet could not read (the pinned SDK's
+   *  receipt normaliser drops `revertReason`). Absent ⇒ no reason context — a
+   *  DIFFERENT fact from "a reason exists but could not be read", which is why
+   *  the surfaces render the three states distinctly. Optional + legacy-safe. */
+  reason?: string;
+  /** The numeric code accompanying the failure: a JSON-RPC admission-band code
+   *  (`-3205x`) for a submit reject, or the on-chain revert code (`0x02NN` family)
+   *  read from a reverted receipt (F4). A number is inherently bounded. Optional
+   *  + legacy-safe. */
+  reasonCode?: number;
+  /** A BOUNDED, SANITISED excerpt of the chain-supplied revert reason (F4), when
+   *  it adds detail the classified token doesn't carry — e.g. a string revert
+   *  like "precompile call is not payable…". Control chars stripped, whitespace
+   *  collapsed, capped at {@link MAX_REASON_DETAIL_LEN}, and dropped if it smells
+   *  of a path/URL. Rendered verbatim (not humanised). Optional + legacy-safe. */
+  reasonDetail?: string;
   /** Owning scope — the lowercased address this record was recorded under (the
    *  active vault's identity at write time). Optional + backward-compatible:
    *  records written before this field omit it. It lets a merged/global list
@@ -144,6 +226,12 @@ export interface IncomingWatermark {
   blockHeight: number;
   txIndex: number;
   logIndex: number;
+  /** The accounted synthetic ids recorded at the top block. Disambiguates
+   *  multiple same-block native receives (which share the txIndex 0 + u32::MAX
+   *  logIndex sentinel) so a second receive in the watermark's block isn't lost.
+   *  Optional + additive — a legacy watermark without it treats its boundary
+   *  block as history (never re-toasts on upgrade). */
+  blockIds?: string[];
 }
 
 /** Per-(address, chain) incoming-watermark key inside the store. */
@@ -170,7 +258,12 @@ export function parseIncomingWatermark(raw: unknown): IncomingWatermark | null {
   if (typeof r.blockHeight !== "number" || !Number.isFinite(r.blockHeight)) return null;
   if (typeof r.txIndex !== "number" || !Number.isFinite(r.txIndex)) return null;
   if (typeof r.logIndex !== "number" || !Number.isFinite(r.logIndex)) return null;
-  return { blockHeight: r.blockHeight, txIndex: r.txIndex, logIndex: r.logIndex };
+  // Additive + non-rejecting: absence/garbage → undefined (legacy boundary is
+  // history), never a reason to drop the whole watermark.
+  const blockIds = Array.isArray(r.blockIds)
+    ? r.blockIds.filter((s): s is string => typeof s === "string")
+    : undefined;
+  return { blockHeight: r.blockHeight, txIndex: r.txIndex, logIndex: r.logIndex, blockIds };
 }
 
 /** Insert a record newest-first and slice to the cap. Pure. */
@@ -200,13 +293,13 @@ export const NOTIFICATION_LABELS: Record<
 > = {
   send: { confirmed: "Sent", failed: "Send failed" },
   receive: { confirmed: "Received", failed: "Received" },
-  delegate: { confirmed: "Staked", failed: "Stake failed" },
-  undelegate: { confirmed: "Unstaked", failed: "Unstake failed" },
-  redelegate: { confirmed: "Restaked", failed: "Restake failed" },
+  delegate: { confirmed: "Delegated", failed: "Delegate failed" },
+  undelegate: { confirmed: "Undelegated", failed: "Undelegate failed" },
+  redelegate: { confirmed: "Redelegated", failed: "Redelegate failed" },
   claim: { confirmed: "Rewards claimed", failed: "Claim failed" },
-  "emergency-key": {
-    confirmed: "Backup key registered",
-    failed: "Backup registration failed",
+  "set-auto-compound": {
+    confirmed: "Auto-compound updated",
+    failed: "Auto-compound update failed",
   },
   "agent-policy": {
     confirmed: "Agent policy updated",
@@ -237,19 +330,118 @@ export function delegationClusterLabel(record: NotificationRecord): string | nul
   );
 }
 
+/** A claim's figure may come ONLY from the decoded `Claimed` log — the receipt's
+ *  settled truth. The submit-time claimable stored on the row is a DIFFERENT
+ *  quantity measured at a different moment: a claim settles further rewards at
+ *  execution, so the submit-time snapshot understates what actually arrived.
+ *  Showing it as "the claimed amount" would misreport income.
+ *
+ *  So a claim surface suppresses `amountDecimal` outright: with a decoded log it
+ *  shows that figure, and without one it shows the bare title — never the
+ *  submit-time value, never a fabricated 0. Pure. */
+export function suppressesSubmitTimeAmount(kind: TxOpKind): boolean {
+  return kind === "claim";
+}
+
+/** Kinds that call the delegation precompile but name no cluster of their own.
+ *  Their counterparty IS that precompile, and the wallet never shows that
+ *  address on a delegation surface, so with no decoded figure there is simply
+ *  nothing to put in a body — the title carries the whole meaning. */
+function hasNoBodySubject(kind: TxOpKind): boolean {
+  return kind === "claim" || kind === "set-auto-compound";
+}
+
+/** Character budget for a redelegate's combined `{from} → {to}` label. Past it
+ *  the DESTINATION shows alone: that is the outcome the user cares about, and OS
+ *  toast widths vary by platform with no measurement API to ask. */
+export const REDELEGATE_CLUSTER_BUDGET = 40;
+
+/** A delegation weight as a percent, or null when it isn't a weight we can
+ *  honestly state. Rejects non-integers, zero and out-of-range values rather
+ *  than rendering "0.00%" for an unknown weight — a delegation of zero percent
+ *  is not a thing the user did. Pure. */
+export function delegationPercentLabel(bps: number | undefined): string | null {
+  if (bps === undefined) return null;
+  if (!Number.isInteger(bps) || bps < 1 || bps > 10_000) return null;
+  return `${(bps / 100).toFixed(2)}%`;
+}
+
+/** The delegation metadata a body is assembled from — the shared shape of a
+ *  tracked row and a recorded notification, so both surfaces read identically. */
+export interface DelegationBodyParts {
+  kind: TxOpKind;
+  clusterId?: number;
+  clusterName?: string;
+  toClusterId?: number;
+  toClusterName?: string;
+  delegationWeightBps?: number;
+}
+
+function clusterLabelOf(
+  name: string | undefined,
+  id: number | undefined,
+): string | null {
+  return name ?? (id !== undefined ? `Cluster #${id}` : null);
+}
+
+/** THE delegation body assembler — the single place the cluster and the percent
+ *  are combined, so the OS toast, the in-app row and the failed row can never
+ *  drift apart.
+ *
+ *  `legacyFallback` is the truncated counterparty, used only for records written
+ *  before cluster metadata was captured. Returns null when nothing is known, and
+ *  the caller shows the title alone. Pure. */
+export function delegationBodyLabel(
+  parts: DelegationBodyParts,
+  legacyFallback: string | null = null,
+): string | null {
+  if (!isDelegationKind(parts.kind)) return null;
+  const pct = delegationPercentLabel(parts.delegationWeightBps);
+  const from = clusterLabelOf(parts.clusterName, parts.clusterId);
+
+  let label: string | null;
+  if (parts.kind === "redelegate") {
+    const to = clusterLabelOf(parts.toClusterName, parts.toClusterId);
+    if (from !== null && to !== null) {
+      const combined = `${from} → ${to}`;
+      label = combined.length <= REDELEGATE_CLUSTER_BUDGET ? combined : to;
+    } else {
+      // An unknown destination falls back to the source alone.
+      label = to ?? from;
+    }
+  } else {
+    label = from;
+  }
+  if (label === null) label = legacyFallback;
+
+  if (label !== null && pct !== null) return `${label} · ${pct}`;
+  return label ?? pct;
+}
+
 /** Amount to display for a record: a reward claim's decoded settled amount
  *  ("+<amt> LYTH") when known, else the plain amount ("<amt> LYTH"), else null
  *  for a zero/absent amount (omitted — honest absence). Centralizes the
  *  claim-amount rule the toast, the in-app row, and the detail all use. */
 export function notificationAmountLabel(record: NotificationRecord): string | null {
-  if (
-    record.kind === "claim" &&
-    record.claimedAmount &&
-    !isZeroAmount(record.claimedAmount)
-  ) {
+  // Keyed on the FIELD, not the kind: enabling auto-compound with pending
+  // rewards settles them in the same tx and emits the same Claimed log, so any
+  // record carrying a decoded settled amount shows it.
+  if (record.claimedAmount && !isZeroAmount(record.claimedAmount)) {
+    // Settled rewards are paid in native LYTH.
     return `+${record.claimedAmount} LYTH`;
   }
-  return isZeroAmount(record.amountDecimal) ? null : `${record.amountDecimal} LYTH`;
+  // No decoded log ⇒ no figure at all for a claim.
+  if (suppressesSubmitTimeAmount(record.kind)) return null;
+  return isZeroAmount(record.amountDecimal)
+    ? null
+    : `${record.amountDecimal} ${amountUnitLabel(record.unit)}`;
+}
+
+/** The unit shown next to a recorded amount — the token symbol when present,
+ *  else native LYTH. Pure; the single default so a token send is never
+ *  mislabeled and a legacy (unit-less) record still reads "LYTH". */
+export function amountUnitLabel(unit: string | undefined): string {
+  return unit && unit.length > 0 ? unit : "LYTH";
 }
 
 /** Render the friendly title for a notification. */
@@ -260,13 +452,14 @@ export function notificationTitle(
   return NOTIFICATION_LABELS[kind][status];
 }
 
-/** Middle-truncate a typed bech32m address for compact display — identical
- *  head/tail to `_detailModalParts.truncMiddle` so the OS toast body matches
- *  the in-app row's `short` form verbatim. Inlined here (rather than imported)
- *  to keep this module DOM/React-free per its header invariant. */
-function shortAddress(s: string, head = 10, tail = 6): string {
-  return s.length > head + tail + 1 ? `${s.slice(0, head)}…${s.slice(-tail)}` : s;
-}
+/** Middle-truncate a typed bech32m address for compact display.
+ *
+ *  The OS toast body must match the in-app row's short form VERBATIM — the
+ *  same address rendered two ways reads as two addresses. That used to be a
+ *  promise in a comment beside a copied implementation; it is now the same
+ *  function, and `truncate.ts` is DOM-free so importing it does not violate
+ *  this module's no-DOM invariant. */
+const shortAddress = truncMiddle;
 
 /** Friendly title + body for a terminal notification — the SAME wording the
  *  in-app Notifications row renders (title = {@link notificationTitle}; body =
@@ -277,7 +470,7 @@ function shortAddress(s: string, head = 10, tail = 6): string {
  *  toast and the in-app record always read identically. */
 /** Generic, content-free title shown on the OS toast when "Show transaction
  *  details" is off — so a glanceable toast leaks neither the amount/address NOR
- *  the action (Sent / Staked / …) on a shared screen. The in-app record always
+ *  the action (Sent / Delegated / …) on a shared screen. The in-app record always
  *  keeps the full friendly title + detail; only the OS toast is redacted. */
 const REDACTED_TOAST_TITLE = "Monolythium Wallet";
 
@@ -292,23 +485,26 @@ export function notificationToast(
   // the action is surfaced on the OS toast. The in-app record keeps full detail.
   if (!includeDetails) return { title: REDACTED_TOAST_TITLE, body: "" };
   const title = notificationTitle(record.kind, record.status);
-  // A reward claim's tx value is 0x0; its settled amount lives in the Claimed
-  // log, decoded into `claimedAmount`. Show "+<amount> LYTH" when known.
-  if (
-    record.kind === "claim" &&
-    record.claimedAmount &&
-    !isZeroAmount(record.claimedAmount)
-  ) {
+  // A settling tx's value is 0x0; the settled amount lives in the Claimed log,
+  // decoded into `claimedAmount`. Keyed on the field so an auto-compound that
+  // settled pending rewards shows its figure too.
+  if (record.claimedAmount && !isZeroAmount(record.claimedAmount)) {
     return { title, body: `+${record.claimedAmount} LYTH` };
   }
+  // No decoded log and no cluster to name ⇒ the bare title. The submit-time
+  // claimable is the wrong quantity, and the counterparty is the delegation
+  // precompile the wallet never surfaces.
+  if (hasNoBodySubject(record.kind)) return { title, body: "" };
   // A delegation tx's counterparty is the bare delegation-module precompile;
-  // name the target cluster instead (the same label the in-app row shows),
-  // falling back to the truncated address only when no cluster metadata was
-  // captured (legacy records).
-  const short = delegationClusterLabel(record) ?? shortAddress(record.counterparty);
+  // name the cluster and the weight instead (through the one assembler the
+  // in-app rows use), falling back to the truncated address only when no cluster
+  // metadata was captured (legacy records).
+  const short =
+    delegationBodyLabel(record, shortAddress(record.counterparty)) ??
+    shortAddress(record.counterparty);
   const body = isZeroAmount(record.amountDecimal)
     ? short
-    : `${record.amountDecimal} LYTH · ${short}`;
+    : `${record.amountDecimal} ${amountUnitLabel(record.unit)} · ${short}`;
   return { title, body };
 }
 
@@ -320,11 +516,11 @@ export function notificationToast(
 export const PENDING_OP_LABELS: Record<TxOpKind, string> = {
   send: "Sending…",
   receive: "Receiving…",
-  delegate: "Staking…",
-  undelegate: "Unstaking…",
-  redelegate: "Restaking…",
+  delegate: "Delegating…",
+  undelegate: "Undelegating…",
+  redelegate: "Redelegating…",
   claim: "Claiming rewards…",
-  "emergency-key": "Registering backup key…",
+  "set-auto-compound": "Updating auto-compound…",
   "agent-policy": "Updating agent policy…",
   contract_call: "Submitting transaction…",
 };
@@ -368,11 +564,44 @@ function asNotificationRecord(raw: unknown): NotificationRecord | null {
       ? r.clusterId
       : undefined;
   const clusterName = typeof r.clusterName === "string" ? r.clusterName : undefined;
+  // Additive delegation metadata. A field the validator does not explicitly
+  // carry is silently dropped on every store rebuild, so each is listed here.
+  const delegationWeightBps =
+    typeof r.delegationWeightBps === "number" && Number.isFinite(r.delegationWeightBps)
+      ? r.delegationWeightBps
+      : undefined;
+  const toClusterId =
+    typeof r.toClusterId === "number" && Number.isFinite(r.toClusterId)
+      ? r.toClusterId
+      : undefined;
+  const toClusterName =
+    typeof r.toClusterName === "string" ? r.toClusterName : undefined;
   const claimedAmount =
     typeof r.claimedAmount === "string" && r.claimedAmount.length > 0
       ? r.claimedAmount
       : undefined;
+  const feeLythoshi =
+    typeof r.feeLythoshi === "string" && r.feeLythoshi.length > 0
+      ? r.feeLythoshi
+      : undefined;
   const scope = typeof r.scope === "string" ? r.scope : undefined;
+  const unit = typeof r.unit === "string" && r.unit.length > 0 ? r.unit : undefined;
+  // Failure reason: a bounded classified token only. Length-capped so a tampered
+  // or future-oversized value can never persist unbounded text.
+  const reason =
+    typeof r.reason === "string" && r.reason.length > 0 && r.reason.length <= MAX_REASON_LEN
+      ? r.reason
+      : undefined;
+  const reasonCode =
+    typeof r.reasonCode === "number" && Number.isFinite(r.reasonCode)
+      ? r.reasonCode
+      : undefined;
+  const reasonDetail =
+    typeof r.reasonDetail === "string" &&
+    r.reasonDetail.length > 0 &&
+    r.reasonDetail.length <= MAX_REASON_DETAIL_LEN
+      ? r.reasonDetail
+      : undefined;
   return {
     id: r.id,
     txHash: r.txHash,
@@ -380,10 +609,18 @@ function asNotificationRecord(raw: unknown): NotificationRecord | null {
     blockNumber,
     kind,
     amountDecimal: r.amountDecimal,
+    unit,
     counterparty: r.counterparty,
     clusterId,
     clusterName,
+    delegationWeightBps,
+    toClusterId,
+    toClusterName,
     claimedAmount,
+    feeLythoshi,
+    reason,
+    reasonCode,
+    reasonDetail,
     scope,
     createdAtMs: r.createdAtMs,
     read: r.read,

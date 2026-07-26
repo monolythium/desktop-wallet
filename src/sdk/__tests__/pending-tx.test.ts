@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   PENDING_ABSOLUTE_CAP_MS,
+  PENDING_DROP_GRACE_MS,
+  ADMITTED_INCLUSION_WINDOW_MS,
   PENDING_SLOW_MS,
   PENDING_TERMINAL_RETAIN_MS,
   PENDING_TX_STORE_KEY,
@@ -10,6 +12,7 @@ import {
   parsePendingTxEnvelope,
   pendingLifecycleNote,
   pendingTxIndex,
+  scopePendingTxs,
   transitionPending,
   type ChainProbe,
   type PendingTx,
@@ -37,22 +40,44 @@ function probe(over: Partial<ChainProbe> = {}): ChainProbe {
 }
 
 describe("classifyPending — terminal detection (status fidelity)", () => {
-  it("confirms on lyth_txStatus=found, carrying the inclusion slot (block + txIndex)", () => {
+  it("confirms a found tx once its receipt shows success, carrying the inclusion slot", () => {
     const v = classifyPending(
-      probe({ txStatus: { kind: "found", blockNumber: 4242, txIndex: 7 } }),
+      probe({
+        txStatus: { kind: "found", blockNumber: 4242, txIndex: 7 },
+        receipt: { kind: "receipt", status: 1, blockNumber: 4242, txIndex: 7 },
+      }),
     );
     expect(v.kind).toBe("confirmed");
     expect(v.kind === "confirmed" && v.blockNumber).toBe(4242);
     expect(v.kind === "confirmed" && v.txIndex).toBe(7);
   });
 
-  it("confirms on found even when block/txIndex are absent (null)", () => {
+  it("falls back to the found txStatus slot when a success receipt omits it", () => {
     const v = classifyPending(
-      probe({ txStatus: { kind: "found", blockNumber: null, txIndex: null } }),
+      probe({
+        txStatus: { kind: "found", blockNumber: 4242, txIndex: 7 },
+        receipt: { kind: "receipt", status: 1, blockNumber: null, txIndex: null },
+      }),
     );
     expect(v.kind).toBe("confirmed");
-    expect(v.kind === "confirmed" && v.blockNumber).toBeNull();
-    expect(v.kind === "confirmed" && v.txIndex).toBeNull();
+    expect(v.kind === "confirmed" && v.blockNumber).toBe(4242);
+    expect(v.kind === "confirmed" && v.txIndex).toBe(7);
+  });
+
+  it("an included tx whose receipt is not yet available stays PENDING, never confirmed", () => {
+    // "found" is inclusion, not success — a reverted tx is also found. Until the
+    // receipt establishes the outcome, the honest verdict is neither terminal.
+    expect(
+      classifyPending(probe({ txStatus: { kind: "found", blockNumber: 4242, txIndex: 7 } })).kind,
+    ).toBe("pending");
+  });
+
+  it("an included tx whose receipt read threw stays PENDING (never a default verdict)", () => {
+    expect(
+      classifyPending(
+        probe({ txStatus: { kind: "found", blockNumber: 5, txIndex: 1 }, receipt: { kind: "throw" } }),
+      ).kind,
+    ).toBe("pending");
   });
 
   it("confirms on a receipt status===1 (with its slot) when txStatus has not surfaced", () => {
@@ -78,12 +103,13 @@ describe("classifyPending — terminal detection (status fidelity)", () => {
     expect(v.kind === "failed" && v.blockNumber).toBe(7);
   });
 
-  it("found short-circuits a (hypothetical) reverted receipt — indexer inclusion wins", () => {
+  it("a found tx with a reverted receipt is FAILED — inclusion is not success", () => {
     const v = classifyPending({
       txStatus: { kind: "found", blockNumber: 5, txIndex: 1 },
       receipt: { kind: "receipt", status: 0, blockNumber: 5, txIndex: 1 },
     });
-    expect(v.kind).toBe("confirmed");
+    expect(v.kind).toBe("failed");
+    expect(v.kind === "failed" && v.blockNumber).toBe(5);
   });
 });
 
@@ -117,28 +143,105 @@ describe("classifyPending — never synthesizes a verdict (keeps pending)", () =
   });
 });
 
-describe("classifyStalePending — time-based lifecycle", () => {
+describe("classifyStalePending — time-based lifecycle (no committed nonce)", () => {
   const base = tx({ submittedAt: 1_000_000 });
 
-  it("is pending inside the slow threshold", () => {
-    expect(classifyStalePending(base, 1_000_000)).toBe("pending");
-    expect(classifyStalePending(base, 1_000_000 + PENDING_SLOW_MS - 1)).toBe("pending");
+  it("is pending inside the inclusion window", () => {
+    expect(classifyStalePending(base, null, 1_000_000)).toBe("pending");
+    expect(
+      classifyStalePending(base, null, 1_000_000 + ADMITTED_INCLUSION_WINDOW_MS - 1),
+    ).toBe("pending");
+  });
+
+  it("is awaiting-inclusion between the window and the slow threshold", () => {
+    // Inserted between `pending` and `slow`: a broadcast with no inclusion
+    // after 20 s deserves an honest signal rather than looking idle.
+    expect(classifyStalePending(base, null, 1_000_000 + ADMITTED_INCLUSION_WINDOW_MS)).toBe(
+      "awaiting-inclusion",
+    );
+    expect(classifyStalePending(base, null, 1_000_000 + PENDING_SLOW_MS - 1)).toBe(
+      "awaiting-inclusion",
+    );
   });
 
   it("is slow from the slow threshold up to the absolute cap", () => {
-    expect(classifyStalePending(base, 1_000_000 + PENDING_SLOW_MS)).toBe("slow");
-    expect(classifyStalePending(base, 1_000_000 + PENDING_ABSOLUTE_CAP_MS - 1)).toBe("slow");
+    expect(classifyStalePending(base, null, 1_000_000 + PENDING_SLOW_MS)).toBe("slow");
+    expect(classifyStalePending(base, null, 1_000_000 + PENDING_ABSOLUTE_CAP_MS - 1)).toBe("slow");
   });
 
   it("is expired at and past the absolute cap", () => {
-    expect(classifyStalePending(base, 1_000_000 + PENDING_ABSOLUTE_CAP_MS)).toBe("expired");
+    expect(classifyStalePending(base, null, 1_000_000 + PENDING_ABSOLUTE_CAP_MS)).toBe("expired");
+  });
+});
+
+describe("classifyStalePending — nonce-based dropped detection", () => {
+  const T0 = 1_000_000;
+  // nonce 5, young enough that the time-based path alone would be "pending".
+  const young = tx({ submittedAt: T0, nonce: 5 });
+
+  it("stays on the time-based path when the committed nonce has NOT passed", () => {
+    expect(classifyStalePending(young, 5, T0 + 1)).toBe("pending"); // committed == nonce
+    expect(classifyStalePending(young, 4, T0 + 1)).toBe("pending"); // committed < nonce
+  });
+
+  it("is slow within the drop grace once the committed nonce passes", () => {
+    // First observation (noncePassedAtMs unset) anchors the grace at `now`.
+    expect(classifyStalePending(young, 6, T0 + 1)).toBe("slow");
+    const stamped = tx({ submittedAt: T0, nonce: 5, noncePassedAtMs: T0 });
+    expect(classifyStalePending(stamped, 6, T0 + PENDING_DROP_GRACE_MS - 1)).toBe("slow");
+  });
+
+  it("is dropped once the drop grace elapses after the nonce passed", () => {
+    const stamped = tx({ submittedAt: T0, nonce: 5, noncePassedAtMs: T0 });
+    expect(classifyStalePending(stamped, 6, T0 + PENDING_DROP_GRACE_MS)).toBe("dropped");
+  });
+
+  it("an INCLUDED tx is NEVER 'dropped' — it consumed its own nonce (V-A)", () => {
+    // seenIncluded means the reconciler observed this tx in a block. The committed
+    // nonce passing it is expected (it filled the slot), so it must not read as a
+    // dropped/replaced tx — that would be a false "didn't confirm" for a tx that
+    // was included and may have succeeded.
+    const included = tx({ submittedAt: T0, nonce: 5, noncePassedAtMs: T0, seenIncluded: true });
+    expect(classifyStalePending(included, 6, T0 + PENDING_DROP_GRACE_MS * 100)).not.toBe("dropped");
+  });
+
+  it("an INCLUDED tx ages to 'expired' (status unknown), never 'dropped'", () => {
+    const included = tx({ submittedAt: T0, nonce: 5, seenIncluded: true });
+    expect(classifyStalePending(included, 6, T0 + PENDING_ABSOLUTE_CAP_MS)).toBe("expired");
+  });
+
+  it("an INCLUDED tx reads 'pending' while young, never 'awaiting-inclusion'", () => {
+    // It IS included, so "waiting for inclusion" would be wrong too.
+    const included = tx({ submittedAt: T0, nonce: 5, seenIncluded: true });
+    expect(
+      classifyStalePending(included, 6, T0 + ADMITTED_INCLUSION_WINDOW_MS + 1),
+    ).toBe("pending");
+  });
+
+  it("a null committed-nonce read never drops, and never un-drops a dropped row", () => {
+    expect(classifyStalePending(young, null, T0 + 1)).toBe("pending"); // never advances to dropped
+    const droppedRow = tx({ submittedAt: T0, nonce: 5, noncePassedAtMs: T0, lifecycle: "dropped" });
+    expect(classifyStalePending(droppedRow, null, T0 + PENDING_DROP_GRACE_MS * 100)).toBe("dropped");
+  });
+
+  it("a real read showing the nonce NOT passed un-drops a dropped row", () => {
+    const droppedRow = tx({ submittedAt: T0, nonce: 5, noncePassedAtMs: T0, lifecycle: "dropped" });
+    expect(classifyStalePending(droppedRow, 5, T0 + 1)).toBe("pending"); // back to time-based
+  });
+
+  it("falls back to time-based when the tx carries no captured nonce", () => {
+    const noNonce = tx({ submittedAt: T0 });
+    expect(classifyStalePending(noNonce, 999, T0 + 1)).toBe("pending");
   });
 });
 
 describe("transitionPending — relabel + bounded terminal removal", () => {
+  const NO_NONCES = new Map<string, number | null>();
+
   it("stamps the lifecycle and flags changed when it moves", () => {
     const { next, changed } = transitionPending(
       [tx({ submittedAt: 1_000_000 })],
+      NO_NONCES,
       1_000_000 + PENDING_SLOW_MS,
     );
     expect(changed).toBe(true);
@@ -148,18 +251,20 @@ describe("transitionPending — relabel + bounded terminal removal", () => {
   it("never removes a pending or slow row", () => {
     const { next } = transitionPending(
       [tx({ submittedAt: 1_000_000 })],
+      NO_NONCES,
       1_000_000 + PENDING_SLOW_MS, // slow, not terminal
     );
     expect(next).toHaveLength(1);
   });
 
   it("keeps an expired row visible until the retention window, then removes it", () => {
-    const kept = transitionPending([tx({ submittedAt: 0 })], PENDING_ABSOLUTE_CAP_MS);
+    const kept = transitionPending([tx({ submittedAt: 0 })], NO_NONCES, PENDING_ABSOLUTE_CAP_MS);
     expect(kept.next).toHaveLength(1);
     expect(kept.next[0]!.lifecycle).toBe("expired");
 
     const removed = transitionPending(
       [tx({ submittedAt: 0, lifecycle: "expired" })],
+      NO_NONCES,
       PENDING_TERMINAL_RETAIN_MS,
     );
     expect(removed.next).toHaveLength(0);
@@ -168,7 +273,7 @@ describe("transitionPending — relabel + bounded terminal removal", () => {
 
   it("is a no-op (changed=false) when every lifecycle is already current", () => {
     const slow = tx({ submittedAt: 1_000_000, lifecycle: "slow" });
-    expect(transitionPending([slow], 1_000_000 + PENDING_SLOW_MS).changed).toBe(false);
+    expect(transitionPending([slow], NO_NONCES, 1_000_000 + PENDING_SLOW_MS).changed).toBe(false);
   });
 
   it("passes a BRIDGED row through untouched — never relabels or removes it", () => {
@@ -180,10 +285,34 @@ describe("transitionPending — relabel + bounded terminal removal", () => {
       confirmedBlockHeight: 5,
       confirmedTxIndex: 0,
     });
-    const out = transitionPending([bridged], PENDING_TERMINAL_RETAIN_MS * 10);
+    const out = transitionPending([bridged], NO_NONCES, PENDING_TERMINAL_RETAIN_MS * 10);
     expect(out.next).toHaveLength(1);
     expect(out.next[0]).toBe(bridged); // same reference — untouched
     expect(out.changed).toBe(false);
+  });
+
+  it("stamps noncePassedAtMs and moves to slow the first tick the committed nonce passes", () => {
+    const now = 2_000_000;
+    // Young (age 1s < slow), so a move to slow can only come from the nonce path.
+    const row = tx({ submittedAt: now - 1_000, nonce: 5 });
+    const nonces = new Map<string, number | null>([["mono1self", 6]]);
+    const { next, changed } = transitionPending([row], nonces, now);
+    expect(changed).toBe(true);
+    expect(next[0]!.noncePassedAtMs).toBe(now);
+    expect(next[0]!.lifecycle).toBe("slow"); // within grace this first tick
+  });
+
+  it("moves a nonce-passed row to dropped once the grace elapses", () => {
+    const now = 2_000_000;
+    const row = tx({
+      submittedAt: now - 1_000, // young: time-based alone would be pending
+      nonce: 5,
+      noncePassedAtMs: now - PENDING_DROP_GRACE_MS,
+    });
+    const nonces = new Map<string, number | null>([["mono1self", 6]]);
+    const { next } = transitionPending([row], nonces, now);
+    expect(next).toHaveLength(1); // dropped but retained (well within retention)
+    expect(next[0]!.lifecycle).toBe("dropped");
   });
 });
 
@@ -191,8 +320,10 @@ describe("pendingLifecycleNote", () => {
   it("maps each lifecycle to its eyebrow note", () => {
     expect(pendingLifecycleNote("pending")).toBe("in flight");
     expect(pendingLifecycleNote("slow")).toBe("taking longer than usual");
-    expect(pendingLifecycleNote("dropped")).toBe("didn't confirm");
-    expect(pendingLifecycleNote("expired")).toBe("status unknown");
+    // Both terminal notes carry their cause, not just their verdict — a bare
+    // "didn't confirm" leaves a user guessing whether their funds moved.
+    expect(pendingLifecycleNote("dropped")).toBe("didn't confirm (replaced or dropped)");
+    expect(pendingLifecycleNote("expired")).toBe("status unknown — taking unusually long");
   });
 });
 
@@ -250,6 +381,62 @@ describe("parsers — tolerant of malformed persisted data", () => {
 
 describe("store key", () => {
   it("is the stable single-file key", () => {
-    expect(PENDING_TX_STORE_KEY).toBe("mono.pending-tx.v1");
+    expect(PENDING_TX_STORE_KEY).toBe("mono.pending-tx.v2");
+  });
+});
+
+describe("scopePendingTxs — cross-(vault, chain) isolation", () => {
+  const CHAIN_A = "0x10f2c"; // builtin
+  const CHAIN_B = "0x539"; // a custom chain
+  const a = tx({ txHash: "0xa", addressLower: "mono1aaa", chainIdHex: CHAIN_A });
+  const b = tx({ txHash: "0xb", addressLower: "mono1bbb", chainIdHex: CHAIN_A });
+  const a2 = tx({ txHash: "0xa2", addressLower: "mono1aaa", chainIdHex: CHAIN_A });
+
+  it("returns only the active wallet's tracked txs on the active chain", () => {
+    const scoped = scopePendingTxs([a, b, a2], "mono1aaa", CHAIN_A);
+    expect(scoped.map((t) => t.txHash)).toEqual(["0xa", "0xa2"]);
+  });
+
+  it("never leaks another vault's in-flight tx into the active feed", () => {
+    // The exact leak this closes: vault B is active, vault A has an in-flight
+    // tx; A's row must not appear.
+    expect(scopePendingTxs([a, a2], "mono1bbb", CHAIN_A)).toEqual([]);
+  });
+
+  // Cross-CHAIN isolation, both directions — the scope defect this fix closes:
+  // the same address's row must appear only under the chain it was broadcast to.
+  it("hides a row broadcast on another chain (same wallet, wrong chain active)", () => {
+    const onA = tx({ txHash: "0xona", addressLower: "mono1aaa", chainIdHex: CHAIN_A });
+    // Chain B is active: chain A's row must NOT surface (its hash lives on A).
+    expect(scopePendingTxs([onA], "mono1aaa", CHAIN_B)).toEqual([]);
+  });
+
+  it("shows the row again once its own chain is active (returning to chain A)", () => {
+    const onA = tx({ txHash: "0xona", addressLower: "mono1aaa", chainIdHex: CHAIN_A });
+    expect(scopePendingTxs([onA], "mono1aaa", CHAIN_A).map((t) => t.txHash)).toEqual([
+      "0xona",
+    ]);
+  });
+
+  it("partitions the same wallet's rows by chain", () => {
+    const onA = tx({ txHash: "0xona", addressLower: "mono1aaa", chainIdHex: CHAIN_A });
+    const onB = tx({ txHash: "0xonb", addressLower: "mono1aaa", chainIdHex: CHAIN_B });
+    expect(scopePendingTxs([onA, onB], "mono1aaa", CHAIN_A).map((t) => t.txHash)).toEqual([
+      "0xona",
+    ]);
+    expect(scopePendingTxs([onA, onB], "mono1aaa", CHAIN_B).map((t) => t.txHash)).toEqual([
+      "0xonb",
+    ]);
+  });
+
+  it("matches address case-insensitively", () => {
+    const upper = tx({ txHash: "0xu", addressLower: "MONO1AAA", chainIdHex: CHAIN_A });
+    expect(scopePendingTxs([upper], "mono1aaa", CHAIN_A).map((t) => t.txHash)).toEqual([
+      "0xu",
+    ]);
+  });
+
+  it("matches nothing when no wallet is ready (empty scope)", () => {
+    expect(scopePendingTxs([a, b], "", CHAIN_A)).toEqual([]);
   });
 });

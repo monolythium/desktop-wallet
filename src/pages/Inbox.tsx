@@ -112,7 +112,7 @@ function BookingRequestCard() {
             <div className="row-label">Booking created</div>
             {result.id ? <div>id: <code>{result.id}</code></div> : null}
             {result.tx_hash ? <div>tx: <code>{result.tx_hash}</code></div> : null}
-            <div style={{ fontSize: 11, opacity: 0.7, marginTop: 4 }}>
+            <div style={{ fontSize: 11, color: "var(--fg-300)", marginTop: 4 }}>
               Confirmation came back from <code>booking_request_create</code>.
             </div>
           </div>
@@ -149,7 +149,7 @@ function BookingFieldRow({
 }) {
   return (
     <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-      <div style={{ width: 120, fontSize: 12, opacity: 0.75 }}>{label}</div>
+      <div style={{ width: 120, fontSize: 12, color: "var(--fg-300)" }}>{label}</div>
       <input
         type="text"
         placeholder={placeholder}
@@ -338,7 +338,6 @@ function AddressBookCard() {
         name: draftName.trim(),
         address: draftAddress.trim(),
         note: draftNote.trim() || null,
-        overwrite: false,
       });
       setDraftName("");
       setDraftAddress("");
@@ -355,10 +354,11 @@ function AddressBookCard() {
     }
   };
 
-  const onRemove = async (name: string) => {
+  // v2 is address-keyed — removing by name would silently match nothing.
+  const onRemove = async (address: string) => {
     setError(null);
     try {
-      await addressbookRemove(name);
+      await addressbookRemove(address);
       await refresh(query.trim() || undefined);
     } catch (cause) {
       if (cause instanceof AddressBookCallError) {
@@ -408,7 +408,7 @@ function AddressBookCard() {
                   </div>
                   {e.note ? <div className="row-help" style={{ marginTop: 4 }}>{e.note}</div> : null}
                 </div>
-                <button type="button" className="btn btn--sm" onClick={() => onRemove(e.name)}>
+                <button type="button" className="btn btn--sm" onClick={() => onRemove(e.address)}>
                   Remove
                 </button>
               </div>

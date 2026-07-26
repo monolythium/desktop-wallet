@@ -5,15 +5,28 @@ import type { ChainInfo } from "@monolythium/core-sdk";
 import { useActiveWallet } from "../sdk/active-wallet";
 import { CopyableAddress } from "../components/_detailModalParts";
 import { MnemonicGrid } from "../components/MnemonicGrid";
+import { getActiveAccount, revealRecoveryPhrase } from "../sdk/keychain";
+import { PasswordInput } from "../components/PasswordInput";
+import { REVEAL_AUTO_HIDE_SECONDS } from "../components/MnemonicGrid";
 import {
-  deleteAccount,
-  getActiveAccount,
-  revealRecoveryPhrase,
-} from "../sdk/keychain";
+  clearUnlockLockout,
+  lockoutRemainingMs,
+  readLockoutState,
+  recordWrongUnlockAttempt,
+} from "../sdk/unlock-lockout";
 import { VaultCallError } from "../sdk/vault";
-import { loadCatalog, removeVaultFromCatalog } from "../sdk/vaultCatalog";
+import {
+  NON_CUSTODIAL_RESET_NOTE,
+  resetConfirmMatches,
+  resetPhraseProofMatches,
+  resetWalletOnThisDevice,
+} from "../sdk/reset";
 import {
   AUTO_LOCK_OPTIONS,
+  AUTO_LOCK_WARNING_TITLE,
+  autoLockConfirmLabel,
+  autoLockIncreaseNeedsConfirm,
+  autoLockWarningParagraphs,
   readAutoLockMinutes,
   writeAutoLockMinutes,
 } from "../sdk/auto-lock-setting";
@@ -28,6 +41,12 @@ import {
   readNotifyWhileLocked,
   writeNotifyWhileLocked,
 } from "../sdk/feature-flags";
+import {
+  FEATURES_INTRO,
+  FEATURES_WHY_BODY,
+  FEATURES_WHY_HEADING,
+  FEATURE_META,
+} from "../sdk/feature-meta";
 import { fetchLiveTestnetRegistry } from "../sdk/live-registry";
 import {
   outboundMcpStart,
@@ -43,31 +62,39 @@ import {
 } from "../sdk/studio-host";
 import {
   LAYOUTS,
-  THEMES,
   applyLayout,
-  applyTheme,
   readLayout,
-  readTheme,
   type LayoutId,
 } from "../sdk/theme";
+import { DeveloperModeToggle } from "../components/DeveloperModeToggle";
+import { PreferencesPanel } from "../components/PreferencesPanel";
+import { CollapsibleSection } from "../components/CollapsibleSection";
+import { useDeveloperMode } from "../sdk/developer-mode";
 
 interface SettingsProps {
-  developerModeEnabled: boolean;
-  setDeveloperModeEnabled: (enabled: boolean) => void;
   steleEnabled: boolean;
   setSteleEnabled: (enabled: boolean) => void;
   experimentalEnabled: boolean;
   setExperimentalEnabled: (enabled: boolean) => void;
+  /** Open directly on a sub-page (for the sidebar shortcuts — Display &
+   *  Preferences / Recovery phrase / Reset wallet). Defaults to the hub. */
+  initialSubPage?: SettingsSubPage;
 }
 
 type SettingsSubPage = "main" | "notifications" | "appearance" | "reset" | "reveal";
 
-export function Settings({ developerModeEnabled, setDeveloperModeEnabled, steleEnabled, setSteleEnabled, experimentalEnabled, setExperimentalEnabled }: SettingsProps) {
+export function Settings({ steleEnabled, setSteleEnabled, experimentalEnabled, setExperimentalEnabled, initialSubPage }: SettingsProps) {
   const wallet = useActiveWallet();
   const [devkitChannel, setDevkitChannel] = useState<NativeDevkitChannel>(() => readDevkitChannel());
   const [autoLockMinutes, setAutoLockMinutes] = useState<number>(() => readAutoLockMinutes());
-  const [subPage, setSubPage] = useState<SettingsSubPage>("main");
+  // A lengthening awaiting confirmation. Nothing is written or shown as active
+  // until it is confirmed, so Cancel reverts by construction.
+  const [pendingAutoLock, setPendingAutoLock] = useState<number | null>(null);
+  const [subPage, setSubPage] = useState<SettingsSubPage>(initialSubPage ?? "main");
   const { lock } = useAutoLock();
+  // Read only so the collapsed Developer mode heading can state whether it is
+  // on — a toggle whose state you cannot see is worse than an open section.
+  const devMode = useDeveloperMode();
 
   if (subPage === "notifications") {
     return <ManageNotificationsPage onBack={() => setSubPage("main")} />;
@@ -89,9 +116,15 @@ export function Settings({ developerModeEnabled, setDeveloperModeEnabled, steleE
         <div className="sub">Customize how your wallet looks and behaves.</div>
       </div>
 
-      <div className="w-card">
-        <div className="w-card__head"><h3>Account</h3></div>
-        <div className="w-card__body">
+      <CollapsibleSection
+        title="Account"
+        value={
+          wallet.status === "ready" || wallet.status === "locked"
+            ? wallet.name
+            : "No active wallet"
+        }
+      >
+        <div>
           <div className="w-setting-row">
             <div>
               <div className="row-label">
@@ -127,11 +160,12 @@ export function Settings({ developerModeEnabled, setDeveloperModeEnabled, steleE
             </button>
           </div>
         </div>
-      </div>
+      </CollapsibleSection>
 
-      <div className="w-card">
-        <div className="w-card__head"><h3>Security</h3></div>
-        <div className="w-card__body">
+      {/* Auto-lock is the one Security value a user can act wrongly on without
+          seeing it, so it reads from the heading while the section is shut. */}
+      <CollapsibleSection title="Security" value={`Auto-lock ${autoLockMinutes}m`}>
+        <div>
           <div className="w-setting-row">
             <div>
               <div className="row-label">Auto-lock after</div>
@@ -146,6 +180,13 @@ export function Settings({ developerModeEnabled, setDeveloperModeEnabled, steleE
                   type="button"
                   className={`btn btn--sm${m === autoLockMinutes ? " btn--primary" : ""}`}
                   onClick={() => {
+                    // Weakening asks; strengthening just applies. The chip only
+                    // moves on a confirmed apply, so Cancel reverts by never
+                    // having changed anything.
+                    if (autoLockIncreaseNeedsConfirm(autoLockMinutes, m)) {
+                      setPendingAutoLock(m);
+                      return;
+                    }
                     setAutoLockMinutes(m);
                     writeAutoLockMinutes(m);
                   }}
@@ -174,11 +215,71 @@ export function Settings({ developerModeEnabled, setDeveloperModeEnabled, steleE
             <button className="btn btn--sm" onClick={() => setSubPage("reset")}>Reset…</button>
           </div>
         </div>
-      </div>
+      </CollapsibleSection>
 
-      <div className="w-card">
-        <div className="w-card__head"><h3>Notifications</h3></div>
-        <div className="w-card__body">
+      {/* Page level, not inside the Security section: it is a fixed overlay, and
+          a collapsed section hides its whole subtree. */}
+      {pendingAutoLock !== null ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={AUTO_LOCK_WARNING_TITLE}
+          data-testid="auto-lock-warning"
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.55)",
+            backdropFilter: "blur(6px)",
+            zIndex: 40,
+            display: "grid",
+            placeItems: "center",
+            padding: 24,
+          }}
+        >
+          <div className="w-card" style={{ maxWidth: 460, width: "100%" }}>
+            <div className="w-card__head">
+              <h3>{AUTO_LOCK_WARNING_TITLE}</h3>
+            </div>
+            <div className="w-card__body">
+              {autoLockWarningParagraphs(pendingAutoLock).map((p) => (
+                <p
+                  key={p}
+                  style={{
+                    margin: "0 0 12px",
+                    lineHeight: 1.6,
+                    color: "var(--w-text-2)",
+                    fontSize: 13,
+                  }}
+                >
+                  {p}
+                </p>
+              ))}
+              <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+                <button
+                  className="btn"
+                  onClick={() => setPendingAutoLock(null)}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="btn btn--primary"
+                  style={{ marginLeft: "auto" }}
+                  onClick={() => {
+                    setAutoLockMinutes(pendingAutoLock);
+                    writeAutoLockMinutes(pendingAutoLock);
+                    setPendingAutoLock(null);
+                  }}
+                >
+                  {autoLockConfirmLabel(pendingAutoLock)}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      <CollapsibleSection title="Notifications">
+        <div>
           <div className="row-help" style={{ lineHeight: 1.6, marginBottom: 4 }}>
             Control system notifications, what details they show, and how they
             behave while the wallet is locked.
@@ -195,69 +296,74 @@ export function Settings({ developerModeEnabled, setDeveloperModeEnabled, steleE
             </button>
           </div>
         </div>
-      </div>
+      </CollapsibleSection>
 
-      <div className="w-card">
-        <div className="w-card__head"><h3>Theme</h3></div>
-        <div className="w-card__body">
-          <div className="row-help" style={{ lineHeight: 1.6, marginBottom: 4 }}>
-            Choose the wallet&apos;s colour theme — light, dark, and accent palettes.
+      <CollapsibleSection title="Display & Preferences">
+        <div className="w-setting-row">
+          <div>
+            <div className="row-label">Preferences</div>
+            <div className="row-help">Theme, language, display currency, and layout.</div>
           </div>
-          <div className="w-setting-row">
-            <div>
-              <div className="row-label">Appearance</div>
-              <div className="row-help">Colour theme and layout.</div>
-            </div>
-            <button className="btn btn--sm" onClick={() => setSubPage("appearance")}>
-              Customize
-            </button>
-          </div>
+          <button className="btn btn--sm" onClick={() => setSubPage("appearance")}>
+            Customize
+          </button>
         </div>
-      </div>
+      </CollapsibleSection>
 
       <ChainRegistryCard />
 
-      <div className="w-card">
-        <div className="w-card__head"><h3>Stele marketplace</h3><span className="w-todo__pill">early access</span></div>
-        <div className="w-card__body">
-          <div className="w-setting-row">
-            <div>
-              <div className="row-label">Enable Stele marketplace</div>
-              <div className="row-help">
-                Shows the Stele, Inbox, and Provider tabs. Lets the same key that holds your LYTH browse, book, and sell services on-chain. Off by default while the marketplace surface is in early access.
+      {/* ONE Features card over the wallet's own flag store — the Stele and
+          Experimental cards were separate before, which made two lists of
+          product surfaces that could drift apart. Developer mode keeps its own
+          card below: it is not a product feature. */}
+      <CollapsibleSection
+        title="Features"
+        // Both switches report from the heading. Collapsing a feature flag out
+        // of sight would leave a user guessing which surfaces are live.
+        value={FEATURE_META.map(
+          (f) =>
+            `${f.label} ${(f.id === "stele" ? steleEnabled : experimentalEnabled) ? "on" : "off"}`,
+        ).join(" · ")}
+      >
+        <div>
+          <p className="row-help" style={{ margin: "0 0 14px" }}>{FEATURES_INTRO}</p>
+          {FEATURE_META.map((feature) => {
+            const on = feature.id === "stele" ? steleEnabled : experimentalEnabled;
+            const set = feature.id === "stele" ? setSteleEnabled : setExperimentalEnabled;
+            return (
+              <div className="w-setting-row" key={feature.id}>
+                <div>
+                  <div className="row-label">
+                    {feature.label}
+                    <span className="w-todo__pill" style={{ marginLeft: 8 }}>{feature.pill}</span>
+                  </div>
+                  <div className="row-help">{feature.tagline}</div>
+                </div>
+                <button
+                  type="button"
+                  className={`w-chip ${on ? "is-on" : ""}`}
+                  aria-label={`Toggle ${feature.label}`}
+                  onClick={() => set(!on)}
+                >
+                  {on ? "Enabled" : "Disabled"}
+                </button>
               </div>
-            </div>
-            <button
-              type="button"
-              className={`w-chip ${steleEnabled ? "is-on" : ""}`}
-              onClick={() => setSteleEnabled(!steleEnabled)}
-            >
-              {steleEnabled ? "Enabled" : "Disabled"}
-            </button>
-          </div>
+            );
+          })}
+          <div className="w-divider" style={{ margin: "16px 0 12px" }} />
+          <div className="row-label">{FEATURES_WHY_HEADING}</div>
+          <p className="row-help" style={{ margin: "6px 0 0" }}>{FEATURES_WHY_BODY}</p>
         </div>
-      </div>
+      </CollapsibleSection>
 
       {steleEnabled ? <OutboundMcpCard /> : null}
 
-      <div className="w-card">
-        <div className="w-card__head"><h3>Developer Mode</h3></div>
-        <div className="w-card__body">
-          <div className="w-setting-row">
-            <div>
-              <div className="row-label">Enable Mono Studio</div>
-              <div className="row-help">
-                Shows the Studio Host and checks the separately installed DevKit only when enabled.
-              </div>
-            </div>
-            <button
-              type="button"
-              className={`w-chip ${developerModeEnabled ? "is-on" : ""}`}
-              onClick={() => setDeveloperModeEnabled(!developerModeEnabled)}
-            >
-              {developerModeEnabled ? "Enabled" : "Disabled"}
-            </button>
-          </div>
+      <CollapsibleSection
+        title="Developer mode"
+        value={`${devMode ? "On" : "Off"} · ${devkitChannel}`}
+      >
+        <div>
+          <DeveloperModeToggle />
           <ChipRow
             label="DevKit channel"
             help="Stable wallet releases do not bundle the full DevKit. Channel selection controls update checks."
@@ -269,40 +375,16 @@ export function Settings({ developerModeEnabled, setDeveloperModeEnabled, steleE
             }}
           />
         </div>
-      </div>
+      </CollapsibleSection>
 
-      <div className="w-card">
-        <div className="w-card__head"><h3>Experimental</h3><span className="w-todo__pill">preview</span></div>
-        <div className="w-card__body">
-          <div className="w-setting-row">
-            <div>
-              <div className="row-label">Enable experimental v5 features</div>
-              <div className="row-help">
-                Shows the Agents page (agent sub-accounts and spending policy), the per-route bridge risk panel, and the Stake autovote planner. These surfaces are in preview and off by default; turning this off hides them and leaves the wallet on the stable surface.
-              </div>
-            </div>
-            <button
-              type="button"
-              className={`w-chip ${experimentalEnabled ? "is-on" : ""}`}
-              onClick={() => setExperimentalEnabled(!experimentalEnabled)}
-            >
-              {experimentalEnabled ? "Enabled" : "Disabled"}
-            </button>
+      <CollapsibleSection title="About" value="Monolythium Wallet">
+        <div className="w-setting-row">
+          <div>
+            <div className="row-label">Wallet</div>
+            <div className="row-help">Monolythium Wallet · Stage 2 (consumer surface).</div>
           </div>
         </div>
-      </div>
-
-      <div className="w-card">
-        <div className="w-card__head"><h3>About</h3></div>
-        <div className="w-card__body">
-          <div className="w-setting-row">
-            <div>
-              <div className="row-label">Wallet</div>
-              <div className="row-help">Monolythium Wallet · Stage 2 (consumer surface).</div>
-            </div>
-          </div>
-        </div>
-      </div>
+      </CollapsibleSection>
     </div>
   );
 }
@@ -417,27 +499,20 @@ function ManageNotificationsPage({ onBack }: { onBack: () => void }) {
  * onboarding. On-chain funds are untouched; only the recovery phrase restores.
  */
 function ResetWalletPage({ onBack }: { onBack: () => void }) {
+  const wallet = useActiveWallet();
   const [confirmText, setConfirmText] = useState("");
+  const [resetPhrase, setResetPhrase] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const canReset = confirmText.trim().toUpperCase() === "RESET" && !busy;
+  const proofOk = resetPhraseProofMatches(resetPhrase, wallet.addressHex);
+  const canReset = resetConfirmMatches(confirmText) && proofOk && !busy;
 
   const doReset = async () => {
     if (!canReset) return;
     setBusy(true);
     setError(null);
     try {
-      const catalog = await loadCatalog().catch(() => null);
-      const slots = catalog ? Object.keys(catalog.vaults) : [];
-      for (const slot of slots) {
-        // Wipe the encrypted blob first, then drop the catalog entry — a
-        // keychain failure aborts before we orphan a row.
-        await deleteAccount(slot);
-        await removeVaultFromCatalog(slot);
-      }
-      // Reload so the boot probe re-runs: with no vault left it routes to
-      // onboarding (the fresh-install state).
-      window.location.reload();
+      await resetWalletOnThisDevice();
     } catch (cause) {
       setError((cause as Error)?.message ?? String(cause));
       setBusy(false);
@@ -460,15 +535,40 @@ function ResetWalletPage({ onBack }: { onBack: () => void }) {
       <div className="w-card">
         <div className="w-card__body">
           <div className="w-banner error" style={{ lineHeight: 1.6 }}>
-            This erases your wallet from this device — every account and its
-            encrypted vault. <strong>Only your recovery phrase can restore it.</strong>{" "}
-            Your funds on-chain are unaffected.
+            This erases <strong>every wallet</strong> on this device and its
+            encrypted vault. <strong>Only the recovery phrase can restore each
+            one</strong> — without it, those funds are gone. Your funds on-chain
+            are unaffected.
+          </div>
+          {/* The fourth clause of the destructive-copy law. The other three are
+              above; this one was only implied, and "no one can help you" is
+              exactly the part a user assumes is untrue. */}
+          <div className="row-help" style={{ marginTop: 8, lineHeight: 1.6 }}>
+            {NON_CUSTODIAL_RESET_NOTE}
           </div>
           <label className="w-onboarding__field" style={{ marginTop: 16 }}>
-            <span className="cap">Type RESET to confirm</span>
+            <span className="cap">Enter this wallet's 24-word recovery phrase</span>
+            <textarea
+              autoCapitalize="none"
+              autoComplete="off"
+              autoCorrect="off"
+              spellCheck={false}
+              rows={3}
+              value={resetPhrase}
+              onChange={(e) => setResetPhrase(e.target.value)}
+              placeholder="word1 word2 word3 …"
+              style={{ resize: "vertical", fontFamily: "var(--f-mono)" }}
+            />
+            <span className="cap" style={{ color: proofOk ? "var(--ok)" : "var(--fg-500)", marginTop: 4 }}>
+              {proofOk
+                ? "✓ Recovery phrase verified — you can restore this wallet"
+                : "Confirms you can restore afterward. It never leaves this device."}
+            </span>
+          </label>
+          <label className="w-onboarding__field" style={{ marginTop: 12 }}>
+            <span className="cap">Then type RESET to confirm</span>
             <input
               type="text"
-              autoFocus
               autoCapitalize="characters"
               autoComplete="off"
               spellCheck={false}
@@ -512,6 +612,35 @@ function RevealPhrasePage({ onBack }: { onBack: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const [mnemonic, setMnemonic] = useState<string | null>(null);
   const [notStored, setNotStored] = useState(false);
+  const [lockoutUntil, setLockoutUntil] = useState(0);
+  const [now, setNow] = useState(() => Date.now());
+  // Seconds left before the phrase auto-hides, or null before the first reveal.
+  const [hideInSec, setHideInSec] = useState<number | null>(null);
+
+  // This page pauses the idle auto-lock so a long transcription is not cut off,
+  // which means the usual timeout cannot protect it. A revealed phrase would
+  // otherwise sit on screen indefinitely on a walked-away machine with the lock
+  // deliberately suspended — so the surface imposes its own tighter bound.
+  //
+  // The countdown starts at the FIRST REVEAL, not at mount: before that the
+  // grid is obscured and there is nothing exposed to time.
+  const startHideCountdown = useCallback(() => {
+    setHideInSec((cur) => (cur === null ? REVEAL_AUTO_HIDE_SECONDS : cur));
+  }, []);
+
+  useEffect(() => {
+    if (hideInSec === null) return;
+    if (hideInSec <= 0) {
+      // Exposure window over. Drop the phrase and leave the way "Done" does —
+      // seeing it again costs a fresh password authorization, so the window is
+      // per-authorization rather than per-visit.
+      setMnemonic(null);
+      onBack();
+      return;
+    }
+    const id = window.setTimeout(() => setHideInSec((s) => (s ?? 1) - 1), 1_000);
+    return () => window.clearTimeout(id);
+  }, [hideInSec, onBack]);
 
   // Suspend the idle auto-lock while the phrase may be on screen; resume and
   // drop the phrase from state when leaving.
@@ -523,13 +652,42 @@ function RevealPhrasePage({ onBack }: { onBack: () => void }) {
     };
   }, [pauseTimer, resumeTimer]);
 
+  // This prompt verifies the WALLET VAULT PASSWORD, so it belongs to the one
+  // shared brute-force budget alongside the unlock gate and the operation
+  // drawer. Without this it was an unthrottled Argon2id oracle for the same
+  // secret — a way to guess without ever meeting a lockout window.
+  //
+  // Password CREATION surfaces are deliberately not members: there is no
+  // existing secret to guess there.
+  useEffect(() => {
+    setLockoutUntil(readLockoutState().lockoutUntil);
+  }, []);
+
+  useEffect(() => {
+    if (lockoutUntil <= Date.now()) return;
+    const id = window.setInterval(() => {
+      const t = Date.now();
+      setNow(t);
+      if (t >= lockoutUntil) window.clearInterval(id);
+    }, 500);
+    return () => window.clearInterval(id);
+  }, [lockoutUntil]);
+
+  const remainingMs = lockoutRemainingMs(lockoutUntil, now);
+  const lockedOut = remainingMs > 0;
+  const remainingSec = Math.ceil(remainingMs / 1000);
+
   const submit = async () => {
-    if (busy || password.length === 0) return;
+    if (busy || password.length === 0 || lockedOut) return;
     setBusy(true);
     setError(null);
     try {
       const out = await revealRecoveryPhrase(getActiveAccount(), password);
       setPassword("");
+      // A correct password clears the shared budget everywhere — the count
+      // resets only on a success, never by waiting a window out.
+      clearUnlockLockout();
+      setLockoutUntil(0);
       if (out.revealable && out.mnemonic) {
         setMnemonic(out.mnemonic);
       } else {
@@ -537,8 +695,17 @@ function RevealPhrasePage({ onBack }: { onBack: () => void }) {
       }
     } catch (cause) {
       if (cause instanceof VaultCallError && cause.cause.code === "wrong_password") {
-        setError("Wrong password. Try again.");
+        const next = recordWrongUnlockAttempt();
+        setLockoutUntil(next.lockoutUntil);
+        setNow(Date.now());
+        const rem = lockoutRemainingMs(next.lockoutUntil, Date.now());
+        setError(
+          rem > 0
+            ? `Wrong password — too many attempts. Locked for ${Math.ceil(rem / 1000)}s.`
+            : "Wrong password. Try again.",
+        );
       } else {
+        // Operational failures are not guesses and never escalate the budget.
         setError((cause as Error)?.message ?? "Could not reveal the phrase.");
       }
     } finally {
@@ -563,21 +730,24 @@ function RevealPhrasePage({ onBack }: { onBack: () => void }) {
         <div className="w-card__body">
           {mnemonic ? (
             <>
-              <div
-                className="w-banner"
-                style={{
-                  borderColor: "var(--gold)",
-                  background: "rgba(var(--gold-glow), 0.10)",
-                  lineHeight: 1.6,
-                }}
-              >
-                <strong>Never share these words.</strong> Anyone who has them can
-                move your funds. Write them down and store them offline — don't
-                screenshot them or paste them anywhere that syncs.
-              </div>
-              <div style={{ marginTop: 16 }}>
-                <MnemonicGrid mnemonic={mnemonic} />
-              </div>
+              {hideInSec !== null ? (
+                <div
+                  data-testid="reveal-countdown"
+                  style={{
+                    display: "inline-block",
+                    marginBottom: 12,
+                    padding: "3px 10px",
+                    borderRadius: "var(--r-pill)",
+                    background: "var(--gold-dim, rgba(200,160,60,0.14))",
+                    color: "var(--gold)",
+                    fontSize: "var(--fs-11)",
+                    fontWeight: 600,
+                  }}
+                >
+                  Hides in {hideInSec}s
+                </div>
+              ) : null}
+              <MnemonicGrid mnemonic={mnemonic} onFirstReveal={startHideCountdown} />
               <div style={{ display: "flex", marginTop: 20 }}>
                 <button
                   className="btn btn--primary"
@@ -607,19 +777,22 @@ function RevealPhrasePage({ onBack }: { onBack: () => void }) {
               </div>
               <label className="w-onboarding__field" style={{ marginTop: 16 }}>
                 <span className="cap">Password</span>
-                <input
-                  type="password"
+                <PasswordInput
                   autoFocus
                   autoComplete="current-password"
                   value={password}
-                  onChange={(e) => setPassword(e.target.value)}
+                  onChange={setPassword}
                   onKeyDown={(e) => {
-                    if (e.key === "Enter") void submit();
+                    if (e.key === "Enter" && !busy && !lockedOut) void submit();
                   }}
-                  disabled={busy}
+                  disabled={busy || lockedOut}
                 />
               </label>
-              {error ? (
+              {lockedOut ? (
+                <div className="w-banner error" style={{ marginTop: 12 }}>
+                  Too many wrong attempts. Try again in {remainingSec}s.
+                </div>
+              ) : error ? (
                 <div className="w-banner error" style={{ marginTop: 12 }}>{error}</div>
               ) : null}
               <div style={{ display: "flex", gap: 8, marginTop: 20 }}>
@@ -627,10 +800,14 @@ function RevealPhrasePage({ onBack }: { onBack: () => void }) {
                 <button
                   className="btn btn--primary"
                   style={{ marginLeft: "auto" }}
-                  disabled={busy || password.length === 0}
+                  disabled={busy || password.length === 0 || lockedOut}
                   onClick={() => void submit()}
                 >
-                  {busy ? "Revealing…" : "Show phrase"}
+                  {lockedOut
+                    ? `Locked — ${remainingSec}s`
+                    : busy
+                      ? "Revealing…"
+                      : "Show phrase"}
                 </button>
               </div>
             </>
@@ -694,14 +871,15 @@ function OutboundMcpCard() {
   };
 
   return (
-    <div className="w-card">
-      <div className="w-card__head">
-        <h3>Outbound MCP</h3>
+    <CollapsibleSection
+      title="Outbound MCP"
+      value={
         <span className="w-todo__pill">
           {status == null ? "loading" : status.enabled ? "running" : "stopped"}
         </span>
-      </div>
-      <div className="w-card__body">
+      }
+    >
+      <div>
         {error ? (
           <div className="row-help" style={{ color: "var(--w-text-2, #999)", marginBottom: 12 }}>
             {error}
@@ -757,7 +935,7 @@ function OutboundMcpCard() {
           </div>
         ) : null}
       </div>
-    </div>
+    </CollapsibleSection>
   );
 }
 
@@ -803,13 +981,8 @@ function shortHex(s: string, head = 10, tail = 6): string {
  * native :root palette (no attribute).
  */
 function AppearancePage({ onBack }: { onBack: () => void }) {
-  const [theme, setTheme] = useState<string>(() => readTheme());
   const [layout, setLayout] = useState<LayoutId>(() => readLayout());
 
-  const pickTheme = (id: string) => {
-    applyTheme(id);
-    setTheme(id);
-  };
   const pickLayout = (id: LayoutId) => {
     applyLayout(id);
     setLayout(id);
@@ -825,62 +998,26 @@ function AppearancePage({ onBack }: { onBack: () => void }) {
         >
           ← Settings
         </button>
-        <h1>Appearance</h1>
+        <h1>Display &amp; Preferences</h1>
         <div className="sub">
-          Choose the wallet&apos;s colour theme and layout. Applies across the
-          wallet and persists on this device.
+          {"How the wallet looks and reads — theme, language, display currency, and layout. Applies across the wallet and persists on this device."}
         </div>
       </div>
       <div className="w-card">
         <div className="w-card__body">
-        <div style={{ marginBottom: 14 }}>
-          <div className="row-label">Theme</div>
-          <div className="row-help" style={{ marginBottom: 12 }}>
-            Pick a palette. Applies across the wallet and persists on this
-            device.
+          {/* The SAME component the Welcome screen renders — zero drift. */}
+          <PreferencesPanel />
+          {/* Layout stays outside the shared panel: it is a desktop shell
+              control with no meaning on the pre-shell Welcome screen. */}
+          <div style={{ marginTop: 14 }}>
+            <ChipRow
+              label="Layout"
+              help="Sidebar keeps a vertical rail on the left. Topbar moves navigation above the content."
+              value={layout}
+              options={LAYOUTS}
+              onChange={pickLayout}
+            />
           </div>
-          <div className="w-theme-grid">
-            {THEMES.map((t) => {
-              const active = t.id === theme;
-              return (
-                <button
-                  key={t.id}
-                  type="button"
-                  className={`w-theme-swatch ${active ? "is-on" : ""}`}
-                  onClick={() => pickTheme(t.id)}
-                  aria-pressed={active}
-                  title={t.desc}
-                >
-                  <span className="w-theme-swatch__top">
-                    <span
-                      className="w-theme-swatch__dot"
-                      style={{
-                        background: t.swatch,
-                        boxShadow: `0 0 12px ${t.swatch}55`,
-                      }}
-                    />
-                    <span className="w-theme-swatch__label">{t.label}</span>
-                    {active ? (
-                      <span className="w-theme-swatch__check" aria-hidden="true">
-                        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2">
-                          <path d="m2 6 3 3 5-6" />
-                        </svg>
-                      </span>
-                    ) : null}
-                  </span>
-                  <span className="w-theme-swatch__desc">{t.desc}</span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-        <ChipRow
-          label="Layout"
-          help="Sidebar keeps a vertical rail on the left. Topbar moves navigation above the content."
-          value={layout}
-          options={LAYOUTS}
-          onChange={pickLayout}
-        />
         </div>
       </div>
     </div>
@@ -913,12 +1050,11 @@ function ChainRegistryCard() {
   }, []);
 
   return (
-    <div className="w-card">
-      <div className="w-card__head">
-        <h3>Chain registry</h3>
-        <span className="w-live-pill">live</span>
-      </div>
-      <div className="w-card__body">
+    <CollapsibleSection
+      title="Chain registry"
+      value={<span className="w-live-pill">live</span>}
+    >
+      <div>
         <div className="w-kv">
           <span className="k">Network</span>
           <span className="v">{registry?.display_name ?? "testnet-69420"}</span>
@@ -956,6 +1092,6 @@ function ChainRegistryCard() {
           compile-time; this card is informational.
         </div>
       </div>
-    </div>
+    </CollapsibleSection>
   );
 }

@@ -39,6 +39,12 @@
   /* Status */
   --ok:    #7ee3c1;
   --warn:  #f4c97a;
+  /* The warn colour as an RGB triplet, so warn-tinted chrome composes with
+     rgba(var(--warn-glow), α) and TRACKS THE ACTIVE THEME. A frozen rgba
+     literal looks correct on whichever theme it was authored against and is
+     silently wrong on the other eleven. The 11 data-theme blocks each carry
+     their own; this is the base block's — which IS the default theme. */
+  --warn-glow: 244, 201, 122;
   --alert: #ff8a9a;
   --err:   #ff8a9a;
   --info:  #7c7fff;
@@ -75,4 +81,19 @@
   --w-green:     #6ad39a;
   --w-red:       #ff8a9a;
   --w-yellow:    #f4c97a;
+
+  /* Name-registry category badges — the five hierarchical categories, and only
+     those. No token exists for any other taxonomy, so an unknown category has
+     nothing to render with and correctly renders nothing. Themes may override.
+     Muted background / legible foreground pairs. */
+  --cat-human-bg:    rgba(127, 178, 255, 0.14);
+  --cat-human-fg:    #9cc4ff;
+  --cat-agent-bg:    rgba(178, 140, 255, 0.14);
+  --cat-agent-fg:    #c0a6ff;
+  --cat-cluster-bg:  rgba(106, 211, 154, 0.14);
+  --cat-cluster-fg:  #8adfb2;
+  --cat-contract-bg: rgba(244, 201, 122, 0.14);
+  --cat-contract-fg: #f0cf90;
+  --cat-system-bg:   rgba(160, 168, 180, 0.14);
+  --cat-system-fg:   #b4bcc8;
 }
