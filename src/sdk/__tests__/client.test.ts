@@ -91,7 +91,7 @@ describe("setEndpoint / subscribeEndpoint / currentEndpoint", () => {
   });
 
   it("does not re-notify when switching to the already-active endpoint", () => {
-    const target = sdkTestnetRpcEndpoints()[1]!;
+    const target = sdkTestnetRpcEndpoints()[0]!;
     setEndpoint(target);
     const seen: string[] = [];
     const unsubscribe = subscribeEndpoint((url) => seen.push(url));
