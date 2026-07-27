@@ -10,8 +10,6 @@ import { Settings } from "../Settings";
 function renderSettings(initialSubPage?: "main" | "appearance") {
   return renderWithProviders(
     <Settings
-      steleEnabled={false}
-      setSteleEnabled={vi.fn()}
       experimentalEnabled={false}
       setExperimentalEnabled={vi.fn()}
       initialSubPage={initialSubPage}

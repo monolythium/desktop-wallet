@@ -8,8 +8,8 @@ import {
 
 // A stand-in icon (the filter never renders it).
 const ic = (() => null) as unknown as NavItem["icon"];
-const ALL_OFF = { developerModeEnabled: false, steleEnabled: false, experimentalEnabled: false };
-const ALL_ON = { developerModeEnabled: true, steleEnabled: true, experimentalEnabled: true };
+const ALL_OFF = { developerModeEnabled: false, experimentalEnabled: false };
+const ALL_ON = { developerModeEnabled: true, experimentalEnabled: true };
 
 describe("visibleNav", () => {
   it("drops a category once all its items are filtered out (no empty headers)", () => {
@@ -21,19 +21,18 @@ describe("visibleNav", () => {
     expect(visibleNav(cats, { ...ALL_OFF, experimentalEnabled: true }).map((c) => c.id)).toEqual(["a", "b"]);
   });
 
-  it("gates stele/experimental items by their flags", () => {
+  it("gates experimental items by their flag", () => {
     const cats: NavCategory[] = [
       {
         id: "p",
         items: [
           { id: "always", label: "A", icon: ic, route: "home" },
-          { id: "stele", label: "S", icon: ic, route: "stele", steleOnly: true },
           { id: "exp", label: "E", icon: ic, route: "agents", experimentalOnly: true },
         ],
       },
     ];
     expect(visibleNav(cats, ALL_OFF)[0]!.items.map((i) => i.id)).toEqual(["always"]);
-    expect(visibleNav(cats, ALL_ON)[0]!.items.map((i) => i.id)).toEqual(["always", "stele", "exp"]);
+    expect(visibleNav(cats, ALL_ON)[0]!.items.map((i) => i.id)).toEqual(["always", "exp"]);
   });
 
   it("keeps developerOnly items discoverable regardless of the flag (the destination stubs)", () => {

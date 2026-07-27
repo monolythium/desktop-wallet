@@ -52,26 +52,18 @@ describe("the scan is non-vacuous", () => {
 
   it("reached the files the sweep fixed", () => {
     // Named so a rename that made the glob miss them cannot pass as "clean".
+    // The sweep also covered three Stele-surface screens; those were deleted
+    // with that surface, so Networks is the surviving anchor.
     const paths = SHIPPED.map((f) => f.rel);
-    for (const rel of [
-      "components/ApprovalOverlay.tsx",
-      "pages/Inbox.tsx",
-      "pages/Stele.tsx",
-      "pages/Networks.tsx",
-    ]) {
+    for (const rel of ["pages/Networks.tsx"]) {
       expect(paths).toContain(rel);
     }
   });
 });
 
 describe("no opacity-dimmed TEXT in shipped components", () => {
-  it("the four swept files carry no inline opacity at all", () => {
-    for (const rel of [
-      "components/ApprovalOverlay.tsx",
-      "pages/Inbox.tsx",
-      "pages/Stele.tsx",
-      "pages/Networks.tsx",
-    ]) {
+  it("the swept files carry no inline opacity at all", () => {
+    for (const rel of ["pages/Networks.tsx"]) {
       const f = SHIPPED.find((x) => x.rel === rel)!;
       expect(INLINE_OPACITY.test(f.source), rel).toBe(false);
     }
@@ -116,11 +108,7 @@ describe("no opacity-dimmed TEXT in shipped components", () => {
 
 describe("the swept sites use token tiers", () => {
   it("each fixed label carries an --fg-* colour instead", () => {
-    for (const rel of [
-      "components/ApprovalOverlay.tsx",
-      "pages/Inbox.tsx",
-      "pages/Stele.tsx",
-    ]) {
+    for (const rel of ["pages/Networks.tsx"]) {
       const f = SHIPPED.find((x) => x.rel === rel)!;
       expect(f.source, rel).toMatch(/color:\s*"var\(--fg-\d00\)"/);
     }
@@ -129,11 +117,7 @@ describe("the swept sites use token tiers", () => {
   it("no fixed site hardcodes a hex text colour", () => {
     // Law 8.4 — a hardcoded colour is a theme-fragility defect even when it
     // passes AA on the theme it was authored against.
-    for (const rel of [
-      "components/ApprovalOverlay.tsx",
-      "pages/Inbox.tsx",
-      "pages/Networks.tsx",
-    ]) {
+    for (const rel of ["pages/Networks.tsx"]) {
       const f = SHIPPED.find((x) => x.rel === rel)!;
       expect(f.source, rel).not.toMatch(/color:\s*["']#[0-9a-fA-F]{3,8}["']/);
     }

@@ -19,11 +19,10 @@ interface Props {
   route: Route;
   setRoute: (r: Route) => void;
   developerModeEnabled: boolean;
-  steleEnabled: boolean;
   experimentalEnabled: boolean;
 }
 
-export function Sidebar({ route, setRoute, developerModeEnabled, steleEnabled, experimentalEnabled }: Props) {
+export function Sidebar({ route, setRoute, developerModeEnabled, experimentalEnabled }: Props) {
   const wallet = useActiveWallet();
   const { lock } = useAutoLock();
   // Rail collapse — a display preference persisted via the theme/display store
@@ -37,7 +36,6 @@ export function Sidebar({ route, setRoute, developerModeEnabled, steleEnabled, e
 
   const categories = visibleNav(NAV_CATEGORIES, {
     developerModeEnabled,
-    steleEnabled,
     experimentalEnabled,
   });
   const mainGroups = categories.filter((c) => !c.footer);

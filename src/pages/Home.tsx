@@ -47,9 +47,7 @@ import {
 } from "../sdk/balance-display";
 import { BalanceFigure } from "../components/BalanceFigure";
 import { HeroChips, type HeroChipId } from "../components/HeroChips";
-import { SetupHealthChip } from "../components/SetupHealthChip";
 import { FeaturesHintBar } from "../components/FeaturesHintBar";
-import { NameNudgeCard } from "../components/NameNudgeCard";
 import { useFitText } from "../components/useFitText";
 import { formatLythFixed } from "../sdk/lyth-display";
 import { loadLastKnownBalance, saveLastKnownBalance } from "../sdk/last-known-balance";
@@ -322,15 +320,8 @@ export function Home({ goto }: Props) {
 
   return (
     <div className="w-page">
-      {/* Setup health — summary only, non-blocking, dismissible. Renders only
-          when an applicable step is actually incomplete. */}
-      {walletAddress && <SetupHealthChip address={walletAddress} goto={goto} />}
-      {/* At most ONE hint bar renders; chip and bar may coexist (summary vs
-          next step). */}
+      {/* At most ONE hint bar renders. */}
       {walletAddress && <FeaturesHintBar address={walletAddress} goto={goto} />}
-      {/* Only ever shown on a DEFINITIVE no-name verdict; uncertainty is
-          silence. Reachability-gated so it never points at a closed surface. */}
-      {walletAddress && <NameNudgeCard address={walletAddress} goto={goto} />}
 
       {/* Hero */}
       <div className="w-hero">

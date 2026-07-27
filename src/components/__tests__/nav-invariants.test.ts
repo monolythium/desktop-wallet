@@ -10,12 +10,10 @@ import { describe, expect, it } from "vitest";
 import { NAV_CATEGORIES, visibleNav, type NavFlags } from "../nav-config";
 
 const ALL_OFF: NavFlags = {
-  steleEnabled: false,
   experimentalEnabled: false,
   developerModeEnabled: false,
 };
 const ALL_ON: NavFlags = {
-  steleEnabled: true,
   experimentalEnabled: true,
   developerModeEnabled: true,
 };
@@ -60,7 +58,7 @@ describe("H6 — no 'coming soon', anywhere", () => {
 
 describe("gated entries use a permitted presentation tier", () => {
   // Two tiers are in play, deliberately:
-  //   • PRODUCT surfaces (stele / experimental) have no stub, so they are
+  //   • PRODUCT surfaces (the experimental previews) have no stub, so they are
   //     OMITTED entirely when their flag is off.
   //   • DEVELOPER surfaces stay discoverable with a "dev" badge, because their
   //     destination renders an explanatory stub — a vanished menu item teaches
@@ -68,14 +66,14 @@ describe("gated entries use a permitted presentation tier", () => {
   // Both are tiers the gated-feature law allows; neither is a "coming soon".
   it("product surfaces disappear when their flag is off", () => {
     const off = itemsOf(visibleNav(NAV_CATEGORIES, ALL_OFF)).map((i) => i.id);
-    for (const gated of ["agents", "ai-trade", "stele"]) {
+    for (const gated of ["agents", "ai-trade"]) {
       expect(off).not.toContain(gated);
     }
   });
 
   it("they reappear when the flag is on", () => {
     const on = itemsOf(visibleNav(NAV_CATEGORIES, ALL_ON)).map((i) => i.id);
-    for (const gated of ["agents", "ai-trade", "stele", "studio", "riscv"]) {
+    for (const gated of ["agents", "ai-trade", "studio", "riscv"]) {
       expect(on).toContain(gated);
     }
   });
@@ -136,16 +134,14 @@ describe("placement laws", () => {
       .filter((b): b is string => b !== undefined);
     expect(badges.length).toBeGreaterThan(0); // non-vacuous
     for (const b of badges) {
-      expect(["preview", "dev", "early"]).toContain(b);
+      expect(["preview", "dev"]).toContain(b);
     }
   });
 
   it("every badge belongs to a gated entry (no badge without a gate)", () => {
     for (const item of itemsOf(NAV_CATEGORIES)) {
       if (item.badge === undefined) continue;
-      expect(
-        item.steleOnly === true || item.experimentalOnly === true || item.developerOnly === true,
-      ).toBe(true);
+      expect(item.experimentalOnly === true || item.developerOnly === true).toBe(true);
     }
   });
 

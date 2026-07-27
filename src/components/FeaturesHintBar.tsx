@@ -9,7 +9,6 @@ import type { Route } from "./types";
 import {
   readDeveloperMode,
   readExperimentalEnabled,
-  readSteleEnabled,
 } from "../sdk/feature-flags";
 import { dismissFeaturesHint, isFeaturesHintDismissed, pickHint } from "../sdk/hint-coordinator";
 
@@ -23,8 +22,7 @@ export function FeaturesHintBar({
   const addressLower = address.toLowerCase();
   const [dismissed, setDismissed] = useState(false);
 
-  const anyFlagOff =
-    !readSteleEnabled() || !readExperimentalEnabled() || !readDeveloperMode();
+  const anyFlagOff = !readExperimentalEnabled() || !readDeveloperMode();
 
   const hint = pickHint({
     anyFlagOff,
@@ -47,8 +45,8 @@ export function FeaturesHintBar({
         Discover more features
       </div>
       <div style={{ marginTop: 3, fontSize: 12, lineHeight: 1.5, color: "var(--fg-300)" }}>
-        Stele marketplace, agent wallets, the autovote planner, Mono Studio — opt in to the
-        surfaces you want in Settings.
+        Agent wallets, the AI Trading preview, Mono Studio — opt in to the surfaces you
+        want in Settings.
       </div>
       <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
         <button

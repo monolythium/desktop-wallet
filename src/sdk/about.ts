@@ -16,7 +16,6 @@ import {
   readNotificationDetails,
   readNotificationsEnabled,
   readNotifyWhileLocked,
-  readSteleEnabled,
 } from "./feature-flags";
 import { featureLabel } from "./feature-meta";
 import { readDeveloperMode } from "./studio-host";
@@ -56,7 +55,6 @@ export async function readWalletVersion(): Promise<string> {
 /** The user-toggleable flags surfaced as "Active features". */
 export interface FeatureFlagState {
   experimental: boolean;
-  stele: boolean;
   developer: boolean;
   incoming: boolean;
   notifications: boolean;
@@ -68,7 +66,6 @@ export interface FeatureFlagState {
 export function readFeatureFlagState(): FeatureFlagState {
   return {
     experimental: readExperimentalEnabled(),
-    stele: readSteleEnabled(),
     developer: readDeveloperMode(),
     incoming: readIncomingEnabled(),
     notifications: readNotificationsEnabled(),
@@ -84,14 +81,13 @@ export interface FeatureChip {
 
 // The flag → label map, in a stable display order.
 //
-// The two PROGRESSIVE-DISCLOSURE flags take their labels from `feature-meta.ts`
-// so the chip here and the row in the Settings Features grid cannot drift apart
-// — they used to, calling the same flag "Stele governance" and "Stele
-// marketplace". The remaining entries are operational flags that appear in no
-// grid, so About still owns their labels.
+// The PROGRESSIVE-DISCLOSURE flags take their labels from `feature-meta.ts` so
+// the chip here and the row in the Settings Features grid cannot drift apart —
+// they used to, naming the same flag two different ways. The remaining entries
+// are operational flags that appear in no grid, so About still owns their
+// labels.
 const FEATURE_CHIPS: FeatureChip[] = [
   { id: "experimental", label: featureLabel("experimental") ?? "Experimental" },
-  { id: "stele", label: featureLabel("stele") ?? "Stele marketplace" },
   { id: "developer", label: "Developer mode" },
   { id: "incoming", label: "Incoming-transfer alerts" },
   { id: "notifications", label: "System notifications" },

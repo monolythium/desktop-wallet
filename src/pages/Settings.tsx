@@ -49,13 +49,6 @@ import {
 } from "../sdk/feature-meta";
 import { fetchLiveTestnetRegistry } from "../sdk/live-registry";
 import {
-  outboundMcpStart,
-  outboundMcpStatus,
-  outboundMcpStop,
-  OutboundMcpCallError,
-  type McpOutboundStatus,
-} from "../sdk/outbound-mcp";
-import {
   readDevkitChannel,
   writeDevkitChannel,
   type NativeDevkitChannel,
@@ -72,8 +65,6 @@ import { CollapsibleSection } from "../components/CollapsibleSection";
 import { useDeveloperMode } from "../sdk/developer-mode";
 
 interface SettingsProps {
-  steleEnabled: boolean;
-  setSteleEnabled: (enabled: boolean) => void;
   experimentalEnabled: boolean;
   setExperimentalEnabled: (enabled: boolean) => void;
   /** Open directly on a sub-page (for the sidebar shortcuts — Display &
@@ -83,7 +74,7 @@ interface SettingsProps {
 
 type SettingsSubPage = "main" | "notifications" | "appearance" | "reset" | "reveal";
 
-export function Settings({ steleEnabled, setSteleEnabled, experimentalEnabled, setExperimentalEnabled, initialSubPage }: SettingsProps) {
+export function Settings({ experimentalEnabled, setExperimentalEnabled, initialSubPage }: SettingsProps) {
   const wallet = useActiveWallet();
   const [devkitChannel, setDevkitChannel] = useState<NativeDevkitChannel>(() => readDevkitChannel());
   const [autoLockMinutes, setAutoLockMinutes] = useState<number>(() => readAutoLockMinutes());
@@ -312,24 +303,23 @@ export function Settings({ steleEnabled, setSteleEnabled, experimentalEnabled, s
 
       <ChainRegistryCard />
 
-      {/* ONE Features card over the wallet's own flag store — the Stele and
-          Experimental cards were separate before, which made two lists of
+      {/* ONE Features card over the wallet's own flag store — the product
+          feature flags were separate cards before, which made two lists of
           product surfaces that could drift apart. Developer mode keeps its own
           card below: it is not a product feature. */}
       <CollapsibleSection
         title="Features"
-        // Both switches report from the heading. Collapsing a feature flag out
+        // Every switch reports from the heading. Collapsing a feature flag out
         // of sight would leave a user guessing which surfaces are live.
         value={FEATURE_META.map(
-          (f) =>
-            `${f.label} ${(f.id === "stele" ? steleEnabled : experimentalEnabled) ? "on" : "off"}`,
+          (f) => `${f.label} ${experimentalEnabled ? "on" : "off"}`,
         ).join(" · ")}
       >
         <div>
           <p className="row-help" style={{ margin: "0 0 14px" }}>{FEATURES_INTRO}</p>
           {FEATURE_META.map((feature) => {
-            const on = feature.id === "stele" ? steleEnabled : experimentalEnabled;
-            const set = feature.id === "stele" ? setSteleEnabled : setExperimentalEnabled;
+            const on = experimentalEnabled;
+            const set = setExperimentalEnabled;
             return (
               <div className="w-setting-row" key={feature.id}>
                 <div>
@@ -355,8 +345,6 @@ export function Settings({ steleEnabled, setSteleEnabled, experimentalEnabled, s
           <p className="row-help" style={{ margin: "6px 0 0" }}>{FEATURES_WHY_BODY}</p>
         </div>
       </CollapsibleSection>
-
-      {steleEnabled ? <OutboundMcpCard /> : null}
 
       <CollapsibleSection
         title="Developer mode"
@@ -815,127 +803,6 @@ function RevealPhrasePage({ onBack }: { onBack: () => void }) {
         </div>
       </div>
     </div>
-  );
-}
-
-function OutboundMcpCard() {
-  const [status, setStatus] = useState<McpOutboundStatus | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [showToken, setShowToken] = useState(false);
-
-  const refresh = useCallback(async () => {
-    setError(null);
-    try {
-      const s = await outboundMcpStatus();
-      setStatus(s);
-    } catch (cause) {
-      if (cause instanceof OutboundMcpCallError) {
-        setError(cause.message);
-        setStatus(null);
-      } else {
-        setError(String(cause));
-      }
-    }
-  }, []);
-
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
-
-  const toggle = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      const next = status?.enabled ? await outboundMcpStop() : await outboundMcpStart();
-      setStatus(next);
-    } catch (cause) {
-      if (cause instanceof OutboundMcpCallError) setError(cause.message);
-      else setError(String(cause));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const copyJson = () => {
-    if (!status?.enabled || !status.url || !status.auth_token) return;
-    const config = {
-      mcpServers: {
-        "monolythium-wallet": {
-          url: status.url,
-          headers: { Authorization: `Bearer ${status.auth_token}` },
-        },
-      },
-    };
-    navigator.clipboard?.writeText(JSON.stringify(config, null, 2));
-  };
-
-  return (
-    <CollapsibleSection
-      title="Outbound MCP"
-      value={
-        <span className="w-todo__pill">
-          {status == null ? "loading" : status.enabled ? "running" : "stopped"}
-        </span>
-      }
-    >
-      <div>
-        {error ? (
-          <div className="row-help" style={{ color: "var(--w-text-2, #999)", marginBottom: 12 }}>
-            {error}
-          </div>
-        ) : null}
-
-        <div className="w-setting-row">
-          <div>
-            <div className="row-label">Expose this wallet as an MCP server</div>
-            <div className="row-help">
-              Lets desktop MCP clients call Stele tools (search providers,
-              request bookings, query balance) on your behalf. Loopback-only with a per-session
-              bearer token. Every destructive call still routes through the approval bridge.
-            </div>
-          </div>
-          <button
-            type="button"
-            className={`w-chip ${status?.enabled ? "is-on" : ""}`}
-            onClick={toggle}
-            disabled={busy}
-          >
-            {busy ? "…" : status?.enabled ? "Stop" : "Start"}
-          </button>
-        </div>
-
-        {status?.enabled && status.url ? (
-          <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 6 }}>
-            <div className="row-help">
-              <div className="row-label">URL</div>
-              <code>{status.url}</code>
-            </div>
-            <div className="row-help">
-              <div className="row-label">Auth token</div>
-              <code>{showToken ? status.auth_token : "•".repeat(24)}</code>
-              <button
-                type="button"
-                className="btn btn--sm"
-                onClick={() => setShowToken((v) => !v)}
-                style={{ marginLeft: 8 }}
-              >
-                {showToken ? "Hide" : "Reveal"}
-              </button>
-            </div>
-            <div className="row-help">
-              <div className="row-label">Scopes</div>
-              {status.scopes.join(" · ")}
-            </div>
-            <div>
-              <button type="button" className="btn btn--sm" onClick={copyJson}>
-                Copy MCP client config
-              </button>
-            </div>
-          </div>
-        ) : null}
-      </div>
-    </CollapsibleSection>
   );
 }
 
