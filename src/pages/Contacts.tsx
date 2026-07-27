@@ -6,9 +6,8 @@
 // than ellipsising: an ellipsis hides exactly the characters a verifying user
 // needs to check.
 //
-// A compact AddressBookCard also lives in Inbox.tsx; this is the canonical
-// full-page management surface (list, search, add, edit, remove, live account
-// policy probe).
+// This is the canonical full-page management surface (list, search, add, edit,
+// remove, live account policy probe).
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useActiveWallet } from "../sdk/active-wallet";

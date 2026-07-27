@@ -3,9 +3,9 @@
 // from the main wallet vault catalog.
 //
 // We keep this out of `vaultCatalog.ts` on purpose: agent sub-accounts are
-// a distinct concept (a delegated-spend identity bound to a principal), and
-// the in-flight Stele merge already churns the catalog. A dedicated store
-// avoids a schema collision and keeps the agent surface self-contained.
+// a distinct concept (a delegated-spend identity bound to a principal). A
+// dedicated store avoids a schema collision and keeps the agent surface
+// self-contained.
 //
 // The registry stores ONLY non-secret metadata (slot, label, addresses,
 // the controlling principal). Key material lives in the OS keychain under
@@ -19,7 +19,7 @@ const STATE_KEY = "state";
 export interface AgentEntry {
   /** Keychain account slot the agent vault lives under. */
   slot: string;
-  /** User-facing label / purpose (e.g. "Travel booking agent"). */
+  /** User-facing label / purpose (e.g. "Treasury reporting agent"). */
   label: string;
   /** Agent internal 20-byte address (`0x…`). */
   addressHex: string;

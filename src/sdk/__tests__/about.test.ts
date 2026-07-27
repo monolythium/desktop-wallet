@@ -18,7 +18,6 @@ import type { ProbeResult } from "../peers";
 
 const ALL_OFF: FeatureFlagState = {
   experimental: false,
-  stele: false,
   developer: false,
   incoming: false,
   notifications: false,

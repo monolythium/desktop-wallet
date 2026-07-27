@@ -11,7 +11,6 @@
 // skipping the probe entirely and treating the wallet as already set up.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ApprovalOverlay } from "./components/ApprovalOverlay";
 import { Onboarding } from "./components/Onboarding";
 import { PendingTxReconciler } from "./components/PendingTxReconciler";
 import { IncomingPoller } from "./components/IncomingPoller";
@@ -32,7 +31,6 @@ import { AiTrading } from "./pages/AiTrading";
 import { Bridges } from "./pages/Bridges";
 import { Contacts } from "./pages/Contacts";
 import { Home } from "./pages/Home";
-import { Inbox } from "./pages/Inbox";
 import { News } from "./pages/News";
 import { MonoStudio } from "./pages/MonoStudio";
 import { Notifications } from "./pages/Notifications";
@@ -40,13 +38,11 @@ import { Operators } from "./pages/Operators";
 import { OperatorManagement } from "./pages/OperatorManagement";
 import { Networks } from "./pages/Networks";
 import { NetworkStatus } from "./pages/NetworkStatus";
-import { Provider } from "./pages/Provider";
 import { Resources } from "./pages/Resources";
 import { Help } from "./pages/Help";
 import { RiscvContracts } from "./pages/RiscvContracts";
 import { Settings } from "./pages/Settings";
 import { Delegate } from "./pages/Delegate";
-import { Stele } from "./pages/Stele";
 import { TokenDetail } from "./pages/TokenDetail";
 import { Tokens } from "./pages/Tokens";
 import { Trade } from "./pages/Trade";
@@ -68,11 +64,9 @@ import {
 import {
   readDeveloperMode,
   readExperimentalEnabled,
-  readSteleEnabled,
   stampDeveloperModeFirstSeenAt,
   writeDeveloperMode,
   writeExperimentalEnabled,
-  writeSteleEnabled,
 } from "./sdk/feature-flags";
 import { DeveloperModeProvider } from "./sdk/developer-mode";
 import "./styles/tokens.css";
@@ -113,7 +107,6 @@ function isTauri(): boolean {
 export function App() {
   const [route, setRoute] = useState<Route>(() => readRoute());
   const [developerModeEnabled, setDeveloperModeEnabledState] = useState<boolean>(() => readDeveloperMode());
-  const [steleEnabled, setSteleEnabledState] = useState<boolean>(() => readSteleEnabled());
   const [experimentalEnabled, setExperimentalEnabledState] = useState<boolean>(() => readExperimentalEnabled());
   const [boot, setBoot] = useState<BootState>(() =>
     isTauri() ? { kind: "probing" } : { kind: "ready" },
@@ -210,15 +203,8 @@ export function App() {
 
   // Developer mode persists + stamps firstSeenAt through the control below, and
   // its gated pages (Studio, RISC-V) render an in-place stub when off — so there
-  // is no route bounce to enforce here (unlike stele/experimental, which have no
-  // stub and bounce home).
-  useEffect(() => {
-    writeSteleEnabled(steleEnabled);
-    if (!steleEnabled && (route === "stele" || route === "inbox" || route === "provider")) {
-      setRoute("home");
-    }
-  }, [steleEnabled, route]);
-
+  // is no route bounce to enforce here (unlike the experimental surfaces, which
+  // have no stub and bounce home).
   useEffect(() => {
     writeExperimentalEnabled(experimentalEnabled);
     if (!experimentalEnabled && (route === "agents" || route === "ai-trade")) {
@@ -247,11 +233,6 @@ export function App() {
     [developerModeEnabled, setDeveloperMode],
   );
 
-  const setSteleEnabled = (enabled: boolean) => {
-    setSteleEnabledState(enabled);
-    writeSteleEnabled(enabled);
-  };
-
   const setExperimentalEnabled = (enabled: boolean) => {
     setExperimentalEnabledState(enabled);
     writeExperimentalEnabled(enabled);
@@ -261,8 +242,6 @@ export function App() {
   // phrase / Reset) all render the same page, opened on the right sub-page.
   const settingsPage = (initialSubPage?: "appearance" | "reveal" | "reset") => (
     <Settings
-      steleEnabled={steleEnabled}
-      setSteleEnabled={setSteleEnabled}
       experimentalEnabled={experimentalEnabled}
       setExperimentalEnabled={setExperimentalEnabled}
       initialSubPage={initialSubPage}
@@ -291,7 +270,6 @@ export function App() {
           route={route}
           setRoute={setRoute}
           developerModeEnabled={developerModeEnabled}
-          steleEnabled={steleEnabled}
           experimentalEnabled={experimentalEnabled}
         />
         <Topbar route={route} setRoute={setRoute} />
@@ -343,9 +321,6 @@ export function App() {
           {route === "trade" ? <Trade /> : null}
           {route === "ai-trade" ? <AiTrading /> : null}
           {route === "news" ? <News /> : null}
-          {route === "stele" && steleEnabled ? <Stele /> : null}
-          {route === "inbox" && steleEnabled ? <Inbox /> : null}
-          {route === "provider" && steleEnabled ? <Provider /> : null}
           {route === "notifications" ? <Notifications /> : null}
           {route === "about" ? <About goto={setRoute} /> : null}
           {route === "resources" ? <Resources /> : null}
@@ -357,7 +332,6 @@ export function App() {
           {route === "reset" ? settingsPage("reset") : null}
           </ErrorBoundary>
         </main>
-        {steleEnabled ? <ApprovalOverlay /> : null}
         <PendingTxReconciler />
         <IncomingPoller />
       </div>

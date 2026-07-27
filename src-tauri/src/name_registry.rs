@@ -257,8 +257,8 @@ pub fn validate(name: &str) -> Result<NameAvailability, NameError> {
 
 /// Tauri command: validate a `.mono` name and estimate its registration
 /// price. Pure client-side check — no chain RPC required. Use this in
-/// Onboarding (when the user picks a name), Send (recipient autocomplete),
-/// and Stele (provider profile lookup) before any signing flow.
+/// Onboarding (when the user picks a name) and Send (recipient autocomplete)
+/// before any signing flow.
 #[tauri::command]
 pub fn name_check_availability(name: String) -> Result<NameAvailability, NameError> {
     validate(&name)

@@ -9,10 +9,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { screen } from "@testing-library/react";
 import { renderWithProviders } from "../../test/renderWithProviders";
 
-const flags = vi.hoisted(() => ({ stele: false, experimental: false, developer: false }));
+const flags = vi.hoisted(() => ({ experimental: false, developer: false }));
 vi.mock("../../sdk/feature-flags", async (orig) => ({
   ...(await orig<typeof import("../../sdk/feature-flags")>()),
-  readSteleEnabled: () => flags.stele,
   readExperimentalEnabled: () => flags.experimental,
   readDeveloperMode: () => flags.developer,
 }));
@@ -32,7 +31,6 @@ function bar(): HTMLElement | null {
 
 beforeEach(() => {
   localStorage.clear();
-  flags.stele = false;
   flags.experimental = false;
   flags.developer = false;
 });
@@ -63,13 +61,12 @@ describe("the hint bar", () => {
     expect(screen.getByText("Discover more features")).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Stele marketplace, agent wallets, the autovote planner, Mono Studio — opt in to the surfaces you want in Settings.",
+        "Agent wallets, the AI Trading preview, Mono Studio — opt in to the surfaces you want in Settings.",
       ),
     ).toBeInTheDocument();
   });
 
-  it("is HIDDEN when all three flags are on — nothing left to discover", () => {
-    flags.stele = true;
+  it("is HIDDEN when every flag is on — nothing left to discover", () => {
     flags.experimental = true;
     flags.developer = true;
     renderWithProviders(<FeaturesHintBar address={ADDR} goto={vi.fn()} />);

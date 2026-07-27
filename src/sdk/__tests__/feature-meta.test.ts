@@ -14,12 +14,11 @@ import {
   FEATURE_META,
   featureLabel,
 } from "../feature-meta";
-import { EXPERIMENTAL_ENABLED_KEY, STELE_ENABLED_KEY } from "../feature-flags";
+import { EXPERIMENTAL_ENABLED_KEY } from "../feature-flags";
 import { activeFeatureChips, type FeatureFlagState } from "../about";
 
 const OFF: FeatureFlagState = {
   experimental: false,
-  stele: false,
   developer: false,
   incoming: false,
   notifications: false,
@@ -28,8 +27,8 @@ const OFF: FeatureFlagState = {
 };
 
 describe("the register", () => {
-  it("carries exactly the two disclosure flags", () => {
-    expect(FEATURE_META.map((f) => f.id)).toEqual(["stele", "experimental"]);
+  it("carries exactly the disclosure flags", () => {
+    expect(FEATURE_META.map((f) => f.id)).toEqual(["experimental"]);
   });
 
   it("developer mode is NOT a grid row", () => {
@@ -42,8 +41,7 @@ describe("the register", () => {
   });
 
   it("reuses the existing storage keys — no new namespace", () => {
-    expect(FEATURE_META[0]!.storageKey).toBe(STELE_ENABLED_KEY);
-    expect(FEATURE_META[1]!.storageKey).toBe(EXPERIMENTAL_ENABLED_KEY);
+    expect(FEATURE_META[0]!.storageKey).toBe(EXPERIMENTAL_ENABLED_KEY);
   });
 
   it("every row has a label, a pill and a tagline", () => {
@@ -57,7 +55,6 @@ describe("the register", () => {
 
 describe("the tagline law — name what you gate, and only that", () => {
   const experimental = FEATURE_META.find((f) => f.id === "experimental")!;
-  const stele = FEATURE_META.find((f) => f.id === "stele")!;
 
   it("Experimental does NOT claim the autovote planner", () => {
     // It graduated to default-on. Claiming it here sends a user to flip a flag
@@ -76,16 +73,7 @@ describe("the tagline law — name what you gate, and only that", () => {
     expect(experimental.tagline).toContain("bridge risk panel");
   });
 
-  it("Stele names its three surfaces", () => {
-    expect(stele.tagline).toContain("Stele");
-    expect(stele.tagline).toContain("Inbox");
-    expect(stele.tagline).toContain("Provider");
-  });
-
-  it("ships the corrected taglines verbatim", () => {
-    expect(stele.tagline).toBe(
-      "Stele, Inbox, and Provider marketplace surfaces — browse, book, and sell services on-chain with the same key that holds your LYTH. Early access.",
-    );
+  it("ships the corrected tagline verbatim", () => {
     expect(experimental.tagline).toBe(
       "Agents (agent sub-accounts and spending policy), the AI Trading preview, and the per-route bridge risk panel. Preview surfaces, off by default.",
     );
@@ -110,13 +98,11 @@ describe("the card copy", () => {
 });
 
 describe("About chips read their labels from here (no drift)", () => {
-  it("the two disclosure chips use the FEATURE_META labels", () => {
-    const chips = activeFeatureChips({ ...OFF, stele: true, experimental: true });
+  it("the disclosure chips use the FEATURE_META labels", () => {
+    const chips = activeFeatureChips({ ...OFF, experimental: true });
     const byId = new Map(chips.map((c) => [c.id, c.label]));
-    expect(byId.get("stele")).toBe(featureLabel("stele"));
     expect(byId.get("experimental")).toBe(featureLabel("experimental"));
-    // Concretely — the old chip called this one "Stele governance".
-    expect(byId.get("stele")).toBe("Stele marketplace");
+    expect(byId.get("experimental")).toBe("Experimental");
   });
 
   it("operational flags keep their own labels (they appear in no grid)", () => {

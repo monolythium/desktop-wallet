@@ -129,7 +129,7 @@ describe("§F.3 — the honesty intro", () => {
 });
 
 describe("S2 — Phase 01's discoverability decision stands", () => {
-  const flags = { steleEnabled: false, experimentalEnabled: false };
+  const flags = { experimentalEnabled: false };
 
   it("the entry stays visible with developer mode OFF, carrying its badge", () => {
     const nav = visibleNav(NAV_CATEGORIES, { ...flags, developerModeEnabled: false });

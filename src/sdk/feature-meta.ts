@@ -2,9 +2,9 @@
 //
 // Two surfaces name these features — the Settings grid and the About page's
 // "Active features" chips — and before this module they named them
-// independently. That is how a flag ends up called "Stele marketplace" in one
-// place and "Stele governance" in the other, and how a tagline goes on
-// describing a surface the flag stopped gating.
+// independently. That is how one flag ends up under two different names in two
+// places, and how a tagline goes on describing a surface the flag stopped
+// gating.
 //
 // So the labels live HERE and both surfaces read them.
 //
@@ -19,14 +19,14 @@
 // only enable path is its own guarded toggle. A bare switch in a grid of
 // product features would be the wrong affordance for it.
 
-import { EXPERIMENTAL_ENABLED_KEY, STELE_ENABLED_KEY } from "./feature-flags";
+import { EXPERIMENTAL_ENABLED_KEY } from "./feature-flags";
 
 /** One disclosure flag as the UI presents it. */
 export interface FeatureMeta {
   /** The existing localStorage key — no new namespace was introduced. */
   storageKey: string;
   /** Stable id, used as a React key and by the About chip mapping. */
-  id: "stele" | "experimental";
+  id: "experimental";
   label: string;
   /** Short status pill beside the label. */
   pill: string;
@@ -34,14 +34,6 @@ export interface FeatureMeta {
 }
 
 export const FEATURE_META: readonly FeatureMeta[] = [
-  {
-    storageKey: STELE_ENABLED_KEY,
-    id: "stele",
-    label: "Stele marketplace",
-    pill: "early access",
-    tagline:
-      "Stele, Inbox, and Provider marketplace surfaces — browse, book, and sell services on-chain with the same key that holds your LYTH. Early access.",
-  },
   {
     storageKey: EXPERIMENTAL_ENABLED_KEY,
     id: "experimental",
@@ -66,8 +58,8 @@ export const FEATURES_WHY_BODY =
   'The wallet ships as a single binary with optional advanced surfaces — not a separate "AI-enhanced wallet" SKU. The default surface stays minimal so non-technical users aren\'t overwhelmed; power users opt in to what they want. New features in future phases land here as additional toggles, not as separate wallet builds.';
 
 /** The label for a disclosure flag, or null if the id is not one. Lets the
- *  About chip list defer to this module for the two flags it covers while
- *  keeping its own labels for the operational flags it also lists. */
+ *  About chip list defer to this module for the flags it covers while keeping
+ *  its own labels for the operational flags it also lists. */
 export function featureLabel(id: string): string | null {
   return FEATURE_META.find((f) => f.id === id)?.label ?? null;
 }

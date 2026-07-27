@@ -20,9 +20,6 @@ export type Route =
   | "trade"
   | "ai-trade"
   | "news"
-  | "stele"
-  | "inbox"
-  | "provider"
   | "notifications"
   | "settings"
   | "display"
@@ -52,9 +49,6 @@ export const ALL_ROUTES: Route[] = [
   "trade",
   "ai-trade",
   "news",
-  "stele",
-  "inbox",
-  "provider",
   "notifications",
   "settings",
   "display",

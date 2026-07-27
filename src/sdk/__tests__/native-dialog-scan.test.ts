@@ -51,16 +51,16 @@ describe("the scan is non-vacuous", () => {
     expect(SHIPPED.length).toBeGreaterThan(50);
   });
 
-  it("reached the two pages that carried the dialogs", () => {
-    // Named explicitly: these held 21 call sites between them. If a rename made
-    // the glob miss them, "no offenders" would be true and meaningless.
+  it("reached the page that carried the dialogs", () => {
+    // Named explicitly: if a rename made the glob miss it, "no offenders" would
+    // be true and meaningless. The other converted page was a Stele screen and
+    // was deleted with that surface.
     const paths = SHIPPED.map((f) => f.rel);
     expect(paths).toContain("pages/Agents.tsx");
-    expect(paths).toContain("pages/Provider.tsx");
   });
 
-  it("and those files still exist as substantial modules", () => {
-    for (const rel of ["pages/Agents.tsx", "pages/Provider.tsx"]) {
+  it("and that file still exists as a substantial module", () => {
+    for (const rel of ["pages/Agents.tsx"]) {
       expect(SHIPPED.find((f) => f.rel === rel)!.source.length).toBeGreaterThan(1_000);
     }
   });
@@ -74,8 +74,8 @@ describe("no native dialog survives", () => {
     expect(offenders).toEqual([]);
   });
 
-  it("the two converted pages are clean in CODE", () => {
-    for (const rel of ["pages/Agents.tsx", "pages/Provider.tsx"]) {
+  it("the converted page is clean in CODE", () => {
+    for (const rel of ["pages/Agents.tsx"]) {
       const f = SHIPPED.find((x) => x.rel === rel)!;
       expect(NATIVE_DIALOG.test(f.source), rel).toBe(false);
     }
