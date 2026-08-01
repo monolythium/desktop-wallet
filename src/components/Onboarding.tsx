@@ -281,9 +281,16 @@ export function Onboarding({ onDone }: Props) {
               other Monolythium Wallet. Words are separated by spaces or
               line breaks.
             </p>
+            {/* Necessary but not sufficient — see the note at the same field in
+                AddVaultModal. These close the STANDARD Chromium store; the
+                embedded Edge webview keeps a SEPARATE one that
+                `autocomplete="off"` does not reach, and
+                `generalAutofillEnabled: false` in tauri.conf.json closes that. */}
             <textarea
               autoFocus
               autoCapitalize="none"
+              autoComplete="off"
+              autoCorrect="off"
               spellCheck={false}
               value={importDraft}
               onChange={(e) => setImportDraft(e.target.value)}

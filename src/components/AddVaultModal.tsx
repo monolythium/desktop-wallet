@@ -319,8 +319,20 @@ export function AddVaultModal({ onClose, onAdded }: Props) {
                 <label style={{ ...fieldLabel, marginTop: 12 }}>
                   24-word recovery phrase
                 </label>
+                {/* NECESSARY BUT NOT SUFFICIENT — do not treat these four as the
+                    defence. They govern the STANDARD Chromium autofill store,
+                    which is measurably empty. The embedded Edge webview keeps a
+                    SEPARATE store that `autocomplete="off"` does not reach, and
+                    it captured a recovery phrase typed here. A phrase field also
+                    cannot be `type="password"` (Edge masks those, and a masked
+                    24-word phrase is unusable — which is exactly why this one was
+                    the field that leaked). The control that actually stops it is
+                    `generalAutofillEnabled: false` in tauri.conf.json; these
+                    attributes stay because they close the other store. */}
                 <textarea
                   autoCapitalize="none"
+                  autoComplete="off"
+                  autoCorrect="off"
                   spellCheck={false}
                   value={importDraft}
                   onChange={(e) => setImportDraft(e.target.value)}
