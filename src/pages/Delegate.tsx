@@ -22,6 +22,7 @@ import { useOperations } from "../operations/context";
 import { useActiveWallet } from "../sdk/active-wallet";
 import {
   CLUSTER_DIRECTORY_FIRST_PAGE,
+  DELEGATION_EXECUTION_UNIT_LIMIT,
   DELEGATION_PRECOMPILE,
   buildClaimRewardsCalldata,
   buildDelegateCalldata,
@@ -127,6 +128,7 @@ import {
 } from "../sdk/auto-compound-recheck";
 import { useInFlightClaim } from "../sdk/use-claim-in-flight";
 import { scopeChainKey } from "../sdk/chains";
+import type { OperationFeePlan } from "../sdk/fee-quote";
 
 /**
  * The signed `to` for every delegation write, DERIVED from the constant
@@ -143,6 +145,19 @@ import { scopeChainKey } from "../sdk/chains";
  * cannot be the surface that gets forgotten again.
  */
 const DELEGATION_DETAILS = [{ k: "Precompile (signed `to`)", v: DELEGATION_PRECOMPILE }];
+
+/**
+ * All seven delegation writes price identically — `submitDelegationTx` passes
+ * one limit for every selector — so they declare one plan.
+ *
+ * `DELEGATION_EXECUTION_UNIT_LIMIT` is the constant the seam itself signs, named
+ * rather than repeated: a second literal `150_000n` here is exactly how a shown
+ * and a signed value drift back apart.
+ */
+const DELEGATION_FEE_PLAN: OperationFeePlan = {
+  feeClass: "transfer",
+  executionUnitLimit: DELEGATION_EXECUTION_UNIT_LIMIT,
+};
 
 export function Delegate() {
   const ops = useOperations();
@@ -673,6 +688,7 @@ export function Delegate() {
       title: `Delegate ${weightLabel} to cluster ${clusterId}`,
       subtitle: `Weight ${weightLabel} of your balance — non-custodial, tokens stay liquid`,
       auth: "keychain",
+      feePlan: DELEGATION_FEE_PLAN,
       details: DELEGATION_DETAILS,
       // Every delegation call signs value = 0 and targets a precompile the user
       // never chose. The cluster IS what they chose, so it is the subject, and
@@ -712,7 +728,11 @@ export function Delegate() {
         await assertCapsStillAllow({ action: "delegate", clusterId, moveBps: weightBps });
         const calldata = buildDelegateCalldata({ clusterId, weightBps });
         const result = await withDelegationRevertCopy(
-          () => submitDelegationTx({ seed: ctx.vaultSeed!, data: calldata }),
+          () => submitDelegationTx({
+                seed: ctx.vaultSeed!,
+                data: calldata,
+                resolvedFee: ctx.resolvedFee,
+              }),
           (message) => raiseRejection(clusterId, "delegate", message),
           aggregateCapBps,
         );
@@ -737,6 +757,7 @@ export function Delegate() {
       title: `Undelegate from cluster ${clusterId}`,
       subtitle: `Undelegate ${weightLabel} of wallet weight — instant, nothing was locked`,
       auth: "keychain",
+      feePlan: DELEGATION_FEE_PLAN,
       details: DELEGATION_DETAILS,
       commitment: { subject: `Cluster ${clusterName(clusterId)}`, amount: null },
       // value = 0: a shortfall here is entirely fee, never "the amount plus".
@@ -774,7 +795,11 @@ export function Delegate() {
         // where the page already shows it, so there is nothing the user would
         // go looking for afterwards.
         const result = await withDelegationRevertCopy(() =>
-          submitDelegationTx({ seed: ctx.vaultSeed!, data: calldata }),
+          submitDelegationTx({
+                seed: ctx.vaultSeed!,
+                data: calldata,
+                resolvedFee: ctx.resolvedFee,
+              }),
         );
         rejection.clear();
         return {
@@ -802,6 +827,7 @@ export function Delegate() {
       title: `Undelegate all · ${rows.length} cluster${rows.length === 1 ? "" : "s"}`,
       subtitle: `Remove ${totalPct} of wallet weight across every cluster — instant, nothing was locked`,
       auth: "keychain",
+      feePlan: DELEGATION_FEE_PLAN,
       details: DELEGATION_DETAILS,
       // A BATCH: one password releases the seed for N submissions. The subject
       // names the plan because that is what the user is consenting to; it
@@ -851,7 +877,11 @@ export function Delegate() {
           let result: { txHash: string; nonce: number };
           try {
             result = await withDelegationRevertCopy(() =>
-              submitDelegationTx({ seed: ctx.vaultSeed!, data: calldata }),
+              submitDelegationTx({
+                seed: ctx.vaultSeed!,
+                data: calldata,
+                resolvedFee: ctx.resolvedFee,
+              }),
             );
           } catch (cause) {
             // Everything before this is on chain. Carry the boundary out with
@@ -905,6 +935,7 @@ export function Delegate() {
       title: `Redelegate cluster ${fromCluster} → ${toCluster}`,
       subtitle: `Move ${weightLabel} of wallet weight without an unbonding round`,
       auth: "keychain",
+      feePlan: DELEGATION_FEE_PLAN,
       details: DELEGATION_DETAILS,
       // The destination is what stacks weight, so it leads — but a redelegate
       // is a movement and naming one end of it would be half the fact.
@@ -954,7 +985,11 @@ export function Delegate() {
         });
         const calldata = buildRedelegateCalldata({ fromCluster, toCluster, weightBps });
         const result = await withDelegationRevertCopy(
-          () => submitDelegationTx({ seed: ctx.vaultSeed!, data: calldata }),
+          () => submitDelegationTx({
+                seed: ctx.vaultSeed!,
+                data: calldata,
+                resolvedFee: ctx.resolvedFee,
+              }),
           // The destination is what the user was trying to reach.
           (message) => raiseRejection(toCluster, "redelegate", message),
           aggregateCapBps,
@@ -983,6 +1018,7 @@ export function Delegate() {
       // rewards accrued in the meantime.
       subtitle: "Settle and withdraw your pending delegation rewards",
       auth: "keychain",
+      feePlan: DELEGATION_FEE_PLAN,
       details: DELEGATION_DETAILS,
       // Funds come IN, and the signed value is 0 — so "no funds leave this
       // wallet" is exactly right. The claimable figure is deliberately NOT the
@@ -1018,7 +1054,11 @@ export function Delegate() {
         }
         const calldata = buildClaimRewardsCalldata();
         const result = await withDelegationRevertCopy(() =>
-          submitDelegationTx({ seed: ctx.vaultSeed!, data: calldata }),
+          submitDelegationTx({
+                seed: ctx.vaultSeed!,
+                data: calldata,
+                resolvedFee: ctx.resolvedFee,
+              }),
         );
         return {
           // Broadcast accepted is not settlement. The settled figure arrives
@@ -1056,6 +1096,7 @@ export function Delegate() {
         ? "Future rewards will be claimed and delegated back automatically."
         : "Rewards will stop compounding — claim them manually.",
       auth: "keychain",
+      feePlan: DELEGATION_FEE_PLAN,
       details: DELEGATION_DETAILS,
       commitment: { subject: `Auto-compound ${next ? "on" : "off"}`, amount: null },
       // value = 0: a shortfall here is entirely fee, never "the amount plus".
@@ -1068,9 +1109,11 @@ export function Delegate() {
         ...(claimsNowLyth !== null
           ? [{ k: "Claims now", v: `${claimsNowLyth} LYTH (current pending)` }]
           : []),
-        // No quote surface exists for a delegation call, so this states that a
-        // fee applies rather than inventing a number.
-        { k: "Network fee (max)", v: "applies (paid in LYTH)" },
+        // The fee row used to live here and read "applies (paid in LYTH)" — a
+        // row that names a charge and refuses to state it, which P03 recorded as
+        // reading worse than absence. Its premise ("no quote surface exists for
+        // a delegation call") stopped being true when the drawer gained one, so
+        // the row is now the drawer's and carries the figure that gets signed.
       ],
       effects: [
         { text: "Unlocks the local vault for this operation only." },
@@ -1098,7 +1141,11 @@ export function Delegate() {
         }
         const calldata = buildSetAutoCompoundCalldata(next);
         const result = await withDelegationRevertCopy(() =>
-          submitDelegationTx({ seed: ctx.vaultSeed!, data: calldata }),
+          submitDelegationTx({
+                seed: ctx.vaultSeed!,
+                data: calldata,
+                resolvedFee: ctx.resolvedFee,
+              }),
         );
         // Arm the bounded re-read. The displayed flag stays the last live read
         // until the chain actually reports the new value.
@@ -1194,6 +1241,7 @@ export function Delegate() {
       title: `Autovote · ${label}`,
       subtitle: `Spread ${(plan.totalWeightBps / 100).toFixed(2)}% of balance across ${plan.allocations.length} cluster${plan.allocations.length === 1 ? "" : "s"} — non-custodial`,
       auth: "keychain",
+      feePlan: DELEGATION_FEE_PLAN,
       details: DELEGATION_DETAILS,
       // The second BATCH. Same limit as undelegate-all: this names the plan, not
       // each of the N transactions the one password authorises.
@@ -1295,6 +1343,8 @@ export function Delegate() {
                 s.nonce,
               );
             },
+            // One price for N submissions, because there was one consent.
+            ctx.resolvedFee,
           );
           rejection.clear();
           return {

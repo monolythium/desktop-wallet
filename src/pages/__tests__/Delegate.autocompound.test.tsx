@@ -67,7 +67,10 @@ vi.mock("../../sdk/autovote", async (importOriginal) => ({
 }));
 
 import { Delegate } from "../Delegate";
-import { DELEGATION_PRECOMPILE } from "../../sdk/delegation";
+import {
+  DELEGATION_EXECUTION_UNIT_LIMIT,
+  DELEGATION_PRECOMPILE,
+} from "../../sdk/delegation";
 
 const READY = {
   status: "ready",
@@ -190,6 +193,33 @@ describe("Delegate — auto-compound has its own section", () => {
     expect(target, "the delegation disclosure must carry the signed target").toBeDefined();
     expect(target!.v).toBe(DELEGATION_PRECOMPILE);
     expect(target!.v).toMatch(/^0x[0-9a-fA-F]{40}$/);
+  });
+
+  it("declares a fee plan naming the limit the seam signs — the delegation block's row is real now", async () => {
+    // Seven surfaces showed no fee figure at all, and the seventh showed the
+    // words "applies (paid in LYTH)" with no number — a row that names a charge
+    // and refuses to state it, which P03 recorded as reading worse than absence.
+    //
+    // Asserted on what the REAL page put in the descriptor, not on the module
+    // constant: R9's `details-tier` guard checked a property of the constants
+    // and stayed green when a literal was typed back into the row.
+    const user = userEvent.setup();
+    renderWithProviders(<Delegate />);
+    await user.click(await screen.findByRole("button", { name: SECTION }));
+    await user.click(screen.getByTestId("auto-compound-toggle"));
+    await waitFor(() => expect(cap.descriptor).toBeDefined());
+
+    const plan = cap.descriptor!.feePlan;
+    expect(plan, "a delegation write must declare a fee plan").toBeDefined();
+    expect(plan!.executionUnitLimit).toBe(DELEGATION_EXECUTION_UNIT_LIMIT);
+    expect(plan!.feeClass).toBe("transfer");
+
+    // The prose row is gone from the surface's own diff — the drawer owns the
+    // fee row now, and it carries a figure.
+    const feeRows = cap.descriptor!.diff.filter((r) => /fee/i.test(r.k));
+    expect(feeRows).toHaveLength(0);
+    // Anti-vacuity: the diff is not simply empty.
+    expect(cap.descriptor!.diff.length).toBeGreaterThan(0);
   });
 
   it("discloses at confirm time even though the section can be collapsed", async () => {

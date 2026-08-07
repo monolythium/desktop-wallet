@@ -47,7 +47,7 @@ export const DELEGATION_PRECOMPILE =
 /** A delegate/undelegate/redelegate/claim call carries a small ABI payload;
  *  size the execution-unit budget above the observed cost with headroom (the
  *  SDK transfer default of ~100k would underprovision the precompile work). */
-const DELEGATION_EXECUTION_UNIT_LIMIT = 150_000n;
+export const DELEGATION_EXECUTION_UNIT_LIMIT = 150_000n;
 
 export interface SubmitDelegationTxArgs {
   seed: Uint8Array;
