@@ -51,6 +51,21 @@ jobs:
       - name: Check version consistency
         run: node scripts/check-versions.mjs
 
+      # The SDK anchor runs BEFORE the build and on its own, deliberately.
+      #
+      # Every other tripwire for the SDK's constants runs under vitest, and
+      # vitest loads vite.config.ts, which imports the SDK at config-evaluation
+      # time — so those assertions run in a process the package under suspicion
+      # has already executed code in. This step is a bare `node` invocation that
+      # reads the installed bundle as TEXT and never imports it, so it inherits
+      # neither the test runner's environment nor the SDK's.
+      #
+      # Placed before `pnpm build` for the same reason: `vite build` also
+      # evaluates that config. Its position in this file is part of what it
+      # asserts.
+      - name: Verify the SDK anchor (no SDK code executed)
+        run: node scripts/verify-sdk-anchor.mjs
+
       # `pnpm build` is `tsc --noEmit && vite build` — typecheck + build in one,
       # and it produces ../dist which the Rust build script embeds, so it must
       # run before the cargo steps below.
