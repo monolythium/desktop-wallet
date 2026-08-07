@@ -20,7 +20,7 @@ import type {
   PrecompileCatalogueResponse,
   TotalBurnedResponse,
 } from "@monolythium/core-sdk";
-import { MlDsa65Backend } from "@monolythium/core-sdk/crypto";
+import { withSigningBackend } from "./signing-backend";
 import { getProvider } from "./client";
 import { isMethodDisabled, METHOD_UNAVAILABLE_LABEL } from "./rpc-availability";
 import { getNativeTransactionCount } from "./native-rpc";
@@ -844,13 +844,17 @@ export async function loadLiveWalletBalance(address: string): Promise<LiveWallet
  * been made.
  */
 export function deriveLiveWalletIdentity(seed: Uint8Array): LiveWalletIdentity {
-  const backend = MlDsa65Backend.fromSeed(seed);
-  const publicKey = backend.publicKey();
-  return {
-    address: addressToTypedBech32("user", backend.getAddress()),
-    publicKeyHex: bytesToHex(publicKey),
-    publicKeyBytes: publicKey.length,
-  };
+  // Public material only. `publicKey()` and `getAddress()` stay valid after
+  // disposal, and both are read before the helper's `finally` runs, so the
+  // returned identity is unaffected by wiping the secret half.
+  return withSigningBackend(seed, (backend) => {
+    const publicKey = backend.publicKey();
+    return {
+      address: addressToTypedBech32("user", backend.getAddress()),
+      publicKeyHex: bytesToHex(publicKey),
+      publicKeyBytes: publicKey.length,
+    };
+  });
 }
 
 /**

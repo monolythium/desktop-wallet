@@ -17,7 +17,7 @@
 // the claim signature). Both paths zeroize the seed after use.
 
 import { addressToTypedBech32 } from "@monolythium/core-sdk";
-import { MlDsa65Backend } from "@monolythium/core-sdk/crypto";
+import { withSigningBackend } from "./signing-backend";
 import { createAndStoreVault } from "./keychain";
 import { mintVaultSlot } from "./vaultCatalog";
 import { sendNativeLyth } from "./native-send";
@@ -98,11 +98,14 @@ export function signClaimAsSubAccount(
   args: SpendingPolicyArgs,
 ): SubAccountClaimSignature {
   try {
-    const backend = MlDsa65Backend.fromSeed(subAccountSeed);
-    const pubkey = backend.publicKey();
-    const message = composePolicyClaimMessage(args);
-    const sig = backend.sign(message);
-    return { pubkey, sig };
+    // The derived key is disposed as soon as the signature is produced —
+    // inside the helper's `finally`, so a throwing `sign()` wipes it too.
+    return withSigningBackend(subAccountSeed, (backend) => {
+      const pubkey = backend.publicKey();
+      const message = composePolicyClaimMessage(args);
+      const sig = backend.sign(message);
+      return { pubkey, sig };
+    });
   } finally {
     subAccountSeed.fill(0);
   }

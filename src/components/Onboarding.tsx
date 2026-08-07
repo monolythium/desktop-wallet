@@ -14,8 +14,8 @@ import {
   generateMnemonic,
   mnemonicToMlDsa65Seed,
   validateMnemonic,
-  MlDsa65Backend,
 } from "@monolythium/core-sdk/crypto";
+import { withSigningBackend } from "../sdk/signing-backend";
 import {
   KeychainCallError,
   PRIMARY_ACCOUNT,
@@ -158,7 +158,9 @@ export function Onboarding({ onDone }: Props) {
       const fresh = generateMnemonic();
       const seed = mnemonicToMlDsa65Seed(fresh);
       try {
-        MlDsa65Backend.fromSeed(seed); // sanity check; throws if SDK broken
+        // Sanity check; throws if the SDK is broken. The derived key is
+        // disposed as soon as the check returns — this path never signs.
+        withSigningBackend(seed, () => {});
       } finally {
         seed.fill(0);
       }

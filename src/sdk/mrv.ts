@@ -126,43 +126,71 @@ interface PreparedCallPlan {
   appPlan: MrvCallTransactionPlan;
 }
 
+// The two `prepare*` helpers below hand OWNERSHIP of a live signing backend to
+// their caller — they are the wallet's only construction sites where the key
+// must outlive the function that derived it, because the plan is built in one
+// step and signed in another. So the four entry points here are the disposal
+// boundary, and each disposes in a `finally`: two never sign at all, and two
+// sign and must not dispose before they do.
+
 export async function buildMrvDeployPayloadTransactionPlan(
   args: BuildMrvDeployPayloadTransactionPlanArgs,
 ): Promise<MrvDeployPayloadTransactionPlan> {
-  return (await prepareDeployPayloadPlan(args)).appPlan;
+  const prepared = await prepareDeployPayloadPlan(args);
+  try {
+    // Plan only — nothing is signed on this path, so the derived key is dead
+    // weight the moment the plan exists.
+    return prepared.appPlan;
+  } finally {
+    prepared.backend.dispose();
+  }
 }
 
 export async function buildMrvCallTransactionPlan(
   args: BuildMrvCallTransactionPlanArgs,
 ): Promise<MrvCallTransactionPlan> {
-  return (await prepareCallPlan(args)).appPlan;
+  const prepared = await prepareCallPlan(args);
+  try {
+    return prepared.appPlan;
+  } finally {
+    prepared.backend.dispose();
+  }
 }
 
 export async function submitMrvDeployPayloadTransaction(
   args: SubmitMrvDeployPayloadTransactionArgs,
 ): Promise<MrvDeployPayloadSubmission> {
   const prepared = await prepareDeployPayloadPlan(args);
-  // Plaintext `mesh_submitTx` (the confirming path). The native tx —
-  // extensions included — is signed + submitted.
-  const txHash = await submitTransaction({
-    client: prepared.client,
-    backend: prepared.backend,
-    tx: prepared.rawPlan.tx,
-  });
-  return { ...prepared.appPlan, txHash };
+  try {
+    // Plaintext `mesh_submitTx` (the confirming path). The native tx —
+    // extensions included — is signed + submitted.
+    const txHash = await submitTransaction({
+      client: prepared.client,
+      backend: prepared.backend,
+      tx: prepared.rawPlan.tx,
+    });
+    return { ...prepared.appPlan, txHash };
+  } finally {
+    // After the submit, whether it resolved or threw.
+    prepared.backend.dispose();
+  }
 }
 
 export async function submitMrvCallTransaction(
   args: SubmitMrvCallTransactionArgs,
 ): Promise<MrvCallSubmission> {
   const prepared = await prepareCallPlan(args);
-  // Plaintext `mesh_submitTx` (the confirming path).
-  const txHash = await submitTransaction({
-    client: prepared.client,
-    backend: prepared.backend,
-    tx: prepared.rawPlan.tx,
-  });
-  return { ...prepared.appPlan, txHash };
+  try {
+    // Plaintext `mesh_submitTx` (the confirming path).
+    const txHash = await submitTransaction({
+      client: prepared.client,
+      backend: prepared.backend,
+      tx: prepared.rawPlan.tx,
+    });
+    return { ...prepared.appPlan, txHash };
+  } finally {
+    prepared.backend.dispose();
+  }
 }
 
 export function normalizeMrvContractAddress(address: string): string {
@@ -177,76 +205,92 @@ async function prepareDeployPayloadPlan(
 ): Promise<PreparedDeployPayloadPlan> {
   const artifact = resolveArtifact(args);
   const backend = MlDsa65Backend.fromSeed(args.seed);
-  const fromHex = backend.getAddress();
-  const from = mrvAddressToBech32("user", fromHex);
-  const client = args.client ?? getProvider().rpcClient;
-  const valueLythoshi = resolveValueLythoshi(args);
-  const context = await resolveNativeContext(client, fromHex, {
-    chainId: args.chainId,
-    nonce: args.nonce,
-    maxExecutionFeeLythoshi: args.maxExecutionFeeLythoshi,
-    priorityTipLythoshi: args.priorityTipLythoshi,
-    executionUnitLimit: args.executionUnitLimit ?? MRV_DEFAULT_DEPLOY_EXECUTION_UNIT_LIMIT,
-  });
+  // `catch`-and-rethrow, NOT `finally`: on SUCCESS the backend is handed to the
+  // caller, which owns disposing it. Only a failure between here and the return
+  // leaves nobody holding it, and that is the case this covers — the nonce read
+  // below is a live RPC call and throws in normal operation.
+  try {
+    const fromHex = backend.getAddress();
+    const from = mrvAddressToBech32("user", fromHex);
+    const client = args.client ?? getProvider().rpcClient;
+    const valueLythoshi = resolveValueLythoshi(args);
+    const context = await resolveNativeContext(client, fromHex, {
+      chainId: args.chainId,
+      nonce: args.nonce,
+      maxExecutionFeeLythoshi: args.maxExecutionFeeLythoshi,
+      priorityTipLythoshi: args.priorityTipLythoshi,
+      executionUnitLimit: args.executionUnitLimit ?? MRV_DEFAULT_DEPLOY_EXECUTION_UNIT_LIMIT,
+    });
 
-  const rawPlan = buildMrvDeployPayloadNativeTxPlan(args.artifactBytes, {
-    from,
-    chainId: context.chainId,
-    nonce: context.nonce,
-    constructorInput: args.constructorInput,
-    valueLythoshi,
-    executionUnitLimit: context.executionUnitLimit,
-    maxExecutionFeeLythoshi: context.maxExecutionFeeLythoshi,
-    priorityTipLythoshi: context.priorityTipLythoshi,
-    artifactHash: artifact.artifactHash,
-  });
-  assertMrvDeployNativeSubmissionPlan(rawPlan);
+    const rawPlan = buildMrvDeployPayloadNativeTxPlan(args.artifactBytes, {
+      from,
+      chainId: context.chainId,
+      nonce: context.nonce,
+      constructorInput: args.constructorInput,
+      valueLythoshi,
+      executionUnitLimit: context.executionUnitLimit,
+      maxExecutionFeeLythoshi: context.maxExecutionFeeLythoshi,
+      priorityTipLythoshi: context.priorityTipLythoshi,
+      artifactHash: artifact.artifactHash,
+    });
+    assertMrvDeployNativeSubmissionPlan(rawPlan);
 
-  return {
-    client,
-    backend,
-    rawPlan,
-    appPlan: toDeployPayloadAppPlan(rawPlan, fromHex, artifact),
-  };
+    return {
+      client,
+      backend,
+      rawPlan,
+      appPlan: toDeployPayloadAppPlan(rawPlan, fromHex, artifact),
+    };
+  } catch (cause) {
+    backend.dispose();
+    throw cause;
+  }
 }
 
 async function prepareCallPlan(
   args: BuildMrvCallTransactionPlanArgs,
 ): Promise<PreparedCallPlan> {
   const backend = MlDsa65Backend.fromSeed(args.seed);
-  const fromHex = backend.getAddress();
-  const from = mrvAddressToBech32("user", fromHex);
-  const client = args.client ?? getProvider().rpcClient;
-  const valueLythoshi = resolveValueLythoshi(args);
-  const context = await resolveNativeContext(client, fromHex, {
-    chainId: args.chainId,
-    nonce: args.nonce,
-    maxExecutionFeeLythoshi: args.maxExecutionFeeLythoshi,
-    priorityTipLythoshi: args.priorityTipLythoshi,
-    executionUnitLimit: args.executionUnitLimit ?? MRV_DEFAULT_CALL_EXECUTION_UNIT_LIMIT,
-  });
+  // See `prepareDeployPayloadPlan` — `catch`-and-rethrow, because success hands
+  // ownership to the caller and only failure orphans the key.
+  try {
+    const fromHex = backend.getAddress();
+    const from = mrvAddressToBech32("user", fromHex);
+    const client = args.client ?? getProvider().rpcClient;
+    const valueLythoshi = resolveValueLythoshi(args);
+    const context = await resolveNativeContext(client, fromHex, {
+      chainId: args.chainId,
+      nonce: args.nonce,
+      maxExecutionFeeLythoshi: args.maxExecutionFeeLythoshi,
+      priorityTipLythoshi: args.priorityTipLythoshi,
+      executionUnitLimit: args.executionUnitLimit ?? MRV_DEFAULT_CALL_EXECUTION_UNIT_LIMIT,
+    });
 
-  const rawPlan = buildMrvCallNativeTxPlan(
-    normalizeMrvContractAddress(args.contractAddress),
-    args.input ?? "0x",
-    {
-      from,
-      chainId: context.chainId,
-      nonce: context.nonce,
-      valueLythoshi,
-      executionUnitLimit: context.executionUnitLimit,
-      maxExecutionFeeLythoshi: context.maxExecutionFeeLythoshi,
-      priorityTipLythoshi: context.priorityTipLythoshi,
-    },
-  );
-  assertMrvCallNativeSubmissionPlan(rawPlan);
+    const rawPlan = buildMrvCallNativeTxPlan(
+      normalizeMrvContractAddress(args.contractAddress),
+      args.input ?? "0x",
+      {
+        from,
+        chainId: context.chainId,
+        nonce: context.nonce,
+        valueLythoshi,
+        executionUnitLimit: context.executionUnitLimit,
+        maxExecutionFeeLythoshi: context.maxExecutionFeeLythoshi,
+        priorityTipLythoshi: context.priorityTipLythoshi,
+      },
+    );
+    assertMrvCallNativeSubmissionPlan(rawPlan);
 
-  return {
-    client,
-    backend,
-    rawPlan,
-    appPlan: toCallAppPlan(rawPlan, fromHex),
-  };
+    return {
+      client,
+      backend,
+      rawPlan,
+      appPlan: toCallAppPlan(rawPlan, fromHex),
+    };
+  } catch (cause) {
+    backend.dispose();
+    throw cause;
+  }
 }
 
 async function resolveNativeContext(

@@ -25,8 +25,8 @@ import {
   generateMnemonic,
   mnemonicToMlDsa65Seed,
   validateMnemonic,
-  MlDsa65Backend,
 } from "@monolythium/core-sdk/crypto";
+import { withSigningBackend } from "../sdk/signing-backend";
 import {
   mintVaultSlot,
   registerVault,
@@ -144,7 +144,9 @@ export function AddVaultModal({ onClose, onAdded }: Props) {
       const fresh = generateMnemonic();
       const seed = mnemonicToMlDsa65Seed(fresh);
       try {
-        MlDsa65Backend.fromSeed(seed); // throws if the SDK is broken
+        // Throws if the SDK is broken. The derived key is disposed as soon as
+        // the check returns — this path never signs anything.
+        withSigningBackend(seed, () => {});
       } finally {
         seed.fill(0);
       }

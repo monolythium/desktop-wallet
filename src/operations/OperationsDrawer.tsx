@@ -30,7 +30,7 @@ import {
   readLockoutState,
   recordWrongUnlockAttempt,
 } from "../sdk/unlock-lockout";
-import { MlDsa65Backend } from "@monolythium/core-sdk/crypto";
+import { withSigningBackend } from "../sdk/signing-backend";
 import {
   classifySendError,
   errorLinksOperators,
@@ -186,9 +186,11 @@ export function OperationsDrawer({ descriptor, onClose, onNavigate }: Props) {
         // legacy installs (catalog entry with addressHex: null) and any
         // future address-corruption recovery picks up the live answer.
         try {
-          const addressHex = MlDsa65Backend.fromSeed(vaultSeed)
-            .getAddress()
-            .toLowerCase();
+          // Address only — the derived key is disposed before the backfill is
+          // even dispatched, so it does not linger for the unlock's duration.
+          const addressHex = withSigningBackend(vaultSeed, (backend) =>
+            backend.getAddress().toLowerCase(),
+          );
           void captureAddressOnUnlock(activeSlot, addressHex).catch(() => {});
         } catch {
           // Never let an address-backfill failure break the unlock path.

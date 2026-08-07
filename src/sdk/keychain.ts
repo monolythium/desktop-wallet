@@ -13,13 +13,13 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import {
-  MlDsa65Backend,
   generateMnemonic,
   mnemonicToMlDsa65Seed,
 } from "@monolythium/core-sdk/crypto";
 import { entropyToMnemonic, mnemonicToEntropy } from "@scure/bip39";
 import { wordlist } from "@scure/bip39/wordlists/english.js";
 import { createVaultV2, revealVault, unlockVault, VaultCallError } from "./vault";
+import { withSigningBackend } from "./signing-backend";
 
 /** Trim, lowercase, and collapse internal whitespace so the mnemonic matches
  *  the form the SDK derives the seed from and the BIP-39 wordlist expects. */
@@ -40,7 +40,9 @@ export function deriveAddressHexFromMnemonic(mnemonic: string): string | null {
   try {
     mnemonicToEntropy(normalized, wordlist); // throws on an invalid phrase
     seed = mnemonicToMlDsa65Seed(normalized);
-    return MlDsa65Backend.fromSeed(seed).getAddress().toLowerCase();
+    // Address only — the derived key is disposed before this returns.
+    // `getAddress()` is public material and stays valid after disposal.
+    return withSigningBackend(seed, (backend) => backend.getAddress().toLowerCase());
   } catch {
     return null;
   } finally {
@@ -186,8 +188,10 @@ export async function createAndStoreVault(
   const payload = mnemonicToEntropy(mnemonic, wordlist);
   let addressHex: string;
   try {
-    const backend = MlDsa65Backend.fromSeed(seed);
-    addressHex = backend.getAddress().toLowerCase();
+    // The backend is needed only for the address; sealing uses the SEED, not
+    // the derived key, so the key is disposed before `createVaultV2` is even
+    // called rather than living for the duration of the vault write.
+    addressHex = withSigningBackend(seed, (backend) => backend.getAddress().toLowerCase());
     const blob = await createVaultV2(password, seed, payload);
     await store(account, blob);
   } finally {
