@@ -408,10 +408,11 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
       const live = await loadLiveAddressActivity(fromBech32m).catch(() => null);
       const liveRows = live && live.ok ? live.value ?? [] : null;
       // Evidence is what the CHAIN said this session, not what is cached on
-      // disk. `activity.v1.json` is plaintext and caller-writable, and unioning
-      // it in here meant one planted outgoing row reported "known" — the second
-      // of the three independent suppressors. The cache still drives the feed's
-      // rendering; it no longer testifies that a payment happened.
+      // disk. The confirmed-activity store is plaintext and caller-writable (the
+      // file name is Rust's business), and unioning it in here meant one planted
+      // outgoing row reported "known" — the second of the three independent
+      // suppressors. The cache still drives the feed's rendering; it no longer
+      // testifies that a payment happened.
       //
       // The cost is stated rather than hidden: with the indexer unreachable
       // there is now no readable history at all, so the surface shows its

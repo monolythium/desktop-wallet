@@ -1,7 +1,9 @@
 // Proving an agent sub-account is one the user actually controls.
 //
-// THE PROBLEM. `agents.v1.json` is plaintext JSON anything running as this OS
-// user can write, and `bech32m` is a transaction target: it reaches
+// THE PROBLEM. The agent registry store is plaintext JSON anything running as
+// this OS user can write (the file name is Rust's business — see
+// `wallet_store.rs`, and the guard that keeps it that way, which caught an
+// earlier draft of this comment). `bech32m` is a transaction target: it reaches
 // `fundAgentSubAccount` and the policy calldata with no check but
 // well-formedness. `requireTypedUserAddressHex` sits exactly where an ownership
 // check is needed and answers a different question — a valid attacker address is
