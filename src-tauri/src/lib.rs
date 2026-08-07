@@ -16,6 +16,7 @@ mod mcp_bridge;
 mod name_registry;
 mod studio_host;
 mod vault;
+mod wallet_store;
 
 #[cfg(feature = "stele")]
 mod stele;
@@ -24,7 +25,14 @@ mod stele;
 pub fn run() {
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_store::Builder::default().build())
+        // No store plugin. Its `load` command resolved a CALLER-SUPPLIED path
+        // against the app-data directory with a bare push, which an absolute,
+        // UNC or drive-relative path discards entirely, and it had no scope
+        // mechanism to constrain. Persistence goes through
+        // `wallet_store::wallet_store_{read,write}`, which take an identifier
+        // from a closed set and never join caller input onto a path. Dropping
+        // the registration as well as the capability means the vulnerable
+        // handler is not compiled into the binary at all.
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         // Native OS toasts for terminal tx notifications. The frontend
@@ -54,6 +62,8 @@ pub fn run() {
         mcp_bridge::mcp_shared_wallet_list,
         mcp_bridge::mcp_shared_store_exists,
         name_registry::name_check_availability,
+        wallet_store::wallet_store_read,
+        wallet_store::wallet_store_write,
         studio_host::studio_devkit_parse_manifest,
         studio_host::studio_devkit_check_compatibility,
         studio_host::studio_devkit_resolve_install_path,

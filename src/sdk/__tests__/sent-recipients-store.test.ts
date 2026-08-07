@@ -5,8 +5,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const backing = vi.hoisted(() => ({ data: new Map<string, unknown>() }));
-vi.mock("@tauri-apps/plugin-store", () => ({
-  Store: {
+vi.mock("../wallet-store", () => ({
+  WalletStore: {
     load: async () => ({
       get: async (k: string) => backing.data.get(k),
       set: async (k: string, v: unknown) => {

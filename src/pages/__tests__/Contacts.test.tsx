@@ -12,8 +12,8 @@ import { renderWithProviders } from "../../test/renderWithProviders";
 // The harness sets __TAURI_INTERNALS__, so the store takes its Tauri path —
 // back it with an in-memory fake rather than letting it read as "offline".
 const backing = vi.hoisted(() => new Map<string, unknown>());
-vi.mock("@tauri-apps/plugin-store", () => ({
-  Store: {
+vi.mock("../../sdk/wallet-store", () => ({
+  WalletStore: {
     load: vi.fn(async () => ({
       get: vi.fn(async (k: string) => backing.get(k)),
       set: vi.fn(async (k: string, v: unknown) => {

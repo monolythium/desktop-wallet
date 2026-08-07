@@ -11,9 +11,9 @@
 // the controlling principal). Key material lives in the OS keychain under
 // `slot`; the encrypted vault blob owns the seed. No seed ever lands here.
 
-import { Store } from "@tauri-apps/plugin-store";
+import { WalletStore } from "./wallet-store";
 
-export const STORE_FILE = "agents.v1.json";
+export const STORE_ID = "agents";
 const STATE_KEY = "state";
 
 export interface AgentEntry {
@@ -37,11 +37,11 @@ interface AgentRegistryState {
 
 const EMPTY: AgentRegistryState = { version: 1, agents: {} };
 
-let storePromise: Promise<Store> | null = null;
+let storePromise: Promise<WalletStore> | null = null;
 
-async function getStore(): Promise<Store> {
+async function getStore(): Promise<WalletStore> {
   if (!storePromise) {
-    storePromise = Store.load(STORE_FILE);
+    storePromise = WalletStore.load(STORE_ID);
   }
   return storePromise;
 }

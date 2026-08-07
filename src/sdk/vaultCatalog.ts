@@ -5,7 +5,7 @@
 // derived addresses so the UI can render a Wallets picker without
 // touching key material.
 //
-// Schema (file `vaults.v1.json`):
+// Schema (the `vaults` store):
 //
 //   {
 //     "version": 1,
@@ -28,10 +28,10 @@
 // a vault but whose catalog is empty get an `addressHex: null` entry
 // that fills in lazily on first unlock.
 
-import { Store } from "@tauri-apps/plugin-store";
+import { WalletStore } from "./wallet-store";
 import { purgeVaultScopes } from "./scope-cleanup";
 
-export const STORE_FILE = "vaults.v1.json";
+export const STORE_ID = "vaults";
 const STATE_KEY = "state";
 
 export type VaultKind = "local";
@@ -53,11 +53,11 @@ export interface CatalogState {
   activeSlot: string | null;
 }
 
-let storePromise: Promise<Store> | null = null;
+let storePromise: Promise<WalletStore> | null = null;
 
-async function getStore(): Promise<Store> {
+async function getStore(): Promise<WalletStore> {
   if (!storePromise) {
-    storePromise = Store.load(STORE_FILE);
+    storePromise = WalletStore.load(STORE_ID);
   }
   return storePromise;
 }

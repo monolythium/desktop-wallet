@@ -13,7 +13,7 @@ vi.mock("../vaultCatalog", () => ({
   // The reset now also sweeps every store file, and the wipe reads each file
   // name from its owning module rather than restating it. No assertion here
   // changes — the mock just carries the export the real module gained.
-  STORE_FILE: "vaults.v1.json",
+  STORE_ID: "vaults",
 }));
 
 import {

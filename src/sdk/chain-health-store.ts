@@ -1,6 +1,6 @@
 // Durable warm-start cache for the chain-health machine.
 //
-// A `@tauri-apps/plugin-store`-backed store (its own `chain-health.v1.json`
+// A wallet-store-backed store (its own `chain-health` store, resolved in Rust
 // file) holding a per-(address, chain) map of the last-seen head, reusing the
 // singleton-store + in-memory-cache pattern of `activity-cache-store.ts`. On
 // reopen the machine restores the cached head to show RECONNECTING (never LIVE —
@@ -16,9 +16,9 @@
 // cold CONNECTING), and every store failure is swallowed so a cache hiccup can
 // never break the heartbeat.
 
-import { Store } from "@tauri-apps/plugin-store";
+import { WalletStore } from "./wallet-store";
 
-export const STORE_FILE = "chain-health.v1.json";
+export const STORE_ID = "chain-health";
 const STATE_KEY = "state";
 
 /** The persisted last-seen head for one (address, chain) scope. */
@@ -39,15 +39,15 @@ interface ChainHealthStoreState {
   heads: Record<string, unknown>;
 }
 
-let storePromise: Promise<Store> | null = null;
+let storePromise: Promise<WalletStore> | null = null;
 let cache: ChainHealthStoreState | null = null;
 
 function headKey(addressLower: string, chainIdHex: string): string {
   return `mono.chain-health.head.${addressLower}.${chainIdHex}.v1`;
 }
 
-async function getStore(): Promise<Store> {
-  if (!storePromise) storePromise = Store.load(STORE_FILE);
+async function getStore(): Promise<WalletStore> {
+  if (!storePromise) storePromise = WalletStore.load(STORE_ID);
   return storePromise;
 }
 

@@ -41,21 +41,9 @@ const EXPECTED_PERMISSIONS = [
   // The scope half of the pair. Without it `open_url` is granted and every URL
   // is refused, which would break every outbound link in the app.
   "opener:allow-default-urls",
-  "store:default",
-  "store:allow-load",
-  "store:allow-get",
-  "store:allow-set",
-  "store:allow-save",
-  "store:allow-delete",
-  "store:allow-clear",
-  "store:allow-reset",
-  "store:allow-has",
-  "store:allow-keys",
-  "store:allow-values",
-  "store:allow-entries",
-  "store:allow-length",
-  "store:allow-reload",
-  "store:allow-get-store",
+  // No store:* — the plugin is gone entirely, not narrowed. Persistence goes
+  // through the wallet's own wallet_store_read / wallet_store_write, which take
+  // an identifier from a closed set instead of a caller-supplied path.
   // src/sdk/updater.ts:65 — `check()`
   "updater:allow-check",
   // src/sdk/updater.ts:95 — `pendingUpdate.downloadAndInstall(...)`, which the
@@ -105,6 +93,29 @@ const MUST_NOT_BE_GRANTED = [
     permission: "opener:allow-open-path",
     why: "no caller — opens an arbitrary local path with its default application",
   },
+  {
+    permission: "store:default",
+    why:
+      "the store plugin resolves a CALLER-SUPPLIED path against the app data directory " +
+      "with a bare push, so an absolute, UNC or drive-relative path escapes the base " +
+      "entirely, and it ships no scope mechanism to constrain (SA-10-007)",
+  },
+  {
+    permission: "store:allow-load",
+    why: "the specific command that takes the path; persistence uses wallet_store_read instead",
+  },
+  {
+    permission: "store:allow-get",
+    why: "part of the plugin surface the wallet no longer routes through",
+  },
+  {
+    permission: "store:allow-set",
+    why: "part of the plugin surface the wallet no longer routes through",
+  },
+  {
+    permission: "store:allow-save",
+    why: "the write half of the path-taking route; persistence uses wallet_store_write instead",
+  },
 ];
 
 describe("the main window capability set", () => {
@@ -147,7 +158,7 @@ describe("the main window capability set", () => {
     // core and store keep their defaults; store additionally enumerates its
     // commands, and notification's default is out of T1.3's scope and recorded
     // as such. Any OTHER `:default` is a new wholesale grant.
-    const KEPT_DEFAULTS = ["core:default", "store:default", "notification:default"];
+    const KEPT_DEFAULTS = ["core:default", "notification:default"];
     const wholesale = granted.filter((p) => p.endsWith(":default"));
     expect(
       wholesale,

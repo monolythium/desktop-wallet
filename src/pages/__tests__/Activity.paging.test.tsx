@@ -9,8 +9,8 @@ import { screen, waitFor } from "@testing-library/react";
 import { renderWithProviders } from "../../test/renderWithProviders";
 
 const backing = vi.hoisted(() => new Map<string, unknown>());
-vi.mock("@tauri-apps/plugin-store", () => ({
-  Store: {
+vi.mock("../../sdk/wallet-store", () => ({
+  WalletStore: {
     load: vi.fn(async () => ({
       get: vi.fn(async (k: string) => backing.get(k)),
       set: vi.fn(async (k: string, v: unknown) => backing.set(k, JSON.parse(JSON.stringify(v)))),

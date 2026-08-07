@@ -7,7 +7,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const backing = new Map<string, unknown>();
-vi.mock("@tauri-apps/plugin-store", () => {
+vi.mock("../wallet-store", () => {
   class FakeStore {
     constructor(private readonly file: string) {}
     static async load(file: string): Promise<FakeStore> {
@@ -24,7 +24,7 @@ vi.mock("@tauri-apps/plugin-store", () => {
       /* no-op */
     }
   }
-  return { Store: FakeStore };
+  return { WalletStore: FakeStore };
 });
 
 vi.mock("../build-mode", () => ({ isHardenedBuild: () => false }));

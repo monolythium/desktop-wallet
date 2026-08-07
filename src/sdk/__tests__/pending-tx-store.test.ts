@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// In-memory fake of @tauri-apps/plugin-store. JSON round-trip mirrors the real
+// In-memory fake of the wallet store seam. the JSON round-trip matches the real
 // plugin (it serializes to disk), keeping the test honest about what survives a
 // reload. Same fake shape as notifications-store.test.ts / reconcile.test.ts.
 const backing = new Map<string, unknown>();
 
-vi.mock("@tauri-apps/plugin-store", () => {
+vi.mock("../wallet-store", () => {
   class FakeStore {
     static async load(_file: string): Promise<FakeStore> {
       return new FakeStore();
@@ -21,7 +21,7 @@ vi.mock("@tauri-apps/plugin-store", () => {
       /* no-op */
     }
   }
-  return { Store: FakeStore };
+  return { WalletStore: FakeStore };
 });
 
 import {

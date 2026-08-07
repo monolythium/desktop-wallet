@@ -1,7 +1,7 @@
 // Sent-recipients log — persistence (the model + integrity crypto live in
 // sent-recipients.ts).
 //
-// A single `@tauri-apps/plugin-store` file (`sent-recipients.v1.json`) holds a
+// A single wallet store (the `sent-recipients` store) holds a
 // `scopes` map keyed per (sender, chain) by `sentRecipientsScopeKey`, following
 // the singleton-store + in-memory-cache pattern of `notifications-store.ts`.
 //
@@ -12,7 +12,7 @@
 // Tauri the store is a no-op (reads empty, writes silently skip); the warning
 // then rests on history alone — the safe direction.
 
-import { Store } from "@tauri-apps/plugin-store";
+import { WalletStore } from "./wallet-store";
 import { requireTypedUserAddressHex } from "./address";
 import { scopeChainKey } from "./chains";
 import {
@@ -25,7 +25,7 @@ import {
   verifySentRecipientTag,
 } from "./sent-recipients";
 
-export const STORE_FILE = "sent-recipients.v1.json";
+export const STORE_ID = "sent-recipients";
 const STATE_KEY = "state";
 
 /** On-disk root — `scopes` maps each per-(sender, chain) key to its envelope
@@ -37,15 +37,15 @@ interface SentRecipientsState {
 
 const EMPTY_STATE: SentRecipientsState = { version: 1, scopes: {} };
 
-let storePromise: Promise<Store> | null = null;
+let storePromise: Promise<WalletStore> | null = null;
 let cache: SentRecipientsState | null = null;
 
 function isTauri(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
 
-async function getStore(): Promise<Store> {
-  if (!storePromise) storePromise = Store.load(STORE_FILE);
+async function getStore(): Promise<WalletStore> {
+  if (!storePromise) storePromise = WalletStore.load(STORE_ID);
   return storePromise;
 }
 

@@ -7,7 +7,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const backing = new Map<string, unknown>();
-vi.mock("@tauri-apps/plugin-store", () => {
+vi.mock("../wallet-store", () => {
   class FakeStore {
     constructor(private file: string) {}
     static async load(file: string): Promise<FakeStore> {
@@ -22,7 +22,7 @@ vi.mock("@tauri-apps/plugin-store", () => {
     }
     async save(): Promise<void> {}
   }
-  return { Store: FakeStore };
+  return { WalletStore: FakeStore };
 });
 
 import { NOTIFIED_SET_CAP, appendNotifiedIdCapped } from "../notifications";
@@ -67,7 +67,7 @@ describe("appendNotifiedIdCapped — the dedupe-set bound", () => {
 
 describe("purgeScopesForAddress — drops exactly one vault's scopes, no cross-vault damage", () => {
   it("notifications: removes this address's history / notified-set / watermark, leaves others (incl. a longer address that shares the prefix)", async () => {
-    backing.set("notifications.v1.json::state", {
+    backing.set("notifications::state", {
       version: 2,
       genesisIdentity: GENESIS,
       scopes: {
@@ -79,14 +79,14 @@ describe("purgeScopesForAddress — drops exactly one vault's scopes, no cross-v
       },
     });
     await purgeNotifications("mono1a");
-    expect(Object.keys(scopesOf("notifications.v1.json", "scopes")).sort()).toEqual([
+    expect(Object.keys(scopesOf("notifications", "scopes")).sort()).toEqual([
       "mono.notifications.history.mono1aa.0x10f2c.v1", // longer address survives (trailing-dot guard)
       "mono.notifications.history.mono1b.0x10f2c.v1",
     ]);
   });
 
   it("activity cache: removes this address's entries, leaves others", async () => {
-    backing.set("activity.v1.json::state", {
+    backing.set("activity::state", {
       version: 2,
       genesisIdentity: GENESIS,
       confirmed: {
@@ -96,14 +96,14 @@ describe("purgeScopesForAddress — drops exactly one vault's scopes, no cross-v
       },
     });
     await purgeActivity("mono1a");
-    expect(Object.keys(scopesOf("activity.v1.json", "confirmed")).sort()).toEqual([
+    expect(Object.keys(scopesOf("activity", "confirmed")).sort()).toEqual([
       "mono.activity.mono1aa.0x10f2c.v1",
       "mono.activity.mono1b.0x10f2c.v1",
     ]);
   });
 
   it("chain-health: removes this address's warm-start heads, leaves others", async () => {
-    backing.set("chain-health.v1.json::state", {
+    backing.set("chain-health::state", {
       version: 1,
       heads: {
         "mono.chain-health.head.mono1a.0x10f2c.v1": { height: 1, headId: "h", advancedAtMs: 0 },
@@ -111,7 +111,7 @@ describe("purgeScopesForAddress — drops exactly one vault's scopes, no cross-v
       },
     });
     await purgeChainHealth("mono1a");
-    expect(Object.keys(scopesOf("chain-health.v1.json", "heads"))).toEqual([
+    expect(Object.keys(scopesOf("chain-health", "heads"))).toEqual([
       "mono.chain-health.head.mono1b.0x10f2c.v1",
     ]);
   });

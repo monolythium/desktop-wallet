@@ -8,7 +8,7 @@ const purgeVaultScopes = vi.hoisted(() => vi.fn(async () => {}));
 vi.mock("../scope-cleanup", () => ({ purgeVaultScopes }));
 
 const backing = new Map<string, unknown>();
-vi.mock("@tauri-apps/plugin-store", () => {
+vi.mock("../wallet-store", () => {
   class FakeStore {
     constructor(private file: string) {}
     static async load(file: string): Promise<FakeStore> {
@@ -23,7 +23,7 @@ vi.mock("@tauri-apps/plugin-store", () => {
     }
     async save(): Promise<void> {}
   }
-  return { Store: FakeStore };
+  return { WalletStore: FakeStore };
 });
 
 import { loadCatalog, removeVaultFromCatalog } from "../vaultCatalog";
@@ -35,7 +35,7 @@ beforeEach(() => {
 
 describe("removeVaultFromCatalog", () => {
   it("deletes the catalog row and purges only that vault's scoped state", async () => {
-    backing.set("vaults.v1.json::state", {
+    backing.set("vaults::state", {
       version: 1,
       vaults: {
         "kc:lyth:aaa:v1": { slot: "kc:lyth:aaa:v1", name: "A", addressHex: "0xaaa", createdAt: 1, kind: "local" },
@@ -57,7 +57,7 @@ describe("removeVaultFromCatalog", () => {
   });
 
   it("is a no-op for an unknown slot", async () => {
-    backing.set("vaults.v1.json::state", { version: 1, vaults: {}, activeSlot: null });
+    backing.set("vaults::state", { version: 1, vaults: {}, activeSlot: null });
     await removeVaultFromCatalog("kc:lyth:missing:v1");
     expect(purgeVaultScopes).not.toHaveBeenCalled();
   });

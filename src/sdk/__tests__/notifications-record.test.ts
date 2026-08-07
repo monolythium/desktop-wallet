@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// In-memory fake of @tauri-apps/plugin-store (same shape as the other store
+// In-memory fake of the wallet store seam (same shape as the other store
 // tests) so recordOperationFailure's real recordNotification round-trips
 // without touching Tauri IPC.
 const backing = new Map<string, unknown>();
 
-vi.mock("@tauri-apps/plugin-store", () => {
+vi.mock("../wallet-store", () => {
   class FakeStore {
     constructor(private readonly file: string) {}
     static async load(file: string): Promise<FakeStore> {
@@ -22,7 +22,7 @@ vi.mock("@tauri-apps/plugin-store", () => {
       /* no-op */
     }
   }
-  return { Store: FakeStore };
+  return { WalletStore: FakeStore };
 });
 
 // Stub the OS-toast helper to assert the synchronous-reject path fires it once
@@ -51,7 +51,7 @@ beforeEach(() => {
 });
 
 function seedActiveVault(): void {
-  backing.set("vaults.v1.json:state", {
+  backing.set("vaults:state", {
     version: 1,
     activeSlot: "kc:test",
     vaults: {

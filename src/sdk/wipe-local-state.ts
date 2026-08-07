@@ -27,7 +27,7 @@
 // wallet AND the residue intact, stranded in a half-torn-down shell. One
 // failing store must not stop the others, and must not stop the reload.
 
-import { Store } from "@tauri-apps/plugin-store";
+import { WalletStore, type WalletStoreId } from "./wallet-store";
 // The survivor keys are imported from their owning modules, never restated: a
 // renamed key must not silently start being wiped. NOTE these are key NAMES —
 // nothing here reads a preference VALUE, which is what the stored-only law
@@ -41,16 +41,16 @@ import {
   SIDEBAR_STORAGE_KEY,
   THEME_STORAGE_KEY,
 } from "./theme";
-import { STORE_FILE as ACTIVITY_STORE } from "./activity-cache-store";
-import { STORE_FILE as ADDRESSBOOK_STORE } from "./addressbook";
-import { STORE_FILE as AGENTS_STORE } from "./agent-registry";
-import { STORE_FILE as CHAIN_HEALTH_STORE } from "./chain-health-store";
-import { STORE_FILE as BALANCE_STORE } from "./last-known-balance";
-import { STORE_FILE as NOTIFICATIONS_STORE } from "./notifications-store";
-import { STORE_FILE as PENDING_TX_STORE } from "./pending-tx-store";
-import { STORE_FILE as NAMES_STORE } from "./reverse-name-cache";
-import { STORE_FILE as SENT_RECIPIENTS_STORE } from "./sent-recipients-store";
-import { STORE_FILE as VAULTS_STORE } from "./vaultCatalog";
+import { STORE_ID as ACTIVITY_STORE } from "./activity-cache-store";
+import { STORE_ID as ADDRESSBOOK_STORE } from "./addressbook";
+import { STORE_ID as AGENTS_STORE } from "./agent-registry";
+import { STORE_ID as CHAIN_HEALTH_STORE } from "./chain-health-store";
+import { STORE_ID as BALANCE_STORE } from "./last-known-balance";
+import { STORE_ID as NOTIFICATIONS_STORE } from "./notifications-store";
+import { STORE_ID as PENDING_TX_STORE } from "./pending-tx-store";
+import { STORE_ID as NAMES_STORE } from "./reverse-name-cache";
+import { STORE_ID as SENT_RECIPIENTS_STORE } from "./sent-recipients-store";
+import { STORE_ID as VAULTS_STORE } from "./vaultCatalog";
 
 /** The prefix every wallet-owned localStorage key carries. */
 export const WALLET_KEY_PREFIX = "wallet.";
@@ -76,11 +76,14 @@ export const WIPE_EXCEPT_KEYS: readonly string[] = [
 ];
 
 /**
- * Every Tauri store file this wallet writes, and what each holds.
+ * Every store this wallet writes, and what each holds.
  *
  * REGISTER NEW STORES HERE. A store absent from this list survives a reset.
+ *
+ * These are store IDENTIFIERS, not file names — the Rust side owns the mapping
+ * to a file, so nothing here can name a path.
  */
-export const STORE_FILES: readonly string[] = [
+export const STORE_IDS: readonly WalletStoreId[] = [
   VAULTS_STORE, // vault catalog: slots, names, addresses
   ADDRESSBOOK_STORE, // saved contacts
   NOTIFICATIONS_STORE, // notification history, dedupe sets, incoming watermarks
@@ -100,10 +103,13 @@ export function walletKeysToWipe(keys: readonly string[]): string[] {
   );
 }
 
-/** Clear one store file. Never throws — the caller must keep going. */
-async function clearStoreFile(file: string): Promise<boolean> {
+/** Clear one store. Never throws — the caller must keep going. */
+async function clearStore(id: WalletStoreId): Promise<boolean> {
   try {
-    const store = await Store.load(file);
+    // `WalletStore.load` returns the SAME instance the owning module holds, so
+    // clearing here empties the document that module would otherwise later save
+    // back. Two independent handles would let a wipe be undone by a stale copy.
+    const store = await WalletStore.load(id);
     await store.clear();
     await store.save();
     return true;
@@ -142,9 +148,9 @@ export async function wipeAllLocalWalletState(): Promise<WipeOutcome> {
 
   // Sequential rather than parallel: the plugin opens a file handle per store,
   // and a predictable order makes a partial failure readable in a bug report.
-  for (const file of STORE_FILES) {
-    if (await clearStoreFile(file)) storesCleared++;
-    else storesFailed.push(file);
+  for (const id of STORE_IDS) {
+    if (await clearStore(id)) storesCleared++;
+    else storesFailed.push(id);
   }
 
   let keysRemoved = 0;
