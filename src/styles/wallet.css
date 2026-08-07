@@ -939,6 +939,31 @@ html[data-sidebar="collapsed"]:not([data-layout="topbar"]) .w-nav__item {
 }
 .w-tx__info .eyebrow .sep::before { content: "·"; }
 .w-tx__info .label { font-size: 13px; font-weight: 500; margin-top: 2px; }
+/* The address a label annotates. Full, never ellipsised — a truncated address is
+   what a lookalike is ground to match — so it CLIPS on overflow rather than
+   hiding characters behind a "…" the user would read as the real thing. */
+.w-tx__addr {
+  font-family: var(--f-mono);
+  font-size: 10.5px;
+  letter-spacing: -0.02em;
+  color: var(--fg-400);
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: clip;
+}
+/* Chain-verified marker. Only a quorum-resolved registered name reaches this. */
+.w-tx__chip {
+  margin-left: 6px;
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 1px 5px;
+  border-radius: 4px;
+  border: 1px solid rgba(var(--gold-glow), 0.5);
+  color: rgba(var(--gold-glow), 1);
+}
 .w-tx__right { text-align: right; }
 .w-tx__amt { font-size: 13px; }
 .w-tx__amt.in  { color: var(--ok); }
