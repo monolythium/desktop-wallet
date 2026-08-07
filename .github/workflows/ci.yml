@@ -63,13 +63,19 @@ jobs:
 
       # cargo check, NOT a full `tauri build` — bundling + signing belong to the
       # release pipeline; the PR gate stays fast and needs no signing secrets.
+      #
+      # `--locked` is the enforcing half of the exact pins in Cargo.toml: it
+      # refuses to build if Cargo.lock would have to change, so a dependency
+      # cannot resolve to anything the committed lockfile does not already
+      # record. Pins without `--locked` leave drift unenforced; `--locked`
+      # without pins leaves the manifest permissive. Neither half works alone.
       - name: Rust check
         working-directory: src-tauri
-        run: cargo check
+        run: cargo check --locked
 
       - name: Rust tests
         working-directory: src-tauri
-        run: cargo test
+        run: cargo test --locked
 
   audit:
     runs-on: ubuntu-latest
@@ -131,6 +137,13 @@ jobs:
       # outstanding Rust advisory". The alert list is a separate read:
       # `gh api repos/<owner>/<repo>/dependabot/alerts?state=open`. Treating
       # green here as the whole answer is what left an alert unexamined.
+      # No `--locked` here, deliberately: cargo-audit is a standalone binary and
+      # does not accept that flag (`cargo audit --help` lists no `--locked`), so
+      # adding it to "complete the set" would fail this job. It needs no such
+      # flag either — it READS Cargo.lock as its input rather than resolving a
+      # dependency graph, so there is nothing for it to drift against. The
+      # `--locked` on `cargo install cargo-audit` above pins the TOOL, not this
+      # project.
       - name: cargo audit (fail on vulnerabilities)
         working-directory: src-tauri
         run: cargo audit --ignore RUSTSEC-2024-0429

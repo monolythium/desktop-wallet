@@ -43,8 +43,12 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "1"
 tokio = { version = "1", features = ["sync", "macros", "rt"] }
-sha2 = "0.10"
-ed25519-dalek = "2"
+# Exact-pinned: see the pinning rule above `argon2` below. These two are the
+# native-host trust gate — `sha2` hashes the sidecar archive and
+# `ed25519-dalek` verifies the manifest signature, so a silent patch bump
+# changes the bytes that decide whether an untrusted manifest is admitted.
+sha2 = "=0.10.9"
+ed25519-dalek = "=2.2.0"
 
 # --- Stele marketplace (settings-gated feature; opt in via `--features stele`) ---
 # The Stele tab in the UI is gated by a TypeScript localStorage flag; this
@@ -55,33 +59,69 @@ ed25519-dalek = "2"
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio", "query"], optional = true }
 futures-util = { version = "0.3", optional = true }
 uuid = { version = "1", features = ["v4"], optional = true }
-bip39 = { version = "2", default-features = false, features = ["std", "zeroize"], optional = true }
-sha3 = { version = "0.10", optional = true }
-bech32 = { version = "0.11", default-features = false, features = ["alloc"], optional = true }
-fips204 = { version = "0.4.6", default-features = false, features = ["ml-dsa-65"], optional = true }
+# The four below are exact-pinned under the same rule as the vault crypto: they
+# turn a mnemonic into a seed (bip39), generate and sign with ML-DSA keys
+# (fips204), and derive and encode the address funds are sent to (sha3,
+# bech32). They are `optional` and no default build compiles them today, so
+# pinning them changes no shipped artefact — it means the Tier 3 trigger
+# ("the first release that passes --features stele") does not ALSO have to be
+# a pinning pass.
+bip39 = { version = "=2.2.2", default-features = false, features = ["std", "zeroize"], optional = true }
+sha3 = { version = "=0.10.9", optional = true }
+bech32 = { version = "=0.11.1", default-features = false, features = ["alloc"], optional = true }
+fips204 = { version = "=0.4.6", default-features = false, features = ["ml-dsa-65"], optional = true }
 
+# --- PINNING RULE (do not pin ad hoc; apply this) ---------------------------
+#
+# Exact-pin a direct dependency when it COMPUTES, HOLDS, ERASES, OR ATTESTS a
+# cryptographic value the wallet cannot independently check: keys, salts,
+# nonces, ciphertext, signatures, digests, addresses, and OS-stored
+# credentials. For those a patch bump can change bytes or quietly weaken a
+# guarantee with no diff to review and no test that would fail, so the version
+# must move only as a deliberate, reviewable manifest edit.
+#
+# Everything else stays RANGED on purpose. `Cargo.lock` plus `--locked` in CI
+# (see .github/workflows) already fix the resolved version, so a range only
+# controls what a deliberate `cargo update` may pick — and there we want
+# ordinary security patches to flow.
+#
+# The framework specifically CANNOT be pinned: the Tauri plugins float their
+# own `tauri` floor (all five in this manifest now require `^2.10`, and two of
+# them required `2.8.2` a release ago). Pinning `tauri = "=2.11.2"` while the
+# plugins stay ranged would deadlock resolution the first time any plugin
+# raises that floor. `tauri-build` follows `tauri` for the same reason.
+#
 # Vault crypto. Argon2id KDF + XChaCha20-Poly1305 encryption of the wallet
 # seed (whitepaper §13.3 keystore default). Stable releases of the RustCrypto
-# password-hashes / AEADs lines; chacha20poly1305 is exact-pinned and is the
-# sole `aead`-trait crate in the tree.
-argon2 = { version = "0.5", default-features = false, features = ["alloc", "password-hash"] }
+# password-hashes / AEADs lines; chacha20poly1305 is the sole `aead`-trait
+# crate in the tree, and was the precedent this rule generalises.
+#
+# `rand` and `base64` each resolve to TWO versions in the lockfile (0.8.6 with
+# 0.9.4, and 0.22.1 with 0.21.7) because transitive dependents pull the other
+# major. That is exactly the condition under which an unnoticed spec drift
+# silently swaps which one the vault path gets, so both are pinned.
+argon2 = { version = "=0.5.3", default-features = false, features = ["alloc", "password-hash"] }
 chacha20poly1305 = { version = "=0.10.1", default-features = false, features = ["alloc"] }
-rand = { version = "0.8", default-features = false, features = ["getrandom"] }
-base64 = { version = "0.22", default-features = false, features = ["alloc"] }
-zeroize = { version = "1", features = ["derive"] }
+rand = { version = "=0.8.6", default-features = false, features = ["getrandom"] }
+base64 = { version = "=0.22.1", default-features = false, features = ["alloc"] }
+zeroize = { version = "=1.8.2", features = ["derive"] }
 
 # OS keychain. Per-platform native backends:
 # - macOS:    apple-native (Security framework)
 # - Windows:  windows-native (Credential Manager)
 # - Linux:    sync-secret-service (libsecret) — works for GNOME Keyring + KWallet.
+#
+# Exact-pinned under the rule above (it holds the credential), and pinned in
+# all THREE target sections — narrowing one platform while leaving the other
+# two ranged would pin nothing, since each target resolves independently.
 [target.'cfg(target_os = "macos")'.dependencies]
-keyring = { version = "3", default-features = false, features = ["apple-native"] }
+keyring = { version = "=3.6.3", default-features = false, features = ["apple-native"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
-keyring = { version = "3", default-features = false, features = ["windows-native"] }
+keyring = { version = "=3.6.3", default-features = false, features = ["windows-native"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-keyring = { version = "3", default-features = false, features = ["sync-secret-service", "crypto-rust"] }
+keyring = { version = "=3.6.3", default-features = false, features = ["sync-secret-service", "crypto-rust"] }
 
 # For O_NOFOLLOW + getuid() in the lyth_mcp shared-store read path
 # (`mcp_bridge.rs`). Unix-only; the Windows path falls back to plain

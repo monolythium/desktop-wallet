@@ -76,21 +76,21 @@ jobs:
         run: |
           echo "${{ secrets.APPSTORE_CONNECT_KEY_BASE64 }}" | base64 --decode > /tmp/asc-key.p8
           export APPLE_API_KEY_PATH=/tmp/asc-key.p8
-          pnpm tauri build --target ${{ matrix.target }}
+          pnpm tauri build --target ${{ matrix.target }} -- --locked
 
       - name: Build (Linux)
         if: matrix.os == 'ubuntu-latest'
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: pnpm tauri build --target ${{ matrix.target }} --bundles deb,appimage,updater
+        run: pnpm tauri build --target ${{ matrix.target }} --bundles deb,appimage,updater -- --locked
 
       - name: Build (Windows — unsigned)
         if: matrix.os == 'windows-latest'
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: pnpm tauri build --target ${{ matrix.target }}
+        run: pnpm tauri build --target ${{ matrix.target }} -- --locked
 
       # Windows installer signing (Azure Trusted Signing) needs four secrets. If
       # any are absent (e.g. the signing account isn't provisioned yet) the
