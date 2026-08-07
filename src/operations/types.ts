@@ -11,6 +11,56 @@ import type { SendErrorContext } from "../sdk/send-error";
 
 export type OperationStage = "preview" | "auth" | "executing" | "done" | "error";
 
+// ── WHAT THE CONFIRM SURFACE DELIBERATELY DOES NOT SHOW ─────────────────────
+//
+// Four of the ten signed components have no row on any surface, and each is a
+// DECISION rather than an oversight. Recorded here, beside the type that would
+// carry them, so the next contributor reads the reason before adding one back —
+// and so the absence is not read as a gap by the next audit.
+//
+// The test the tiering applies, per component: WHAT DECISION DOES SEEING THIS
+// LET A USER MAKE THAT THEY CANNOT MAKE WITHOUT IT? A component that fails it
+// does not belong on the primary surface. Adding it anyway is not free: a
+// confirm screen nobody reads is worse than a short one, because it converts an
+// informed decision into a habit.
+//
+//  1. `maxPriorityFeePerGas` — the priority tip.
+//     It supports no decision IN ISOLATION and it is not independent:
+//     `postClampResolvedFee` guarantees `tip <= maxFeePerGas`, and the tip is
+//     already INSIDE the fee total a user reads. A row for it would be a second
+//     number that can only ever be a fraction of the first.
+//
+//  2. `nonce`.
+//     Apply the test literally: what would a wrong nonce LOOK like, and what
+//     would the user do about it? They hold no expected value to compare it
+//     against. Its failure mode is real — a transaction that never confirms, or
+//     one that replaces a pending one — and it is already owned elsewhere:
+//     `pending-nonce.ts` tracks it, `submitNativeTx` returns it, and
+//     `reconcile.ts` follows it to a terminal state. The decision a nonce
+//     supports belongs to Activity, not to consent.
+//
+//  3. `chainId`, ON THE SUBMIT SEAM ONLY.
+//     `submit.ts` signs a compile-time constant, and hands the wire to a
+//     transport `getProvider()` has already cleared against the same pin by a
+//     SYMMETRIC comparison. A row that can never be wrong is not information —
+//     it is training in ignoring rows.
+//     ⚠ THIS INVERTS ON THE MRV SEAM, where the chain id was operator-supplied.
+//     The answer there was not to display it (a user has nothing to check it
+//     against) but to stop the operator choosing it — see `mrv.ts`. The same
+//     component is decorative on one path and load-bearing on another, and a
+//     uniform rule gets one of them wrong.
+//
+//  4. `access_list`.
+//     There is no such field on `NativeEvmTxFields`; the encoder writes a zero
+//     length. There is nothing to show.
+//
+// `extensions` is a fifth omission and the only one with a behavioural guard,
+// because unlike the four above it CAN change without anyone noticing:
+// `submit-no-extension.test.ts` pins that a non-MRV write signs an empty list.
+//
+// `gasLimit` is NOT in this list — it is a disclosure-tier component (see
+// `details`), pending the single declared fee source that will supply it.
+
 /**
  * A single-row diff line shown in the preview pane.
  * `kind` lets the drawer style additions vs. fee lines vs. plain values.
