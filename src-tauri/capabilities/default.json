@@ -3,9 +3,29 @@
   "identifier": "default",
   "description": "Default capability set for the main wallet window.",
   "windows": ["main"],
+  "_comment": [
+    "Every plugin grant here is the specific command the wallet calls, not the",
+    "plugin's `default` set. The defaults are wider than the wallet's use:",
+    "`updater:default` is four commands (check, download, install,",
+    "download_and_install) where the wallet calls two; `process:default` adds",
+    "`exit` which nothing calls; `opener:default` adds `reveal_item_in_dir`,",
+    "which has no caller anywhere in the frontend.",
+    "",
+    "opener is NARROWED, NOT DROPPED. The plugin injects a click interceptor",
+    "into the webview that rewrites `target=_blank` anchors into a",
+    "`plugin:opener|open_url` IPC call, so every outbound link in the app",
+    "depends on it even though no module imports the plugin. allow-default-urls",
+    "is the SCOPE half (mailto/tel/http/https); without it open_url is granted",
+    "but every URL is refused.",
+    "",
+    "This does NOT close SA-11-002: `check` is the command that carries the",
+    "caller-supplied `proxy` parameter, and `check` must stay. Removing that",
+    "needs a wallet-owned Rust command (T2.5), not an ACL edit."
+  ],
   "permissions": [
     "core:default",
-    "opener:default",
+    "opener:allow-open-url",
+    "opener:allow-default-urls",
     "store:default",
     "store:allow-load",
     "store:allow-get",
@@ -21,8 +41,9 @@
     "store:allow-length",
     "store:allow-reload",
     "store:allow-get-store",
-    "updater:default",
-    "process:default",
+    "updater:allow-check",
+    "updater:allow-download-and-install",
+    "process:allow-restart",
     "notification:default"
   ]
 }
