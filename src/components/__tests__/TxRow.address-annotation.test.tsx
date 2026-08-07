@@ -186,6 +186,85 @@ describe("the address is visible, not merely in the DOM", () => {
   });
 });
 
+// SA-07-006 — the same law, reached by a different route.
+//
+// `activityCounterparty` returned `row.clusterName` in preference to the
+// address, so a delegation row rendered the name with NO address anywhere — and
+// that row carries no `counterpartyLabel`, so the assertions above could not see
+// it. Home and TokenDetail pass no label props at all, which is why the cluster
+// label travels ON the row: it is the only way the annotation reaches all three
+// pages rather than the one page that resolves labels.
+//
+// Extended here rather than in a second file because it is the same property:
+// the label annotates, the address renders beside it.
+describe("a cluster name annotates, it does not replace", () => {
+  it("renders the address for a row whose only label is a cluster name", () => {
+    render(
+      <TxRow
+        tx={tx({
+          counterparty: ADDRESS,
+          clusterLabel: { kind: "cluster", label: "Aurora Cluster" },
+          counterpartyAddress: ADDRESS,
+        })}
+      />,
+    );
+    // No `counterpartyLabel` prop — this is the Home/TokenDetail shape.
+    expect(screen.getByText(/Aurora Cluster/)).toBeInTheDocument();
+    expect(screen.getByTestId("txrow-counterparty-address").textContent).toBe(ADDRESS);
+  });
+
+  it("a cluster name NEVER carries the chain-verified chip", () => {
+    // It resolves from a SINGLE operator, while an address reverse-name needs a
+    // quorum of two. Same string as a registered name would be, differing only
+    // in `kind`.
+    render(
+      <TxRow
+        tx={tx({
+          clusterLabel: { kind: "cluster", label: "alice.mono" },
+          counterpartyAddress: ADDRESS,
+        })}
+      />,
+    );
+    expect(screen.queryByTestId("txrow-name-chip")).toBeNull();
+    expect(document.querySelector(".w-tx__chip")).toBeNull();
+  });
+
+  it("an ADDRESS-SHAPED cluster name still renders the real address beside it", () => {
+    // The sharp case: `clusterName` is never format-checked, so a planted row
+    // can name itself with the victim's own address. Before, the row showed
+    // that string and nothing else.
+    render(
+      <TxRow
+        tx={tx({
+          clusterLabel: { kind: "cluster", label: OTHER_ADDRESS },
+          counterpartyAddress: ADDRESS,
+        })}
+      />,
+    );
+    expect(screen.getByTestId("txrow-counterparty-address").textContent).toBe(ADDRESS);
+  });
+
+  it("a call-site label still wins over the row's cluster label", () => {
+    render(
+      <TxRow
+        tx={tx({ clusterLabel: { kind: "cluster", label: "Aurora Cluster" } })}
+        counterpartyLabel={{ kind: "contact", label: "Alice" }}
+        counterpartyAddress={ADDRESS}
+      />,
+    );
+    expect(screen.getByText(/Alice/)).toBeInTheDocument();
+    expect(document.body.textContent ?? "").not.toContain("Aurora Cluster");
+  });
+
+  it("the drop rule holds for a cluster label too", () => {
+    // Fail direction, unchanged: a label with no address to annotate is
+    // dropped rather than shown alone.
+    render(<TxRow tx={tx({ counterparty: "Cluster #3", clusterLabel: { kind: "cluster", label: "Aurora Cluster" } })} />);
+    expect(document.body.textContent ?? "").not.toContain("Aurora Cluster");
+    expect(screen.queryByTestId("txrow-counterparty-address")).toBeNull();
+  });
+});
+
 // NOTE on what is deliberately NOT tested here. A caller that passes a label and
 // forgets the address is not defended by a source scan — it is defended by the
 // drop rule above: such a row loses its label and renders unlabelled. The

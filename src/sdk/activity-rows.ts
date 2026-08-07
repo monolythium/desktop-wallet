@@ -16,6 +16,7 @@
 // name registry exists); native rows show "LYTH".
 
 import type { Tx, TxBucket } from "../data/types";
+import type { AddressLabel } from "./address-label";
 import type { LiveAddressActivityRow } from "./live";
 import { confirmedRowKey } from "./activity-cache";
 import {
@@ -112,14 +113,31 @@ export function activityWhen(row: LiveAddressActivityRow, nowMs?: number): strin
   return `block ${row.blockHeight.toString()} · tx ${row.txIndex}`;
 }
 
-/** Counterparty label. Prefers a resolved cluster name from enrichment, then
- *  the counterparty address, then a plain cluster identifier for
- *  delegation-style rows, else "—" (no fabrication). */
+/** Counterparty for the row's main line: the ADDRESS when there is one, then a
+ *  plain cluster identifier for delegation-style rows, else "—" (no fabrication).
+ *
+ *  This used to return `row.clusterName` in preference to the address, which is
+ *  the substitution `address-label.ts:8-9` forbids: the name replaced the
+ *  address and no address rendered anywhere on the row. `clusterName` is never
+ *  format-checked and arrives from a plaintext store or a SINGLE operator, so it
+ *  can be made address-shaped — a planted row could show the victim their own
+ *  address as the "counterparty" while the real one was elsewhere.
+ *
+ *  The name is not lost: it travels as a {@link AddressLabel} of kind "cluster"
+ *  (see {@link activityClusterLabel}) and annotates the address rather than
+ *  standing in for it. */
 export function activityCounterparty(row: LiveAddressActivityRow): string {
-  if (row.clusterName) return row.clusterName;
   if (row.counterparty) return row.counterparty;
   if (row.cluster !== null) return `Cluster #${row.cluster}`;
   return "—";
+}
+
+/** The resolved cluster name as a label, or null. Never a chain-verified kind:
+ *  cluster names resolve from one operator, while an address reverse-name needs
+ *  a quorum of two. */
+export function activityClusterLabel(row: LiveAddressActivityRow): AddressLabel {
+  const name = typeof row.clusterName === "string" ? row.clusterName.trim() : "";
+  return name === "" ? null : { kind: "cluster", label: name };
 }
 
 /**
@@ -175,6 +193,11 @@ export function activityRowToTx(
     kind,
     bucket,
     counterparty: activityCounterparty(row),
+    // Carried on the row so EVERY page rendering a TxRow gets the annotation —
+    // Home and TokenDetail pass no label props at all, and a cluster row is
+    // exactly the case they render.
+    clusterLabel: activityClusterLabel(row),
+    counterpartyAddress: row.counterparty ?? null,
     // The indexer stream carries no memo — left empty so TxRow omits it.
     memo: "",
     typeLabel: txTypeLabelForActivity(row),

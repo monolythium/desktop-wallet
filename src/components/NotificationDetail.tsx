@@ -135,14 +135,21 @@ export function NotificationDetail({ record, onClose }: NotificationDetailProps)
               value={amountLabel}
             />
           ) : null}
+          {/* An if/ELSE here meant a cluster label REPLACED the address row —
+              the modal that `Notifications.tsx` cites to justify truncating its
+              own row showed no address at all for exactly the rows carrying a
+              cluster name. `clusterName` is unvalidated and disk-sourced, so
+              that is the substitution the display law forbids. Both render now:
+              the cluster annotates, the address stands. */}
           {clusterLabel !== null ? (
             <DRow label="Cluster" value={clusterLabel} />
-          ) : (
+          ) : null}
+          {record.counterparty ? (
             <DRow
               label={record.kind === "receive" ? "From" : "To"}
               value={<CopyableAddress addr={record.counterparty} />}
             />
-          )}
+          ) : null}
           {showBlock ? (
             <DRow
               label="Block"

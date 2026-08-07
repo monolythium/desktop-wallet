@@ -36,9 +36,17 @@ export function TxRow({ tx, onClick, counterpartyLabel, counterpartyAddress }: P
   // counterparty is merely less friendly. `tx.counterparty` is NOT a substitute
   // address here — `activityCounterparty` prefers `row.clusterName` and can also
   // yield "Cluster #N" or an em-dash, so only an explicitly-passed address counts.
+  // The call site's label wins (Activity resolves a registered name or a
+  // contact); otherwise the row's own cluster label applies. Home and
+  // TokenDetail pass no label props at all, and a delegation row carrying a
+  // cluster name is exactly what they render — so carrying it on the row is
+  // what makes this reach all three pages rather than one.
+  const effectiveLabel = counterpartyLabel ?? tx.clusterLabel ?? null;
+  const effectiveAddress =
+    typeof counterpartyAddress === "string" ? counterpartyAddress : tx.counterpartyAddress ?? null;
   const annotated =
-    counterpartyLabel && typeof counterpartyAddress === "string" && counterpartyAddress !== ""
-      ? { label: counterpartyLabel, address: counterpartyAddress }
+    effectiveLabel && typeof effectiveAddress === "string" && effectiveAddress !== ""
+      ? { label: effectiveLabel, address: effectiveAddress }
       : null;
   const counterparty = annotated ? annotated.label.label : tx.counterparty;
   const label = tx.bucket === "reward"
