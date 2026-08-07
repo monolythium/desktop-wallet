@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { ChainInfo } from "@monolythium/core-sdk";
 import { useActiveWallet } from "../sdk/active-wallet";
+import { useAddressDerived } from "../sdk/use-address-provenance";
 import { CopyableAddress } from "../components/_detailModalParts";
 import { MnemonicGrid } from "../components/MnemonicGrid";
 import { getActiveAccount, revealRecoveryPhrase } from "../sdk/keychain";
@@ -85,6 +86,7 @@ type SettingsSubPage = "main" | "notifications" | "appearance" | "reset" | "reve
 
 export function Settings({ steleEnabled, setSteleEnabled, experimentalEnabled, setExperimentalEnabled, initialSubPage }: SettingsProps) {
   const wallet = useActiveWallet();
+  const addressVerified = useAddressDerived(wallet.addressHex);
   const [devkitChannel, setDevkitChannel] = useState<NativeDevkitChannel>(() => readDevkitChannel());
   const [autoLockMinutes, setAutoLockMinutes] = useState<number>(() => readAutoLockMinutes());
   // A lengthening awaiting confirmation. Nothing is written or shown as active
@@ -134,8 +136,17 @@ export function Settings({ steleEnabled, setSteleEnabled, experimentalEnabled, s
               </div>
               <div className="row-help">The address others use to send you LYTH.</div>
             </div>
-            {wallet.status === "ready" ? (
+            {wallet.status === "ready" && addressVerified ? (
               <CopyableAddress addr={wallet.address} />
+            ) : wallet.status === "ready" ? (
+              // Same rule as the Receive QR: this row renders the FULL address
+              // and hands it to the clipboard under the words "the address
+              // others use to send you LYTH", so it is a publication surface,
+              // not a read one. An address this process has not derived does
+              // not get published from here either.
+              <span className="row-help" data-testid="settings-addr-unverified">
+                Unverified — unlock to confirm this address
+              </span>
             ) : (
               <span className="row-help">
                 {wallet.status === "locked"

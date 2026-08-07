@@ -97,8 +97,13 @@ describe("a labelled row renders the address the label annotates", () => {
     // Same STRING as the registered case above, differing only in `kind` — so
     // this fails the moment the discriminant stops reaching the render, which
     // is precisely how `?.label ?? null` broke it.
+    //
+    // Asserted on the CHIP NODE, not on a body substring: REGISTERED_CHIP_TEXT
+    // is the word "name", so a whole-document `not.toContain` would also trip on
+    // a memo or a type label containing it, and would read as a property check
+    // while actually testing the fixture.
     expect(screen.queryByTestId("txrow-name-chip")).toBeNull();
-    expect(rowText()).not.toContain(REGISTERED_CHIP_TEXT);
+    expect(document.querySelector(".w-tx__chip")).toBeNull();
   });
 });
 

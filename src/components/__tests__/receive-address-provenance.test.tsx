@@ -32,12 +32,14 @@ import {
   markAddressDerived,
 } from "../../sdk/address-provenance";
 
-/** What derivation would produce — the user's real address. */
+/** What derivation would produce — the user's real address. The bech32m is the
+ *  REAL encoding of the hex (checked against addressToTypedBech32), so a test
+ *  asserting the published string cannot pass against a fabricated pairing. */
 const REAL_HEX = "0x3fdf7513d14e2938d3ff505dbb45e19716f699e5";
-const REAL_BECH32 = "mono1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq";
+const REAL_BECH32 = "mono18l0h2y73fc5n35ll2pwmk30pjut0dx09wmu4y9";
 /** What an attacker wrote into the catalog instead. */
 const PLANTED_HEX = "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef";
-const PLANTED_BECH32 = "mono1zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz";
+const PLANTED_BECH32 = "mono1m6kmam774klwlh4dhmhaatd7al02m0h0533qk6";
 
 beforeEach(() => {
   qr.value = null;
@@ -52,7 +54,7 @@ describe("a planted catalog address is not published", () => {
     // The whole attack in one render: the catalog says PLANTED, and nothing in
     // this process ever derived it.
     renderWithProviders(
-      <ReceiveModal address={PLANTED_BECH32} addressHex={PLANTED_HEX} onClose={vi.fn()} />,
+      <ReceiveModal addressHex={PLANTED_HEX} onClose={vi.fn()} />,
     );
 
     expect(screen.queryByTestId("qr")).toBeNull();
@@ -64,7 +66,7 @@ describe("a planted catalog address is not published", () => {
 
   it("the planted address appears NOWHERE in the rendered DOM", () => {
     renderWithProviders(
-      <ReceiveModal address={PLANTED_BECH32} addressHex={PLANTED_HEX} onClose={vi.fn()} />,
+      <ReceiveModal addressHex={PLANTED_HEX} onClose={vi.fn()} />,
     );
     // Not "not in the QR" — not anywhere. A value the user could read off the
     // screen and retype is published just as surely as one they scan.
@@ -75,7 +77,7 @@ describe("a planted catalog address is not published", () => {
 
   it("shows the way to verify instead of a caveat", () => {
     renderWithProviders(
-      <ReceiveModal address={PLANTED_BECH32} addressHex={PLANTED_HEX} onClose={vi.fn()} />,
+      <ReceiveModal addressHex={PLANTED_HEX} onClose={vi.fn()} />,
     );
     // A QR is scanned, not read, so the unverified state must not be "here is
     // the address, but". It is a password prompt and nothing else.
@@ -87,7 +89,7 @@ describe("control — a derived address publishes exactly as before", () => {
   it("renders the QR, the address text and the copy button", () => {
     markAddressDerived(REAL_HEX);
     renderWithProviders(
-      <ReceiveModal address={REAL_BECH32} addressHex={REAL_HEX} onClose={vi.fn()} />,
+      <ReceiveModal addressHex={REAL_HEX} onClose={vi.fn()} />,
     );
 
     // The anti-vacuity companion: without this, every assertion above would
@@ -105,7 +107,7 @@ describe("control — a derived address publishes exactly as before", () => {
     // global "the wallet is unlocked" flag, which is the whole point.
     markAddressDerived(REAL_HEX);
     renderWithProviders(
-      <ReceiveModal address={PLANTED_BECH32} addressHex={PLANTED_HEX} onClose={vi.fn()} />,
+      <ReceiveModal addressHex={PLANTED_HEX} onClose={vi.fn()} />,
     );
     expect(screen.queryByTestId("qr")).toBeNull();
     expect(screen.getByTestId("receive-confirm")).toBeInTheDocument();
@@ -161,7 +163,7 @@ describe("locking forgets every derivation", () => {
     expect(isAddressDerived(REAL_HEX)).toBe(false);
 
     renderWithProviders(
-      <ReceiveModal address={REAL_BECH32} addressHex={REAL_HEX} onClose={vi.fn()} />,
+      <ReceiveModal addressHex={REAL_HEX} onClose={vi.fn()} />,
     );
     expect(screen.queryByTestId("qr")).toBeNull();
   });

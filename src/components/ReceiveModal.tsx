@@ -1,6 +1,6 @@
 // Receive modal — wallet's typed `mono1…` address as QR + copy.
 //
-// The address is NOT simply a catalog read any more. `vaults.v1.json` is
+// The address is NOT simply a catalog read any more. The vault catalog store is
 // plaintext JSON that anything running as this OS user can write, and the value
 // in it reached the QR with no signature, no unlock and no re-derivation: a
 // planted `addressHex` re-encodes to a perfectly valid `mono1…` and the payer
@@ -14,6 +14,7 @@
 
 import { useEffect, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
+import { addressToTypedBech32 } from "@monolythium/core-sdk";
 import { useFitText } from "./useFitText";
 import { NETWORK_DISPLAY_NAME, TESTNET_CHAIN_ID, TESTNET_CHAIN_ID_HEX } from "../sdk/peers";
 import { useReverseName } from "../sdk/use-reverse-names";
@@ -35,10 +36,10 @@ import {
 } from "../sdk/unlock-lockout";
 
 interface Props {
-  address: string;
-  /** The 20-byte `0x…` the typed address encodes. Required, and separate from
-   *  `address`, because provenance is recorded against what the SDK's
-   *  derivation returns — a hex — not against its bech32m rendering. */
+  /** The 20-byte `0x…` of the active vault. The published string is derived
+   *  FROM this rather than passed alongside it, so the value the gate checks and
+   *  the value the QR carries are the same value. A second address prop could
+   *  disagree with the hex that was verified, and nothing would notice. */
   addressHex: string;
   onClose: () => void;
 }
@@ -93,16 +94,37 @@ function ConfirmToReveal({ onClose }: { onClose: () => void }) {
       const derivedHex = withSigningBackend(seed, (backend) =>
         backend.getAddress().toLowerCase(),
       );
+      // Zeroed the instant it is no longer needed — the derivation is the ONLY
+      // thing the seed was fetched for. Waiting for the `finally` would leave it
+      // live across the synchronous head of the store call below; the `finally`
+      // stays as the backstop for the paths that never reach here.
+      seed.fill(0);
       markAddressDerived(derivedHex);
       setPassword("");
       clearUnlockLockout();
+      setLockoutUntil(0);
       // Correct the catalog if what was stored is not what the seed produces,
       // then tell the active-wallet readers so the revealed address is the
-      // DERIVED one. Until that lands the modal simply stays unrevealed —
+      // DERIVED one. Until that lands the modal stays unrevealed —
       // `useAddressDerived` is keyed on the derived hex, so a stale prop cannot
       // slip through.
-      await captureAddressOnUnlock(slot, derivedHex).catch(() => {});
-      notifyActiveWalletChanged();
+      //
+      // Dispatched, not awaited: this is up to five IPC round trips including a
+      // filesystem write, and awaiting it would hold the decrypted seed live in
+      // the heap for the whole of it. The other two derivation sites document
+      // exactly that discipline; awaiting here would have been the one place
+      // that reversed it. The reveal is driven by the mark above, not the write.
+      void captureAddressOnUnlock(slot, derivedHex)
+        .then(() => notifyActiveWalletChanged())
+        .catch(() => {
+          // The password was right and the derivation succeeded — only the
+          // catalog write failed. Say so: without this the field simply empties
+          // and the panel re-renders identically, forever, with no error.
+          setError(
+            "Your password was correct, but this device could not update the " +
+              "stored address. Close and reopen Receive, or restart the wallet.",
+          );
+        });
     } catch (cause) {
       if (isWrongPasswordFailure(cause)) {
         const next = recordWrongUnlockAttempt();
@@ -171,8 +193,10 @@ function ConfirmToReveal({ onClose }: { onClose: () => void }) {
   );
 }
 
-export function ReceiveModal({ address, addressHex, onClose }: Props) {
+export function ReceiveModal({ addressHex, onClose }: Props) {
   const [copied, setCopied] = useState(false);
+  // ONE derivation of the published string, from the hex the gate checks.
+  const address = addressToTypedBech32("user", addressHex);
   // Membership means this process decrypted the vault and the SDK produced this
   // exact address. It is never read from disk, so a planted catalog cannot
   // assert it. Fail direction: unknown is unverified.

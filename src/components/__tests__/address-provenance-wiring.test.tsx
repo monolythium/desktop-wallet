@@ -174,7 +174,11 @@ describe("the lock gate fills the provenance set", () => {
       fireEvent.click(screen.getByRole("button", { name: /unlock/i }));
     });
 
-    await waitFor(() => expect(screen.queryByText(/backend unavailable/i)).toBeNull());
+    // `queryByText(...) === null` is already true at t=0, so a waitFor on it
+    // resolves on the first poll and asserts nothing. Assert what "lets the user
+    // in" actually means: the vault was decrypted, and NO error banner rendered.
+    await waitFor(() => expect(fetchAndUnlockVault).toHaveBeenCalledTimes(1));
+    expect(document.querySelector(".w-banner.error")).toBeNull();
     expect(derivedAddressCount()).toBe(0);
   });
 });

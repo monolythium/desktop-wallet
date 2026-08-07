@@ -25,8 +25,8 @@ vi.mock("../../sdk/use-reverse-names", async (orig) => ({
 import { ReceiveModal } from "../ReceiveModal";
 import { clearDerivedAddresses, markAddressDerived } from "../../sdk/address-provenance";
 
-const ADDRESS = "mono1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq";
 const ADDRESS_HEX = "0x1111111111111111111111111111111111111111";
+const ADDRESS = "mono1zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg357f9at";
 
 beforeEach(() => {
   qr.value = null;
@@ -40,7 +40,7 @@ beforeEach(() => {
 describe("with a quorum-verified own name", () => {
   it("renders the name, the chip and the category badge", () => {
     name.value = "alice.mono";
-    renderWithProviders(<ReceiveModal address={ADDRESS} addressHex={ADDRESS_HEX} onClose={vi.fn()} />);
+    renderWithProviders(<ReceiveModal addressHex={ADDRESS_HEX} onClose={vi.fn()} />);
 
     expect(screen.getByTestId("receive-own-name")).toBeInTheDocument();
     expect(screen.getByText("alice.mono")).toBeInTheDocument();
@@ -50,14 +50,14 @@ describe("with a quorum-verified own name", () => {
 
   it("the QR still encodes the ADDRESS, never the name", () => {
     name.value = "alice.mono";
-    renderWithProviders(<ReceiveModal address={ADDRESS} addressHex={ADDRESS_HEX} onClose={vi.fn()} />);
+    renderWithProviders(<ReceiveModal addressHex={ADDRESS_HEX} onClose={vi.fn()} />);
     expect(qr.value).toBe(ADDRESS);
     expect(qr.value).not.toContain("alice");
   });
 
   it("the address block is unchanged — full, single-line, click-to-copy", () => {
     name.value = "alice.mono";
-    renderWithProviders(<ReceiveModal address={ADDRESS} addressHex={ADDRESS_HEX} onClose={vi.fn()} />);
+    renderWithProviders(<ReceiveModal addressHex={ADDRESS_HEX} onClose={vi.fn()} />);
     const row = screen.getByTestId("receive-address");
     expect(row.textContent).toBe(ADDRESS);
     expect(row.style.whiteSpace).toBe("nowrap");
@@ -67,14 +67,14 @@ describe("with a quorum-verified own name", () => {
 
 describe("without a name", () => {
   it("renders no name row at all — nothing reserves space", () => {
-    renderWithProviders(<ReceiveModal address={ADDRESS} addressHex={ADDRESS_HEX} onClose={vi.fn()} />);
+    renderWithProviders(<ReceiveModal addressHex={ADDRESS_HEX} onClose={vi.fn()} />);
     expect(screen.queryByTestId("receive-own-name")).toBeNull();
     expect(screen.queryByTestId("name-chip")).toBeNull();
     expect(screen.queryByTestId("category-badge")).toBeNull();
   });
 
   it("keeps the network caution and the subtitle verbatim", () => {
-    renderWithProviders(<ReceiveModal address={ADDRESS} addressHex={ADDRESS_HEX} onClose={vi.fn()} />);
+    renderWithProviders(<ReceiveModal addressHex={ADDRESS_HEX} onClose={vi.fn()} />);
     expect(
       screen.getByText(
         "Send LYTH on Monolythium Testnet only. Chain id 69420 (0x10F2C). Sending LYTH from a different chain may result in lost funds.",

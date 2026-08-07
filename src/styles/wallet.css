@@ -939,18 +939,19 @@ html[data-sidebar="collapsed"]:not([data-layout="topbar"]) .w-nav__item {
 }
 .w-tx__info .eyebrow .sep::before { content: "·"; }
 .w-tx__info .label { font-size: 13px; font-weight: 500; margin-top: 2px; }
-/* The address a label annotates. Full, never ellipsised — a truncated address is
-   what a lookalike is ground to match — so it CLIPS on overflow rather than
-   hiding characters behind a "…" the user would read as the real thing. */
+/* The address a label annotates. Full and VISIBLY full — a truncated address is
+   what a lookalike is ground to match, so every character has to survive to the
+   screen. `nowrap` + `overflow:hidden` would have clipped the tail silently in a
+   narrow row, which is strictly worse than an ellipsis: at least an ellipsis
+   admits that something was removed. It wraps instead. */
 .w-tx__addr {
   font-family: var(--f-mono);
   font-size: 10.5px;
   letter-spacing: -0.02em;
   color: var(--fg-400);
   margin-top: 2px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: clip;
+  overflow-wrap: anywhere;
+  word-break: break-all;
 }
 /* An address this process has not derived. Deliberately quiet — it is a
    statement about what the wallet knows, not an alarm about what it found. */

@@ -101,6 +101,11 @@ export function UnlockGate() {
         const derivedHex = withSigningBackend(seed, (backend) =>
           backend.getAddress().toLowerCase(),
         );
+        // Zeroed here, not merely below: the store call dispatched a few lines
+        // on runs its synchronous head before any later statement, so the seed
+        // must already be gone. The `seed.fill(0)` after this block stays as the
+        // backstop for the paths that skip the derivation.
+        seed.fill(0);
         markAddressDerived(derivedHex);
         const slot = getActiveAccount();
         void captureAddressOnUnlock(slot, derivedHex)

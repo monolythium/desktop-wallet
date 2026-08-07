@@ -1,6 +1,9 @@
 // Which addresses this process has DERIVED, as opposed to merely read.
 //
-// THE PROBLEM. `vaults.v1.json` is plaintext JSON in app-data. `loadCatalog`
+// THE PROBLEM. The vault catalog store is plaintext JSON in app-data (the file
+// name is Rust's business — see `wallet_store.rs`, and the guard in
+// `store-path-confinement.test.ts` that keeps it that way, which caught an
+// earlier draft of this very comment). `loadCatalog`
 // checks that the root is an object and that `vaults` is an object; it performs
 // no per-entry validation. `active-wallet.ts` then re-encodes the stored
 // `addressHex` with `addressToTypedBech32` and every surface calls the result
@@ -36,8 +39,18 @@
 /** Lowercased `0x…` hexes this process has seen a derivation produce. */
 const derived = new Set<string>();
 
+/** Bumped on every real change. Monotonic on purpose: the set's SIZE is a
+ *  colliding snapshot — clear-then-derive returns to the same count, and a
+ *  subscriber comparing snapshots by identity would miss it. */
+let revision = 0;
+
 type Listener = () => void;
 const listeners = new Set<Listener>();
+
+function notify(): void {
+  revision += 1;
+  for (const listener of listeners) listener();
+}
 
 function normalize(addressHex: string | null | undefined): string | null {
   if (typeof addressHex !== "string") return null;
@@ -57,7 +70,7 @@ export function markAddressDerived(addressHex: string): void {
   if (key === null) return;
   if (derived.has(key)) return;
   derived.add(key);
-  for (const listener of listeners) listener();
+  notify();
 }
 
 /** True only if this process watched a derivation produce this address. */
@@ -74,7 +87,7 @@ export function isAddressDerived(addressHex: string | null | undefined): boolean
 export function clearDerivedAddresses(): void {
   if (derived.size === 0) return;
   derived.clear();
-  for (const listener of listeners) listener();
+  notify();
 }
 
 /** Subscribe to changes. Returns the unsubscribe. */
@@ -89,4 +102,9 @@ export function subscribeDerivedAddresses(listener: Listener): () => void {
  *  rather than merely reporting `false` for one probe address. */
 export function derivedAddressCount(): number {
   return derived.size;
+}
+
+/** A monotonic change counter for subscribers. See {@link revision}. */
+export function derivedAddressesRevision(): number {
+  return revision;
 }

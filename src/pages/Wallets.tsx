@@ -11,6 +11,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { addressToTypedBech32 } from "@monolythium/core-sdk";
+import { isAddressDerived } from "../sdk/address-provenance";
+import { useDerivedAddressesVersion } from "../sdk/use-address-provenance";
 import { useDeveloperMode } from "../sdk/developer-mode";
 
 /** Per-wallet live native-balance state. Each wallet tracks its own state so
@@ -75,6 +77,11 @@ export function Wallets() {
   const [catalogError, setCatalogError] = useState<string | null>(null);
   /** Slot whose address was just copied — drives the transient "Copied" label. */
   const [copiedSlot, setCopiedSlot] = useState<string | null>(null);
+  // Re-render when a derivation lands, so a vault unlocked in another surface
+  // gains its copy affordance without a reload. Subscribed once for the whole
+  // list; the per-row question is asked with `isAddressDerived`, because "some
+  // address was derived" is not "THIS address was derived".
+  useDerivedAddressesVersion();
 
   /** Copy a wallet's FULL bech32m. The row displays an ellipsized form; copying
    *  that would hand the user a string that is not an address. */
@@ -482,7 +489,14 @@ export function Wallets() {
                           affordance — and an affordance whose copy action is
                           missing is a dead end. This copies the FULL bech32m,
                           never the truncated form the row shows. */}
-                      {bech32m ? (
+                      {/* …and only for an address this process DERIVED. The
+                          clipboard is where a publication begins: a user copies
+                          from here and pastes it to whoever is paying them, so
+                          a planted `addressHex` reaches the same end state as
+                          the Receive QR by a quieter route. Unverified rows keep
+                          the row and the ellipsized address — this page is read,
+                          not scanned — but hand nothing to the clipboard. */}
+                      {bech32m && isAddressDerived(v.addressHex) ? (
                         <button
                           className="btn btn--sm btn--ghost"
                           aria-label={`Copy address for ${v.name}`}
@@ -490,6 +504,14 @@ export function Wallets() {
                         >
                           {copiedSlot === v.slot ? "Copied" : "Copy address"}
                         </button>
+                      ) : bech32m ? (
+                        <span
+                          className="row-help"
+                          data-testid={`wallets-unverified-${v.slot}`}
+                          title="Unlock this wallet to confirm this address before sharing it"
+                        >
+                          Unverified — unlock to copy
+                        </span>
                       ) : null}
                       <button
                         className="btn btn--sm btn--ghost"

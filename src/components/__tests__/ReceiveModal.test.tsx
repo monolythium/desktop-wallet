@@ -21,8 +21,10 @@ vi.mock("qrcode.react", () => ({
 import { ReceiveModal } from "../ReceiveModal";
 import { clearDerivedAddresses, markAddressDerived } from "../../sdk/address-provenance";
 
-const ADDRESS = "mono1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq";
+// A REAL pair: the bech32m is what addressToTypedBech32("user", HEX) returns,
+// so the fixture cannot assert a correspondence the code does not produce.
 const ADDRESS_HEX = "0x1111111111111111111111111111111111111111";
+const ADDRESS = "mono1zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg357f9at";
 
 function addressRow(): HTMLElement {
   return screen.getByTestId("receive-address");
@@ -45,7 +47,7 @@ function stubClipboard(writeText: (t: string) => Promise<void>) {
  *  land after it. */
 function renderReceive(onClose = vi.fn()) {
   const r = renderWithProviders(
-    <ReceiveModal address={ADDRESS} addressHex={ADDRESS_HEX} onClose={onClose} />,
+    <ReceiveModal addressHex={ADDRESS_HEX} onClose={onClose} />,
   );
   stubClipboard(async (t: string) => {
     written.push(t);

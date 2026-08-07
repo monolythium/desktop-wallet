@@ -5,6 +5,7 @@
 
 import { useState } from "react";
 import { useActiveWallet } from "../sdk/active-wallet";
+import { useAddressDerived } from "../sdk/use-address-provenance";
 import { useAutoLock } from "../sdk/auto-lock";
 import { applySidebarCollapsed, readSidebarCollapsed } from "../sdk/theme";
 import {
@@ -25,6 +26,7 @@ interface Props {
 
 export function Sidebar({ route, setRoute, developerModeEnabled, steleEnabled, experimentalEnabled }: Props) {
   const wallet = useActiveWallet();
+  const addressVerified = useAddressDerived(wallet.addressHex);
   const { lock } = useAutoLock();
   // Rail collapse — a display preference persisted via the theme/display store
   // and applied to <html> so the grid column reflows. Default OPEN.
@@ -91,7 +93,13 @@ export function Sidebar({ route, setRoute, developerModeEnabled, steleEnabled, e
         <b>{wallet.status === "ready" || wallet.status === "locked" ? wallet.name : "No active wallet"}</b>
         <div className="addr">
           {wallet.status === "ready"
-            ? wallet.address
+            ? addressVerified
+              ? wallet.address
+              // Read surface, so it is marked rather than blanked — but the
+              // address is not repeated beside the marker, because a full
+              // bech32m sitting next to the word "unverified" is still a string
+              // a user can copy by hand and send to a payer.
+              : "unverified — unlock to confirm"
             : wallet.status === "locked"
               ? "unlock to derive address"
               : wallet.status === "error"
