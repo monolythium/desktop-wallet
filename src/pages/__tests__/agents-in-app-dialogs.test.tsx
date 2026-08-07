@@ -16,7 +16,8 @@ import { renderWithProviders } from "../../test/renderWithProviders";
 const AGENT = {
   slot: "kc:agent:1",
   label: "buyer-bot",
-  bech32m: "mono1agentaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  addressHex: "0xa9e1f0000000000000000000000000000000a9e1",
+  bech32m: "mono148slqqqqqqqqqqqqqqqqqqqqqqqqp20prg6jyj",
 };
 
 const loadAgents = vi.hoisted(() => vi.fn(async () => [] as unknown[]));
@@ -53,6 +54,7 @@ vi.mock("../../operations/context", async (orig) => ({
 }));
 
 import { Agents } from "../Agents";
+import { clearDerivedAddresses, markAddressDerived } from "../../sdk/address-provenance";
 
 let promptSpy: ReturnType<typeof vi.spyOn>;
 let confirmSpy: ReturnType<typeof vi.spyOn>;
@@ -60,6 +62,13 @@ let alertSpy: ReturnType<typeof vi.spyOn>;
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // Funding now requires the agent's address to have been PROVED this session
+  // (SA-08-002 — the registry is a plaintext file, so its funding target is a
+  // claim). These tests are about amounts, balance reads and the diff, so the
+  // proof is granted up front; the gate itself is driven through the UI in
+  // `Agents.funding-target.test.tsx`.
+  clearDerivedAddresses();
+  markAddressDerived(AGENT.addressHex);
   loadAgents.mockResolvedValue([AGENT]);
   fetchSpendingPolicy.mockResolvedValue({ exists: false });
   loadLiveWalletBalance.mockResolvedValue({

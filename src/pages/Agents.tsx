@@ -56,6 +56,11 @@ import {
   type AgentEntry,
 } from "../sdk/agent-registry";
 import {
+  AGENT_MISMATCH_MESSAGE,
+  isAgentAddressProven,
+  proveAgentAddress,
+} from "../sdk/agent-ownership";
+import {
   FUND_DEFAULT_AMOUNT,
   NO_PRINCIPAL_MESSAGE,
   POLICY_FORM_DEFAULTS,
@@ -165,6 +170,12 @@ export function Agents() {
     error: string | null;
     unverified: string | null;
     busy: boolean;
+    /** Agent vault password, collected only while the agent's address is still
+     *  unproved this session. Cleared the moment the proof lands. */
+    agentPassword: string;
+    /** Set when the slot derives a DIFFERENT address than the record claims.
+     *  Terminal: no amount of retyping a password fixes planted data. */
+    tampered: boolean;
   } | null>(null);
 
   // In-app policy form. Replaces the seven-prompt chain plus four alerts.
@@ -268,7 +279,15 @@ export function Agents() {
   /** Open the in-app funding form. Nothing is validated or read yet — the
    *  form is input capture, exactly as the prompt was. */
   const openFund = (agent: AgentEntry) => {
-    setFund({ agent, amount: FUND_DEFAULT_AMOUNT, error: null, unverified: null, busy: false });
+    setFund({
+      agent,
+      amount: FUND_DEFAULT_AMOUNT,
+      error: null,
+      unverified: null,
+      busy: false,
+      agentPassword: "",
+      tampered: false,
+    });
   };
 
   /**
@@ -290,6 +309,55 @@ export function Agents() {
       return;
     }
     const { amountLyth, amountLythoshi } = verdict;
+
+    // SA-08-002. `agent.bech32m` comes from a plaintext store and becomes the
+    // transaction `to`. The only check on the way was `requireTypedUserAddressHex`,
+    // which asks whether the string is an address — not whether it is the user's.
+    // A valid attacker address passes it.
+    //
+    // The agent is a fresh keypair in its own keychain slot, so the principal's
+    // seed cannot reproduce it; the agent's own vault can. Prove ownership by
+    // re-deriving from the slot and comparing, exactly once per session, before
+    // any drawer opens. A mismatch is terminal — it means the record on disk is
+    // not describing this vault.
+    if (!isAgentAddressProven(agent)) {
+      if (fund.agentPassword.length === 0) {
+        setFund({
+          ...fund,
+          busy: false,
+          error: "Enter the agent vault password to confirm this is your agent.",
+          unverified: null,
+        });
+        return;
+      }
+      setFund({ ...fund, busy: true, error: null, unverified: null });
+      const proof = await proveAgentAddress(agent, fund.agentPassword);
+      if (proof.kind === "mismatch") {
+        setFund({
+          ...fund,
+          busy: false,
+          agentPassword: "",
+          tampered: true,
+          error: AGENT_MISMATCH_MESSAGE,
+          unverified: null,
+        });
+        return;
+      }
+      if (proof.kind !== "proved") {
+        setFund({
+          ...fund,
+          busy: false,
+          error:
+            proof.kind === "wrong-password"
+              ? "Wrong agent vault password."
+              : proof.message,
+          unverified: null,
+        });
+        return;
+      }
+      // Proved. The password has done its job and is dropped immediately.
+      setFund({ ...fund, busy: false, agentPassword: "", error: null });
+    }
 
     // Sufficiency check BEFORE opening the drawer: read the principal's live
     // native balance and refuse to open an execute that the chain would reject
@@ -972,8 +1040,33 @@ export function Agents() {
               style={{ ...inputStyle, width: "100%", marginTop: 6 }}
             />
 
+            {/* Ownership proof. Shown only while the agent's address is still
+                unproved this session — right after creating an agent it is
+                already proved, so the ordinary path never sees this field. */}
+            {!isAgentAddressProven(fund.agent) && !fund.tampered ? (
+              <label style={{ display: "block", marginTop: 10 }}>
+                <span className="row-help">
+                  Agent vault password — confirms this address belongs to a vault
+                  you hold, rather than to whatever is written in this device's
+                  agent list
+                </span>
+                <PasswordInput
+                  autoComplete="current-password"
+                  ariaLabel="Agent vault password"
+                  value={fund.agentPassword}
+                  onChange={(v) =>
+                    setFund({ ...fund, agentPassword: v, error: null })
+                  }
+                />
+              </label>
+            ) : null}
+
             {fund.error ? (
-              <div className="row-help" style={{ color: "var(--err)", marginTop: 8 }}>
+              <div
+                className={fund.tampered ? "w-banner error" : "row-help"}
+                data-testid={fund.tampered ? "fund-tampered" : "fund-error"}
+                style={fund.tampered ? { marginTop: 8 } : { color: "var(--err)", marginTop: 8 }}
+              >
                 {fund.error}
               </div>
             ) : null}
@@ -993,17 +1086,22 @@ export function Agents() {
               >
                 Cancel
               </button>
+              {/* A tampered record has no "continue anyway". The balance-read
+                  failure above is an absence of evidence and earns a second
+                  deliberate click; this is evidence of the wrong kind. */}
               <button
                 type="button"
                 className="btn btn--sm btn--primary"
-                disabled={fund.busy}
+                disabled={fund.busy || fund.tampered}
                 onClick={() => void submitFund(fund.unverified !== null)}
               >
                 {fund.busy
-                  ? "Checking balance…"
-                  : fund.unverified !== null
-                    ? "Continue anyway"
-                    : "Review transfer"}
+                  ? "Checking…"
+                  : fund.tampered
+                    ? "Blocked"
+                    : fund.unverified !== null
+                      ? "Continue anyway"
+                      : "Review transfer"}
               </button>
             </div>
           </div>
