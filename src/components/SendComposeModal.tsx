@@ -400,6 +400,14 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
     }
     let cancelled = false;
     setFamiliarity("unknown"); // clear any stale value while the read is in flight
+    // …and say so. While the read is in flight the surface used to render
+    // NOTHING — not the amber warning, not the neutral caution — because the
+    // caution requires `historyUnreadable`, which is only set once the read
+    // resolves. `walletFetch` attaches no timeout, so a hung endpoint made that
+    // silent window unbounded: paste, type an amount, Review, with no caution at
+    // any point. Treating in-flight as "not yet readable" is honest and closes
+    // it; the read overwrites this the moment it lands.
+    setHistoryUnreadable(true);
     const recipientLower = effectiveBech.toLowerCase();
     const fromLower = fromBech32m.toLowerCase();
     void (async () => {
@@ -443,7 +451,14 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [effectiveBech, recipientContactName, fromBech32m]);
+    // `recipientContactName` is deliberately ABSENT from these deps. The body no
+    // longer reads it, but leaving it listed kept the address book influencing
+    // the warning by a back route: when the lookup resolved, the identity
+    // changed, the effect re-ran, and `setFamiliarity("unknown")` blanked an
+    // amber warning that had already painted — for the length of a second
+    // network read. A planted contact could therefore still remove the warning,
+    // which is the one thing this change exists to prevent.
+  }, [effectiveBech, fromBech32m]);
 
   const validate = useMemo(
     () => () => {

@@ -197,7 +197,17 @@ export function activityRowToTx(
     // Home and TokenDetail pass no label props at all, and a cluster row is
     // exactly the case they render.
     clusterLabel: activityClusterLabel(row),
-    counterpartyAddress: row.counterparty ?? null,
+    // The identifier the label annotates. For an ordinary row that is the
+    // address; for a DELEGATION row it is the cluster number, because those rows
+    // carry no counterparty at all — which is why `activityCounterparty` has a
+    // `Cluster #N` fallback in the first place.
+    //
+    // Getting this wrong is not a missing annotation, it is a REGRESSION: with
+    // no identifier the label is dropped by the fail-closed rule, so the row
+    // renders "To Cluster #1" and the resolved name disappears entirely. That is
+    // strictly worse than before this change, and it is the exact row the change
+    // was written for.
+    counterpartyAddress: row.counterparty ?? activityCounterparty(row),
     // The indexer stream carries no memo — left empty so TxRow omits it.
     memo: "",
     typeLabel: txTypeLabelForActivity(row),

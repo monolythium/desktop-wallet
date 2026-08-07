@@ -14,6 +14,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import { TxRow } from "../TxRow";
 import type { Tx } from "../../data/types";
+import { activityRowToTx } from "../../sdk/activity-rows";
 import { REGISTERED_CHIP_TEXT } from "../../sdk/address-label";
 
 const ADDRESS = "mono1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq";
@@ -129,9 +130,9 @@ describe("fail direction — a label without its address is dropped", () => {
   });
 
   it("the address shown is the one PASSED, not the Tx display string", () => {
-    // `activityCounterparty` prefers `row.clusterName`, so `tx.counterparty` is
-    // a display string that is not always an address. The row must annotate
-    // with the address it was given, never with that field.
+    // `tx.counterparty` is a display string that is not always an address — it
+    // can be "Cluster #N" or an em-dash. The row must annotate with the
+    // identifier it was given, never with that field.
     render(
       <TxRow
         tx={tx({ counterparty: "Staking Cluster" })}
@@ -254,6 +255,35 @@ describe("a cluster name annotates, it does not replace", () => {
     );
     expect(screen.getByText(/Alice/)).toBeInTheDocument();
     expect(document.body.textContent ?? "").not.toContain("Aurora Cluster");
+  });
+
+  it("END TO END: a real delegation row keeps its name AND its identifier", () => {
+    // Every other case here hand-builds a `Tx`, and every hand-built fixture
+    // carried an address — so none of them could see the row that has none,
+    // which is exactly the row the cluster change was written for. Piping the
+    // real adapter into the real component is what makes this reachable.
+    render(
+      <TxRow
+        tx={activityRowToTx({
+          blockHeight: 1000n,
+          txIndex: 2,
+          logIndex: 0,
+          kind: "delegation",
+          subKind: "delegated",
+          direction: null,
+          counterparty: null,
+          tokenId: null,
+          amount: null,
+          cluster: 1,
+          weightBps: 2500,
+          blockTimestampSeconds: null,
+          txHash: null,
+          clusterName: "atlas.cluster.mono",
+        })}
+      />,
+    );
+    expect(screen.getByText(/atlas\.cluster\.mono/)).toBeInTheDocument();
+    expect(screen.getByTestId("txrow-counterparty-address").textContent).toBe("Cluster #1");
   });
 
   it("the drop rule holds for a cluster label too", () => {

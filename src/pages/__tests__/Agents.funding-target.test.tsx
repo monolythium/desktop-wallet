@@ -38,7 +38,9 @@ const agentRow = (over: Record<string, unknown> = {}) => ({
 
 const stored = vi.hoisted(() => ({ agents: [] as unknown[] }));
 const loadAgents = vi.hoisted(() => vi.fn(async () => stored.agents));
-const fetchSpendingPolicy = vi.hoisted(() => vi.fn(async () => ({ exists: false })));
+const fetchSpendingPolicy = vi.hoisted(() =>
+  vi.fn(async (): Promise<{ exists: boolean; enabled?: boolean }> => ({ exists: false })),
+);
 const loadLiveWalletBalance = vi.hoisted(() =>
   vi.fn(async () => ({ balanceLyth: "100", balanceLythoshi: "100000000000000000000" })),
 );
@@ -77,7 +79,7 @@ vi.mock("../../operations/context", async (orig) => ({
 }));
 
 import { Agents } from "../Agents";
-import { clearDerivedAddresses } from "../../sdk/address-provenance";
+import { clearDerivedAddresses, markAddressDerived } from "../../sdk/address-provenance";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -177,6 +179,14 @@ describe("control — a genuine agent funds, and the target is the proved one", 
     // satisfied by a page that can never fund anything at all.
     await waitFor(() => expect(opsOpen).toHaveBeenCalledTimes(1));
     expect(fundedTargets()).toEqual([AGENT_BECH32]);
+    // THE VAULT THAT WAS UNLOCKED. Without this the prover could open the
+    // PRINCIPAL's vault — the wrong one entirely — and every other assertion
+    // in this file would still pass, because the mocked backend returns the
+    // same address whichever seed it is handed.
+    expect(fetchAndUnlockVault).toHaveBeenCalledWith(
+      "kc:lyth:agent01:v1",
+      "correct-agent-password",
+    );
   });
 
   it("the proof is per-session — a second funding does not re-ask", async () => {
@@ -202,5 +212,42 @@ describe("control — a genuine agent funds, and the target is the proved one", 
     // The mitigating fact the finding records. It must survive this change.
     const diff = (opsOpen.mock.calls[0]![0] as { diff: { k: string; v: string }[] }).diff;
     expect(diff.find((row) => row.k === "To (agent)")?.v).toBe(AGENT_BECH32);
+  });
+});
+
+describe("the policy actions are gated too — funding was one sink of four", () => {
+  /** Revoking a substituted address is a no-op the user reads as success: the
+   *  drawer reports the policy revoked while the real agent's allowance stays
+   *  live. That is worse than refusing, so it is gated like the rest. */
+  beforeEach(() => {
+    // Revoke only renders for a policy that exists and is enabled.
+    fetchSpendingPolicy.mockResolvedValue({ exists: true, enabled: true });
+  });
+
+  it("Revoke refuses while the agent is unproved", async () => {
+    const r = renderWithProviders(<Agents />);
+    await screen.findByText("buyer-bot");
+    await r.user.click(await screen.findByRole("button", { name: "Revoke" }));
+    expect(opsOpen).not.toHaveBeenCalled();
+    expect(await screen.findByText(/Confirm buyer-bot first/)).toBeInTheDocument();
+  });
+
+  it("Enable refuses while the agent is unproved", async () => {
+    fetchSpendingPolicy.mockResolvedValue({ exists: true, enabled: false });
+    const r = renderWithProviders(<Agents />);
+    await screen.findByText("buyer-bot");
+    const enable = await screen.findByRole("button", { name: "Enable" });
+    await r.user.click(enable);
+    expect(opsOpen).not.toHaveBeenCalled();
+  });
+
+  it("CONTROL: Revoke proceeds once the agent is proved", async () => {
+    // Anti-vacuity: the refusals above are the gate, not a page that can never
+    // revoke anything.
+    markAddressDerived(AGENT_HEX);
+    const r = renderWithProviders(<Agents />);
+    await screen.findByText("buyer-bot");
+    await r.user.click(await screen.findByRole("button", { name: "Revoke" }));
+    await waitFor(() => expect(opsOpen).toHaveBeenCalledTimes(1));
   });
 });

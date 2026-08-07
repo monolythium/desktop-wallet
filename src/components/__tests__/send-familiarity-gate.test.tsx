@@ -158,9 +158,17 @@ describe("store 2 — the confirmed-activity cache", () => {
       ok: true,
       value: [{ counterparty: TO, direction: "out" }],
     });
+    // A contact is added ONLY so the settled "known" state has a visible marker
+    // to anchor on — the green box needs a name to render. It is not what makes
+    // the recipient known; the case above proves that with the same contact.
+    addressbook.addressbookLookup.mockResolvedValue([{ name: "Alice", address: TO }]);
     await typeRecipient();
-    await waitFor(() => expect(live.loadLiveAddressActivity).toHaveBeenCalled());
-    await waitFor(() => expect(warningVisible()).toBe(false));
+    // Anchored on the SETTLED box, never on a mock call: the classifier writes
+    // familiarity AFTER the reads resolve, so a call-count anchor is already
+    // true while the state is still "unknown" — during which the warning is
+    // also absent, for entirely the wrong reason.
+    await waitFor(() => expect(screen.queryByTestId("send-known-contact")).not.toBeNull());
+    expect(warningVisible()).toBe(false);
   });
 });
 
@@ -173,10 +181,11 @@ describe("store 3 — pending-tx", () => {
     pending.pendingTxsSnapshot.mockReturnValue([
       { counterparty: TO, addressLower: FROM.toLowerCase() },
     ]);
+    addressbook.addressbookLookup.mockResolvedValue([{ name: "Alice", address: TO }]);
     await typeRecipient();
-    await waitFor(() =>
-      expect(live.loadLiveAddressActivity).toHaveBeenCalled(),
-    );
+    // Settled-state anchor. When this residue is closed the box stops appearing
+    // and this fails LOUDLY, which is the point of recording it as a test at all.
+    await waitFor(() => expect(screen.queryByTestId("send-known-contact")).not.toBeNull());
     expect(warningVisible()).toBe(false);
   });
 });
@@ -196,8 +205,9 @@ describe("the fail direction", () => {
 
   it("the HMAC-bound sent log still suppresses — it is the one authenticated input", async () => {
     sentLog.isSentRecipientVerified.mockResolvedValue(true);
+    addressbook.addressbookLookup.mockResolvedValue([{ name: "Alice", address: TO }]);
     await typeRecipient();
-    await waitFor(() => expect(sentLog.isSentRecipientVerified).toHaveBeenCalled());
+    await waitFor(() => expect(screen.queryByTestId("send-known-contact")).not.toBeNull());
     expect(warningVisible()).toBe(false);
   });
 });

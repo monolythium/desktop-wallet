@@ -317,3 +317,37 @@ describe("activityClusterLabel", () => {
     expect(activityClusterLabel(row({ clusterName: "   " }))).toBeNull();
   });
 });
+
+describe("a delegation row keeps BOTH its cluster name and its identifier", () => {
+  // The shape the clusterName change exists for, piped through the real adapter
+  // rather than hand-built — the hand-built fixtures in the TxRow guard all
+  // carried an address, so none of them could see a row that has none.
+  const delegationRow = row({
+    kind: "delegation",
+    subKind: "delegated",
+    direction: null,
+    counterparty: null,
+    cluster: 1,
+    clusterName: "atlas.cluster.mono",
+    weightBps: 2500,
+  });
+
+  it("carries the name as a cluster label", () => {
+    expect(activityRowToTx(delegationRow).clusterLabel).toEqual({
+      kind: "cluster",
+      label: "atlas.cluster.mono",
+    });
+  });
+
+  it("carries an identifier for the label to annotate, even with no address", () => {
+    // Without this the fail-closed drop rule discards the label and the name is
+    // LOST — a regression, not merely a missing annotation.
+    expect(activityRowToTx(delegationRow).counterpartyAddress).toBe("Cluster #1");
+  });
+
+  it("still uses the address as the identifier when the row has one", () => {
+    expect(
+      activityRowToTx(row({ counterparty: "mono1abc", clusterName: "atlas" })).counterpartyAddress,
+    ).toBe("mono1abc");
+  });
+});

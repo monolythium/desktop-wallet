@@ -278,6 +278,26 @@ export function Agents() {
 
   /** Open the in-app funding form. Nothing is validated or read yet — the
    *  form is input capture, exactly as the prompt was. */
+  /**
+   * Every action that puts `agent.bech32m` into signed calldata goes through
+   * here first. The registry is a plaintext file, so that address is a claim
+   * until this session has watched the agent's own vault derive it.
+   *
+   * Funding asks for the proof inline (it owns a form). These are one-click
+   * actions with nowhere to put a password field, so they refuse and point at
+   * the place that can take one. The proof is per-session, so a user who has
+   * funded once this session passes straight through.
+   */
+  const requireProvenAgent = (agent: AgentEntry): boolean => {
+    if (isAgentAddressProven(agent)) return true;
+    setPageError(
+      `Confirm ${agent.label} first: open Fund and enter the agent vault password. ` +
+        "Until this wallet has re-derived the agent's address from its own vault, " +
+        "the address in this device's agent list is unverified.",
+    );
+    return false;
+  };
+
   const openFund = (agent: AgentEntry) => {
     setFund({
       agent,
@@ -355,8 +375,14 @@ export function Agents() {
         });
         return;
       }
-      // Proved. The password has done its job and is dropped immediately.
-      setFund({ ...fund, busy: false, agentPassword: "", error: null });
+      // Proved. Drop the password with a FUNCTIONAL update: every branch above
+      // spreads the captured `fund`, and so does the balance check below, so a
+      // plain object here was immediately overwritten by the next stale spread
+      // and the typed agent-vault password stayed in component state — with its
+      // input no longer rendered, because the proof had landed.
+      setFund((prev) =>
+        prev === null ? null : { ...prev, busy: false, agentPassword: "", error: null },
+      );
     }
 
     // Sufficiency check BEFORE opening the drawer: read the principal's live
@@ -365,27 +391,37 @@ export function Agents() {
     // — we don't block the user from trying, since the drawer surfaces the
     // real on-chain error verbatim either way.
     if (principalBech32m && !acceptUnverified) {
-      setFund({ ...fund, busy: true, error: null, unverified: null });
+      setFund((prev) =>
+        prev === null ? null : { ...prev, busy: true, error: null, unverified: null },
+      );
       try {
         const bal = await loadLiveWalletBalance(principalBech32m);
         const have = BigInt(bal.balanceLythoshi);
         if (have < amountLythoshi) {
-          setFund({
-            ...fund,
-            busy: false,
-            error: insufficientBalanceMessage(bal.balanceLyth, amountLyth),
-            unverified: null,
-          });
+          setFund((prev) =>
+            prev === null
+              ? null
+              : {
+                  ...prev,
+                  busy: false,
+                  error: insufficientBalanceMessage(bal.balanceLyth, amountLyth),
+                  unverified: null,
+                },
+          );
           return;
         }
       } catch (cause) {
         // Ask, don't refuse — and require a deliberate second action.
-        setFund({
-          ...fund,
-          busy: false,
-          error: null,
-          unverified: balanceCheckFailedMessage(errorMessage(cause)),
-        });
+        setFund((prev) =>
+          prev === null
+            ? null
+            : {
+                ...prev,
+                busy: false,
+                error: null,
+                unverified: balanceCheckFailedMessage(errorMessage(cause)),
+              },
+        );
         return;
       }
     }
@@ -432,6 +468,15 @@ export function Agents() {
   const openRegister = (agent: AgentEntry) => {
     if (!principalBech32m) {
       setPageError(NO_PRINCIPAL_MESSAGE);
+      return;
+    }
+    // The UPDATE branch never unlocks the agent vault — the principal alone
+    // signs `setPolicy`, so there is no later moment at which ownership could be
+    // proved. And the branch is chosen by a chain read keyed on the address the
+    // record claims, which an attacker can make "existing" by registering any
+    // policy on their own address. So the proof is required before the form
+    // opens; the register branch proves again at execute, where it has the key.
+    if (policies.get(agent.slot)?.exists === true && !requireProvenAgent(agent)) {
       return;
     }
     setPageError(null);
@@ -561,6 +606,20 @@ export function Agents() {
           // No-claim update: the principal amends its own existing policy.
           calldata = buildSetPolicyCalldata(args);
         } else {
+          // Ownership first. This path already unlocks the agent vault below,
+          // and `signClaimAsSubAccount` takes its public key and signature
+          // without ever asking what ADDRESS it derives — so the material for
+          // the check was in hand and thrown away. Proving here means the agent
+          // key cannot be made to sign a claim naming an address it does not own.
+          const proof = await proveAgentAddress(agent, agentPassword);
+          if (proof.kind === "mismatch") throw new Error(AGENT_MISMATCH_MESSAGE);
+          if (proof.kind !== "proved") {
+            throw new Error(
+              proof.kind === "wrong-password"
+                ? "Wrong agent vault password."
+                : proof.message,
+            );
+          }
           // Two-key dance: unlock the AGENT vault transiently to produce its
           // pubkey + signature over the claim-bound message. The principal
           // seed (ctx.vaultSeed) signs + submits the outer tx.
@@ -585,6 +644,7 @@ export function Agents() {
   // Re-enable a previously-disabled policy (selector 0x5bfa1b68). Cheap toggle
   // — no claim payload, principal signs + submits. Mirrors the revoke path.
   const openEnable = (agent: AgentEntry) => {
+    if (!requireProvenAgent(agent)) return;
     ops.open({
       title: `Enable policy · ${agent.label}`,
       subtitle: "Re-enable the agent's disabled spending policy",
@@ -621,6 +681,11 @@ export function Agents() {
   };
 
   const openRevoke = (agent: AgentEntry) => {
+    // Revoking a substituted address is a NO-OP the user reads as success: the
+    // drawer reports "Policy revoked", and the real agent's allowance stays
+    // live. That is worse than refusing, so this is gated like the rest — the
+    // proof is per-session and reachable from Fund, so it strands nobody.
+    if (!requireProvenAgent(agent)) return;
     ops.open({
       title: `Revoke policy · ${agent.label}`,
       subtitle: "Disable the agent's spending policy (no spend authorised)",
