@@ -62,6 +62,17 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
 
+      # The SDK anchor gates the ARTIFACT, not just pull requests. It also runs
+      # in ci.yml, but that path never touches a release build — and a
+      # substituted SDK matters most in the binary users install. Runs
+      # immediately after install and before any build step, because every
+      # build evaluates vite.config.ts, which imports the SDK.
+      #
+      # Bare `node`: it reads the installed bundle as text and never imports it,
+      # so it inherits neither a test runner's environment nor the SDK's.
+      - name: Verify the SDK anchor (no SDK code executed)
+        run: node scripts/verify-sdk-anchor.mjs
+
       - name: Build (macOS — signed + notarized)
         if: matrix.os == 'macos-latest'
         env:
