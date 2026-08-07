@@ -13,7 +13,10 @@ import {
   getActiveAccount,
 } from "../sdk/keychain";
 import { isWrongPasswordFailure } from "../sdk/vault";
-import { loadActiveWallet } from "../sdk/active-wallet";
+import { loadActiveWallet, notifyActiveWalletChanged } from "../sdk/active-wallet";
+import { withSigningBackend } from "../sdk/signing-backend";
+import { markAddressDerived } from "../sdk/address-provenance";
+import { captureAddressOnUnlock } from "../sdk/vaultCatalog";
 import { useAutoLock } from "../sdk/auto-lock";
 import {
   NON_CUSTODIAL_RESET_NOTE,
@@ -87,6 +90,27 @@ export function UnlockGate() {
     setError(null);
     try {
       const seed = await fetchAndUnlockVault(getActiveAccount(), password);
+      // The seed is here for exactly one instant, so derive the address while it
+      // is: this gate is the path every returning user takes, and it used to
+      // zero the seed without ever asking what address it produces. That left
+      // the catalog's plaintext `addressHex` unchecked even for a user who had
+      // just proved the passphrase — only performing a signing operation healed
+      // it. Deriving here records the provenance and corrects a wrong stored
+      // value on the ordinary path.
+      try {
+        const derivedHex = withSigningBackend(seed, (backend) =>
+          backend.getAddress().toLowerCase(),
+        );
+        markAddressDerived(derivedHex);
+        const slot = getActiveAccount();
+        void captureAddressOnUnlock(slot, derivedHex)
+          .then(() => notifyActiveWalletChanged())
+          .catch(() => {});
+      } catch {
+        // Never let the address check break the unlock itself — a user who
+        // typed the right password gets in. The publication surfaces fail
+        // closed on their own if no derivation was recorded.
+      }
       seed.fill(0); // verification only — never retain the decrypted seed
       setPassword("");
       setLockoutUntil(0); // unlock() clears the persisted lockout counter

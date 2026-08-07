@@ -540,6 +540,7 @@ export function Home({ goto }: Props) {
       {receiveOpen && walletAddress && (
         <ReceiveModal
           address={walletAddress}
+          addressHex={wallet.status === "ready" ? wallet.addressHex : ""}
           onClose={() => setReceiveOpen(false)}
         />
       )}

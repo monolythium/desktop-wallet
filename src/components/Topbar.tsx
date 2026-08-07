@@ -36,6 +36,7 @@ import {
 import { activeFleet } from "../sdk/fleet";
 import { probeActiveChainOperator } from "../sdk/chain-trust";
 import { shortHex } from "./format";
+import { useAddressDerived } from "../sdk/use-address-provenance";
 import type { Route } from "./types";
 
 interface Props {
@@ -78,6 +79,7 @@ const TITLES: Record<Route, string> = {
 
 export function Topbar({ route, setRoute }: Props) {
   const wallet = useActiveWallet();
+  const addressVerified = useAddressDerived(wallet.addressHex);
   const ready = wallet.status === "ready";
   const chain = useChainHealthView();
   const pres = chainHealthPresentation(chain.health);
@@ -108,6 +110,22 @@ export function Topbar({ route, setRoute }: Props) {
           </div>
           <div className="w-top__user__addr">
             {wallet.status === "ready" ? shortHex(wallet.address) : "no address"}
+            {/* This address comes from the plaintext catalog, and it is the
+                widest surface for a planted one — it renders on every route,
+                where it doubles as the reference a user would check the Receive
+                address against. If this process has not derived it, say so: an
+                unverified value that corroborates itself on two surfaces is
+                worse than one the user knows is unchecked. Marked rather than
+                hidden, because unlike the QR this is read, not scanned. */}
+            {wallet.status === "ready" && !addressVerified ? (
+              <span
+                data-testid="topbar-addr-unverified"
+                title="Not verified this session — unlock to confirm this is your address"
+                className="w-top__user__addr__unverified"
+              >
+                unverified
+              </span>
+            ) : null}
           </div>
         </div>
       </div>

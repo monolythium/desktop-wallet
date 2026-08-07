@@ -20,6 +20,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { fetchAndUnlockVault } from "./keychain";
 import { withSigningBackend } from "./signing-backend";
+import { markAddressDerived } from "./address-provenance";
 import { listVaults, registerVault } from "./vaultCatalog";
 
 /** One credential, by name. Never carries secret material. */
@@ -109,6 +110,7 @@ export async function recoverSlotIntoCatalog(
     const addressHex = withSigningBackend(seed, (backend) =>
       backend.getAddress().toLowerCase(),
     );
+    markAddressDerived(addressHex);
     await registerVault({ slot, name, addressHex });
     return { kind: "recovered", slot, addressHex };
   } catch (cause) {

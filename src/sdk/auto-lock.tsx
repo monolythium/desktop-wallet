@@ -22,6 +22,7 @@ import {
 import { readAutoLockMinutes } from "./auto-lock-setting";
 import { clearUnlockLockout } from "./unlock-lockout";
 import { clearSentRecipientIntegrityKeys } from "./sent-recipients";
+import { clearDerivedAddresses } from "./address-provenance";
 import { readPersistedLocked, writePersistedLocked } from "./lock-state";
 
 interface AutoLockApi {
@@ -130,6 +131,13 @@ export function LockProvider({ children }: { children: ReactNode }) {
   // per operation and never cached, so there is nothing else to wipe.)
   useEffect(() => {
     if (isLocked) clearSentRecipientIntegrityKeys();
+  }, [isLocked]);
+
+  // Forget which addresses this process derived. After a lock the user must
+  // prove the passphrase again, so a provenance record surviving the lock would
+  // let the pre-lock proof vouch for a catalog value planted afterwards.
+  useEffect(() => {
+    if (isLocked) clearDerivedAddresses();
   }, [isLocked]);
 
   // Arm on mount; tear the timer down on unmount.

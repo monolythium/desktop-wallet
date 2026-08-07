@@ -20,6 +20,7 @@ import { entropyToMnemonic, mnemonicToEntropy } from "@scure/bip39";
 import { wordlist } from "@scure/bip39/wordlists/english.js";
 import { createVaultV2, revealVault, unlockVault, VaultCallError } from "./vault";
 import { withSigningBackend } from "./signing-backend";
+import { markAddressDerived } from "./address-provenance";
 
 /** Trim, lowercase, and collapse internal whitespace so the mnemonic matches
  *  the form the SDK derives the seed from and the BIP-39 wordlist expects. */
@@ -192,6 +193,9 @@ export async function createAndStoreVault(
     // the derived key, so the key is disposed before `createVaultV2` is even
     // called rather than living for the duration of the vault write.
     addressHex = withSigningBackend(seed, (backend) => backend.getAddress().toLowerCase());
+    // This process watched the derivation, so the address may be published
+    // without a further passphrase prompt for the rest of the session.
+    markAddressDerived(addressHex);
     const blob = await createVaultV2(password, seed, payload);
     await store(account, blob);
   } finally {

@@ -31,6 +31,7 @@ import {
   recordWrongUnlockAttempt,
 } from "../sdk/unlock-lockout";
 import { withSigningBackend } from "../sdk/signing-backend";
+import { markAddressDerived } from "../sdk/address-provenance";
 import {
   classifySendError,
   errorLinksOperators,
@@ -191,6 +192,12 @@ export function OperationsDrawer({ descriptor, onClose, onNavigate }: Props) {
           const addressHex = withSigningBackend(vaultSeed, (backend) =>
             backend.getAddress().toLowerCase(),
           );
+          // Record the derivation BEFORE the backfill is dispatched. The
+          // backfill is a fire-and-forget store write that may fail; the fact
+          // that this process derived the address is already true either way,
+          // and gating it on a disk write would make a store error look like a
+          // failed proof of ownership.
+          markAddressDerived(addressHex);
           void captureAddressOnUnlock(activeSlot, addressHex).catch(() => {});
         } catch {
           // Never let an address-backfill failure break the unlock path.

@@ -952,6 +952,15 @@ html[data-sidebar="collapsed"]:not([data-layout="topbar"]) .w-nav__item {
   overflow: hidden;
   text-overflow: clip;
 }
+/* An address this process has not derived. Deliberately quiet — it is a
+   statement about what the wallet knows, not an alarm about what it found. */
+.w-top__user__addr__unverified {
+  margin-left: 6px;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--warn);
+}
 /* Chain-verified marker. Only a quorum-resolved registered name reaches this. */
 .w-tx__chip {
   margin-left: 6px;

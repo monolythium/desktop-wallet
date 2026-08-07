@@ -19,8 +19,10 @@ vi.mock("qrcode.react", () => ({
 }));
 
 import { ReceiveModal } from "../ReceiveModal";
+import { clearDerivedAddresses, markAddressDerived } from "../../sdk/address-provenance";
 
 const ADDRESS = "mono1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq";
+const ADDRESS_HEX = "0x1111111111111111111111111111111111111111";
 
 function addressRow(): HTMLElement {
   return screen.getByTestId("receive-address");
@@ -42,7 +44,9 @@ function stubClipboard(writeText: (t: string) => Promise<void>) {
  *  harness at render time) installs its own clipboard stub, so ours has to
  *  land after it. */
 function renderReceive(onClose = vi.fn()) {
-  const r = renderWithProviders(<ReceiveModal address={ADDRESS} onClose={onClose} />);
+  const r = renderWithProviders(
+    <ReceiveModal address={ADDRESS} addressHex={ADDRESS_HEX} onClose={onClose} />,
+  );
   stubClipboard(async (t: string) => {
     written.push(t);
   });
@@ -52,6 +56,11 @@ function renderReceive(onClose = vi.fn()) {
 beforeEach(() => {
   qr.value = null;
   written = [];
+  // These pin the PUBLISHED state, which now requires the address to have been
+  // derived in this process. The refusal itself is covered by
+  // `receive-address-provenance.test.tsx`.
+  clearDerivedAddresses();
+  markAddressDerived(ADDRESS_HEX);
 });
 
 describe("H5 — the one-canonical-string law", () => {
