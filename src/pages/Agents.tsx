@@ -57,6 +57,7 @@ import {
 } from "../sdk/agent-registry";
 import {
   AGENT_MISMATCH_MESSAGE,
+  assertPrincipalMatchesSeed,
   isAgentAddressProven,
   proveAgentAddress,
 } from "../sdk/agent-ownership";
@@ -601,6 +602,15 @@ export function Agents() {
         if (!ctx?.vaultSeed) {
           throw new Error("vault seed unavailable after keychain authorization");
         }
+        // SA-08-014. `args.principal` is a SIGNED term and it came from the
+        // vault catalog — plaintext, caller-writable, validated only for
+        // object-ness. Unlike the agent address there is no derivation problem
+        // here: this operation has just unlocked the principal vault, so the
+        // seed that is about to sign is in hand, and the term it commits to can
+        // be checked against what that seed actually derives. Both branches run
+        // it, because the update branch takes no agent key and would otherwise
+        // have no ownership check at all.
+        assertPrincipalMatchesSeed(ctx.vaultSeed, args.principal);
         let calldata: string;
         if (isUpdate) {
           // No-claim update: the principal amends its own existing policy.

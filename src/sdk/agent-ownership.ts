@@ -28,6 +28,7 @@
 // with every other derivation. Nothing is persisted: a "verified" flag on disk
 // would sit in the same attacker-writable store as the value it vouches for.
 
+import { addressToTypedBech32 } from "@monolythium/core-sdk";
 import { fetchAndUnlockVault } from "./keychain";
 import { withSigningBackend } from "./signing-backend";
 import { isAddressDerived, markAddressDerived } from "./address-provenance";
@@ -91,6 +92,46 @@ export async function proveAgentAddress(
     seed?.fill(0);
   }
 }
+
+/**
+ * Check that a claimed principal address is the one the supplied seed derives.
+ *
+ * `args.principal` is a SIGNED policy term — the user's key commits to it — and
+ * it originates from the vault catalog, which is plaintext and caller-writable.
+ * Unlike the agent address, this one IS reproducible at the moment it matters:
+ * every policy operation unlocks the principal vault, so the seed is in hand
+ * exactly when the term is about to be signed. Derive-don't-trust is available
+ * here, and it is strictly stronger than rendering the term and hoping.
+ *
+ * (The term IS rendered — the confirm diff carries a "Principal" row, so
+ * displayed already equals signed. This adds the check the display cannot make.)
+ *
+ * Throws rather than returning a verdict: there is no partial outcome worth
+ * offering. A mismatch means the calldata would bind the user's signature to a
+ * principal that is not them, and nothing about that is a user error.
+ */
+export function assertPrincipalMatchesSeed(
+  seed: Uint8Array,
+  claimedPrincipalBech32m: string,
+): void {
+  const derivedHex = withSigningBackend(seed, (backend) =>
+    backend.getAddress().toLowerCase(),
+  );
+  const derived = addressToTypedBech32("user", derivedHex);
+  if (derived !== claimedPrincipalBech32m) {
+    throw new Error(PRINCIPAL_MISMATCH_MESSAGE);
+  }
+  // Free, and it makes the principal usable by the display surfaces that ask
+  // the same question (R6's provenance set).
+  markAddressDerived(derivedHex);
+}
+
+/** Shown when the signed principal term is not the address the unlocked vault
+ *  produces. Like the agent message, it does not blame the user's typing. */
+export const PRINCIPAL_MISMATCH_MESSAGE =
+  "The principal address in this policy is not the one this wallet's vault " +
+  "produces. The wallet list on this device has been changed. Nothing was " +
+  "signed or submitted.";
 
 /** What the user is told when the slot derives a different address. Deliberately
  *  not phrased as a possible mistake of theirs. */
