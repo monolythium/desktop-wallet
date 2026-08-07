@@ -11,9 +11,30 @@ import {
   type MrvDeployFormInput,
 } from "../sdk/mrv-form";
 import {
+  MRV_DEFAULT_CALL_EXECUTION_UNIT_LIMIT,
+  MRV_DEFAULT_DEPLOY_EXECUTION_UNIT_LIMIT,
   submitMrvCallTransaction,
   submitMrvDeployPayloadTransaction,
 } from "../sdk/mrv";
+import type { OperationFeePlan } from "../sdk/fee-quote";
+
+/**
+ * The MRV seam does not route through `submitNativeTx`, so it keeps its own fee
+ * defaults — the quote's SUMMED per-unit price rather than the SDK resolver's
+ * safety-multiplied one. `feeClass: "mrv"` reproduces exactly that, so pricing
+ * these two surfaces ahead of the password changes WHEN the read happens and
+ * not what the number is.
+ *
+ * The limit is the user's own form value here, which is the one place in the
+ * wallet where `gasLimit` is chosen rather than defaulted — so it rides in the
+ * plan from the same normalized input the transaction is built from.
+ */
+function mrvFeePlan(executionUnitLimit: string | undefined, fallback: bigint): OperationFeePlan {
+  return {
+    feeClass: "mrv",
+    executionUnitLimit: executionUnitLimit === undefined ? fallback : BigInt(executionUnitLimit),
+  };
+}
 
 /**
  * What this console honestly is.
@@ -67,6 +88,10 @@ export function RiscvContracts({ goto }: RiscvContractsProps) {
         subject: "New RISC-V contract (deploy)",
         amount: normalized.valueLyth === "0" ? null : `${normalized.valueLyth} LYTH`,
       },
+      feePlan: mrvFeePlan(
+        normalized.executionUnitLimit,
+        MRV_DEFAULT_DEPLOY_EXECUTION_UNIT_LIMIT,
+      ),
       diff: [
         { k: "Artifact", v: byteSummary(normalized.artifactBytes) },
         { k: "Constructor", v: byteSummary(normalized.constructorInput) },
@@ -75,11 +100,10 @@ export function RiscvContracts({ goto }: RiscvContractsProps) {
           k: "Execution units",
           v: normalized.executionUnitLimit ?? "default",
         },
-        {
-          k: "Fee cap",
-          v: normalized.maxExecutionFeeLythoshi ?? "node quote",
-          kind: "fee",
-        },
+        // The `Fee cap` row is gone. It rendered the literal "node quote" —
+        // naming a charge and refusing to state it, the same shape as the
+        // delegation prose row. The drawer's row carries the figure now, and it
+        // is the figure `execute` signs.
       ],
       effects: [
         { text: "Submits an MRV deploy payload from the unlocked vault." },
@@ -95,9 +119,12 @@ export function RiscvContracts({ goto }: RiscvContractsProps) {
           ...(normalized.executionUnitLimit === undefined
             ? {}
             : { executionUnitLimit: normalized.executionUnitLimit }),
-          ...(normalized.maxExecutionFeeLythoshi === undefined
-            ? {}
-            : { maxExecutionFeeLythoshi: normalized.maxExecutionFeeLythoshi }),
+          // The fee the preview rendered, handed down as the seam's own two
+          // fields. Supplying both makes `resolveNativeContext`'s `needsQuote`
+          // false, so the MRV path performs NO second quote read — which is the
+          // property, not merely the value agreeing.
+          maxExecutionFeeLythoshi: ctx.resolvedFee!.maxFeePerGas.toString(),
+          priorityTipLythoshi: ctx.resolvedFee!.maxPriorityFeePerGas.toString(),
         });
         return {
           headline: "MRV deploy broadcast",
@@ -127,6 +154,7 @@ export function RiscvContracts({ goto }: RiscvContractsProps) {
         subject: normalized.contractAddress,
         amount: normalized.valueLyth === "0" ? null : `${normalized.valueLyth} LYTH`,
       },
+      feePlan: mrvFeePlan(normalized.executionUnitLimit, MRV_DEFAULT_CALL_EXECUTION_UNIT_LIMIT),
       diff: [
         { k: "Contract", v: normalized.contractAddress },
         { k: "Input", v: byteSummary(normalized.input) },
@@ -135,11 +163,8 @@ export function RiscvContracts({ goto }: RiscvContractsProps) {
           k: "Execution units",
           v: normalized.executionUnitLimit ?? "default",
         },
-        {
-          k: "Fee cap",
-          v: normalized.maxExecutionFeeLythoshi ?? "node quote",
-          kind: "fee",
-        },
+        // See the deploy surface — the numberless "Fee cap" row is the drawer's
+        // now, with a figure.
       ],
       effects: [
         { text: "Submits an MRV call from the unlocked vault." },
@@ -155,9 +180,12 @@ export function RiscvContracts({ goto }: RiscvContractsProps) {
           ...(normalized.executionUnitLimit === undefined
             ? {}
             : { executionUnitLimit: normalized.executionUnitLimit }),
-          ...(normalized.maxExecutionFeeLythoshi === undefined
-            ? {}
-            : { maxExecutionFeeLythoshi: normalized.maxExecutionFeeLythoshi }),
+          // The fee the preview rendered, handed down as the seam's own two
+          // fields. Supplying both makes `resolveNativeContext`'s `needsQuote`
+          // false, so the MRV path performs NO second quote read — which is the
+          // property, not merely the value agreeing.
+          maxExecutionFeeLythoshi: ctx.resolvedFee!.maxFeePerGas.toString(),
+          priorityTipLythoshi: ctx.resolvedFee!.maxPriorityFeePerGas.toString(),
         });
         return {
           headline: "MRV call broadcast",
