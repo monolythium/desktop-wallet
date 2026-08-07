@@ -119,6 +119,17 @@ keyring = { version = "=3.6.3", default-features = false, features = ["apple-nat
 
 [target.'cfg(target_os = "windows")'.dependencies]
 keyring = { version = "=3.6.3", default-features = false, features = ["windows-native"] }
+# `keyring` has no enumeration API at all — its `CredentialApi` trait is
+# entirely per-entry (get/set/delete on a service+account you must already
+# know), and its Windows backend calls only CredReadW/CredWriteW/CredDeleteW.
+# Finding a vault whose catalog row was lost therefore needs CredEnumerateW
+# directly. Ranged under the pinning rule above: it computes no cryptographic
+# value, and this is the same crate (and resolved version) `keyring` already
+# pulls in for this target, so it adds a graph edge rather than a package.
+windows-sys = { version = "0.60", features = [
+    "Win32_Foundation",
+    "Win32_Security_Credentials",
+] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 keyring = { version = "=3.6.3", default-features = false, features = ["sync-secret-service", "crypto-rust"] }

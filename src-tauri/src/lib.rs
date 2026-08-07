@@ -11,6 +11,7 @@
 #[cfg(feature = "stele")]
 use tauri::Manager;
 
+mod credential_scan;
 mod keychain;
 mod mcp_bridge;
 mod name_registry;
@@ -55,6 +56,8 @@ pub fn run() {
         keychain::keychain_unlock,
         keychain::keychain_store,
         keychain::keychain_delete,
+        credential_scan::keychain_list_accounts,
+        credential_scan::keychain_orphaned_slots,
         vault::vault_create,
         vault::vault_seal_seed,
         vault::vault_seal_v2,
