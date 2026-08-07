@@ -20,7 +20,16 @@ import {
   humanQuantityToAtoms,
   notionalQuoteAtoms,
 } from "../sdk/clob-units";
+import { PRECOMPILE_ADDRESSES } from "@monolythium/core-sdk";
 import { useOperations } from "../operations/context";
+
+/**
+ * The signed `to` for both CLOB writes, DERIVED from the same constant
+ * `clob-trade.ts` passes. Neither surface carried a target row of any kind —
+ * the address appeared only inside prose in the effects list, where it is not
+ * a value anything can check.
+ */
+const CLOB_DETAILS = [{ k: "Precompile (signed `to`)", v: PRECOMPILE_ADDRESSES.CLOB }];
 
 export function Trade() {
   const [status, setStatus] = useState<LiveTradeStatus | null>(null);
@@ -331,6 +340,7 @@ function PlaceLimitOrderCard({
         subject: `${side === "buy" ? "BUY" : "SELL"} ${qtyStr} base @ ${priceStr} quote/base`,
         amount: null,
       },
+      details: CLOB_DETAILS,
       diff: [
         { k: "Side", v: side === "buy" ? "BUY" : "SELL" },
         { k: "Limit price", v: `${priceStr} quote / base` },
@@ -511,6 +521,7 @@ function CancelOrderCard() {
       subtitle: "Native CLOB cancelOrder · canonical RPC gateway",
       auth: "keychain",
       commitment: { subject: `Cancel order ${trimmed}`, amount: null },
+      details: CLOB_DETAILS,
       diff: [{ k: "Order id", v: trimmed }],
       effects: [
         { text: "Unlocks the local vault for this operation only." },

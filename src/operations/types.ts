@@ -95,6 +95,26 @@ export interface OperationDescriptor {
   commitment: OperationCommitment;
   /** Diff lines for the preview pane. */
   diff: OperationDiffLine[];
+  /**
+   * Secondary rows, rendered inside a CLOSED `<details>` in the preview pane.
+   *
+   * For signed components that are checkable but carry no decision on their own
+   * — the precompile target the wallet chose rather than the user, the key
+   * material inside a policy claim. Promoting them would train a user to skip
+   * rows; omitting them would leave a signed value with no representation at
+   * all. A disclosure is the honest third answer.
+   *
+   * `<details>` and NOT `CollapsibleSection`: that component hides with the
+   * `hidden` attribute, which takes collapsed content out of the accessibility
+   * tree. A consent surface must not put a signed fact somewhere a screen
+   * reader cannot reach, and `<details>` keeps it reachable either way.
+   *
+   * ⚠ Every value here must be DERIVED from what is signed. A typed literal
+   * that happens to be correct today cannot disagree with the signed value, and
+   * therefore cannot detect a change to it — which is the entire reason the row
+   * exists.
+   */
+  details?: OperationDiffLine[];
   /** User-facing side-effects of approval. */
   effects: OperationEffect[];
   /** Auth method required to advance from `preview` to `executing`. */

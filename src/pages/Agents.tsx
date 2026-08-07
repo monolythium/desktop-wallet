@@ -47,6 +47,7 @@ import {
   buildSpendingPolicyArgs,
   fetchSpendingPolicy,
   POLICY_TOGGLE_LIMIT,
+  SPENDING_POLICY_PRECOMPILE,
   submitSpendingPolicyTx,
 } from "../sdk/spending-policy";
 import {
@@ -73,7 +74,28 @@ import {
   type PolicyFormInput,
 } from "../sdk/agent-forms";
 
+/** Page-header shorthand. Display chrome only — it names no signed value. */
 const PRECOMPILE_LABEL = "0x…110c";
+
+/**
+ * The signed `to` for every spending-policy write, DERIVED from the constant
+ * `submitSpendingPolicyTx` passes. The confirm diffs used to carry
+ * {@link PRECOMPILE_LABEL} instead — a truncated literal that would still read
+ * `0x…110c` if the precompile moved underneath it.
+ *
+ * The claim's key material rides here too. A 1 952-byte public key and a
+ * 3 309-byte signature are inside the signed calldata and were prose in the
+ * effects list; as hex they support no decision, but WHICH KEY signed does, and
+ * that is now a proved fact rather than a claim (the agent vault is re-derived
+ * and compared before this surface opens).
+ */
+const POLICY_DETAILS = [
+  { k: "Precompile (signed `to`)", v: SPENDING_POLICY_PRECOMPILE },
+  {
+    k: "Claim key material",
+    v: "ML-DSA-65 public key 1952 B + signature 3309 B, from the agent's own vault slot (proved this session)",
+  },
+];
 
 /** The policy form's rows, in the order the sequential prompts asked them, with
  *  each prompt's wording carried over verbatim. Keeping the order matters
@@ -583,8 +605,8 @@ export function Agents() {
               ? expiryUnixToIso(fields.policyExpiryUnixSeconds)
               : "never",
         },
-        { k: "Precompile", v: PRECOMPILE_LABEL },
       ],
+      details: POLICY_DETAILS,
       effects: [
         { text: "Unlocks the principal vault for this operation only." },
         isUpdate
@@ -676,8 +698,8 @@ export function Agents() {
       diff: [
         { k: "Agent", v: agent.bech32m },
         { k: "Action", v: "enable" },
-        { k: "Precompile", v: PRECOMPILE_LABEL },
       ],
+      details: POLICY_DETAILS,
       effects: [
         { text: "Unlocks the principal vault for this operation only." },
         { text: "Encodes enable(subAccount) via @monolythium/core-sdk; the retained policy slot becomes spendable again under its existing caps." },
@@ -718,8 +740,8 @@ export function Agents() {
       diff: [
         { k: "Agent", v: agent.bech32m },
         { k: "Action", v: "disable" },
-        { k: "Precompile", v: PRECOMPILE_LABEL },
       ],
+      details: POLICY_DETAILS,
       effects: [
         { text: "Unlocks the principal vault for this operation only." },
         { text: "Encodes disable(subAccount) via @monolythium/core-sdk; the policy slot is retained but inert until re-enabled." },

@@ -9,6 +9,7 @@ import {
   NATIVE_LYTH_DECIMALS,
   formatLyth,
   parseLythToLythoshi,
+  tokenFactoryAddressHex,
   typedBech32ToAddress,
 } from "@monolythium/core-sdk";
 import { useOperations } from "../operations/context";
@@ -614,6 +615,11 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
           },
           { k: "Finality", v: finality.label, kind: "value" },
         ],
+        // The recipient above is a CALLDATA argument. The signed `to` is the
+        // token factory — a target the user never chose and cannot check, so it
+        // belongs here rather than beside the payee. Derived from the same
+        // helper `sendMrc20Token` passes.
+        details: [{ k: "Precompile (signed `to`)", v: tokenFactoryAddressHex() }],
         effects: [
           { text: "Transactions are irreversible. Confirm the recipient and amount carefully." },
           ...(isSelfSend ? [SELF_SEND_EFFECT] : []),

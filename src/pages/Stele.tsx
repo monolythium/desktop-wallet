@@ -34,6 +34,16 @@ import {
 } from "../sdk/name-registry";
 import { classifyRecipientInput, resolveNameQuorum } from "../sdk/name-resolve";
 import { useOperations } from "../operations/context";
+
+/**
+ * The signed `to` for every name-registry write, DERIVED from the same
+ * `nameRegistryAddressHex()` the transaction builders call. Three diffs used to
+ * carry the literal `"0x…110E"`, which could not disagree with the signed value
+ * and so could not detect a change to it.
+ */
+const NAME_REGISTRY_DETAILS = [
+  { k: "Precompile (signed `to`)", v: nameRegistryAddressHex() },
+];
 import { useActiveWallet } from "../sdk/active-wallet";
 import { invalidateReverseNameFor, loadReverseName } from "../sdk/reverse-name";
 import { CategoryBadge } from "../components/CategoryBadge";
@@ -724,8 +734,8 @@ function NameChecker({ onRegistered }: { onRegistered?: () => void }) {
         { k: "Category", v: category },
         { k: "Registration fee", v: `${quote.costLyth} LYTH`, kind: "fee" as const },
         { k: "Owner", v: ownerAddress },
-        { k: "Precompile", v: "0x…110E" },
       ],
+      details: NAME_REGISTRY_DETAILS,
       effects: [
         { text: "Unlocks the local vault for this operation only." },
         { text: "Encodes register(string,address) via @monolythium/core-sdk — the signing wallet becomes the owner." },
@@ -939,8 +949,8 @@ function AcceptTransfer({ onAccepted }: { onAccepted?: () => void }) {
         { k: "Name", v: trimmed },
         { k: "Current owner", v: owner ?? "—" },
         { k: "Accept fee", v: `${quote.costLyth} LYTH`, kind: "fee" as const },
-        { k: "Precompile", v: "0x…110E" },
       ],
+      details: NAME_REGISTRY_DETAILS,
       effects: [
         { text: "Unlocks the local vault for this operation only." },
         { text: "Encodes acceptTransfer(string) via @monolythium/core-sdk. You pay the registration fee to receive the name." },
@@ -1126,8 +1136,8 @@ function MyNames({ refreshKey }: { refreshKey: number }) {
         { k: "Name", v: name },
         { k: "To", v: recipient },
         { k: "Acceptance window", v: "24 hours" },
-        { k: "Precompile", v: "0x…110E" },
       ],
+      details: NAME_REGISTRY_DETAILS,
       effects: [
         { text: "Unlocks the local vault for this operation only." },
         { text: "Encodes proposeTransfer(string,address) via @monolythium/core-sdk. Proposing is free — the recipient pays the registration fee when they accept." },

@@ -462,6 +462,37 @@ function PreviewPane({ descriptor }: { descriptor: OperationDescriptor }) {
         </div>
       </div>
 
+      {/* The disclosure tier. Closed by default — a confirm screen nobody reads
+          is the failure this whole surface is written against, and a `<details>`
+          a user can open is a different object from a row they must scroll past.
+          `<details>` rather than the shared collapsible: that one hides with the
+          `hidden` attribute, so its content leaves the accessibility tree, and a
+          signed fact must stay reachable whether the section is open or not. */}
+      {descriptor.details && descriptor.details.length > 0 ? (
+        <div className="w-card" style={{ padding: 0 }}>
+          <div className="w-card__body">
+            <details data-testid="operation-details">
+              <summary style={{ fontSize: 11.5, color: "var(--w-text-3)", cursor: "pointer" }}>
+                Transaction details
+              </summary>
+              <div style={{ marginTop: 8 }}>
+                {descriptor.details.map((line, i) => (
+                  <div key={i} className="w-kv">
+                    <span className="k">{line.k}</span>
+                    <span
+                      className="v mono"
+                      style={{ overflowWrap: "anywhere", wordBreak: "break-all" }}
+                    >
+                      {line.v}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </details>
+          </div>
+        </div>
+      ) : null}
+
       {descriptor.effects.length > 0 ? (
         <div className="w-card" style={{ padding: 0 }}>
           <div className="w-card__head"><h3>Effects</h3></div>

@@ -128,6 +128,22 @@ import {
 import { useInFlightClaim } from "../sdk/use-claim-in-flight";
 import { scopeChainKey } from "../sdk/chains";
 
+/**
+ * The signed `to` for every delegation write, DERIVED from the constant
+ * `submitDelegationTx` actually passes.
+ *
+ * This was seven copies of the string `"0x…100a"`, typed into seven diffs. A
+ * literal cannot disagree with what is signed, so it also cannot detect a change
+ * to it — it read as disclosure while disclosing only itself. It sits in the
+ * disclosure tier because a user cannot tell a correct precompile from an
+ * incorrect one; promoting it would teach them to skip rows, and dropping it
+ * would leave a signed value with no representation at all.
+ *
+ * One object, so the autovote batch — which carried no target row of any kind —
+ * cannot be the surface that gets forgotten again.
+ */
+const DELEGATION_DETAILS = [{ k: "Precompile (signed `to`)", v: DELEGATION_PRECOMPILE }];
+
 export function Delegate() {
   const ops = useOperations();
   // The durable rejection signal lives above the router, so it is still there
@@ -657,6 +673,7 @@ export function Delegate() {
       title: `Delegate ${weightLabel} to cluster ${clusterId}`,
       subtitle: `Weight ${weightLabel} of your balance — non-custodial, tokens stay liquid`,
       auth: "keychain",
+      details: DELEGATION_DETAILS,
       // Every delegation call signs value = 0 and targets a precompile the user
       // never chose. The cluster IS what they chose, so it is the subject, and
       // "no funds leave this wallet" is the honest amount — it is also the
@@ -669,7 +686,6 @@ export function Delegate() {
         { k: "Cluster", v: String(clusterId) },
         { k: "Weight", v: `${weightLabel} of balance` },
         { k: "Value", v: "0 LYTH (non-custodial)" },
-        { k: "Precompile", v: "0x…100a" },
       ],
       effects: [
         { text: "Unlocks the local vault for this operation only." },
@@ -721,6 +737,7 @@ export function Delegate() {
       title: `Undelegate from cluster ${clusterId}`,
       subtitle: `Undelegate ${weightLabel} of wallet weight — instant, nothing was locked`,
       auth: "keychain",
+      details: DELEGATION_DETAILS,
       commitment: { subject: `Cluster ${clusterName(clusterId)}`, amount: null },
       // value = 0: a shortfall here is entirely fee, never "the amount plus".
       errorContext: { amountLythoshi: 0n },
@@ -728,7 +745,6 @@ export function Delegate() {
         { k: "From", v: selfBech32m },
         { k: "Cluster", v: String(clusterId) },
         { k: "Weight removed", v: weightLabel },
-        { k: "Precompile", v: "0x…100a" },
       ],
       effects: [
         { text: "Unlocks the local vault for this operation only." },
@@ -786,6 +802,7 @@ export function Delegate() {
       title: `Undelegate all · ${rows.length} cluster${rows.length === 1 ? "" : "s"}`,
       subtitle: `Remove ${totalPct} of wallet weight across every cluster — instant, nothing was locked`,
       auth: "keychain",
+      details: DELEGATION_DETAILS,
       // A BATCH: one password releases the seed for N submissions. The subject
       // names the plan because that is what the user is consenting to; it
       // cannot name each transaction, and §2 of the report says so.
@@ -803,7 +820,6 @@ export function Delegate() {
           k: clusterName(r.cluster),
           v: `${(r.weightBps / 100).toFixed(2)}%`,
         })),
-        { k: "Precompile", v: "0x…100a" },
       ],
       effects: [
         { text: "Unlocks the local vault for this operation only." },
@@ -889,6 +905,7 @@ export function Delegate() {
       title: `Redelegate cluster ${fromCluster} → ${toCluster}`,
       subtitle: `Move ${weightLabel} of wallet weight without an unbonding round`,
       auth: "keychain",
+      details: DELEGATION_DETAILS,
       // The destination is what stacks weight, so it leads — but a redelegate
       // is a movement and naming one end of it would be half the fact.
       commitment: {
@@ -902,7 +919,6 @@ export function Delegate() {
         { k: "Source cluster", v: String(fromCluster) },
         { k: "Destination cluster", v: String(toCluster) },
         { k: "Weight moved", v: weightLabel },
-        { k: "Precompile", v: "0x…100a" },
       ],
       effects: [
         { text: "Unlocks the local vault for this operation only." },
@@ -967,6 +983,7 @@ export function Delegate() {
       // rewards accrued in the meantime.
       subtitle: "Settle and withdraw your pending delegation rewards",
       auth: "keychain",
+      details: DELEGATION_DETAILS,
       // Funds come IN, and the signed value is 0 — so "no funds leave this
       // wallet" is exactly right. The claimable figure is deliberately NOT the
       // amount: what is claimable now and what the claim settles are different
@@ -978,7 +995,6 @@ export function Delegate() {
         { k: "From", v: selfBech32m },
         // Labelled as a live preview, not an outcome.
         { k: "Claimable (current)", v: `${totalLyth} LYTH` },
-        { k: "Precompile", v: "0x…100a" },
       ],
       effects: [
         { text: "Unlocks the local vault for this operation only." },
@@ -1040,6 +1056,7 @@ export function Delegate() {
         ? "Future rewards will be claimed and delegated back automatically."
         : "Rewards will stop compounding — claim them manually.",
       auth: "keychain",
+      details: DELEGATION_DETAILS,
       commitment: { subject: `Auto-compound ${next ? "on" : "off"}`, amount: null },
       // value = 0: a shortfall here is entirely fee, never "the amount plus".
       errorContext: { amountLythoshi: 0n },
@@ -1054,7 +1071,6 @@ export function Delegate() {
         // No quote surface exists for a delegation call, so this states that a
         // fee applies rather than inventing a number.
         { k: "Network fee (max)", v: "applies (paid in LYTH)" },
-        { k: "Precompile", v: "0x…100a" },
       ],
       effects: [
         { text: "Unlocks the local vault for this operation only." },
@@ -1178,6 +1194,7 @@ export function Delegate() {
       title: `Autovote · ${label}`,
       subtitle: `Spread ${(plan.totalWeightBps / 100).toFixed(2)}% of balance across ${plan.allocations.length} cluster${plan.allocations.length === 1 ? "" : "s"} — non-custodial`,
       auth: "keychain",
+      details: DELEGATION_DETAILS,
       // The second BATCH. Same limit as undelegate-all: this names the plan, not
       // each of the N transactions the one password authorises.
       commitment: {
