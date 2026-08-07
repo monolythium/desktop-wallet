@@ -13,6 +13,7 @@ import {
   formatLyth,
   nameRegistryAddressHex,
 } from "@monolythium/core-sdk";
+import type { ResolvedExecutionFee } from "@monolythium/core-sdk";
 import { requireTypedUserAddressHex } from "./address";
 import { getProvider } from "./client";
 import { submitNativeTx, type SubmitNativeTxResult } from "./submit";
@@ -91,7 +92,25 @@ export function nameRegisterTx(name: string, costLythoshi: bigint): NameRegister
   };
 }
 
-export interface RegisterNameArgs {
+/**
+ * ⚠ TWO DIFFERENT FEES LIVE ON THESE THREE SURFACES, and they must not be
+ * confused.
+ *
+ * `costLythoshi` is the REGISTRATION price — the transaction's `value`, set by
+ * the chain's U-curve, already displayed, and already re-read and refused on
+ * change inside `execute` (`quoteUnchanged`). It is not what D2 is about.
+ *
+ * `resolvedFee` is the NETWORK fee — `maxFeePerGas` / `maxPriorityFeePerGas`,
+ * which every one of these writes previously left `submitNativeTx` to resolve
+ * from its own read after the password. That is the one being unified.
+ */
+export interface NetworkFeeArg {
+  /** The fee the confirm surface RENDERED, signed verbatim (`shown == signed`).
+   *  Absent ⇒ `submitNativeTx` resolves its own, which is a second read. */
+  resolvedFee?: ResolvedExecutionFee;
+}
+
+export interface RegisterNameArgs extends NetworkFeeArg {
   /** Wallet ML-DSA-65 seed, unlocked by the OperationsDrawer. */
   seed: Uint8Array;
   name: string;
@@ -105,7 +124,11 @@ export async function submitNameRegistration(
   args: RegisterNameArgs,
 ): Promise<SubmitNativeTxResult> {
   const tx = nameRegisterTx(args.name, args.costLythoshi);
-  return submitNativeTx({ seed: args.seed, ...tx });
+  return submitNativeTx({
+    seed: args.seed,
+    ...tx,
+    ...(args.resolvedFee === undefined ? {} : { resolvedFee: args.resolvedFee }),
+  });
 }
 
 /** True when the fresh submit-time quote exactly matches the reviewed one. A
@@ -209,7 +232,7 @@ export function nameAcceptTransferTx(name: string, costLythoshi: bigint): NameTr
   };
 }
 
-export interface ProposeTransferArgs {
+export interface ProposeTransferArgs extends NetworkFeeArg {
   seed: Uint8Array;
   name: string;
   /** Typed `mono1…` recipient (resolved address for a `.mono` name recipient). */
@@ -222,10 +245,14 @@ export async function submitNameProposeTransfer(
   args: ProposeTransferArgs,
 ): Promise<SubmitNativeTxResult> {
   const recipientHex = requireTypedUserAddressHex(args.recipient, "recipient");
-  return submitNativeTx({ seed: args.seed, ...nameProposeTransferTx(args.name, recipientHex) });
+  return submitNativeTx({
+    seed: args.seed,
+    ...nameProposeTransferTx(args.name, recipientHex),
+    ...(args.resolvedFee === undefined ? {} : { resolvedFee: args.resolvedFee }),
+  });
 }
 
-export interface AcceptTransferArgs {
+export interface AcceptTransferArgs extends NetworkFeeArg {
   seed: Uint8Array;
   name: string;
   /** Exact accept fee in lythoshi (from the fresh quote; must equal the chain's). */
@@ -236,7 +263,11 @@ export interface AcceptTransferArgs {
 export async function submitNameAcceptTransfer(
   args: AcceptTransferArgs,
 ): Promise<SubmitNativeTxResult> {
-  return submitNativeTx({ seed: args.seed, ...nameAcceptTransferTx(args.name, args.costLythoshi) });
+  return submitNativeTx({
+    seed: args.seed,
+    ...nameAcceptTransferTx(args.name, args.costLythoshi),
+    ...(args.resolvedFee === undefined ? {} : { resolvedFee: args.resolvedFee }),
+  });
 }
 
 /** The current owner of a name (`lyth_resolveName`), or null when unregistered

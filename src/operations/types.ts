@@ -6,7 +6,9 @@
 // flow with a typed `OperationDescriptor`. Stages 3+ extend it with the
 // real keystore signing path.
 
+import type { ResolvedExecutionFee } from "@monolythium/core-sdk";
 import type { TxOpKind } from "../sdk/notifications";
+import type { OperationFeePlan } from "../sdk/fee-quote";
 import type { SendErrorContext } from "../sdk/send-error";
 
 export type OperationStage = "preview" | "auth" | "executing" | "done" | "error";
@@ -143,6 +145,18 @@ export interface OperationDescriptor {
   subtitle?: string;
   /** Payee + amount, rendered at `auth`. See {@link OperationCommitment}. */
   commitment: OperationCommitment;
+  /**
+   * Declared by every surface that reaches `submitNativeTx` (or the MRV seam).
+   *
+   * The drawer resolves ONE quote at preview, renders it, and hands the SAME
+   * object to `execute` — so the number a user reads and the number their key
+   * commits to are fields of one value rather than two reads of one function.
+   *
+   * Absent ⇒ unchanged behaviour: the compose surfaces resolve their own tiered
+   * quote (they have a tier selector this cannot express) and pass it as
+   * `resolvedFee` themselves, and the read-only surfaces price nothing.
+   */
+  feePlan?: OperationFeePlan;
   /** Diff lines for the preview pane. */
   diff: OperationDiffLine[];
   /**
@@ -222,6 +236,16 @@ export interface OperationNotifyMeta {
 export interface OperationExecutionContext {
   /** Present only after `auth: "keychain"` succeeds. */
   vaultSeed?: Uint8Array;
+  /**
+   * The fee the preview pane RENDERED, present whenever the descriptor declared
+   * a {@link OperationFeePlan}.
+   *
+   * Forward it verbatim to the seam as `resolvedFee`; never re-resolve. An
+   * `execute` that ignores this hands the fee back to `submitNativeTx`, which
+   * reads its own quote after the password — which is the divergence this whole
+   * mechanism exists to remove, and it would be silent.
+   */
+  resolvedFee?: ResolvedExecutionFee;
   /**
    * Add facts to this operation's notification metadata that only `execute`
    * can know.

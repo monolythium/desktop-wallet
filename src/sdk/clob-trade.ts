@@ -16,6 +16,7 @@ import {
   encodePlaceLimitOrderCalldata,
   type SpotLimitOrderSide,
 } from "@monolythium/core-sdk";
+import type { ResolvedExecutionFee } from "@monolythium/core-sdk";
 import { submitNativeTx } from "./submit";
 
 const SPOT_LIMIT_ORDER_EXECUTION_UNIT_LIMIT = 250_000n;
@@ -39,6 +40,9 @@ export interface PlaceClobLimitOrderArgs {
   /** Optional execution-unit limit override; defaults to a value sized for
    *  a typical place + cross + escrow + (one or two) fills. */
   executionUnitLimit?: bigint;
+  /** The fee the confirm surface RENDERED, signed verbatim (`shown == signed`).
+   *  Absent ⇒ `submitNativeTx` resolves its own, which is a second read. */
+  resolvedFee?: ResolvedExecutionFee;
 }
 
 export interface PlaceClobLimitOrderResult {
@@ -67,6 +71,7 @@ export async function placeClobLimitOrder(
     input: calldataHex,
     executionUnitLimit:
       args.executionUnitLimit ?? SPOT_LIMIT_ORDER_EXECUTION_UNIT_LIMIT,
+    ...(args.resolvedFee === undefined ? {} : { resolvedFee: args.resolvedFee }),
   });
 
   return {
@@ -85,6 +90,9 @@ export interface CancelClobOrderArgs {
   /** 32-byte order id (`0x…`). */
   orderIdHex: string;
   executionUnitLimit?: bigint;
+  /** The fee the confirm surface RENDERED, signed verbatim (`shown == signed`).
+   *  Absent ⇒ `submitNativeTx` resolves its own, which is a second read. */
+  resolvedFee?: ResolvedExecutionFee;
 }
 
 export interface CancelClobOrderResult {
@@ -103,6 +111,7 @@ export async function cancelClobOrder(
     to: PRECOMPILE_ADDRESSES.CLOB,
     input: calldataHex,
     executionUnitLimit: args.executionUnitLimit ?? CLOB_CANCEL_EXECUTION_UNIT_LIMIT,
+    ...(args.resolvedFee === undefined ? {} : { resolvedFee: args.resolvedFee }),
   });
 
   return {

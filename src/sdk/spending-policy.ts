@@ -36,6 +36,7 @@ import type {
 import { requireTypedUserAddress } from "./address";
 import { getProvider } from "./client";
 import { submitNativeTx } from "./submit";
+import type { ResolvedExecutionFee } from "@monolythium/core-sdk";
 
 /** Spending-policy precompile address (`0x…110C`, WP §18.8 / Law §5.4). */
 export const SPENDING_POLICY_PRECOMPILE = spendingPolicyAddressHex();
@@ -166,6 +167,9 @@ export interface SubmitSpendingPolicyTxArgs {
   /** Spending-policy precompile calldata (setPolicyClaim / enable / disable). */
   data: string;
   executionUnitLimit?: bigint;
+  /** The fee the confirm surface RENDERED, signed verbatim (`shown == signed`).
+   *  Absent ⇒ `submitNativeTx` resolves its own, which is a second read. */
+  resolvedFee?: ResolvedExecutionFee;
 }
 
 export interface SubmitSpendingPolicyTxResult {
@@ -192,6 +196,7 @@ export async function submitSpendingPolicyTx(
     feeClass: "registry",
     executionUnitLimit:
       args.executionUnitLimit ?? SET_POLICY_CLAIM_EXECUTION_UNIT_LIMIT,
+    ...(args.resolvedFee === undefined ? {} : { resolvedFee: args.resolvedFee }),
   });
   return { txHash: result.txHash };
 }

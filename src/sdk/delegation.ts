@@ -38,6 +38,7 @@ import { requireTypedUserAddress, requireTypedUserAddressHex } from "./address";
 import { truncateDecimals } from "./lyth-display";
 import { getProvider } from "./client";
 import { submitNativeTx } from "./submit";
+import type { ResolvedExecutionFee } from "@monolythium/core-sdk";
 
 /** Delegation precompile address (Law §5.4 / §7.6). */
 export const DELEGATION_PRECOMPILE =
@@ -52,6 +53,9 @@ export interface SubmitDelegationTxArgs {
   seed: Uint8Array;
   data: string;
   executionUnitLimit?: bigint;
+  /** The fee the confirm surface RENDERED, signed verbatim (`shown == signed`).
+   *  Absent ⇒ `submitNativeTx` resolves its own, which is a second read. */
+  resolvedFee?: ResolvedExecutionFee;
 }
 
 export interface SubmitDelegationTxResult {
@@ -232,6 +236,8 @@ export async function submitDelegationTx(
     input: args.data,
     valueLythoshi: 0n,
     executionUnitLimit: args.executionUnitLimit ?? DELEGATION_EXECUTION_UNIT_LIMIT,
+    // Spread, so absent stays absent and no existing caller's behaviour moves.
+    ...(args.resolvedFee === undefined ? {} : { resolvedFee: args.resolvedFee }),
   });
   return { txHash: result.txHash, nonce: result.nonce };
 }
