@@ -61,6 +61,12 @@ export function RiscvContracts({ goto }: RiscvContractsProps) {
       title: "Deploy RISC-V contract",
       subtitle: "MRV native transaction",
       auth: "keychain",
+      // A deploy signs `to: null` — there is no target to name, so the subject
+      // states what is created. The value can be non-zero here, so it is real.
+      commitment: {
+        subject: "New RISC-V contract (deploy)",
+        amount: normalized.valueLyth === "0" ? null : `${normalized.valueLyth} LYTH`,
+      },
       diff: [
         { k: "Artifact", v: byteSummary(normalized.artifactBytes) },
         { k: "Constructor", v: byteSummary(normalized.constructorInput) },
@@ -116,6 +122,11 @@ export function RiscvContracts({ goto }: RiscvContractsProps) {
       title: "Call RISC-V contract",
       subtitle: "MRV native transaction",
       auth: "keychain",
+      // The contract IS the signed `to`, and the user typed it.
+      commitment: {
+        subject: normalized.contractAddress,
+        amount: normalized.valueLyth === "0" ? null : `${normalized.valueLyth} LYTH`,
+      },
       diff: [
         { k: "Contract", v: normalized.contractAddress },
         { k: "Input", v: byteSummary(normalized.input) },

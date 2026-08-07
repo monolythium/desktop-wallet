@@ -366,6 +366,7 @@ export function MonoStudio({ goto }: MonoStudioProps) {
       title: "Review MRV deploy plan",
       subtitle: "Mono Studio Host approval boundary",
       auth: "keychain",
+      commitment: { subject: "Approval preview only — nothing is signed", amount: null },
       diff: [
         { k: "Artifact hash", v: "pending from DevKit" },
         { k: "Expected address", v: "monoc1..." },
@@ -409,6 +410,10 @@ export function MonoStudio({ goto }: MonoStudioProps) {
         title: request.title,
         subtitle: request.summary,
         auth: "none",
+        // `auth: "none"` never reaches the auth pane, so this is never rendered.
+        // It is still stated: the field is required precisely so that a surface
+        // which later gains an unlock cannot acquire one without answering.
+        commitment: { subject: "Returns a decision to the DevKit sidecar", amount: null },
         diff: approvalDiff(request),
         effects: [
           { text: "This request was prepared outside the wallet and validated before display." },

@@ -48,11 +48,51 @@ export interface OperationEffect {
  */
 export type AuthMethod = "keychain" | "passkey" | "none";
 
+/**
+ * Who is paid and how much — the two facts that must be on screen at the moment
+ * the seed is released.
+ *
+ * The drawer renders this at the `auth` stage, where until now a user saw a
+ * banner and a password field and no transaction fact at all. The diff stays at
+ * `preview`: a ten-row wall above a password field is not a summary, and the
+ * batch surfaces can produce exactly that.
+ *
+ * REQUIRED, deliberately. Optional, this would be a guard that reports the
+ * omission after someone shipped it; required, a new signing surface cannot be
+ * added without answering the question.
+ *
+ * A surface ANSWERS this — it does not restate its diff. Where nothing leaves
+ * the wallet `amount` is null and the drawer says so, because "this moves no
+ * funds" is a fact a user acts on.
+ *
+ * ⚠ The diff's own payee/amount rows must be built FROM this object, never
+ * authored beside it. Two copies of one fact on two screens can drift, and a
+ * wallet showing a user two answers to "who is being paid" is worse than one
+ * showing a single answer in one place.
+ */
+export interface OperationCommitment {
+  /**
+   * The counterparty as the user understands it.
+   *
+   * Where the USER chose the target, this is that address (with its name when
+   * one resolved). Where the WALLET chose it — a precompile the user never
+   * picked — an address here would be noise at the one moment noise is most
+   * expensive, so this states what the operation IS instead. The precompile is
+   * still shown, derived, in the preview disclosure.
+   */
+  subject: string;
+  /** The amount leaving this wallet, formatted with its unit, or `null` when
+   *  none does (the signed `value` is `0n`). */
+  amount: string | null;
+}
+
 export interface OperationDescriptor {
   /** Short title shown in the drawer head — e.g. `Send LYTH`. */
   title: string;
   /** One-line subtitle — usually the user-facing summary. */
   subtitle?: string;
+  /** Payee + amount, rendered at `auth`. See {@link OperationCommitment}. */
+  commitment: OperationCommitment;
   /** Diff lines for the preview pane. */
   diff: OperationDiffLine[];
   /** User-facing side-effects of approval. */

@@ -595,6 +595,10 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
         title: `Send ${token.symbol}`,
         subtitle: "MRC-20 transfer · canonical RPC gateway",
         auth: "keychain",
+        // The user chose the recipient, so the recipient is the subject. The
+        // signed `to` is the token factory — a target they did not pick and
+        // could not check — and it belongs in the disclosure, not here.
+        commitment: { subject: toLine, amount: `${shown} ${token.symbol}` },
         diff: [
           { k: "From", v: fromBech32m },
           { k: "To", v: toLine },
@@ -677,6 +681,8 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
       title: `Send ${amountLyth} LYTH`,
       subtitle: "Native ML-DSA send · canonical RPC gateway",
       auth: "keychain",
+      // The one surface where the signed `to` IS what the user chose.
+      commitment: { subject: toLine, amount: `${amountLyth} LYTH` },
       diff: [
         { k: "From", v: fromBech32m },
         { k: "To", v: toLine },

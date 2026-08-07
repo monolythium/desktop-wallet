@@ -32,10 +32,24 @@ import { VaultCallError } from "../../sdk/vault";
 import { OperationsDrawer } from "../OperationsDrawer";
 
 function keychainOp(execute: OperationDescriptor["execute"]): OperationDescriptor {
-  return { title: "Send 1 LYTH", diff: [{ k: "Amount", v: "1 LYTH" }], effects: [], auth: "keychain", execute };
+  return {
+    title: "Send 1 LYTH",
+    commitment: { subject: "mono1recipient", amount: "1 LYTH" },
+    diff: [{ k: "Amount", v: "1 LYTH" }],
+    effects: [],
+    auth: "keychain",
+    execute,
+  };
 }
 function readOp(execute: OperationDescriptor["execute"]): OperationDescriptor {
-  return { title: "Read", diff: [], effects: [], auth: "none", execute };
+  return {
+    title: "Read",
+    commitment: { subject: "read-only", amount: null },
+    diff: [],
+    effects: [],
+    auth: "none",
+    execute,
+  };
 }
 function passwordInput(): HTMLElement {
   return screen.getByLabelText("Password");

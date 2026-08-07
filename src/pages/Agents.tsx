@@ -432,6 +432,12 @@ export function Agents() {
       title: `Fund ${agent.label}`,
       subtitle: `Transfer ${amountLyth} LYTH to the agent sub-account`,
       auth: "keychain",
+      // A plain native transfer: the signed `to` is the agent, and the agent is
+      // what the user picked. Proved this session before the drawer opened.
+      commitment: {
+        subject: `${agent.label} · ${agent.bech32m}`,
+        amount: `${amountLyth} LYTH`,
+      },
       diff: [
         { k: "From (principal)", v: principalBech32m ?? "active wallet" },
         { k: "To (agent)", v: agent.bech32m },
@@ -548,6 +554,13 @@ export function Agents() {
         ? "Amend the agent's §18.8 spending policy (setPolicy, no-claim)"
         : "Bind a §18.8 spending policy to the agent (setPolicyClaim)",
       auth: "keychain",
+      // Nobody is paid: the signed `to` is a precompile the user did not choose
+      // and the signed `value` is 0. So the subject states what is being
+      // authorised — which is the thing that could be wrong here.
+      commitment: {
+        subject: `${isUpdate ? "Update" : "Register"} spending policy · ${agent.label}`,
+        amount: null,
+      },
       diff: [
         { k: "Principal", v: principal },
         { k: "Agent", v: agent.bech32m },
@@ -659,6 +672,7 @@ export function Agents() {
       title: `Enable policy · ${agent.label}`,
       subtitle: "Re-enable the agent's disabled spending policy",
       auth: "keychain",
+      commitment: { subject: `Enable spending policy · ${agent.label}`, amount: null },
       diff: [
         { k: "Agent", v: agent.bech32m },
         { k: "Action", v: "enable" },
@@ -700,6 +714,7 @@ export function Agents() {
       title: `Revoke policy · ${agent.label}`,
       subtitle: "Disable the agent's spending policy (no spend authorised)",
       auth: "keychain",
+      commitment: { subject: `Revoke spending policy · ${agent.label}`, amount: null },
       diff: [
         { k: "Agent", v: agent.bech32m },
         { k: "Action", v: "disable" },

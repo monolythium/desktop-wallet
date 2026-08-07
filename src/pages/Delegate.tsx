@@ -657,6 +657,11 @@ export function Delegate() {
       title: `Delegate ${weightLabel} to cluster ${clusterId}`,
       subtitle: `Weight ${weightLabel} of your balance — non-custodial, tokens stay liquid`,
       auth: "keychain",
+      // Every delegation call signs value = 0 and targets a precompile the user
+      // never chose. The cluster IS what they chose, so it is the subject, and
+      // "no funds leave this wallet" is the honest amount — it is also the
+      // single most reassuring fact about a non-custodial delegation.
+      commitment: { subject: `Cluster ${clusterName(clusterId)}`, amount: null },
       // value = 0: a shortfall here is entirely fee, never "the amount plus".
       errorContext: { amountLythoshi: 0n },
       diff: [
@@ -716,6 +721,7 @@ export function Delegate() {
       title: `Undelegate from cluster ${clusterId}`,
       subtitle: `Undelegate ${weightLabel} of wallet weight — instant, nothing was locked`,
       auth: "keychain",
+      commitment: { subject: `Cluster ${clusterName(clusterId)}`, amount: null },
       // value = 0: a shortfall here is entirely fee, never "the amount plus".
       errorContext: { amountLythoshi: 0n },
       diff: [
@@ -780,6 +786,13 @@ export function Delegate() {
       title: `Undelegate all · ${rows.length} cluster${rows.length === 1 ? "" : "s"}`,
       subtitle: `Remove ${totalPct} of wallet weight across every cluster — instant, nothing was locked`,
       auth: "keychain",
+      // A BATCH: one password releases the seed for N submissions. The subject
+      // names the plan because that is what the user is consenting to; it
+      // cannot name each transaction, and §2 of the report says so.
+      commitment: {
+        subject: `${rows.length} cluster${rows.length === 1 ? "" : "s"} · ${totalPct} of wallet weight`,
+        amount: null,
+      },
       // value = 0: a shortfall here is entirely fee, never "the amount plus".
       errorContext: { amountLythoshi: 0n },
       diff: [
@@ -876,6 +889,12 @@ export function Delegate() {
       title: `Redelegate cluster ${fromCluster} → ${toCluster}`,
       subtitle: `Move ${weightLabel} of wallet weight without an unbonding round`,
       auth: "keychain",
+      // The destination is what stacks weight, so it leads — but a redelegate
+      // is a movement and naming one end of it would be half the fact.
+      commitment: {
+        subject: `Cluster ${clusterName(fromCluster)} → ${clusterName(toCluster)}`,
+        amount: null,
+      },
       // value = 0: a shortfall here is entirely fee, never "the amount plus".
       errorContext: { amountLythoshi: 0n },
       diff: [
@@ -948,6 +967,11 @@ export function Delegate() {
       // rewards accrued in the meantime.
       subtitle: "Settle and withdraw your pending delegation rewards",
       auth: "keychain",
+      // Funds come IN, and the signed value is 0 — so "no funds leave this
+      // wallet" is exactly right. The claimable figure is deliberately NOT the
+      // amount: what is claimable now and what the claim settles are different
+      // quantities, and the auth pane is the last place to blur that.
+      commitment: { subject: "Delegation rewards → this wallet", amount: null },
       // value = 0: a shortfall here is entirely fee, never "the amount plus".
       errorContext: { amountLythoshi: 0n },
       diff: [
@@ -1016,6 +1040,7 @@ export function Delegate() {
         ? "Future rewards will be claimed and delegated back automatically."
         : "Rewards will stop compounding — claim them manually.",
       auth: "keychain",
+      commitment: { subject: `Auto-compound ${next ? "on" : "off"}`, amount: null },
       // value = 0: a shortfall here is entirely fee, never "the amount plus".
       errorContext: { amountLythoshi: 0n },
       diff: [
@@ -1153,6 +1178,12 @@ export function Delegate() {
       title: `Autovote · ${label}`,
       subtitle: `Spread ${(plan.totalWeightBps / 100).toFixed(2)}% of balance across ${plan.allocations.length} cluster${plan.allocations.length === 1 ? "" : "s"} — non-custodial`,
       auth: "keychain",
+      // The second BATCH. Same limit as undelegate-all: this names the plan, not
+      // each of the N transactions the one password authorises.
+      commitment: {
+        subject: `${plan.allocations.length} cluster${plan.allocations.length === 1 ? "" : "s"} · ${(plan.totalWeightBps / 100).toFixed(2)}% of balance`,
+        amount: null,
+      },
       // value = 0: a shortfall here is entirely fee, never "the amount plus".
       errorContext: { amountLythoshi: 0n },
       // Without this the drawer skips recordOperationFailure entirely, so a

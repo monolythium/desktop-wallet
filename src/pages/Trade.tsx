@@ -324,6 +324,13 @@ function PlaceLimitOrderCard({
       title: `${side === "buy" ? "Buy" : "Sell"} ${qtyStr} @ ${priceStr}`,
       subtitle: "Native CLOB placeLimitOrder · canonical RPC gateway",
       auth: "keychain",
+      // The order signs value = 0 — the legs settle through the book, not as
+      // native value on this transaction — so the amount is honestly null and
+      // the subject is the order the user is committing to.
+      commitment: {
+        subject: `${side === "buy" ? "BUY" : "SELL"} ${qtyStr} base @ ${priceStr} quote/base`,
+        amount: null,
+      },
       diff: [
         { k: "Side", v: side === "buy" ? "BUY" : "SELL" },
         { k: "Limit price", v: `${priceStr} quote / base` },
@@ -503,6 +510,7 @@ function CancelOrderCard() {
       title: `Cancel order ${trimmed.slice(0, 18)}…`,
       subtitle: "Native CLOB cancelOrder · canonical RPC gateway",
       auth: "keychain",
+      commitment: { subject: `Cancel order ${trimmed}`, amount: null },
       diff: [{ k: "Order id", v: trimmed }],
       effects: [
         { text: "Unlocks the local vault for this operation only." },

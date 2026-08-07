@@ -252,6 +252,10 @@ export function Wallets() {
       title: "Unlock wallet preview",
       subtitle: "Derive the live ML-DSA identity from the local vault",
       auth: "keychain",
+      // Releases the seed and signs nothing. That is exactly the case the
+      // null amount exists to state — a user typing a password deserves to
+      // know when the answer is "this pays nobody".
+      commitment: { subject: `Vault slot ${slot} · derive identity only`, amount: null },
       diff: [
         { k: "Vault slot", v: slot },
         { k: "Algorithm", v: "ML-DSA-65" },

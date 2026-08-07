@@ -41,6 +41,7 @@ const PLAN_NOTIFY: OperationNotifyMeta = {
 function batchOp(execute: OperationDescriptor["execute"]): OperationDescriptor {
   return {
     title: "Autovote · Max Diversity",
+    commitment: { subject: "4 clusters · 20.00% of balance", amount: null },
     diff: [],
     effects: [],
     auth: "none",

@@ -189,6 +189,31 @@ describe("control — a genuine agent funds, and the target is the proved one", 
     );
   });
 
+  it("the auth-stage commitment names the SAME proved target as the diff", async () => {
+    // The commitment is a second surface showing the funding target, and it is
+    // the one on screen when the seed is released. Two surfaces showing one
+    // fact can drift, and this is the check that they have not — driven through
+    // the real page, against the descriptor that really reached `ops.open`,
+    // because a hand-built descriptor could only assert its own construction.
+    const r = await openFund();
+    await r.user.type(agentPasswordBox(), "correct-agent-password");
+    await r.user.click(screen.getByRole("button", { name: "Review transfer" }));
+    await waitFor(() => expect(opsOpen).toHaveBeenCalledTimes(1));
+
+    const d = opsOpen.mock.calls[0]![0] as {
+      commitment: { subject: string; amount: string | null };
+      diff: { k: string; v: string }[];
+    };
+    // Anti-vacuity: the proved target really is what the row carries.
+    expect(fundedTargets()).toEqual([AGENT_BECH32]);
+    expect(d.commitment.subject).toContain(AGENT_BECH32);
+    expect(d.commitment.subject).not.toContain(ATTACKER_BECH32);
+    // And the amount is real, not a placeholder — a null here would render
+    // "No funds leave this wallet" on a transfer that moves funds.
+    expect(d.commitment.amount).not.toBeNull();
+    expect(d.diff.find((row) => row.k === "Amount")?.v).toContain(d.commitment.amount!);
+  });
+
   it("the proof is per-session — a second funding does not re-ask", async () => {
     const r = await openFund();
     await r.user.type(agentPasswordBox(), "correct-agent-password");

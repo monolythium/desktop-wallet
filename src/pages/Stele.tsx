@@ -717,6 +717,8 @@ function NameChecker({ onRegistered }: { onRegistered?: () => void }) {
       title: `Register ${trimmed}`,
       subtitle: "Acquire this .mono name — one-time, permanent",
       auth: "keychain",
+      // The registration cost IS the signed `value` — real funds leave here.
+      commitment: { subject: `Name registry · ${trimmed}`, amount: `${quote.costLyth} LYTH` },
       diff: [
         { k: "Name", v: trimmed },
         { k: "Category", v: category },
@@ -932,6 +934,7 @@ function AcceptTransfer({ onAccepted }: { onAccepted?: () => void }) {
       title: `Accept ${trimmed}`,
       subtitle: "Accept a name transfer proposed to you — you pay the fee",
       auth: "keychain",
+      commitment: { subject: `Name registry · ${trimmed}`, amount: `${quote.costLyth} LYTH` },
       diff: [
         { k: "Name", v: trimmed },
         { k: "Current owner", v: owner ?? "—" },
@@ -1115,6 +1118,10 @@ function MyNames({ refreshKey }: { refreshKey: number }) {
       title: `Transfer ${name}`,
       subtitle: "Propose a name transfer — the recipient accepts within 24h",
       auth: "keychain",
+      // The recipient is a calldata argument, not the signed `to` — but the
+      // user chose it and it is what a substitution would change, so it leads.
+      // Proposing is free; the recipient pays on accept.
+      commitment: { subject: `${name} → ${recipient}`, amount: null },
       diff: [
         { k: "Name", v: name },
         { k: "To", v: recipient },

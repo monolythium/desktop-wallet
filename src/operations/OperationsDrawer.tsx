@@ -513,6 +513,30 @@ function AuthPane({
   }
   return (
     <>
+      {/* The transaction, at the moment the key is released.
+          The diff stays at `preview` — this is a summary, not a second copy of
+          it — but the commitment travels, because a user who reads the facts on
+          one screen and commits on another has not read them at the moment that
+          matters. The two facts here are the two that carry a decision: who is
+          paid, and how much.
+          `overflow-wrap: anywhere` and not `text-overflow: clip`: clipping drops
+          an address's tail with no signal, which is worse than no address. */}
+      <div className="w-card" style={{ padding: 0, marginBottom: 12 }} data-testid="auth-commitment">
+        <div className="w-card__body">
+          <div className="w-kv">
+            <span className="k">To</span>
+            <span className="v" style={{ overflowWrap: "anywhere", wordBreak: "break-all" }}>
+              {descriptor.commitment.subject}
+            </span>
+          </div>
+          <div className="w-kv">
+            <span className="k">Amount</span>
+            <span className="v mono">
+              {descriptor.commitment.amount ?? "No funds leave this wallet"}
+            </span>
+          </div>
+        </div>
+      </div>
       <div className="w-banner">
         Enter your wallet password. The vault decrypts in-process via
         Argon2id + XChaCha20-Poly1305; the password never touches disk.
