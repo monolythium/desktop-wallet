@@ -3,6 +3,22 @@
 // The core SDK owns the MRV request builders and native tx adapter fields.
 // This module keeps the desktop-wallet surface app-facing: typed MRV requests,
 // lythoshi values, and fee previews. Submission is plaintext (`mesh_submitTx`).
+//
+// TWO SIGNED FIELDS THIS SEAM USED TO TAKE FROM THE OPERATOR IT SUBMITS TO.
+//
+// This is the one signing path that does NOT route through `submitNativeTx`, so
+// neither of that seam's bindings reached it:
+//
+//   - the chain id came from `eth_chainId` — the operator's unilateral claim
+//     about which chain it serves, deciding which chain the signature is valid
+//     on. Showing that number to a user is not a fix: they have nothing to check
+//     it against. It now comes from `activeChainPin()` (see below).
+//   - the fee had no client-side bound at all, because `postClampResolvedFee`
+//     is applied inside `submitNativeTx`. The chain has no maximum per-unit
+//     price (fee-model.ts), so bounding it is the client's duty and this seam
+//     was not doing it.
+//
+// Both are now taken from the same places every other write takes them.
 
 import {
   assertMrvCallNativeSubmissionPlan,
@@ -34,6 +50,8 @@ import {
   submitTransaction,
 } from "@monolythium/core-sdk/crypto";
 import { getProvider } from "./client";
+import { activeChainPin } from "./chain-trust";
+import { postClampResolvedFee } from "./fee-model";
 import { getExecutionUnitQuote, getNativeTransactionCount } from "./native-rpc";
 
 export const MRV_DEFAULT_DEPLOY_EXECUTION_UNIT_LIMIT = 1_000_000n;
@@ -310,34 +328,65 @@ async function resolveNativeContext(
   maxExecutionFeeLythoshi: string;
   priorityTipLythoshi: string;
 }> {
+  // THE CHAIN ID IS THE ONE THE ACTIVE OPERATOR WAS VERIFIED AGAINST — never the
+  // one it reports about itself.
+  //
+  // `activeChainPin()` is the single derivation the health tick and the
+  // switch-time gate both use: the SDK registry pin on the builtin chain, the
+  // user's own record on a custom one. The operator that will receive this wire
+  // has already been compared against it (`verdictFromStats`), and
+  // `getProvider()` refuses to hand out a transport until that comparison
+  // passed — so this value has been checked AGAINST the wire rather than taken
+  // FROM it, which is the whole difference.
+  //
+  // Not a second hardcoded literal, either: `submit.ts` pins
+  // MONOLYTHIUM_TESTNET_CHAIN_ID, which is correct only while the builtin chain
+  // is active. This tracks a user-added chain, so copying that literal here
+  // would have reproduced a known defect rather than fixed one.
+  const chainId =
+    args.chainId === undefined
+      ? BigInt(activeChainPin().chainId)
+      : normalizeU64("chainId", args.chainId);
+
   // One live quote covers both defaulted fee fields (single RPC): the max-fee
   // default reads the summed per-unit price and the tip default reads the live,
   // height-aware priority-tip floor — so a milestone that raises the floor is
   // tracked, instead of a hardcoded 1 gwei that only happens to match today.
   const needsQuote =
     args.maxExecutionFeeLythoshi === undefined || args.priorityTipLythoshi === undefined;
-  const [chainId, nonce, quote] = await Promise.all([
-    args.chainId === undefined
-      ? client.ethChainId()
-      : Promise.resolve(normalizeU64("chainId", args.chainId)),
+  const [nonce, quote] = await Promise.all([
     args.nonce === undefined
       ? getNativeTransactionCount(client, fromHex)
       : Promise.resolve(normalizeU64("nonce", args.nonce)),
     needsQuote ? getExecutionUnitQuote(client) : Promise.resolve(null),
   ]);
 
+  const executionUnitLimit = normalizeU64("executionUnitLimit", args.executionUnitLimit);
+
+  // The SAME floor + ceiling that binds every `submitNativeTx` write, applied
+  // here because this seam does not route through it. Unconditional, including
+  // a caller-supplied number: the ceiling is a client duty the chain does not
+  // perform (it has floors only), so WHO supplied the price does not change
+  // whether it should be bounded. One import, so the two paths cannot come to
+  // disagree about what the bound is.
+  const bounded = postClampResolvedFee({
+    maxFeePerGas:
+      args.maxExecutionFeeLythoshi === undefined
+        ? quote!.summedLythoshi
+        : BigInt(normalizeLythoshi("maxExecutionFeeLythoshi", args.maxExecutionFeeLythoshi)),
+    maxPriorityFeePerGas:
+      args.priorityTipLythoshi === undefined
+        ? quote!.suggestedTipLythoshi
+        : BigInt(normalizeLythoshi("priorityTipLythoshi", args.priorityTipLythoshi)),
+    gasLimit: executionUnitLimit,
+  });
+
   return {
     chainId,
     nonce,
-    executionUnitLimit: normalizeU64("executionUnitLimit", args.executionUnitLimit),
-    maxExecutionFeeLythoshi:
-      args.maxExecutionFeeLythoshi === undefined
-        ? quote!.summedLythoshi.toString()
-        : normalizeLythoshi("maxExecutionFeeLythoshi", args.maxExecutionFeeLythoshi),
-    priorityTipLythoshi:
-      args.priorityTipLythoshi === undefined
-        ? quote!.suggestedTipLythoshi.toString()
-        : normalizeLythoshi("priorityTipLythoshi", args.priorityTipLythoshi),
+    executionUnitLimit,
+    maxExecutionFeeLythoshi: bounded.maxFeePerGas.toString(),
+    priorityTipLythoshi: bounded.maxPriorityFeePerGas.toString(),
   };
 }
 
