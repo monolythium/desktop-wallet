@@ -29,7 +29,15 @@ export interface ClassifyRecipientArgs {
   recipientLower: string;
   /** Lowercased active sending account. */
   fromLower: string;
-  /** Confirmed activity rows (cache ∪ live), or null when none were readable. */
+  /**
+   * Confirmed activity rows, or null when none were readable.
+   *
+   * ONLY rows the caller obtained from the chain this session belong here. The
+   * cached copy on disk used to be unioned in, which made a single planted row
+   * `{direction:"out", counterparty:<attacker>}` sufficient to report "known" —
+   * one of the three stores that could each suppress the warning independently.
+   * The cache is a rendering aid; it is not evidence that a payment happened.
+   */
   rows: ReadonlyArray<ActivityLike> | null;
   /** Tracked pending txs, or null when unreadable. */
   pending: ReadonlyArray<PendingLike> | null;

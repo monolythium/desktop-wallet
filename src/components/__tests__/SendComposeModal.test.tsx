@@ -600,14 +600,34 @@ describe("SendComposeModal — known box + warning mutual exclusion (T5)", () =>
     expect(await screen.findByText(/First-time recipient\./)).toBeInTheDocument();
   });
 
-  it("a saved contact (matched by address) shows the green box and beats the warning", async () => {
+  // REVISED for SA-07-003. This case previously asserted "green beats amber" —
+  // that a saved contact suppresses the first-time warning. That behaviour was
+  // the finding: the address book is a plaintext file, so a planted name
+  // silenced the wallet's last defence against paying the wrong party. A
+  // contact is the user's own declaration, not evidence of a prior payment, so
+  // it now annotates the evidence rather than overriding it.
+  it("a saved contact does NOT suppress the warning for an address never paid", async () => {
     live.loadLiveAddressActivity.mockResolvedValue({ ok: true, value: [] });
     addressbook.addressbookLookup.mockResolvedValue([{ name: "Alice", address: TO }]);
     const { user } = renderWithProviders(<SendComposeModal fromBech32m={FROM} onClose={vi.fn()} />);
     await user.type(screen.getByLabelText("Recipient typed bech32m address"), TO);
-    expect(await screen.findByText(/Saved contact:/)).toBeInTheDocument();
+    expect(await screen.findByText(/First-time recipient\./)).toBeInTheDocument();
+    expect(screen.queryByTestId("send-known-contact")).toBeNull();
+  });
+
+  it("a saved contact ANNOTATES the green box when the evidence earns it", async () => {
+    // The contact keeps its job — naming the recipient — on a recipient the
+    // chain evidence already established. The name is a label, not the reason.
+    live.loadLiveAddressActivity.mockResolvedValue({
+      ok: true,
+      value: [{ counterparty: TO, direction: "out" }],
+    });
+    addressbook.addressbookLookup.mockResolvedValue([{ name: "Alice", address: TO }]);
+    const { user } = renderWithProviders(<SendComposeModal fromBech32m={FROM} onClose={vi.fn()} />);
+    await user.type(screen.getByLabelText("Recipient typed bech32m address"), TO);
+    expect(await screen.findByTestId("send-known-contact")).toBeInTheDocument();
     expect(screen.getByText("Alice")).toBeInTheDocument();
-    expect(screen.queryByText(/First-time recipient\./)).toBeNull(); // green beats amber
+    expect(screen.queryByText(/First-time recipient\./)).toBeNull();
   });
 
   it("a quorum-forward hit renders 'Registered name:' and suppresses the warning", async () => {
