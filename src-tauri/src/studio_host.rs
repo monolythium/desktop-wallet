@@ -14,7 +14,7 @@ use std::{
     cmp::Ordering,
     env, fs,
     io::{BufRead, BufReader, Read, Write},
-    path::{Path, PathBuf},
+    path::{Component, Path, PathBuf},
     process::{Child, ChildStdin, Command, Stdio},
     sync::{mpsc, Arc, Mutex},
     thread,
@@ -208,7 +208,12 @@ pub fn studio_devkit_resolve_install_path(
         Some(version) => version,
         None => read_current_version(&channel)?.unwrap_or_else(|| "current".to_owned()),
     };
-    if version.trim().is_empty() || version.contains("..") {
+    // This command takes `version` from the CALLER, not from a manifest, so it
+    // never passes `validate_manifest_shape` — it needs the same predicate in its
+    // own right. The previous `contains("..")` test could not stop an absolute or
+    // drive-relative segment, and those are exactly the forms `Path::join`
+    // discards the base for.
+    if !is_single_path_component(&version) {
         return Err(StudioHostError::InvalidArgument {
             message: "version must be a simple directory name".to_owned(),
         });
@@ -1135,6 +1140,21 @@ fn validate_manifest_shape(manifest: &DevkitManifest) -> Result<(), StudioHostEr
             message: "archive trust root is required".to_owned(),
         });
     }
+    // Both of these are concatenated into paths that decide an outcome, and
+    // `Path::join` with an absolute segment discards the base. Rejected here, at
+    // the single boundary every consumer passes through (`parse_manifest_at`), so
+    // no downstream join can receive a value that escapes its root. Refused, never
+    // normalised: a coerced value is a fallback, and the fallback is the target.
+    if !is_single_path_component(&manifest.devkit_version) {
+        return Err(StudioHostError::MalformedManifest {
+            message: "devkit_version must be a single path component".to_owned(),
+        });
+    }
+    if !is_single_path_component(&manifest.sidecar.binary_name) {
+        return Err(StudioHostError::MalformedManifest {
+            message: "sidecar binary_name must be a single path component".to_owned(),
+        });
+    }
     Ok(())
 }
 
@@ -1543,6 +1563,32 @@ fn is_sha256_hex(value: &str) -> bool {
     value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
+/// True only when `value` is exactly one ordinary path segment — no root, no
+/// prefix, no separator, no `.` or `..`, not empty.
+///
+/// Both manifest fields this guards are concatenated into paths that decide an
+/// outcome: `devkit_version` selects the directory `install_local_archive_at`
+/// removes with `fs::remove_dir_all`, and `binary_name` selects the file the
+/// sidecar launcher resolves and runs. `Path::join` with an absolute segment
+/// DISCARDS the base, so either field could relocate the whole operation.
+///
+/// The single-`Normal`-component test is the right shape because it rejects
+/// absolute paths, UNC and verbatim-UNC roots, drive-relative and
+/// drive-letter-relative forms, embedded separators and `..` TOGETHER. A `..`
+/// denylist does not: of the six escaping forms measured against `Path::join`
+/// — `C:\Windows\System32`, `C:\`, `\Windows`, `\\server\share\x`,
+/// `\\?\C:\…`, and `C:foo` — **not one contains `..`**.
+fn is_single_path_component(value: &str) -> bool {
+    // Whitespace-only is one `Normal` component and does not escape, but it is
+    // not a name either — the check this replaces already refused it, and losing
+    // that would be a regression dressed as a hardening.
+    if value.trim().is_empty() {
+        return false;
+    }
+    let mut components = Path::new(value).components();
+    matches!(components.next(), Some(Component::Normal(_))) && components.next().is_none()
+}
+
 fn compare_versions(left: &str, right: &str) -> Ordering {
     parse_version_parts(left).cmp(&parse_version_parts(right))
 }
@@ -1566,6 +1612,113 @@ mod tests {
         let manifest = test_manifest("0.1.0", "a".repeat(64));
         let result = compatibility_result(&manifest, HOST_API_VERSION);
         assert_eq!(result.compatibility, "compatible");
+    }
+
+    /// Forms that make `Path::join` DISCARD its base on Windows. None contains
+    /// `..`, which is why the sibling `version.contains("..")` check could never
+    /// have stopped them.
+    const WINDOWS_ESCAPING_FORMS: &[&str] = &[
+        r"C:\Windows\System32",
+        r"C:\",
+        r"\Windows",
+        r"\\server\share\x",
+        r"\\?\C:\Windows",
+        r"C:foo",
+    ];
+
+    /// Forms that are not single components on any platform.
+    const UNIVERSAL_REJECTS: &[&str] = &["..", "../..", "a/b", ".", "", "   ", "/", "./x"];
+
+    #[test]
+    fn single_component_accepts_an_ordinary_segment() {
+        // Anti-vacuity: if this control ever failed, every rejection below would
+        // pass for the trivial reason that the predicate rejects everything.
+        for good in ["0.1.0", "mono-dev.mjs", "mono-dev", "v1.2.3-rc1", "a"] {
+            assert!(
+                is_single_path_component(good),
+                "{good:?} is an ordinary segment and must be accepted"
+            );
+        }
+    }
+
+    #[test]
+    fn single_component_rejects_non_segments_on_every_platform() {
+        for bad in UNIVERSAL_REJECTS {
+            assert!(
+                !is_single_path_component(bad),
+                "{bad:?} is not a single path component and must be rejected"
+            );
+        }
+    }
+
+    /// The invariant that actually matters, asserted on every platform: whatever
+    /// the predicate ACCEPTS must not be able to leave the base it is joined to.
+    /// This is platform-correct by construction — a Windows-absolute form is only
+    /// dangerous where it is absolute, and there it is rejected.
+    #[test]
+    fn accepted_values_can_never_escape_the_base() {
+        let base = Path::new("/install/root");
+        for candidate in WINDOWS_ESCAPING_FORMS.iter().chain(UNIVERSAL_REJECTS.iter()) {
+            if is_single_path_component(candidate) {
+                assert!(
+                    base.join(candidate).starts_with(base),
+                    "{candidate:?} was accepted but escapes the base when joined"
+                );
+            }
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn single_component_rejects_every_measured_windows_escape() {
+        for bad in WINDOWS_ESCAPING_FORMS {
+            // Proves the form really does escape here, so the rejection below is
+            // guarding a live hazard and not an inert string.
+            assert!(
+                !Path::new("C:\\install\\root").join(bad).starts_with("C:\\install\\root"),
+                "{bad:?} was expected to escape the base on this platform"
+            );
+            assert!(
+                !is_single_path_component(bad),
+                "{bad:?} escapes `Path::join` and must be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn manifest_validation_rejects_a_hostile_version_and_binary_name() {
+        // The fields are refused at the manifest boundary, so no downstream join
+        // — the install directory that gets `remove_dir_all`, or the sidecar
+        // binary that gets executed — can ever receive one.
+        let mut manifest = test_manifest("0.1.0", "a".repeat(64));
+        assert!(validate_manifest_shape(&manifest).is_ok(), "the control manifest must validate");
+
+        let hostile: &[&str] = if cfg!(windows) {
+            WINDOWS_ESCAPING_FORMS
+        } else {
+            UNIVERSAL_REJECTS
+        };
+
+        for bad in hostile {
+            let mut m = manifest.clone();
+            m.devkit_version = (*bad).to_owned();
+            assert!(
+                validate_manifest_shape(&m).is_err(),
+                "devkit_version {bad:?} must be refused"
+            );
+
+            let mut m = manifest.clone();
+            m.sidecar.binary_name = (*bad).to_owned();
+            assert!(
+                validate_manifest_shape(&m).is_err(),
+                "binary_name {bad:?} must be refused"
+            );
+        }
+
+        // …and a legitimate value the wallet actually needs still passes.
+        manifest.sidecar.binary_name = "mono-dev".to_owned();
+        manifest.devkit_version = "0.1.0".to_owned();
+        assert!(validate_manifest_shape(&manifest).is_ok());
     }
 
     #[test]
