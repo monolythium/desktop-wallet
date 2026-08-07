@@ -22,7 +22,7 @@ import { createAndStoreVault } from "./keychain";
 import { mintVaultSlot } from "./vaultCatalog";
 import { sendNativeLyth } from "./native-send";
 import { composePolicyClaimMessage } from "./spending-policy";
-import type { SpendingPolicyArgs } from "@monolythium/core-sdk";
+import type { ResolvedExecutionFee, SpendingPolicyArgs } from "@monolythium/core-sdk";
 
 export interface CreateAgentSubAccountResult {
   /** Keychain slot the fresh agent vault lives under. */
@@ -62,6 +62,9 @@ export interface FundAgentSubAccountArgs {
   toBech32m: string;
   /** Whole-or-decimal LYTH amount to transfer. */
   amountLyth: string;
+  /** The fee the confirm surface RENDERED, signed verbatim (`shown == signed`).
+   *  Absent ⇒ `submitNativeTx` resolves its own, which is a second read. */
+  resolvedFee?: ResolvedExecutionFee;
 }
 
 /**
@@ -74,6 +77,7 @@ export async function fundAgentSubAccount(args: FundAgentSubAccountArgs) {
     seed: args.seed,
     to: args.toBech32m,
     amountLyth: args.amountLyth,
+    ...(args.resolvedFee === undefined ? {} : { resolvedFee: args.resolvedFee }),
   });
 }
 

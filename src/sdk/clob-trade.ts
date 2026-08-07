@@ -22,6 +22,11 @@ import { submitNativeTx } from "./submit";
 const SPOT_LIMIT_ORDER_EXECUTION_UNIT_LIMIT = 250_000n;
 const CLOB_CANCEL_EXECUTION_UNIT_LIMIT = 80_000n;
 
+/** The two limits, exported so a confirm surface prices itself from the same
+ *  constants these writes sign rather than from a second literal. */
+export const SPOT_LIMIT_ORDER_LIMIT = SPOT_LIMIT_ORDER_EXECUTION_UNIT_LIMIT;
+export const CLOB_CANCEL_LIMIT = CLOB_CANCEL_EXECUTION_UNIT_LIMIT;
+
 export interface PlaceClobLimitOrderArgs {
   /** Wallet's ML-DSA-65 seed (32 bytes). */
   seed: Uint8Array;

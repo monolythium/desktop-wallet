@@ -204,6 +204,11 @@ export async function submitSpendingPolicyTx(
 /** Execution-unit limit for an enable/disable toggle (no claim payload). */
 export const POLICY_TOGGLE_LIMIT = POLICY_TOGGLE_EXECUTION_UNIT_LIMIT;
 
+/** Execution-unit limit for a `setPolicy` / `setPolicyClaim` write — the default
+ *  {@link submitSpendingPolicyTx} signs. Exported so a confirm surface can price
+ *  itself from the same constant the seam uses rather than a second literal. */
+export const SET_POLICY_CLAIM_LIMIT = SET_POLICY_CLAIM_EXECUTION_UNIT_LIMIT;
+
 /**
  * Read the live §18.8 spending-policy view for a sub-account.
  * `lyth_getSpendingPolicy` is keyed by the controlled sub-account.

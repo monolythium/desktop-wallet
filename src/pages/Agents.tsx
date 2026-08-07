@@ -47,9 +47,12 @@ import {
   buildSpendingPolicyArgs,
   fetchSpendingPolicy,
   POLICY_TOGGLE_LIMIT,
+  SET_POLICY_CLAIM_LIMIT,
   SPENDING_POLICY_PRECOMPILE,
   submitSpendingPolicyTx,
 } from "../sdk/spending-policy";
+import { NATIVE_TRANSFER_EXECUTION_UNIT_LIMIT } from "../sdk/fee-model";
+import type { OperationFeePlan } from "../sdk/fee-quote";
 import {
   loadAgents,
   registerAgent,
@@ -89,6 +92,27 @@ const PRECOMPILE_LABEL = "0x…110c";
  * that is now a proved fact rather than a claim (the agent vault is re-derived
  * and compared before this surface opens).
  */
+/**
+ * The three policy writes price as `registry` — the class `submitSpendingPolicyTx`
+ * passes — but at two different limits: a claim carries 1 952 + 3 309 bytes of
+ * ML-DSA-65 material, a toggle carries none. Named from the seam's own constants
+ * so a limit cannot be shown at one value and signed at another.
+ */
+const POLICY_CLAIM_FEE_PLAN: OperationFeePlan = {
+  feeClass: "registry",
+  executionUnitLimit: SET_POLICY_CLAIM_LIMIT,
+};
+const POLICY_TOGGLE_FEE_PLAN: OperationFeePlan = {
+  feeClass: "registry",
+  executionUnitLimit: POLICY_TOGGLE_LIMIT,
+};
+/** Funding an agent is an ordinary native transfer — the same class and limit a
+ *  send signs, so it prices like one. */
+const FUND_FEE_PLAN: OperationFeePlan = {
+  feeClass: "transfer",
+  executionUnitLimit: NATIVE_TRANSFER_EXECUTION_UNIT_LIMIT,
+};
+
 const POLICY_DETAILS = [
   { k: "Precompile (signed `to`)", v: SPENDING_POLICY_PRECOMPILE },
   {
@@ -460,6 +484,7 @@ export function Agents() {
         subject: `${agent.label} · ${agent.bech32m}`,
         amount: `${amountLyth} LYTH`,
       },
+      feePlan: FUND_FEE_PLAN,
       diff: [
         { k: "From (principal)", v: principalBech32m ?? "active wallet" },
         { k: "To (agent)", v: agent.bech32m },
@@ -478,6 +503,7 @@ export function Agents() {
           seed: ctx.vaultSeed,
           toBech32m: agent.bech32m,
           amountLyth,
+          resolvedFee: ctx.resolvedFee,
         });
         return {
           headline: `Funded ${agent.label} with ${amountLyth} LYTH`,
@@ -583,6 +609,7 @@ export function Agents() {
         subject: `${isUpdate ? "Update" : "Register"} spending policy · ${agent.label}`,
         amount: null,
       },
+      feePlan: POLICY_CLAIM_FEE_PLAN,
       diff: [
         { k: "Principal", v: principal },
         { k: "Agent", v: agent.bech32m },
@@ -675,6 +702,7 @@ export function Agents() {
         const r = await submitSpendingPolicyTx({
           seed: ctx.vaultSeed,
           data: calldata,
+          resolvedFee: ctx.resolvedFee,
         });
         return {
           headline: isUpdate
@@ -695,6 +723,7 @@ export function Agents() {
       subtitle: "Re-enable the agent's disabled spending policy",
       auth: "keychain",
       commitment: { subject: `Enable spending policy · ${agent.label}`, amount: null },
+      feePlan: POLICY_TOGGLE_FEE_PLAN,
       diff: [
         { k: "Agent", v: agent.bech32m },
         { k: "Action", v: "enable" },
@@ -717,6 +746,7 @@ export function Agents() {
           seed: ctx.vaultSeed,
           data: calldata,
           executionUnitLimit: POLICY_TOGGLE_LIMIT,
+          resolvedFee: ctx.resolvedFee,
         });
         return {
           headline: `Policy enabled for ${agent.label}`,
@@ -737,6 +767,10 @@ export function Agents() {
       subtitle: "Disable the agent's spending policy (no spend authorised)",
       auth: "keychain",
       commitment: { subject: `Revoke spending policy · ${agent.label}`, amount: null },
+      // ⚠ A PROTECTIVE OPERATION under a fail-closed fee gate. See §3 of the R10
+      // report: an operator that refuses to quote can stop a user withdrawing an
+      // authority. The safe direction is implemented; the trade is recorded.
+      feePlan: POLICY_TOGGLE_FEE_PLAN,
       diff: [
         { k: "Agent", v: agent.bech32m },
         { k: "Action", v: "disable" },
@@ -759,6 +793,7 @@ export function Agents() {
           seed: ctx.vaultSeed,
           data: calldata,
           executionUnitLimit: POLICY_TOGGLE_LIMIT,
+          resolvedFee: ctx.resolvedFee,
         });
         return {
           headline: `Policy revoked for ${agent.label}`,

@@ -14,7 +14,13 @@ import {
   type ConvertQuoteView,
 } from "../sdk/convert";
 import { flightSearch, FlightCallError, type FlightSearchInput } from "../sdk/flights";
-import { ADDRESS_KIND_HRPS, nameRegistryAddressHex, typedBech32ToAddress } from "@monolythium/core-sdk";
+import {
+  ADDRESS_KIND_HRPS,
+  REGISTRY_DEFAULT_EXECUTION_UNIT_LIMIT,
+  nameRegistryAddressHex,
+  typedBech32ToAddress,
+} from "@monolythium/core-sdk";
+import type { OperationFeePlan } from "../sdk/fee-quote";
 import {
   checkAgentParentOwnership,
   checkName,
@@ -44,6 +50,23 @@ import { useOperations } from "../operations/context";
 const NAME_REGISTRY_DETAILS = [
   { k: "Precompile (signed `to`)", v: nameRegistryAddressHex() },
 ];
+
+/**
+ * ⚠ THE NETWORK FEE, NOT THE REGISTRATION PRICE. These surfaces already show
+ * the U-curve cost (the transaction's `value`) and already re-read it at submit
+ * and refuse on change. That was never the unpriced quantity — the network fee
+ * was, and every one of these writes left it to be resolved after the password.
+ *
+ * The three writes pass no execution-unit limit, so they take the SDK registry
+ * default — and the SDK EXPORTS that default, so this still names the constant
+ * the seam resolves to rather than repeating its value. (R9 recorded that no
+ * nameable constant existed here and used it to defer the limit's disclosure;
+ * that was wrong, and `REGISTRY_DEFAULT_EXECUTION_UNIT_LIMIT` is the constant.)
+ */
+const NAME_REGISTRY_FEE_PLAN: OperationFeePlan = {
+  feeClass: "registry",
+  executionUnitLimit: REGISTRY_DEFAULT_EXECUTION_UNIT_LIMIT,
+};
 import { useActiveWallet } from "../sdk/active-wallet";
 import { invalidateReverseNameFor, loadReverseName } from "../sdk/reverse-name";
 import { CategoryBadge } from "../components/CategoryBadge";
@@ -735,6 +758,7 @@ function NameChecker({ onRegistered }: { onRegistered?: () => void }) {
         { k: "Registration fee", v: `${quote.costLyth} LYTH`, kind: "fee" as const },
         { k: "Owner", v: ownerAddress },
       ],
+      feePlan: NAME_REGISTRY_FEE_PLAN,
       details: NAME_REGISTRY_DETAILS,
       effects: [
         { text: "Unlocks the local vault for this operation only." },
@@ -765,6 +789,7 @@ function NameChecker({ onRegistered }: { onRegistered?: () => void }) {
           seed: ctx.vaultSeed,
           name: trimmed,
           costLythoshi: reviewedCost,
+          resolvedFee: ctx.resolvedFee,
         });
         // Record this device's registration so "My names" can show it (the
         // chain has no enumerate RPC). Best-effort; the reverse read stays
@@ -950,6 +975,7 @@ function AcceptTransfer({ onAccepted }: { onAccepted?: () => void }) {
         { k: "Current owner", v: owner ?? "—" },
         { k: "Accept fee", v: `${quote.costLyth} LYTH`, kind: "fee" as const },
       ],
+      feePlan: NAME_REGISTRY_FEE_PLAN,
       details: NAME_REGISTRY_DETAILS,
       effects: [
         { text: "Unlocks the local vault for this operation only." },
@@ -979,6 +1005,7 @@ function AcceptTransfer({ onAccepted }: { onAccepted?: () => void }) {
           seed: ctx.vaultSeed,
           name: trimmed,
           costLythoshi: reviewedCost,
+          resolvedFee: ctx.resolvedFee,
         });
         onAccepted?.();
         return { headline: `Accepted ${trimmed}`, detail: r.txHash, txHash: r.txHash, nonce: r.nonce };
@@ -1137,6 +1164,7 @@ function MyNames({ refreshKey }: { refreshKey: number }) {
         { k: "To", v: recipient },
         { k: "Acceptance window", v: "24 hours" },
       ],
+      feePlan: NAME_REGISTRY_FEE_PLAN,
       details: NAME_REGISTRY_DETAILS,
       effects: [
         { text: "Unlocks the local vault for this operation only." },
@@ -1164,7 +1192,12 @@ function MyNames({ refreshKey }: { refreshKey: number }) {
         if (!ctx?.vaultSeed) {
           throw new Error("vault seed unavailable after keychain authorization");
         }
-        const r = await submitNameProposeTransfer({ seed: ctx.vaultSeed, name, recipient });
+        const r = await submitNameProposeTransfer({
+          seed: ctx.vaultSeed,
+          name,
+          recipient,
+          resolvedFee: ctx.resolvedFee,
+        });
         return { headline: `Proposed transfer of ${name}`, detail: r.txHash, txHash: r.txHash, nonce: r.nonce };
       },
     });
