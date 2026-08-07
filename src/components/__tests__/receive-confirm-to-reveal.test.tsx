@@ -107,14 +107,44 @@ describe("the lockout is shared, not bypassed", () => {
     // The property that matters. A surface that decrypts first and reports the
     // lockout afterwards has not throttled anything — the attacker still gets
     // one Argon2id trial per click.
+    //
+    // Driven through the KEYBOARD, not the button. Clicking is a vacuous probe:
+    // the button carries `disabled`, so jsdom drops the click and the test would
+    // pass with the lockout check deleted from `submit` entirely — measured, it
+    // did. The Enter handler reaches `submit` regardless, so this asks whether
+    // the CODE refuses, not whether the DOM was styled to.
     readLockoutState.mockReturnValue({ lockoutUntil: Date.now() + 60_000, failCount: 9 });
     renderReceive();
 
     await type("guess");
-    await submit();
+    await act(async () => {
+      fireEvent.keyDown(passwordBox(), { key: "Enter" });
+    });
 
     expect(fetchAndUnlockVault).not.toHaveBeenCalled();
     expect(withSigningBackend).not.toHaveBeenCalled();
+  });
+
+  it("the same refusal holds through the button", async () => {
+    // The affordance is disabled too — belt and braces, and the companion that
+    // keeps the keyboard test above honest about what it is testing.
+    readLockoutState.mockReturnValue({ lockoutUntil: Date.now() + 60_000, failCount: 9 });
+    renderReceive();
+    await type("guess");
+    expect(revealButton()).toBeDisabled();
+    await submit();
+    expect(fetchAndUnlockVault).not.toHaveBeenCalled();
+  });
+
+  it("ANTI-VACUITY: the same keyboard path DOES decrypt with no lockout", async () => {
+    // Without this, the assertion above would pass against an Enter handler that
+    // never worked at all.
+    renderReceive();
+    await type("correct-horse");
+    await act(async () => {
+      fireEvent.keyDown(passwordBox(), { key: "Enter" });
+    });
+    expect(fetchAndUnlockVault).toHaveBeenCalledTimes(1);
   });
 
   it("reads the persisted lockout on mount, so a relaunch cannot sidestep it", () => {
