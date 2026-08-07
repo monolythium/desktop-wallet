@@ -116,6 +116,31 @@ describe("the Bridges surface", () => {
     expect(rig.drainCalls).toBe(0);
   });
 
+  // ANTI-VACUITY COMPANION for the two zero-counts above.
+  //
+  // P15 named this exact pair as the shape of the defect its census exists to
+  // catch, and stated the rule: an execution proof discharges "nothing rendered"
+  // ONLY. For a spy or a counter the vacuity mode is *the watched call site
+  // vanished* — and `routeCalls > 0` is a DIFFERENT subject, so it cannot rule
+  // that out. If `fetchBridgeHealth` or `fetchDrainStatus` were renamed, moved,
+  // or no longer wired to these counters, both zero-counts would pass forever
+  // while asserting nothing at all.
+  //
+  // This drives the two mocked functions directly. It proves the counters are
+  // live and reachable, which is the one thing the zero-counts cannot prove
+  // about themselves.
+  it("the health and drain counters CAN increment — so the zeroes above mean something", async () => {
+    const { fetchBridgeHealth, fetchDrainStatus } = await import("../../sdk/bridge");
+    expect(rig.healthCalls).toBe(0);
+    expect(rig.drainCalls).toBe(0);
+
+    await fetchBridgeHealth(null, 1);
+    await fetchDrainStatus("bridge-1", "mono1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq");
+
+    expect(rig.healthCalls).toBe(1);
+    expect(rig.drainCalls).toBe(1);
+  });
+
   it("renders its real body in developer mode", async () => {
     render(true);
     await waitFor(() => expect(screen.queryByText("Developer mode required")).toBeNull());
