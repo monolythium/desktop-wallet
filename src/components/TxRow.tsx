@@ -34,8 +34,9 @@ export function TxRow({ tx, onClick, counterpartyLabel, counterpartyAddress }: P
   // falls back to its unlabelled rendering. Showing the name alone is the
   // failure that misleads, so it is the one refused; showing the raw
   // counterparty is merely less friendly. `tx.counterparty` is NOT a substitute
-  // address here — `activityCounterparty` prefers `row.clusterName` and can also
-  // yield "Cluster #N" or an em-dash, so only an explicitly-passed address counts.
+  // address here — `activityCounterparty` can yield "Cluster #N" or an em-dash,
+  // so only an explicitly-supplied address counts.
+  //
   // The call site's label wins (Activity resolves a registered name or a
   // contact); otherwise the row's own cluster label applies. Home and
   // TokenDetail pass no label props at all, and a delegation row carrying a
