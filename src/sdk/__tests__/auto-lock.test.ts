@@ -59,6 +59,14 @@ function advance(ms: number) {
 }
 
 beforeEach(() => {
+  // The lock flag is now PERSISTED (see sdk/lock-state.ts), and jsdom keeps one
+  // localStorage for the whole file. Without this, the first test to lock
+  // leaves a marker behind and every later mount comes up locked — which is
+  // the fix working, not a bug, but it makes these idle-timer tests depend on
+  // execution order. Clearing gives each test the fresh profile it is written
+  // against; the persistence behaviour itself is asserted in
+  // lock-persistence.test.ts.
+  localStorage.clear();
   vi.useFakeTimers();
   container = document.createElement("div");
   document.body.appendChild(container);

@@ -22,6 +22,7 @@ import {
 import { readAutoLockMinutes } from "./auto-lock-setting";
 import { clearUnlockLockout } from "./unlock-lockout";
 import { clearSentRecipientIntegrityKeys } from "./sent-recipients";
+import { readPersistedLocked, writePersistedLocked } from "./lock-state";
 
 interface AutoLockApi {
   isLocked: boolean;
@@ -39,7 +40,13 @@ const AutoLockContext = createContext<AutoLockApi | null>(null);
 // Module-level copy of the lock flag so non-React modules (e.g. the OS-toast
 // layer, which decides whether to suppress a toast while locked) can read it
 // synchronously. The LockProvider keeps it in sync with its React state.
-let _walletLocked = false;
+//
+// SEEDED FROM THE PERSISTED MARKER AT MODULE INIT, not left `false` until the
+// first React sync. `isWalletLocked()`'s two consumers — IncomingPoller and
+// os-toast — can both run before the provider's effect has fired, so a plain
+// `false` here let a toast reach the OS during the window between process
+// start and first render, even though the wallet was locked (SA-10-001).
+let _walletLocked = readPersistedLocked();
 
 /** True when the wallet is currently locked. Readable outside React. */
 export function isWalletLocked(): boolean {
@@ -55,7 +62,10 @@ export function useAutoLock(): AutoLockApi {
 }
 
 export function LockProvider({ children }: { children: ReactNode }) {
-  const [isLocked, setIsLocked] = useState(false);
+  // Read the persisted marker at mount, so an idle lock survives a relaunch
+  // instead of coming back as an open shell (SA-09-004). Lazy initialiser: the
+  // read happens once, not on every render.
+  const [isLocked, setIsLocked] = useState(() => readPersistedLocked());
   const deadlineRef = useRef(0);
   const timerRef = useRef<number | null>(null);
   const pauseDepthRef = useRef(0);
@@ -102,9 +112,17 @@ export function LockProvider({ children }: { children: ReactNode }) {
     if (pauseDepthRef.current === 0) arm();
   }, [arm]);
 
-  // Keep the module-level copy in sync so non-React readers see the lock flag.
+  // Keep the module-level copy in sync so non-React readers see the lock flag,
+  // and persist the flag so it survives the process.
+  //
+  // This lives in an effect on `isLocked` rather than inside lock()/unlock()
+  // because there are THREE ways to become locked and only one of them is
+  // lock(): the idle timer calls setIsLocked directly, and so does the
+  // wall-clock deadline check after sleep/resume. Writing at the call sites
+  // would persist the manual lock and silently miss both automatic ones.
   useEffect(() => {
     _walletLocked = isLocked;
+    writePersistedLocked(isLocked);
   }, [isLocked]);
 
   // Zeroize the one session secret this wallet caches — the sent-recipients
