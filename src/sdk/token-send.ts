@@ -16,6 +16,7 @@ import {
   encodeTokenFactoryTransferCalldata,
   tokenFactoryAddressHex,
 } from "@monolythium/core-sdk";
+import type { ResolvedExecutionFee } from "@monolythium/core-sdk";
 import { requireTypedUserAddressHex } from "./address";
 import { submitNativeTx } from "./submit";
 import {
@@ -42,6 +43,17 @@ export interface SendMrc20Args {
   /** The token's real decimals from `lyth_mrcMetadata`; null/undefined BLOCKS. */
   decimals: number | null | undefined;
   executionUnitLimit?: bigint;
+  /**
+   * The compose preview's tiered fee, signed verbatim (`submit.ts` resolves a
+   * supplied fee to itself and skips the live resolver). Passing it is what makes
+   * the confirm row's "Network fee (max)" the ceiling actually signed: without it
+   * the row renders `reservationLythoshi` from the preview quote while the
+   * signature carries a fee the resolver derived from a SECOND, later read — two
+   * formulas over two samples of a moving quote. Its `gasLimit` is the same
+   * `TOKEN_TRANSFER_EXECUTION_UNIT_LIMIT` the preview was quoted at, so supplying
+   * it moves the two price fields and nothing else.
+   */
+  resolvedFee?: ResolvedExecutionFee;
 }
 
 export interface SendMrc20Result {
@@ -91,6 +103,7 @@ export async function sendMrc20Token(args: SendMrc20Args): Promise<SendMrc20Resu
     valueLythoshi: 0n,
     feeClass: "transfer",
     executionUnitLimit: args.executionUnitLimit ?? TOKEN_TRANSFER_EXECUTION_UNIT_LIMIT,
+    ...(args.resolvedFee === undefined ? {} : { resolvedFee: args.resolvedFee }),
   });
 
   return {

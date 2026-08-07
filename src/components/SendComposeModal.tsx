@@ -592,6 +592,11 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
             to: toBech32m,
             amount: amountLyth,
             decimals: token.decimals,
+            // Sign the quote the row above was rendered from, exactly as the
+            // native path does below. Without this the row shows this quote's
+            // reservation while the signature carries a fee re-derived from a
+            // later read — the shown ceiling and the signed ceiling diverge.
+            resolvedFee: tokenQuote.signedFee,
           });
           // Log the HUMAN recipient (never the token-factory precompile), seed
           // still in scope, before the drawer scrubs it. Best-effort.
