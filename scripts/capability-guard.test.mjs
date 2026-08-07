@@ -44,13 +44,14 @@ const EXPECTED_PERMISSIONS = [
   // No store:* — the plugin is gone entirely, not narrowed. Persistence goes
   // through the wallet's own wallet_store_read / wallet_store_write, which take
   // an identifier from a closed set instead of a caller-supplied path.
-  // src/sdk/updater.ts:65 — `check()`
-  "updater:allow-check",
-  // src/sdk/updater.ts:95 — `pendingUpdate.downloadAndInstall(...)`, which the
-  // JS binding sends as `plugin:updater|download_and_install` (one command, not
-  // `download` then `install`).
-  "updater:allow-download-and-install",
-  // src/sdk/updater.ts:112 — `relaunch()`, sent as `plugin:process|restart`.
+  //
+  // No updater:* either. Its `check` carried a caller-supplied `proxy` that
+  // redirects both the manifest fetch and the bundle download past the CSP
+  // connect-src allowlist, and narrowing could not remove it because `check` is
+  // the command the wallet needs. `wallet_update_check` / `wallet_update_install`
+  // call UpdaterBuilder in Rust with no caller parameters.
+  //
+  // src/sdk/updater.ts — `relaunch()`, sent as `plugin:process|restart`.
   "process:allow-restart",
   "notification:default",
 ];
@@ -63,15 +64,26 @@ const EXPECTED_PERMISSIONS = [
 const MUST_NOT_BE_GRANTED = [
   {
     permission: "updater:default",
-    why: "expands to four commands; the wallet calls check and download_and_install only (SA-11-006)",
+    why: "expands to four commands, every one of which accepts caller-supplied parameters (SA-11-006)",
+  },
+  {
+    permission: "updater:allow-check",
+    why:
+      "`check` is the command that carries the caller-supplied `proxy`, which redirects both " +
+      "the manifest fetch and the bundle download to a host of the caller's choosing, past the " +
+      "CSP connect-src allowlist (SA-11-002). Use wallet_update_check.",
+  },
+  {
+    permission: "updater:allow-download-and-install",
+    why: "accepts caller-supplied parameters; use wallet_update_install (SA-11-002)",
   },
   {
     permission: "updater:allow-download",
-    why: "no caller — the wallet uses the combined download_and_install command",
+    why: "no caller — the wallet installs through its own command",
   },
   {
     permission: "updater:allow-install",
-    why: "no caller — installing a bundle the wallet did not download in the same call",
+    why: "no caller — installing a bundle the wallet did not verify in the same call",
   },
   {
     permission: "process:default",

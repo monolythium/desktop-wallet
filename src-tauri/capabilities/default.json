@@ -28,14 +28,26 @@
     "",
     "Wallet-owned commands are NOT listed here. `tauri::generate_handler!`",
     "commands are reachable without a capability entry; this file governs PLUGIN",
-    "commands only. That is why removing a grant is what closes a plugin route."
+    "commands only. That is why removing a grant is what closes a plugin route.",
+    "",
+    "The updater plugin's commands are gone for the same reason. Its `check`",
+    "accepted `proxy`, `headers`, `target` and `allowDowngrades` from the caller,",
+    "and `proxy` redirects BOTH the manifest fetch and the bundle download to a",
+    "host of the caller's choosing, bypassing the CSP connect-src allowlist. It",
+    "could not be narrowed away, because `check` is the command that carries it",
+    "and `check` is the command the wallet needs. `wallet_update_check` and",
+    "`wallet_update_install` call UpdaterBuilder in Rust with no caller",
+    "parameters at all.",
+    "",
+    "The updater plugin stays REGISTERED in lib.rs even so: `updater_builder()`",
+    "reads state that the plugin's own Builder manages, so unregistering it",
+    "would panic those commands. Removing the capability is what makes its IPC",
+    "commands unreachable from the webview."
   ],
   "permissions": [
     "core:default",
     "opener:allow-open-url",
     "opener:allow-default-urls",
-    "updater:allow-check",
-    "updater:allow-download-and-install",
     "process:allow-restart",
     "notification:default"
   ]

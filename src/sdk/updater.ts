@@ -17,12 +17,29 @@
 // a failed check, so it needs to tell `none` from `error` (hence this union
 // instead of a single boolean that folds both into "not available").
 
-import type { Update } from "@tauri-apps/plugin-updater";
+import { Channel, invoke } from "@tauri-apps/api/core";
 
-/** Cached handle to the currently-pending Update (held between
- *  `checkForUpdate` and `downloadAndInstallUpdate`). Wiped when the
- *  user dismisses or after install starts. */
-let pendingUpdate: Update | null = null;
+/** Whether the last check found an update.
+ *
+ *  This is a FLAG, not a handle. The plugin's `check` returned a resource id
+ *  that install then had to hand back; the wallet's own `wallet_update_install`
+ *  re-checks instead, so there is nothing here that could be substituted for
+ *  what gets installed. All this decides is whether the Install button acts or
+ *  tells the user to check again. */
+let updatePending = false;
+
+/** What the Rust command returns for an available release. */
+interface UpdateInfoFromRust {
+  version: string;
+  notes: string | null;
+  pubDate: string | null;
+}
+
+/** Progress events streamed over the IPC channel by `wallet_update_install`. */
+type DownloadProgressEvent =
+  | { event: "started"; contentLength: number | null }
+  | { event: "progress"; chunkLength: number }
+  | { event: "finished" };
 
 export interface UpdateAvailable {
   kind: "available";
@@ -61,17 +78,25 @@ function isTauri(): boolean {
 export async function checkForUpdate(): Promise<UpdateCheckResult> {
   if (!isTauri()) return { kind: "none" };
   try {
-    const { check } = await import("@tauri-apps/plugin-updater");
-    const update = await check();
-    if (update === null) return { kind: "none" };
-    pendingUpdate = update;
+    // The wallet's own command. It takes no arguments, so there is no proxy,
+    // target, header map or downgrade switch for a caller to supply — the
+    // endpoint and public key come from tauri.conf.json and nothing reachable
+    // from the webview can redirect them.
+    const update = await invoke<UpdateInfoFromRust | null>("wallet_update_check");
+    if (update === null) {
+      updatePending = false;
+      return { kind: "none" };
+    }
+    updatePending = true;
     return {
       kind: "available",
       version: update.version,
-      notes: update.body ?? null,
-      pubDate: update.date ?? null,
+      notes: update.notes ?? null,
+      pubDate: update.pubDate ?? null,
     };
   } catch {
+    // An unreachable or unparseable manifest is `error`, never folded into
+    // `none` — update-check.ts keeps the prior verdict on a non-answer.
     return { kind: "error" };
   }
 }
@@ -87,42 +112,49 @@ export async function checkForUpdate(): Promise<UpdateCheckResult> {
 export async function downloadAndInstallUpdate(
   onProgress?: (downloaded: number, total: number | undefined) => void,
 ): Promise<void> {
-  if (!pendingUpdate) {
+  if (!updatePending) {
     throw new Error("no update pending — call checkForUpdate() first");
   }
   let downloaded = 0;
   let contentLength: number | undefined;
-  await pendingUpdate.downloadAndInstall((event) => {
+
+  const channel = new Channel<DownloadProgressEvent>();
+  channel.onmessage = (event) => {
     switch (event.event) {
-      case "Started":
-        contentLength = event.data.contentLength;
+      case "started":
+        contentLength = event.contentLength ?? undefined;
         break;
-      case "Progress":
-        downloaded += event.data.chunkLength;
+      case "progress":
+        downloaded += event.chunkLength;
         onProgress?.(downloaded, contentLength);
         break;
-      case "Finished":
+      case "finished":
         onProgress?.(contentLength ?? downloaded, contentLength);
         break;
     }
-  });
-  // Clear the pending handle before relaunch so a re-mount can't reuse it.
-  pendingUpdate = null;
+  };
+
+  // The Rust command re-checks before installing, so the bytes installed are
+  // the ones IT verified — this call cannot nominate them.
+  await invoke("wallet_update_install", { onProgress: channel });
+
+  // Clear the flag before relaunch so a re-mount can't act on a stale one.
+  updatePending = false;
   const { relaunch } = await import("@tauri-apps/plugin-process");
   await relaunch();
 }
 
-/** Drop the pending update handle without installing. The banner's
+/** Drop the pending-update flag without installing. The banner's
  *  Dismiss button calls this; next `checkForUpdate` will re-fetch. */
 export function dismissPendingUpdate(): void {
-  pendingUpdate = null;
+  updatePending = false;
 }
 
-/** Whether a live `Update` handle is currently held.
+/** Whether THIS process has checked and found an update.
  *
- *  The verdict outlives the handle: the cache can say "update available" after
- *  a restart while no handle exists in this process. Install must know the
- *  difference so it can re-acquire one rather than throwing. */
+ *  The persisted verdict outlives it: the cache can say "update available"
+ *  after a restart while this process has not checked. Install must know the
+ *  difference so it can check again rather than throwing. */
 export function hasPendingUpdate(): boolean {
-  return pendingUpdate !== null;
+  return updatePending;
 }

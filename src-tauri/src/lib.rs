@@ -17,6 +17,7 @@ mod name_registry;
 mod studio_host;
 mod vault;
 mod wallet_store;
+mod wallet_updater;
 
 #[cfg(feature = "stele")]
 mod stele;
@@ -64,6 +65,8 @@ pub fn run() {
         name_registry::name_check_availability,
         wallet_store::wallet_store_read,
         wallet_store::wallet_store_write,
+        wallet_updater::wallet_update_check,
+        wallet_updater::wallet_update_install,
         studio_host::studio_devkit_parse_manifest,
         studio_host::studio_devkit_check_compatibility,
         studio_host::studio_devkit_resolve_install_path,
