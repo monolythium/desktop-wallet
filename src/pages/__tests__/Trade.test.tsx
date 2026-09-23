@@ -237,6 +237,19 @@ describe("Trade market-list honesty", () => {
 // ── place-limit-order path ──────────────────────────────────────────────────
 
 describe("Trade place-limit-order", () => {
+  it.each([
+    { side: "Buy", amount: "Up to 6 quote tokens (fill or escrow)" },
+    { side: "Sell", amount: "Up to 3 base tokens (fill or escrow)" },
+  ])("shows the $side token spend at password authorization", async ({ side, amount }) => {
+    const { user } = await renderTrade(status([marketRecord()]));
+    await user.click(screen.getByRole("button", { name: side }));
+    await user.type(screen.getByPlaceholderText("e.g. 10"), "2");
+    await user.type(screen.getByPlaceholderText("e.g. 2"), "3");
+    await user.click(placeButton());
+    await waitFor(() => expect(cap.descriptor).toBeDefined());
+    expect(cap.descriptor!.commitment.amount).toBe(amount);
+  });
+
   it("refuses a price finer than the market's per-atom granularity", async () => {
     const { user } = await renderTrade(status([marketRecord()]));
     // 19 decimal places against an 18-decimal scale — not representable.

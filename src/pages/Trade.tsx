@@ -21,6 +21,7 @@ import {
 import type { OperationFeePlan } from "../sdk/fee-quote";
 import {
   SPOT_DEFAULT_DECIMALS,
+  atomsToDecimal,
   atomPriceToHuman,
   humanPriceToAtoms,
   humanQuantityToAtoms,
@@ -350,12 +351,14 @@ function PlaceLimitOrderCard({
       title: `${side === "buy" ? "Buy" : "Sell"} ${qtyStr} @ ${priceStr}`,
       subtitle: "Native CLOB placeLimitOrder · canonical RPC gateway",
       auth: "keychain",
-      // The order signs value = 0 — the legs settle through the book, not as
-      // native value on this transaction — so the amount is honestly null and
-      // the subject is the order the user is committing to.
+      // The native transaction signs value = 0, but placing an order can move
+      // tokens into escrow or exchange them in an immediate fill. The password
+      // screen must describe that spend, rather than say no funds leave.
       commitment: {
         subject: `${side === "buy" ? "BUY" : "SELL"} ${qtyStr} base @ ${priceStr} quote/base`,
-        amount: null,
+        amount: side === "buy"
+          ? `Up to ${atomsToDecimal(notionalAtoms!, quoteDecimals)} quote tokens (fill or escrow)`
+          : `Up to ${atomsToDecimal(quantityAtoms, baseDecimals)} base tokens (fill or escrow)`,
       },
       feePlan: PLACE_FEE_PLAN,
       details: CLOB_DETAILS,
