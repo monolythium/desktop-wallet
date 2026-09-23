@@ -27,9 +27,11 @@
 // stay readable. `store_file_name` is asserted against that list in tests.
 
 use std::collections::BTreeMap;
-use std::fs;
-use std::path::PathBuf;
+use std::fs::{self, File, OpenOptions};
+use std::io::{self, Write};
+use std::path::{Path, PathBuf};
 
+use rand::{rngs::OsRng, RngCore};
 use serde::Serialize;
 use tauri::{AppHandle, Manager, Runtime};
 
@@ -106,10 +108,7 @@ pub fn store_ids() -> Vec<&'static str> {
 /// absent: nothing from the caller is ever joined onto the base. `file` is a
 /// `&'static str` from the table above, so there is no input for a `..`, an
 /// absolute path or a UNC prefix to arrive through.
-fn store_path<R: Runtime>(
-    app: &AppHandle<R>,
-    store_id: &str,
-) -> Result<PathBuf, WalletStoreError> {
+fn store_path<R: Runtime>(app: &AppHandle<R>, store_id: &str) -> Result<PathBuf, WalletStoreError> {
     let file = store_file_name(store_id).ok_or_else(|| WalletStoreError::UnknownStore {
         store_id: store_id.to_string(),
     })?;
@@ -134,7 +133,15 @@ pub async fn wallet_store_read<R: Runtime>(
     store_id: String,
 ) -> Result<BTreeMap<String, serde_json::Value>, WalletStoreError> {
     let path = store_path(&app, &store_id)?;
-    let bytes = match fs::read(&path) {
+    read_store_from_path(&path)
+}
+
+fn read_store_from_path(
+    path: &Path,
+) -> Result<BTreeMap<String, serde_json::Value>, WalletStoreError> {
+    // A temp file is an interrupted write, never a committed catalog. Only the
+    // final path may be loaded, even if a stale temp file happens to be valid.
+    let bytes = match fs::read(path) {
         Ok(b) => b,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(BTreeMap::new()),
         Err(e) => {
@@ -159,22 +166,149 @@ pub async fn wallet_store_write<R: Runtime>(
     contents: BTreeMap<String, serde_json::Value>,
 ) -> Result<(), WalletStoreError> {
     let path = store_path(&app, &store_id)?;
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|e| WalletStoreError::Io {
-            reason: e.to_string(),
-        })?;
-    }
     let bytes = serde_json::to_vec_pretty(&contents).map_err(|e| WalletStoreError::Malformed {
         reason: e.to_string(),
     })?;
-    fs::write(&path, bytes).map_err(|e| WalletStoreError::Io {
+    write_store_to_path(&path, &bytes).map_err(|e| WalletStoreError::Io {
         reason: e.to_string(),
     })
+}
+
+fn create_temp_file(path: &Path) -> io::Result<(PathBuf, File)> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| io::Error::from(io::ErrorKind::InvalidInput))?;
+    let name = path
+        .file_name()
+        .ok_or_else(|| io::Error::from(io::ErrorKind::InvalidInput))?;
+    for _ in 0..10 {
+        let mut temp_name = std::ffi::OsString::from(".");
+        temp_name.push(name);
+        temp_name.push(format!(".{:016x}.tmp", OsRng.next_u64()));
+        let temp_path = parent.join(temp_name);
+        let mut options = OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        match options.open(&temp_path) {
+            Ok(file) => return Ok((temp_path, file)),
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e),
+        }
+    }
+    Err(io::Error::from(io::ErrorKind::AlreadyExists))
+}
+
+fn write_store_to_path(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| io::Error::from(io::ErrorKind::InvalidInput))?;
+    fs::create_dir_all(parent)?;
+    let (temp_path, mut temp) = create_temp_file(path)?;
+    let result = (|| {
+        temp.write_all(bytes)?;
+        temp.flush()?;
+        temp.sync_all()?;
+        drop(temp); // Windows cannot rename an open file.
+        fs::rename(&temp_path, path)?;
+        #[cfg(unix)]
+        {
+            // Persist the directory entry after the file contents. Some Unix
+            // filesystems do not support directory fsync; retain the rename.
+            match File::open(parent).and_then(|dir| dir.sync_all()) {
+                Ok(()) => {}
+                Err(e)
+                    if matches!(
+                        e.kind(),
+                        io::ErrorKind::Unsupported | io::ErrorKind::InvalidInput
+                    ) => {}
+                Err(e) => return Err(e),
+            }
+        }
+        Ok(())
+    })();
+    if result.is_err() {
+        // If the rename already succeeded, this is a harmless NotFound. On an
+        // earlier failure it removes only the uncommitted temp file.
+        let _ = fs::remove_file(&temp_path);
+    }
+    result
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct TestDirectory(PathBuf);
+
+    impl TestDirectory {
+        fn new() -> Self {
+            let path = std::env::temp_dir().join(format!(
+                "wallet-store-test-{}-{:016x}",
+                std::process::id(),
+                OsRng.next_u64()
+            ));
+            fs::create_dir(&path).unwrap();
+            Self(path)
+        }
+
+        fn catalog(&self) -> PathBuf {
+            self.0.join("vaults.v1.json")
+        }
+    }
+
+    impl Drop for TestDirectory {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn writing_replaces_a_complete_catalog_and_leaves_no_temp_file() {
+        let dir = TestDirectory::new();
+        let path = dir.catalog();
+        let old = br#"{"wallet":"old"}"#;
+        let new = br#"{"wallet":"new","count":2}"#;
+        write_store_to_path(&path, old).unwrap();
+        assert_eq!(fs::read(&path).unwrap(), old);
+        write_store_to_path(&path, new).unwrap();
+        assert_eq!(fs::read(&path).unwrap(), new);
+        assert_eq!(fs::read_dir(&dir.0).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn interrupted_temp_file_does_not_replace_the_last_complete_catalog() {
+        let dir = TestDirectory::new();
+        let path = dir.catalog();
+        write_store_to_path(&path, br#"{"wallet":"old"}"#).unwrap();
+        fs::write(
+            dir.0.join(".vaults.v1.json.abandoned.tmp"),
+            br#"{"wallet":"new"}"#,
+        )
+        .unwrap();
+        assert_eq!(read_store_from_path(&path).unwrap()["wallet"], "old");
+        write_store_to_path(&path, br#"{"wallet":"latest"}"#).unwrap();
+        assert_eq!(read_store_from_path(&path).unwrap()["wallet"], "latest");
+    }
+
+    #[test]
+    fn temp_file_cannot_mask_a_corrupt_committed_catalog() {
+        let dir = TestDirectory::new();
+        let path = dir.catalog();
+        fs::write(&path, b"incomplete JSON").unwrap();
+        fs::write(
+            dir.0.join(".vaults.v1.json.abandoned.tmp"),
+            br#"{"wallet":"new"}"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            read_store_from_path(&path),
+            Err(WalletStoreError::Malformed { .. })
+        ));
+    }
 
     /// The file names the plugin used, and therefore the names already on disk.
     /// Changing one without a migration strands that store's data.
@@ -215,9 +349,9 @@ mod tests {
         for bogus in [
             "",
             "unknown",
-            "Vaults",              // case matters
-            "vaults.v1.json",      // the file name is not an identifier
-            "vaults ",             // no trimming
+            "Vaults",         // case matters
+            "vaults.v1.json", // the file name is not an identifier
+            "vaults ",        // no trimming
             "../vaults",
             "..",
             "../../secrets",
