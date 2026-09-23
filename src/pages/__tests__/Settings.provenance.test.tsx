@@ -31,8 +31,6 @@ import { clearDerivedAddresses, markAddressDerived } from "../../sdk/address-pro
 function renderSettings() {
   return renderWithProviders(
     <Settings
-      steleEnabled={false}
-      setSteleEnabled={vi.fn()}
       experimentalEnabled={false}
       setExperimentalEnabled={vi.fn()}
     />,

@@ -43,10 +43,6 @@ const MUST_BE_EXACT = [
   { crate: "sha2", why: "hashes the sidecar archive for the native-host integrity gate" },
   { crate: "ed25519-dalek", why: "verifies the native-host manifest signature" },
   { crate: "keyring", why: "holds the credential in the OS store" },
-  { crate: "bip39", why: "turns the recovery mnemonic into the seed (stele-gated)" },
-  { crate: "fips204", why: "generates and signs with ML-DSA keys (stele-gated)" },
-  { crate: "sha3", why: "digests the public key into an address (stele-gated)" },
-  { crate: "bech32", why: "encodes the address funds are sent to (stele-gated)" },
 ];
 
 /**

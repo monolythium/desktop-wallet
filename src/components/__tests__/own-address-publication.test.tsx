@@ -56,7 +56,6 @@ function renderSidebar() {
         route="home"
         setRoute={vi.fn()}
         developerModeEnabled={false}
-        steleEnabled={false}
         experimentalEnabled={false}
       />
     </LockProvider>,

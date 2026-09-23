@@ -1,7 +1,6 @@
-// Tier 3 — the two build-surface conditions the audit's conclusions rest on.
+// Build-surface conditions the audit's conclusions rest on.
 //
-// Both findings are "correct today, load-bearing later", and both were asserted
-// NOWHERE. A trigger nobody watches is a note; this is what makes it fire.
+// A trigger nobody watches is a note; this is what makes it fire.
 //
 // This follows the `csp-drift` / `autofill-guard` convention: a plain Node test
 // reading the shipped configuration as DATA, so it cannot be satisfied by a
@@ -70,11 +69,9 @@ describe("SA-13-004 — pnpm's install-script blocking is the default, and stays
   });
 });
 
-describe("SA-10-003 — the stele findings are inert only because the feature is off", () => {
-  // P01 measured stele NOT SHIPPED, and several findings were deferred on that
-  // basis. The trigger is "the first release that passes `--features stele`".
-  // This makes that build go RED, so the deferred findings come back into scope
-  // deliberately rather than silently.
+describe("the removed Stele backend stays out of release builds", () => {
+  // Master removed the feature and backend. A later reintroduction needs its own
+  // review before it can become part of the wallet artifact.
 
   const defaultLine = cargoToml.match(/^default\s*=\s*\[(.*)\]/m);
 
@@ -83,10 +80,8 @@ describe("SA-10-003 — the stele findings are inert only because the feature is
     expect(defaultLine, "the `default = [...]` line moved or was removed").not.toBeNull();
   });
 
-  it("ANTI-VACUITY: the stele feature is still declared, so this guards something", () => {
-    // If the feature were deleted the assertion below would pass for the wrong
-    // reason — and the deferred findings would need re-reading anyway.
-    expect(/^stele\s*=\s*\[/m.test(cargoToml)).toBe(true);
+  it("does not declare the removed feature", () => {
+    expect(/^stele\s*=\s*\[/m.test(cargoToml)).toBe(false);
   });
 
   it("does NOT include stele in the default feature set", () => {
@@ -97,17 +92,14 @@ describe("SA-10-003 — the stele findings are inert only because the feature is
     expect(defaults).toEqual(["custom-protocol"]);
     expect(
       defaults.includes("stele"),
-      "SA-10-003 and every other stele-gated finding are recorded as INERT because " +
-        "the backend is not compiled. Adding `stele` to the default set makes them " +
-        "live. That is a decision, not a default — re-open the deferred findings first.",
+      "The removed Stele backend must not enter default wallet builds.",
     ).toBe(false);
   });
 
   it("the release workflow passes no --features flag that could turn it on", () => {
     expect(
       /--features/.test(releaseYml),
-      "SA-10-003: a `--features` flag in the release workflow can enable stele " +
-        "without touching Cargo.toml, which is the same trigger by another route.",
+      "A `--features` flag in the release workflow needs review before release.",
     ).toBe(false);
     // Anti-vacuity: the workflow really does build, so the absence above is
     // meaningful rather than a check against an empty file.
