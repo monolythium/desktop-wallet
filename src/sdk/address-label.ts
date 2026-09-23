@@ -15,6 +15,11 @@
 export type AddressLabel =
   | { kind: "registered"; label: string }
   | { kind: "contact"; label: string }
+  /** A delegation cluster's resolved name. A THIRD provenance, and weaker than
+   *  both of the above: it comes from a SINGLE operator with no quorum, and it
+   *  is never format-checked, so it can be made address-shaped. It annotates and
+   *  never earns the chip. */
+  | { kind: "cluster"; label: string }
   | null;
 
 /** Apply the precedence. Empty/whitespace strings count as absent. Pure.

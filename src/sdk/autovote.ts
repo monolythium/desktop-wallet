@@ -15,6 +15,7 @@ import { DIVERSITY_SCORE_MAX } from "@monolythium/core-sdk";
 import type {
   ClusterDirectoryEntryResponse,
   ClusterDiversityView,
+  ResolvedExecutionFee,
 } from "@monolythium/core-sdk";
 import { shake256 } from "@noble/hashes/sha3.js";
 import { getProvider } from "./client";
@@ -622,6 +623,14 @@ export async function submitAutovotePlan(
    *  single delegate rather than waiting for a whole-batch result that a
    *  mid-batch failure never produces. */
   onSubmitted?: (submission: AutovoteSubmission) => void,
+  /**
+   * The fee the confirm surface RENDERED, signed verbatim by every step.
+   *
+   * ONE price for the whole batch, deliberately: the user was shown one figure
+   * and authorised once, so quoting per step would sign N prices against a
+   * single consent — and the later ones would be prices nobody ever saw.
+   */
+  resolvedFee?: ResolvedExecutionFee,
 ): Promise<SubmitAutovotePlanResult> {
   const txHashes: string[] = [];
   const total = plan.allocations.length;
@@ -633,7 +642,7 @@ export async function submitAutovotePlan(
       // Each batch step classifies too — a plan that trips a cap or the row limit
       // mid-run must say which wall it hit, not just that a step failed.
       result = await withDelegationRevertCopy(() =>
-        submitDelegationTx({ seed, data: calldata }),
+        submitDelegationTx({ seed, data: calldata, resolvedFee }),
       );
     } catch (cause) {
       // Everything before this point is on chain. Carry it out with the failure

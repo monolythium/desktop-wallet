@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { blake3 } from "@noble/hashes/blake3.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
+import { sha256 } from "@noble/hashes/sha2.js";
 import {
   ML_DSA_65_SEED_LEN,
   MlDsa65Backend,
@@ -8,6 +9,31 @@ import {
 } from "@monolythium/core-sdk/crypto";
 import { deriveLiveWalletIdentity } from "../live";
 import { requireTypedUserAddressHex } from "../address";
+
+// ── The derivation pin ──────────────────────────────────────────────────────
+//
+// Everything below this block asserts the address-derivation LAW: that the
+// address is a domain-separated BLAKE3 digest over the public key. That law is
+// worth asserting and it is not what a substituted SDK would break.
+//
+// The gap it leaves was measured: `expected` is recomputed from
+// `backend.publicKey()`, so an SDK whose seed→keypair derivation changed would
+// produce a different public key, a different `expected`, and a matching
+// address — and every assertion in this file would still pass. It compared the
+// SDK to itself.
+//
+// So these are the values the reviewed SDK actually produces for a fixed seed,
+// written down. They are FULL values, not shapes or lengths: a shape assertion
+// would not have helped, because a substituted keygen produces a well-formed
+// address of exactly the right length.
+//
+// A change here is a change to what this wallet believes an address IS, and it
+// must be argued for in the commit that bumps the dependency.
+const PINNED_SEED_BYTE = 0x42;
+const PINNED_PUBLIC_KEY_LEN = 1952;
+const PINNED_PUBLIC_KEY_SHA256 =
+  "0x2f40048b7202cf1d33e0af88f0695e076d00fea5be3d201d667021afe09c23c1";
+const PINNED_ADDRESS = "0x3fdf7513d14e2938d3ff505dbb45e19716f699e5";
 
 const ADDRESS_DOMAIN = new TextEncoder().encode("MONO_ADDRESS_BLAKE3_20_V1");
 const ML_DSA_65_ALGO_ID_BE = Uint8Array.from([0x03, 0xe9]);
@@ -21,6 +47,41 @@ function concatBytes(...chunks: Uint8Array[]): Uint8Array {
   }
   return out;
 }
+
+describe("the SDK's seed → keypair derivation is pinned, not merely self-consistent", () => {
+  const seed = new Uint8Array(ML_DSA_65_SEED_LEN).fill(PINNED_SEED_BYTE);
+
+  it("produces the exact public key the reviewed SDK produced", () => {
+    // Pinned by digest rather than by the 1,952 raw bytes, but it is still the
+    // FULL value of that digest — any change to the keypair changes it.
+    const backend = MlDsa65Backend.fromSeed(seed);
+    const publicKey = backend.publicKey();
+    backend.dispose();
+    expect(publicKey.length).toBe(PINNED_PUBLIC_KEY_LEN);
+    expect(
+      bytesToHex(sha256(publicKey)),
+      "the SDK derived a DIFFERENT keypair from the same seed. Every existing vault's " +
+        "address depends on this derivation, so a change here silently re-points them.",
+    ).toBe(PINNED_PUBLIC_KEY_SHA256);
+  });
+
+  it("produces the exact address the reviewed SDK produced", () => {
+    // The end-to-end value a user would see. Pinned in full: a substituted
+    // keygen yields a well-formed address of the right length, so asserting
+    // the shape would have passed.
+    const backend = MlDsa65Backend.fromSeed(seed);
+    const address = backend.getAddress();
+    backend.dispose();
+    expect(address).toBe(PINNED_ADDRESS);
+  });
+
+  it("pins the address the wallet's own identity seam returns", () => {
+    // Through the wallet's seam, not just the SDK's, so a change on either
+    // side of that boundary is caught.
+    const identity = deriveLiveWalletIdentity(seed);
+    expect(requireTypedUserAddressHex(identity.address, "wallet")).toBe(PINNED_ADDRESS);
+  });
+});
 
 describe("desktop ML-DSA identity derivation", () => {
   it("derives vault addresses with the BLAKE3 address domain", () => {

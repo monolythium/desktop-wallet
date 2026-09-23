@@ -24,7 +24,6 @@ tauri-plugin-opener = "2"
 # Per-app key-value JSON store, used for the multi-vault catalog
 # (sdk/vaultCatalog.ts). The plugin is mobile-and-desktop; on desktop it
 # writes to the OS-standard app-data dir.
-tauri-plugin-store = "2"
 # Self-update: pulls the signed latest.json manifest from the project's
 # GitHub Releases, verifies the platform asset signature against the
 # `plugins.updater.pubkey` in tauri.conf.json, and downloads + applies
@@ -43,31 +42,32 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "1"
 tokio = { version = "1", features = ["sync", "macros", "rt"] }
-sha2 = "0.10"
-ed25519-dalek = "2"
+sha2 = "=0.10.9"
+ed25519-dalek = "=2.2.0"
 
 # Vault crypto. Argon2id KDF + XChaCha20-Poly1305 encryption of the wallet
 # seed (whitepaper §13.3 keystore default). Stable releases of the RustCrypto
 # password-hashes / AEADs lines; chacha20poly1305 is exact-pinned and is the
 # sole `aead`-trait crate in the tree.
-argon2 = { version = "0.5", default-features = false, features = ["alloc", "password-hash"] }
+argon2 = { version = "=0.5.3", default-features = false, features = ["alloc", "password-hash"] }
 chacha20poly1305 = { version = "=0.10.1", default-features = false, features = ["alloc"] }
-rand = { version = "0.8", default-features = false, features = ["getrandom"] }
-base64 = { version = "0.22", default-features = false, features = ["alloc"] }
-zeroize = { version = "1", features = ["derive"] }
+rand = { version = "=0.8.6", default-features = false, features = ["getrandom"] }
+base64 = { version = "=0.22.1", default-features = false, features = ["alloc"] }
+zeroize = { version = "=1.8.2", features = ["derive"] }
 
 # OS keychain. Per-platform native backends:
 # - macOS:    apple-native (Security framework)
 # - Windows:  windows-native (Credential Manager)
 # - Linux:    sync-secret-service (libsecret) — works for GNOME Keyring + KWallet.
 [target.'cfg(target_os = "macos")'.dependencies]
-keyring = { version = "3", default-features = false, features = ["apple-native"] }
+keyring = { version = "=3.6.3", default-features = false, features = ["apple-native"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
-keyring = { version = "3", default-features = false, features = ["windows-native"] }
+keyring = { version = "=3.6.3", default-features = false, features = ["windows-native"] }
+windows-sys = { version = "0.60", features = ["Win32_Foundation", "Win32_Security_Credentials"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-keyring = { version = "3", default-features = false, features = ["sync-secret-service", "crypto-rust"] }
+keyring = { version = "=3.6.3", default-features = false, features = ["sync-secret-service", "crypto-rust"] }
 
 [features]
 # Default to no custom features. Production builds opt in via `--features custom-protocol`.

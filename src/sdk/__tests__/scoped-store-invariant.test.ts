@@ -41,13 +41,18 @@ function srcOf(name: string): string {
 }
 
 // ── The store universe, enumerated by BEHAVIOUR ─────────────────────────────
-// A persisted Tauri store is any module that opens one via `Store.load(`. This
+// A persisted store is any module that opens one via `WalletStore.load(`. This
 // catches stores that do NOT follow the *-store.ts name — last-known-balance,
 // reverse-name-cache — which a naming glob would miss, and a missed store is
 // exactly the one this guard exists to catch.
+//
+// The call moved from `Store.load(` when persistence stopped going through the
+// path-taking plugin. Note the seam itself (`wallet-store.ts`) DEFINES
+// `static load` but never calls `WalletStore.load(`, so it is not enumerated as
+// a store — which is right: it is the mechanism, not a store with a scope.
 function enumerateStores(raw: Record<string, string>): string[] {
   return Object.entries(raw)
-    .filter(([p, src]) => !isTest(p) && /\bStore\.load\s*\(/.test(src))
+    .filter(([p, src]) => !isTest(p) && /\bWalletStore\.load\s*\(/.test(src))
     .map(([p]) => basename(p))
     .sort();
 }

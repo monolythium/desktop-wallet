@@ -44,6 +44,21 @@ vi.mock("../peers", async (orig) => ({
   ],
 }));
 
+// WHAT THESE TWO DO NOT PROVE, recorded rather than removed.
+//
+// `PIN_CHAIN` and `PIN_GENESIS` are read from the SDK, and the code under test
+// reads the same values from the same SDK — so every assertion below compares
+// the SDK to itself. A substituted SDK that changed both sides together would
+// satisfy all of them. Mutation testing measured exactly that.
+//
+// They are kept because what they DO prove is real and is not covered
+// elsewhere: that the trust verdict fires on a correctly-shaped mismatch rather
+// than only on a malformed one, and that the polarity is right. The property
+// they cannot defend — that the pinned values are the reviewed ones — is
+// asserted out of process by `scripts/verify-sdk-anchor.mjs`, which reads the
+// installed bundle as text and never imports it.
+//
+// So: do not read a green run here as evidence about the SDK's contents.
 const PIN = getChainInfo(NETWORK_SLUG);
 const PIN_CHAIN = PIN.chain_id;
 const PIN_GENESIS = PIN.genesis_hash;

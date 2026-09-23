@@ -9,9 +9,9 @@ import {
   NATIVE_LYTH_DECIMALS,
   formatLyth,
   parseLythToLythoshi,
+  tokenFactoryAddressHex,
   typedBech32ToAddress,
 } from "@monolythium/core-sdk";
-import { scopeChainKey } from "../sdk/chains";
 import { useOperations } from "../operations/context";
 import { sendNativeLyth } from "../sdk/native-send";
 import { sendMrc20Token } from "../sdk/token-send";
@@ -27,8 +27,6 @@ import { loadReverseName } from "../sdk/reverse-name";
 import { addressbookLookup } from "../sdk/addressbook";
 import { fetchFinalityPosture } from "../sdk/finality";
 import { errorMessage, loadLiveAddressActivity, loadLiveWalletBalance } from "../sdk/live";
-import { activityCacheKey } from "../sdk/activity-cache";
-import { readConfirmedCache } from "../sdk/activity-cache-store";
 import { pendingTxsSnapshot } from "../sdk/pending-tx-store";
 import {
   classifyRecipient,
@@ -261,6 +259,31 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
   // HERE, so both mechanisms see no contact at all. A check at one consumer
   // alone would leave the other still suppressing the warning.
   const recipientContactName = resolvedContactName ?? matchedContactName;
+  // …and here it is. The gate is on this derivation, and it resolves to null
+  // for SUPPRESSION while leaving the name available for LABELLING.
+  //
+  // WHY NOT THE HMAC THE FINDINGS PROPOSE. Both records name the seed-derived
+  // tag `sent-recipients.ts` owns. It does not fit this store's lifecycle: a
+  // contact is created and read with NO unlock, and that sub-key exists only
+  // after a send has run this session (`verifySentRecipientTag` returns false
+  // with no cached key, deliberately). Binding contacts with it would make a
+  // contact verifiable only after the user had already sent something — so in
+  // practice contacts would almost never suppress, while the code claimed they
+  // were authenticated. That is a worse outcome than saying it plainly.
+  //
+  // WHAT IS TRUE INSTEAD: a saved contact is the user's own declaration, not
+  // evidence of a prior payment. The warning asks "have you sent to this address
+  // before?" — a name in a local file cannot answer it, and a planted name
+  // answers it falsely. So the contact no longer decides familiarity at all; it
+  // annotates whatever the evidence says. This is the display-precedence law
+  // from `address-label.ts` applied to a different surface: the label annotates,
+  // it does not assert.
+  //
+  // FAIL DIRECTION, stated rather than left to control flow: there is no value
+  // of the contact store that can turn "new" into "known". Suppression is driven
+  // only by `classifyRecipient`, whose inputs are chain evidence and the
+  // HMAC-bound sent log.
+  const contactSuppressesWarning = false as const;
   // A quorum-confirmed FORWARD hit — the name the user actually typed. This (and a
   // contact) is the ONLY thing that fills the green box / suppresses the warning;
   // a single-operator reverse name may label the review row but never suppresses.
@@ -367,26 +390,44 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
     // NOT the sole suppressor — the hint-stack render precedence suppresses the
     // amber warning independently. An integrity gate belongs at the
     // `recipientContactName` chokepoint above, which both mechanisms read.
-    if (recipientContactName) {
+    // MECHANISM 1, gated. This used to be `if (recipientContactName)` — a saved
+    // contact set "known" and returned before any evidence was read at all, so a
+    // planted addressbook entry suppressed the warning outright. The contact is
+    // now irrelevant here: the evidence below decides, every time.
+    if (contactSuppressesWarning) {
       setFamiliarity("known");
       setHistoryUnreadable(false);
       return;
     }
     let cancelled = false;
     setFamiliarity("unknown"); // clear any stale value while the read is in flight
+    // …and say so. While the read is in flight the surface used to render
+    // NOTHING — not the amber warning, not the neutral caution — because the
+    // caution requires `historyUnreadable`, which is only set once the read
+    // resolves. `walletFetch` attaches no timeout, so a hung endpoint made that
+    // silent window unbounded: paste, type an amount, Review, with no caution at
+    // any point. Treating in-flight as "not yet readable" is honest and closes
+    // it; the read overwrites this the moment it lands.
+    setHistoryUnreadable(true);
     const recipientLower = effectiveBech.toLowerCase();
     const fromLower = fromBech32m.toLowerCase();
     void (async () => {
-      const chainIdHex = scopeChainKey();
-      const scopeKey = activityCacheKey(fromLower, chainIdHex);
-      const cached = await readConfirmedCache(scopeKey).catch(() => null);
+      // The confirmed-activity cache is deliberately NOT read here any more —
+      // see the note below. Removing the read also removes the disk round-trip.
       const live = await loadLiveAddressActivity(fromBech32m).catch(() => null);
       const liveRows = live && live.ok ? live.value ?? [] : null;
-      const cachedRows = cached ? cached.rows : null;
-      const rows =
-        cachedRows === null && liveRows === null
-          ? null
-          : [...(cachedRows ?? []), ...(liveRows ?? [])];
+      // Evidence is what the CHAIN said this session, not what is cached on
+      // disk. The confirmed-activity store is plaintext and caller-writable (the
+      // file name is Rust's business), and unioning it in here meant one planted
+      // outgoing row reported "known" — the second of the three independent
+      // suppressors. The cache still drives the feed's rendering; it no longer
+      // testifies that a payment happened.
+      //
+      // The cost is stated rather than hidden: with the indexer unreachable
+      // there is now no readable history at all, so the surface shows its
+      // neutral verify caution instead of claiming "first-time". That is the
+      // honest answer — an unreadable history cannot establish "never sent".
+      const rows = liveRows;
       let pending: ReturnType<typeof pendingTxsSnapshot> | null;
       try {
         pending = pendingTxsSnapshot();
@@ -411,7 +452,14 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [effectiveBech, recipientContactName, fromBech32m]);
+    // `recipientContactName` is deliberately ABSENT from these deps. The body no
+    // longer reads it, but leaving it listed kept the address book influencing
+    // the warning by a back route: when the lookup resolved, the identity
+    // changed, the effect re-ran, and `setFamiliarity("unknown")` blanked an
+    // amber warning that had already painted — for the length of a second
+    // network read. A planted contact could therefore still remove the warning,
+    // which is the one thing this change exists to prevent.
+  }, [effectiveBech, fromBech32m]);
 
   const validate = useMemo(
     () => () => {
@@ -548,6 +596,10 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
         title: `Send ${token.symbol}`,
         subtitle: "MRC-20 transfer · canonical RPC gateway",
         auth: "keychain",
+        // The user chose the recipient, so the recipient is the subject. The
+        // signed `to` is the token factory — a target they did not pick and
+        // could not check — and it belongs in the disclosure, not here.
+        commitment: { subject: toLine, amount: `${shown} ${token.symbol}` },
         diff: [
           { k: "From", v: fromBech32m },
           { k: "To", v: toLine },
@@ -563,6 +615,11 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
           },
           { k: "Finality", v: finality.label, kind: "value" },
         ],
+        // The recipient above is a CALLDATA argument. The signed `to` is the
+        // token factory — a target the user never chose and cannot check, so it
+        // belongs here rather than beside the payee. Derived from the same
+        // helper `sendMrc20Token` passes.
+        details: [{ k: "Precompile (signed `to`)", v: tokenFactoryAddressHex() }],
         effects: [
           { text: "Transactions are irreversible. Confirm the recipient and amount carefully." },
           ...(isSelfSend ? [SELF_SEND_EFFECT] : []),
@@ -592,6 +649,11 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
             to: toBech32m,
             amount: amountLyth,
             decimals: token.decimals,
+            // Sign the quote the row above was rendered from, exactly as the
+            // native path does below. Without this the row shows this quote's
+            // reservation while the signature carries a fee re-derived from a
+            // later read — the shown ceiling and the signed ceiling diverge.
+            resolvedFee: tokenQuote.signedFee,
           });
           // Log the HUMAN recipient (never the token-factory precompile), seed
           // still in scope, before the drawer scrubs it. Best-effort.
@@ -625,6 +687,8 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
       title: `Send ${amountLyth} LYTH`,
       subtitle: "Native ML-DSA send · canonical RPC gateway",
       auth: "keychain",
+      // The one surface where the signed `to` IS what the user chose.
+      commitment: { subject: toLine, amount: `${amountLyth} LYTH` },
       diff: [
         { k: "From", v: fromBech32m },
         { k: "To", v: toLine },
@@ -978,9 +1042,18 @@ export function SendComposeModal({ fromBech32m, token, onClose }: Props) {
             quorum-confirmed forward hit; a single-operator reverse name fills
             neither (R3). Amber fires only for a genuinely new recipient; the
             neutral caution only when the history was unreadable. */}
-        {recipientContactName ? (
-          <div style={knownBox}>
+        {/* MECHANISM 2, gated. The green box used to be headed by the contact,
+            which meant a planted name outranked the amber warning regardless of
+            familiarity — the second suppressor the comment above warns about.
+            The contact now only ever ANNOTATES a box the evidence chose. */}
+        {contactSuppressesWarning && recipientContactName ? (
+          <div style={knownBox} data-testid="send-known-contact">
             Saved contact: <strong style={{ color: "var(--fg-100)" }}>{recipientContactName}</strong>
+          </div>
+        ) : familiarity === "known" && recipientContactName ? (
+          <div style={knownBox} data-testid="send-known-contact">
+            You have sent to this address before. Saved as{" "}
+            <strong style={{ color: "var(--fg-100)" }}>{recipientContactName}</strong>.
           </div>
         ) : quorumForwardHit && parse.monoName ? (
           <div style={knownBox}>

@@ -67,6 +67,10 @@ vi.mock("../../sdk/autovote", async (importOriginal) => ({
 }));
 
 import { Delegate } from "../Delegate";
+import {
+  DELEGATION_EXECUTION_UNIT_LIMIT,
+  DELEGATION_PRECOMPILE,
+} from "../../sdk/delegation";
 
 const READY = {
   status: "ready",
@@ -167,6 +171,55 @@ describe("Delegate — auto-compound has its own section", () => {
     const last = d.effects[d.effects.length - 1]!;
     expect(last.level).toBe("warn");
     expect(last.text).toMatch(/claims your pending 7 LYTH now/i);
+  });
+
+  it("the signed target in the disclosure is DERIVED, not a typed literal", async () => {
+    // Seven delegation diffs carried the string `"0x…100a"`. A literal cannot
+    // disagree with what is signed, so it cannot detect a change to it — and a
+    // guard that only checks the CONSTANT is a full address cannot detect a
+    // contributor re-typing the literal into the row. So this reads what the
+    // real page actually put in the descriptor, and compares it to the constant
+    // `submitDelegationTx` passes as `to`.
+    const user = userEvent.setup();
+    renderWithProviders(<Delegate />);
+    await user.click(await screen.findByRole("button", { name: SECTION }));
+    await user.click(screen.getByTestId("auto-compound-toggle"));
+    await waitFor(() => expect(cap.descriptor).toBeDefined());
+
+    const rows = cap.descriptor!.details ?? [];
+    // Anti-vacuity: an empty details array would satisfy an `every` check.
+    expect(rows.length).toBeGreaterThan(0);
+    const target = rows.find((r) => /precompile/i.test(r.k));
+    expect(target, "the delegation disclosure must carry the signed target").toBeDefined();
+    expect(target!.v).toBe(DELEGATION_PRECOMPILE);
+    expect(target!.v).toMatch(/^0x[0-9a-fA-F]{40}$/);
+  });
+
+  it("declares a fee plan naming the limit the seam signs — the delegation block's row is real now", async () => {
+    // Seven surfaces showed no fee figure at all, and the seventh showed the
+    // words "applies (paid in LYTH)" with no number — a row that names a charge
+    // and refuses to state it, which P03 recorded as reading worse than absence.
+    //
+    // Asserted on what the REAL page put in the descriptor, not on the module
+    // constant: R9's `details-tier` guard checked a property of the constants
+    // and stayed green when a literal was typed back into the row.
+    const user = userEvent.setup();
+    renderWithProviders(<Delegate />);
+    await user.click(await screen.findByRole("button", { name: SECTION }));
+    await user.click(screen.getByTestId("auto-compound-toggle"));
+    await waitFor(() => expect(cap.descriptor).toBeDefined());
+
+    const plan = cap.descriptor!.feePlan;
+    expect(plan, "a delegation write must declare a fee plan").toBeDefined();
+    expect(plan!.executionUnitLimit).toBe(DELEGATION_EXECUTION_UNIT_LIMIT);
+    expect(plan!.feeClass).toBe("transfer");
+
+    // The prose row is gone from the surface's own diff — the drawer owns the
+    // fee row now, and it carries a figure.
+    const feeRows = cap.descriptor!.diff.filter((r) => /fee/i.test(r.k));
+    expect(feeRows).toHaveLength(0);
+    // Anti-vacuity: the diff is not simply empty.
+    expect(cap.descriptor!.diff.length).toBeGreaterThan(0);
   });
 
   it("discloses at confirm time even though the section can be collapsed", async () => {

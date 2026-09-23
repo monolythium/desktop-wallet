@@ -6,10 +6,62 @@
 // flow with a typed `OperationDescriptor`. Stages 3+ extend it with the
 // real keystore signing path.
 
+import type { ResolvedExecutionFee } from "@monolythium/core-sdk";
 import type { TxOpKind } from "../sdk/notifications";
+import type { OperationFeePlan } from "../sdk/fee-quote";
 import type { SendErrorContext } from "../sdk/send-error";
 
 export type OperationStage = "preview" | "auth" | "executing" | "done" | "error";
+
+// ── WHAT THE CONFIRM SURFACE DELIBERATELY DOES NOT SHOW ─────────────────────
+//
+// Four of the ten signed components have no row on any surface, and each is a
+// DECISION rather than an oversight. Recorded here, beside the type that would
+// carry them, so the next contributor reads the reason before adding one back —
+// and so the absence is not read as a gap by the next audit.
+//
+// The test the tiering applies, per component: WHAT DECISION DOES SEEING THIS
+// LET A USER MAKE THAT THEY CANNOT MAKE WITHOUT IT? A component that fails it
+// does not belong on the primary surface. Adding it anyway is not free: a
+// confirm screen nobody reads is worse than a short one, because it converts an
+// informed decision into a habit.
+//
+//  1. `maxPriorityFeePerGas` — the priority tip.
+//     It supports no decision IN ISOLATION and it is not independent:
+//     `postClampResolvedFee` guarantees `tip <= maxFeePerGas`, and the tip is
+//     already INSIDE the fee total a user reads. A row for it would be a second
+//     number that can only ever be a fraction of the first.
+//
+//  2. `nonce`.
+//     Apply the test literally: what would a wrong nonce LOOK like, and what
+//     would the user do about it? They hold no expected value to compare it
+//     against. Its failure mode is real — a transaction that never confirms, or
+//     one that replaces a pending one — and it is already owned elsewhere:
+//     `pending-nonce.ts` tracks it, `submitNativeTx` returns it, and
+//     `reconcile.ts` follows it to a terminal state. The decision a nonce
+//     supports belongs to Activity, not to consent.
+//
+//  3. `chainId`, ON THE SUBMIT SEAM ONLY.
+//     `submit.ts` signs a compile-time constant, and hands the wire to a
+//     transport `getProvider()` has already cleared against the same pin by a
+//     SYMMETRIC comparison. A row that can never be wrong is not information —
+//     it is training in ignoring rows.
+//     ⚠ THIS INVERTS ON THE MRV SEAM, where the chain id was operator-supplied.
+//     The answer there was not to display it (a user has nothing to check it
+//     against) but to stop the operator choosing it — see `mrv.ts`. The same
+//     component is decorative on one path and load-bearing on another, and a
+//     uniform rule gets one of them wrong.
+//
+//  4. `access_list`.
+//     There is no such field on `NativeEvmTxFields`; the encoder writes a zero
+//     length. There is nothing to show.
+//
+// `extensions` is a fifth omission and the only one with a behavioural guard,
+// because unlike the four above it CAN change without anyone noticing:
+// `submit-no-extension.test.ts` pins that a non-MRV write signs an empty list.
+//
+// `gasLimit` is NOT in this list — it is a disclosure-tier component (see
+// `details`), pending the single declared fee source that will supply it.
 
 /**
  * A single-row diff line shown in the preview pane.
@@ -48,13 +100,85 @@ export interface OperationEffect {
  */
 export type AuthMethod = "keychain" | "passkey" | "none";
 
+/**
+ * Who is paid and how much — the two facts that must be on screen at the moment
+ * the seed is released.
+ *
+ * The drawer renders this at the `auth` stage, where until now a user saw a
+ * banner and a password field and no transaction fact at all. The diff stays at
+ * `preview`: a ten-row wall above a password field is not a summary, and the
+ * batch surfaces can produce exactly that.
+ *
+ * REQUIRED, deliberately. Optional, this would be a guard that reports the
+ * omission after someone shipped it; required, a new signing surface cannot be
+ * added without answering the question.
+ *
+ * A surface ANSWERS this — it does not restate its diff. Where nothing leaves
+ * the wallet `amount` is null and the drawer says so, because "this moves no
+ * funds" is a fact a user acts on.
+ *
+ * ⚠ The diff's own payee/amount rows must be built FROM this object, never
+ * authored beside it. Two copies of one fact on two screens can drift, and a
+ * wallet showing a user two answers to "who is being paid" is worse than one
+ * showing a single answer in one place.
+ */
+export interface OperationCommitment {
+  /**
+   * The counterparty as the user understands it.
+   *
+   * Where the USER chose the target, this is that address (with its name when
+   * one resolved). Where the WALLET chose it — a precompile the user never
+   * picked — an address here would be noise at the one moment noise is most
+   * expensive, so this states what the operation IS instead. The precompile is
+   * still shown, derived, in the preview disclosure.
+   */
+  subject: string;
+  /** The amount leaving this wallet, formatted with its unit, or `null` when
+   *  none does (the signed `value` is `0n`). */
+  amount: string | null;
+}
+
 export interface OperationDescriptor {
   /** Short title shown in the drawer head — e.g. `Send LYTH`. */
   title: string;
   /** One-line subtitle — usually the user-facing summary. */
   subtitle?: string;
+  /** Payee + amount, rendered at `auth`. See {@link OperationCommitment}. */
+  commitment: OperationCommitment;
+  /**
+   * Declared by every surface that reaches `submitNativeTx` (or the MRV seam).
+   *
+   * The drawer resolves ONE quote at preview, renders it, and hands the SAME
+   * object to `execute` — so the number a user reads and the number their key
+   * commits to are fields of one value rather than two reads of one function.
+   *
+   * Absent ⇒ unchanged behaviour: the compose surfaces resolve their own tiered
+   * quote (they have a tier selector this cannot express) and pass it as
+   * `resolvedFee` themselves, and the read-only surfaces price nothing.
+   */
+  feePlan?: OperationFeePlan;
   /** Diff lines for the preview pane. */
   diff: OperationDiffLine[];
+  /**
+   * Secondary rows, rendered inside a CLOSED `<details>` in the preview pane.
+   *
+   * For signed components that are checkable but carry no decision on their own
+   * — the precompile target the wallet chose rather than the user, the key
+   * material inside a policy claim. Promoting them would train a user to skip
+   * rows; omitting them would leave a signed value with no representation at
+   * all. A disclosure is the honest third answer.
+   *
+   * `<details>` and NOT `CollapsibleSection`: that component hides with the
+   * `hidden` attribute, which takes collapsed content out of the accessibility
+   * tree. A consent surface must not put a signed fact somewhere a screen
+   * reader cannot reach, and `<details>` keeps it reachable either way.
+   *
+   * ⚠ Every value here must be DERIVED from what is signed. A typed literal
+   * that happens to be correct today cannot disagree with the signed value, and
+   * therefore cannot detect a change to it — which is the entire reason the row
+   * exists.
+   */
+  details?: OperationDiffLine[];
   /** User-facing side-effects of approval. */
   effects: OperationEffect[];
   /** Auth method required to advance from `preview` to `executing`. */
@@ -112,6 +236,16 @@ export interface OperationNotifyMeta {
 export interface OperationExecutionContext {
   /** Present only after `auth: "keychain"` succeeds. */
   vaultSeed?: Uint8Array;
+  /**
+   * The fee the preview pane RENDERED, present whenever the descriptor declared
+   * a {@link OperationFeePlan}.
+   *
+   * Forward it verbatim to the seam as `resolvedFee`; never re-resolve. An
+   * `execute` that ignores this hands the fee back to `submitNativeTx`, which
+   * reads its own quote after the password — which is the divergence this whole
+   * mechanism exists to remove, and it would be silent.
+   */
+  resolvedFee?: ResolvedExecutionFee;
   /**
    * Add facts to this operation's notification metadata that only `execute`
    * can know.

@@ -8,16 +8,18 @@
 // Stage 5 will extend with `monolythium-core-sdk` RPC wrappers + passkey
 // signer.
 
+mod credential_scan;
 mod keychain;
 mod name_registry;
 mod studio_host;
 mod vault;
+mod wallet_store;
+mod wallet_updater;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         // Native OS toasts for terminal tx notifications. The frontend
@@ -29,12 +31,18 @@ pub fn run() {
             keychain::keychain_unlock,
             keychain::keychain_store,
             keychain::keychain_delete,
+            credential_scan::keychain_list_accounts,
+            credential_scan::keychain_orphaned_slots,
             vault::vault_create,
             vault::vault_seal_seed,
             vault::vault_seal_v2,
             vault::vault_unlock,
             vault::vault_reveal,
             name_registry::name_check_availability,
+            wallet_store::wallet_store_read,
+            wallet_store::wallet_store_write,
+            wallet_updater::wallet_update_check,
+            wallet_updater::wallet_update_install,
             studio_host::studio_devkit_parse_manifest,
             studio_host::studio_devkit_check_compatibility,
             studio_host::studio_devkit_resolve_install_path,

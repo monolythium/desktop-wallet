@@ -1,7 +1,7 @@
 // Tauri-store-backed durable tracked-tx store.
 //
-// The tracked-tx set is persisted on top of `@tauri-apps/plugin-store` (its own
-// `pending-tx.v1.json` file under a versioned key), reusing the
+// The tracked-tx set is persisted on top of the wallet store seam (its own
+// `pending-tx` store under a versioned key), reusing the
 // singleton-store + in-memory-cache pattern from `notifications-store.ts`, so a
 // tx that confirms while every surface is closed still notifies.
 // The store root is bound to the live block-0 hash. Chain id alone cannot
@@ -30,7 +30,7 @@
 // never throw back into the submit flow or the poller. The set is small (one
 // row per outstanding broadcast), so reads/writes are cheap.
 
-import { Store } from "@tauri-apps/plugin-store";
+import { WalletStore } from "./wallet-store";
 import {
   PENDING_TX_STORE_KEY,
   parsePendingTxEnvelope,
@@ -41,9 +41,9 @@ import {
 } from "./pending-tx";
 import { requireLiveGenesisIdentity } from "./chain-identity";
 
-export const STORE_FILE = "pending-tx.v1.json";
+export const STORE_ID = "pending-tx";
 
-let storePromise: Promise<Store> | null = null;
+let storePromise: Promise<WalletStore> | null = null;
 interface PendingTxStoreState {
   version: 2;
   genesisIdentity: string;
@@ -61,9 +61,9 @@ const subscribers = new Set<() => void>();
 // a build with no in-flight txs (until `hydratePendingTxs()` warms it).
 let snapshot: ReadonlyArray<PendingTx> = [];
 
-async function getStore(): Promise<Store> {
+async function getStore(): Promise<WalletStore> {
   if (!storePromise) {
-    storePromise = Store.load(STORE_FILE);
+    storePromise = WalletStore.load(STORE_ID);
   }
   return storePromise;
 }

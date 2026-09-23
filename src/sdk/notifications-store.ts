@@ -1,10 +1,10 @@
 // Tauri-store-backed notification store.
 //
-// A `@tauri-apps/plugin-store`-backed notifications store, using the
+// A wallet-store-backed notifications store, using the
 // singleton-store + in-memory-cache pattern of `vaultCatalog.ts` /
 // `agent-registry.ts`.
 //
-// A single JSON store file (`notifications.v1.json`) holds a `scopes` map keyed
+// A single JSON store (the `notifications` store) holds a `scopes` map keyed
 // per (address, chain) by the `mono.notifications.history.<addr>.<chainIdHex>.v1`
 // string, so each scope's dedupe set lives beside its history. The root also
 // records the live block-0 hash. A testnet regenesis preserves chain id, so
@@ -27,7 +27,7 @@
 // is the in-app terminal-transition hook. No page / RPC path can synthesize
 // a notification.
 
-import { Store } from "@tauri-apps/plugin-store";
+import { WalletStore } from "./wallet-store";
 import {
   NOTIFICATION_HISTORY_CAP,
   appendCapped,
@@ -47,7 +47,7 @@ import {
 } from "./notifications";
 import { requireLiveGenesisIdentity } from "./chain-identity";
 
-export const STORE_FILE = "notifications.v1.json";
+export const STORE_ID = "notifications";
 const STATE_KEY = "state";
 
 /** On-disk root. `scopes` maps each per-(address, chain) storage key to its
@@ -70,13 +70,13 @@ function emptyState(genesisIdentity: string): NotificationsState {
 // without a disk round-trip; it's refreshed on every load/save and is the
 // value handed to subscribers.
 
-let storePromise: Promise<Store> | null = null;
+let storePromise: Promise<WalletStore> | null = null;
 let cache: NotificationsState | null = null;
 const subscribers = new Set<() => void>();
 
-async function getStore(): Promise<Store> {
+async function getStore(): Promise<WalletStore> {
   if (!storePromise) {
-    storePromise = Store.load(STORE_FILE);
+    storePromise = WalletStore.load(STORE_ID);
   }
   return storePromise;
 }

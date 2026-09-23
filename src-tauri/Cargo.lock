@@ -908,10 +908,10 @@ dependencies = [
  "tauri-plugin-notification",
  "tauri-plugin-opener",
  "tauri-plugin-process",
- "tauri-plugin-store",
  "tauri-plugin-updater",
  "thiserror 1.0.69",
  "tokio",
+ "windows-sys 0.60.2",
  "zeroize",
 ]
 

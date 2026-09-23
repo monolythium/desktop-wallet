@@ -15,10 +15,10 @@
 // chain is active. The chain component comes from `scopeChainKey()` — the single
 // source every per-scope store uses — never a hardcoded chain id.
 
-import { Store } from "@tauri-apps/plugin-store";
+import { WalletStore } from "./wallet-store";
 import { scopeChainKey } from "./chains";
 
-export const STORE_FILE = "names.v1.json";
+export const STORE_ID = "names";
 const STATE_KEY = "state";
 const BROWSER_KEY = "wallet.names.reverse.v1";
 
@@ -39,7 +39,7 @@ export interface ReverseNameCacheState {
 
 const EMPTY: ReverseNameCacheState = { version: 1, reverse: {} };
 
-let storePromise: Promise<Store> | null = null;
+let storePromise: Promise<WalletStore> | null = null;
 let cache: ReverseNameCacheState | null = null;
 const listeners = new Set<() => void>();
 
@@ -52,8 +52,8 @@ function isTauri(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
 
-async function getStore(): Promise<Store> {
-  if (!storePromise) storePromise = Store.load(STORE_FILE);
+async function getStore(): Promise<WalletStore> {
+  if (!storePromise) storePromise = WalletStore.load(STORE_ID);
   return storePromise;
 }
 

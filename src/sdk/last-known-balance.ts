@@ -22,10 +22,10 @@
 // itself and the wallet would seed the hero with the BUILTIN chain's balance —
 // presenting one network's figure as the user's balance on another.
 
-import { Store } from "@tauri-apps/plugin-store";
+import { WalletStore } from "./wallet-store";
 import { scopeChainKey } from "./chains";
 
-export const STORE_FILE = "balance.v1.json";
+export const STORE_ID = "balance";
 const STATE_KEY = "state";
 
 /** The persisted last-known balance for one (address, chain) scope. */
@@ -46,15 +46,15 @@ interface BalanceStoreState {
   balances: Record<string, unknown>;
 }
 
-let storePromise: Promise<Store> | null = null;
+let storePromise: Promise<WalletStore> | null = null;
 let cache: BalanceStoreState | null = null;
 
 export function balanceScopeKey(addressLower: string, chainIdHex: string): string {
   return `mono.balance.${addressLower}.${chainIdHex}.v1`;
 }
 
-async function getStore(): Promise<Store> {
-  if (!storePromise) storePromise = Store.load(STORE_FILE);
+async function getStore(): Promise<WalletStore> {
+  if (!storePromise) storePromise = WalletStore.load(STORE_ID);
   return storePromise;
 }
 

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { LiveAddressActivityRow } from "../live";
 import {
+  activityClusterLabel,
   activityCounterparty,
   activityRowDirection,
   activityKindToTxKind,
@@ -136,10 +137,25 @@ describe("activityWhen", () => {
 });
 
 describe("activityCounterparty", () => {
-  it("prefers the resolved cluster name from enrichment when present", () => {
+  // REVISED for SA-07-006. This case previously asserted that the cluster name
+  // is PREFERRED over the address — the substitution the display law forbids,
+  // pinned as intended behaviour. `clusterName` is never format-checked and
+  // arrives from a plaintext store or a single operator, so preferring it let a
+  // planted row render a name where an address belonged, with no address on the
+  // row at all. The name now travels as a label (see `activityClusterLabel`)
+  // and annotates the address instead.
+  it("does NOT let the cluster name replace the address", () => {
+    expect(
+      activityCounterparty(
+        row({ counterparty: "mono1abc", cluster: 4, clusterName: "atlas.cluster.mono" }),
+      ),
+    ).toBe("mono1abc");
+  });
+
+  it("falls back to the cluster identifier when the row carries no address", () => {
     expect(
       activityCounterparty(row({ counterparty: null, cluster: 4, clusterName: "atlas.cluster.mono" })),
-    ).toBe("atlas.cluster.mono");
+    ).toBe("Cluster #4");
   });
 
   it("uses the address when present and no cluster name", () => {
@@ -278,5 +294,60 @@ describe("activityRowToTx", () => {
     const tx = activityRowToTx(row({ tokenId: "0xdeadbeef", amount: "1500000" }), meta);
     expect(tx.amountText).toBeNull();
     expect(tx.unit).toBe("MYST"); // symbol still shown as the unit
+  });
+});
+
+describe("activityClusterLabel", () => {
+  it("carries a resolved cluster name as a label of kind 'cluster'", () => {
+    expect(activityClusterLabel(row({ clusterName: "atlas.cluster.mono" }))).toEqual({
+      kind: "cluster",
+      label: "atlas.cluster.mono",
+    });
+  });
+
+  it("is never a chain-verified kind — one operator resolves it, not a quorum", () => {
+    // The kind is what decides whether the chip renders, so this is the
+    // assertion that keeps a single-operator name from borrowing a quorum's
+    // credibility.
+    expect(activityClusterLabel(row({ clusterName: "x" }))?.kind).toBe("cluster");
+  });
+
+  it("is null for an absent or blank name — no fabricated label", () => {
+    expect(activityClusterLabel(row({ clusterName: null }))).toBeNull();
+    expect(activityClusterLabel(row({ clusterName: "   " }))).toBeNull();
+  });
+});
+
+describe("a delegation row keeps BOTH its cluster name and its identifier", () => {
+  // The shape the clusterName change exists for, piped through the real adapter
+  // rather than hand-built — the hand-built fixtures in the TxRow guard all
+  // carried an address, so none of them could see a row that has none.
+  const delegationRow = row({
+    kind: "delegation",
+    subKind: "delegated",
+    direction: null,
+    counterparty: null,
+    cluster: 1,
+    clusterName: "atlas.cluster.mono",
+    weightBps: 2500,
+  });
+
+  it("carries the name as a cluster label", () => {
+    expect(activityRowToTx(delegationRow).clusterLabel).toEqual({
+      kind: "cluster",
+      label: "atlas.cluster.mono",
+    });
+  });
+
+  it("carries an identifier for the label to annotate, even with no address", () => {
+    // Without this the fail-closed drop rule discards the label and the name is
+    // LOST — a regression, not merely a missing annotation.
+    expect(activityRowToTx(delegationRow).counterpartyAddress).toBe("Cluster #1");
+  });
+
+  it("still uses the address as the identifier when the row has one", () => {
+    expect(
+      activityRowToTx(row({ counterparty: "mono1abc", clusterName: "atlas" })).counterpartyAddress,
+    ).toBe("mono1abc");
   });
 });
