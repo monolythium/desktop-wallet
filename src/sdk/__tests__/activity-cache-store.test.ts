@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const backing = new Map<string, unknown>();
 
-vi.mock("@tauri-apps/plugin-store", () => {
+vi.mock("../wallet-store", () => {
   class FakeStore {
     static async load(_file: string): Promise<FakeStore> {
       return new FakeStore();
@@ -20,7 +20,7 @@ vi.mock("@tauri-apps/plugin-store", () => {
       /* no-op */
     }
   }
-  return { Store: FakeStore };
+  return { WalletStore: FakeStore };
 });
 
 import { activityCacheKey } from "../activity-cache";

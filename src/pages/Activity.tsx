@@ -21,7 +21,7 @@ import { TxRow } from "../components/TxRow";
 import { RefreshButton } from "../components/RefreshButton";
 import { GlyphBadge, iconForKind } from "../components/activity-icons";
 import { useReverseNamesEager } from "../sdk/use-reverse-names";
-import { preferredAddressLabel } from "../sdk/address-label";
+import { preferredAddressLabel, type AddressLabel } from "../sdk/address-label";
 import { addressbookLookup } from "../sdk/addressbook";
 import {
   activityRowDirection,
@@ -302,14 +302,20 @@ export function Activity() {
   }, []);
 
   /** One precedence, same as every other surface: registered name, then
-   *  contact label, then nothing (the row keeps its existing rendering). */
-  const labelFor = (address: string | null | undefined): string | null => {
+   *  contact label, then nothing (the row keeps its existing rendering).
+   *
+   *  Returns the WHOLE {@link AddressLabel}. This used to end in
+   *  `?.label ?? null`, which threw away `.kind` and delivered a purely-local
+   *  contact label to the row indistinguishable from a quorum-verified name —
+   *  the union exists precisely so those two cannot be confused, and taking
+   *  `.label` discarded half of it one line after computing it. */
+  const labelFor = (address: string | null | undefined): AddressLabel => {
     if (typeof address !== "string" || address === "") return null;
     const key = address.toLowerCase();
     return preferredAddressLabel({
       reverseName: reverseNames.get(key) ?? null,
       contactName: contactNames.get(key) ?? null,
-    })?.label ?? null;
+    });
   };
 
   // Native rows carry the zero-address token id, so normalize to the display
@@ -713,6 +719,11 @@ export function Activity() {
                   key={`c:${confirmedRowKey(row)}`}
                   tx={activityRowToTx(row, tokenMeta)}
                   counterpartyLabel={labelFor(row.counterparty)}
+                  // The address the label annotates. Taken from the row, NOT
+                  // from `tx.counterparty` — `activityCounterparty` prefers a
+                  // resolved `clusterName`, so the Tx field is a display string
+                  // that is not always an address.
+                  counterpartyAddress={row.counterparty}
                   onClick={() => setSelected(indexedRowToDetail(row))}
                 />
               );

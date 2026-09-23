@@ -45,12 +45,19 @@ const submitSpy = vi.fn(
   (_client: unknown, _wire: string, expected: string): Promise<string> =>
     Promise.resolve(expected),
 );
+/** Records that the derived signing key was disposed on this path (SA-02-002). */
+const disposeSpy = vi.hoisted(() => vi.fn());
 
 vi.mock("@monolythium/core-sdk/crypto", () => ({
   MlDsa65Backend: {
     fromSeed: (_seed: Uint8Array) => ({
       // 20-byte hex address, lower-case.
       getAddress: () => "0x000000000000000000000000000000000000abcd",
+      // The submit path now derives its backend through `withSigningBackend`,
+      // which disposes in a `finally`. The fake must carry the method or the
+      // helper throws on the way out — and a fake that cannot be disposed would
+      // hide a real missing disposal.
+      dispose: () => disposeSpy(),
     }),
   },
   buildPlaintextSubmission: (args: RecordedSubmitArgs) => buildSpy(args),
@@ -102,6 +109,7 @@ const TO = "0x000000000000000000000000000000000000dead";
 beforeEach(() => {
   buildSpy.mockClear();
   submitSpy.mockClear();
+  disposeSpy.mockClear();
   chainCtl.current = "0x10f2c";
   _resetPendingNonces();
   resetProviderForTest();
@@ -118,6 +126,18 @@ describe("submitNativeTx — plaintext path", () => {
     expect(buildSpy).toHaveBeenCalledTimes(1);
     expect(submitSpy).toHaveBeenCalledTimes(1);
     expect(res.txHash).toBe(LOCAL_TX_HASH);
+  });
+
+  it("disposes the derived signing key once the submission completes", async () => {
+    // Per-site coverage for the wallet's busiest signing path: every native
+    // send, register, CLOB and MRV write routes through here, so a key left
+    // resident by this function is resident after most operations the user
+    // performs (SA-02-002).
+    await submitNativeTx({ seed: SEED, to: TO, valueLythoshi: 5n });
+    expect(
+      disposeSpy,
+      "submitNativeTx returned without disposing the ~4KB derived signing key",
+    ).toHaveBeenCalledTimes(1);
   });
 
   it("uses the SDK transfer fee defaults (no hardcoded limit) by default", async () => {
@@ -196,6 +216,13 @@ describe("submitNativeTx — F3: an admission reject carries the local hash", ()
     expect(rejectedSubmitTxHash(thrown)).toBe(LOCAL_TX_HASH);
     // The message mirrors the cause so the send-error classifier still works.
     expect((thrown as Error).message).toContain("insufficient funds");
+    // The error path disposes too. A rejected submission is the case where a
+    // success-only wipe would leave the key resident — and rejections are
+    // ordinary here, not exotic.
+    expect(
+      disposeSpy,
+      "a rejected submission left the derived signing key resident",
+    ).toHaveBeenCalledTimes(1);
   });
 
   it("does NOT advance the local nonce on a reject (so a retry reuses it)", async () => {

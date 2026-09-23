@@ -47,14 +47,24 @@ import {
   buildSpendingPolicyArgs,
   fetchSpendingPolicy,
   POLICY_TOGGLE_LIMIT,
+  SET_POLICY_CLAIM_LIMIT,
+  SPENDING_POLICY_PRECOMPILE,
   submitSpendingPolicyTx,
 } from "../sdk/spending-policy";
+import { NATIVE_TRANSFER_EXECUTION_UNIT_LIMIT } from "../sdk/fee-model";
+import type { OperationFeePlan } from "../sdk/fee-quote";
 import {
   loadAgents,
   registerAgent,
   removeAgent,
   type AgentEntry,
 } from "../sdk/agent-registry";
+import {
+  AGENT_MISMATCH_MESSAGE,
+  assertPrincipalMatchesSeed,
+  isAgentAddressProven,
+  proveAgentAddress,
+} from "../sdk/agent-ownership";
 import {
   FUND_DEFAULT_AMOUNT,
   NO_PRINCIPAL_MESSAGE,
@@ -67,7 +77,49 @@ import {
   type PolicyFormInput,
 } from "../sdk/agent-forms";
 
+/** Page-header shorthand. Display chrome only — it names no signed value. */
 const PRECOMPILE_LABEL = "0x…110c";
+
+/**
+ * The signed `to` for every spending-policy write, DERIVED from the constant
+ * `submitSpendingPolicyTx` passes. The confirm diffs used to carry
+ * {@link PRECOMPILE_LABEL} instead — a truncated literal that would still read
+ * `0x…110c` if the precompile moved underneath it.
+ *
+ * The claim's key material rides here too. A 1 952-byte public key and a
+ * 3 309-byte signature are inside the signed calldata and were prose in the
+ * effects list; as hex they support no decision, but WHICH KEY signed does, and
+ * that is now a proved fact rather than a claim (the agent vault is re-derived
+ * and compared before this surface opens).
+ */
+/**
+ * The three policy writes price as `registry` — the class `submitSpendingPolicyTx`
+ * passes — but at two different limits: a claim carries 1 952 + 3 309 bytes of
+ * ML-DSA-65 material, a toggle carries none. Named from the seam's own constants
+ * so a limit cannot be shown at one value and signed at another.
+ */
+const POLICY_CLAIM_FEE_PLAN: OperationFeePlan = {
+  feeClass: "registry",
+  executionUnitLimit: SET_POLICY_CLAIM_LIMIT,
+};
+const POLICY_TOGGLE_FEE_PLAN: OperationFeePlan = {
+  feeClass: "registry",
+  executionUnitLimit: POLICY_TOGGLE_LIMIT,
+};
+/** Funding an agent is an ordinary native transfer — the same class and limit a
+ *  send signs, so it prices like one. */
+const FUND_FEE_PLAN: OperationFeePlan = {
+  feeClass: "transfer",
+  executionUnitLimit: NATIVE_TRANSFER_EXECUTION_UNIT_LIMIT,
+};
+
+const POLICY_DETAILS = [
+  { k: "Precompile (signed `to`)", v: SPENDING_POLICY_PRECOMPILE },
+  {
+    k: "Claim key material",
+    v: "ML-DSA-65 public key 1952 B + signature 3309 B, from the agent's own vault slot (proved this session)",
+  },
+];
 
 /** The policy form's rows, in the order the sequential prompts asked them, with
  *  each prompt's wording carried over verbatim. Keeping the order matters
@@ -165,6 +217,12 @@ export function Agents() {
     error: string | null;
     unverified: string | null;
     busy: boolean;
+    /** Agent vault password, collected only while the agent's address is still
+     *  unproved this session. Cleared the moment the proof lands. */
+    agentPassword: string;
+    /** Set when the slot derives a DIFFERENT address than the record claims.
+     *  Terminal: no amount of retyping a password fixes planted data. */
+    tampered: boolean;
   } | null>(null);
 
   // In-app policy form. Replaces the seven-prompt chain plus four alerts.
@@ -267,8 +325,36 @@ export function Agents() {
 
   /** Open the in-app funding form. Nothing is validated or read yet — the
    *  form is input capture, exactly as the prompt was. */
+  /**
+   * Every action that puts `agent.bech32m` into signed calldata goes through
+   * here first. The registry is a plaintext file, so that address is a claim
+   * until this session has watched the agent's own vault derive it.
+   *
+   * Funding asks for the proof inline (it owns a form). These are one-click
+   * actions with nowhere to put a password field, so they refuse and point at
+   * the place that can take one. The proof is per-session, so a user who has
+   * funded once this session passes straight through.
+   */
+  const requireProvenAgent = (agent: AgentEntry): boolean => {
+    if (isAgentAddressProven(agent)) return true;
+    setPageError(
+      `Confirm ${agent.label} first: open Fund and enter the agent vault password. ` +
+        "Until this wallet has re-derived the agent's address from its own vault, " +
+        "the address in this device's agent list is unverified.",
+    );
+    return false;
+  };
+
   const openFund = (agent: AgentEntry) => {
-    setFund({ agent, amount: FUND_DEFAULT_AMOUNT, error: null, unverified: null, busy: false });
+    setFund({
+      agent,
+      amount: FUND_DEFAULT_AMOUNT,
+      error: null,
+      unverified: null,
+      busy: false,
+      agentPassword: "",
+      tampered: false,
+    });
   };
 
   /**
@@ -291,33 +377,98 @@ export function Agents() {
     }
     const { amountLyth, amountLythoshi } = verdict;
 
+    // SA-08-002. `agent.bech32m` comes from a plaintext store and becomes the
+    // transaction `to`. The only check on the way was `requireTypedUserAddressHex`,
+    // which asks whether the string is an address — not whether it is the user's.
+    // A valid attacker address passes it.
+    //
+    // The agent is a fresh keypair in its own keychain slot, so the principal's
+    // seed cannot reproduce it; the agent's own vault can. Prove ownership by
+    // re-deriving from the slot and comparing, exactly once per session, before
+    // any drawer opens. A mismatch is terminal — it means the record on disk is
+    // not describing this vault.
+    if (!isAgentAddressProven(agent)) {
+      if (fund.agentPassword.length === 0) {
+        setFund({
+          ...fund,
+          busy: false,
+          error: "Enter the agent vault password to confirm this is your agent.",
+          unverified: null,
+        });
+        return;
+      }
+      setFund({ ...fund, busy: true, error: null, unverified: null });
+      const proof = await proveAgentAddress(agent, fund.agentPassword);
+      if (proof.kind === "mismatch") {
+        setFund({
+          ...fund,
+          busy: false,
+          agentPassword: "",
+          tampered: true,
+          error: AGENT_MISMATCH_MESSAGE,
+          unverified: null,
+        });
+        return;
+      }
+      if (proof.kind !== "proved") {
+        setFund({
+          ...fund,
+          busy: false,
+          error:
+            proof.kind === "wrong-password"
+              ? "Wrong agent vault password."
+              : proof.message,
+          unverified: null,
+        });
+        return;
+      }
+      // Proved. Drop the password with a FUNCTIONAL update: every branch above
+      // spreads the captured `fund`, and so does the balance check below, so a
+      // plain object here was immediately overwritten by the next stale spread
+      // and the typed agent-vault password stayed in component state — with its
+      // input no longer rendered, because the proof had landed.
+      setFund((prev) =>
+        prev === null ? null : { ...prev, busy: false, agentPassword: "", error: null },
+      );
+    }
+
     // Sufficiency check BEFORE opening the drawer: read the principal's live
     // native balance and refuse to open an execute that the chain would reject
     // for insufficient funds. A balance-read failure (RPC offline) only warns
     // — we don't block the user from trying, since the drawer surfaces the
     // real on-chain error verbatim either way.
     if (principalBech32m && !acceptUnverified) {
-      setFund({ ...fund, busy: true, error: null, unverified: null });
+      setFund((prev) =>
+        prev === null ? null : { ...prev, busy: true, error: null, unverified: null },
+      );
       try {
         const bal = await loadLiveWalletBalance(principalBech32m);
         const have = BigInt(bal.balanceLythoshi);
         if (have < amountLythoshi) {
-          setFund({
-            ...fund,
-            busy: false,
-            error: insufficientBalanceMessage(bal.balanceLyth, amountLyth),
-            unverified: null,
-          });
+          setFund((prev) =>
+            prev === null
+              ? null
+              : {
+                  ...prev,
+                  busy: false,
+                  error: insufficientBalanceMessage(bal.balanceLyth, amountLyth),
+                  unverified: null,
+                },
+          );
           return;
         }
       } catch (cause) {
         // Ask, don't refuse — and require a deliberate second action.
-        setFund({
-          ...fund,
-          busy: false,
-          error: null,
-          unverified: balanceCheckFailedMessage(errorMessage(cause)),
-        });
+        setFund((prev) =>
+          prev === null
+            ? null
+            : {
+                ...prev,
+                busy: false,
+                error: null,
+                unverified: balanceCheckFailedMessage(errorMessage(cause)),
+              },
+        );
         return;
       }
     }
@@ -327,6 +478,13 @@ export function Agents() {
       title: `Fund ${agent.label}`,
       subtitle: `Transfer ${amountLyth} LYTH to the agent sub-account`,
       auth: "keychain",
+      // A plain native transfer: the signed `to` is the agent, and the agent is
+      // what the user picked. Proved this session before the drawer opened.
+      commitment: {
+        subject: `${agent.label} · ${agent.bech32m}`,
+        amount: `${amountLyth} LYTH`,
+      },
+      feePlan: FUND_FEE_PLAN,
       diff: [
         { k: "From (principal)", v: principalBech32m ?? "active wallet" },
         { k: "To (agent)", v: agent.bech32m },
@@ -345,6 +503,7 @@ export function Agents() {
           seed: ctx.vaultSeed,
           toBech32m: agent.bech32m,
           amountLyth,
+          resolvedFee: ctx.resolvedFee,
         });
         return {
           headline: `Funded ${agent.label} with ${amountLyth} LYTH`,
@@ -364,6 +523,15 @@ export function Agents() {
   const openRegister = (agent: AgentEntry) => {
     if (!principalBech32m) {
       setPageError(NO_PRINCIPAL_MESSAGE);
+      return;
+    }
+    // The UPDATE branch never unlocks the agent vault — the principal alone
+    // signs `setPolicy`, so there is no later moment at which ownership could be
+    // proved. And the branch is chosen by a chain read keyed on the address the
+    // record claims, which an attacker can make "existing" by registering any
+    // policy on their own address. So the proof is required before the form
+    // opens; the register branch proves again at execute, where it has the key.
+    if (policies.get(agent.slot)?.exists === true && !requireProvenAgent(agent)) {
       return;
     }
     setPageError(null);
@@ -434,6 +602,14 @@ export function Agents() {
         ? "Amend the agent's §18.8 spending policy (setPolicy, no-claim)"
         : "Bind a §18.8 spending policy to the agent (setPolicyClaim)",
       auth: "keychain",
+      // Nobody is paid: the signed `to` is a precompile the user did not choose
+      // and the signed `value` is 0. So the subject states what is being
+      // authorised — which is the thing that could be wrong here.
+      commitment: {
+        subject: `${isUpdate ? "Update" : "Register"} spending policy · ${agent.label}`,
+        amount: null,
+      },
+      feePlan: POLICY_CLAIM_FEE_PLAN,
       diff: [
         { k: "Principal", v: principal },
         { k: "Agent", v: agent.bech32m },
@@ -456,8 +632,8 @@ export function Agents() {
               ? expiryUnixToIso(fields.policyExpiryUnixSeconds)
               : "never",
         },
-        { k: "Precompile", v: PRECOMPILE_LABEL },
       ],
+      details: POLICY_DETAILS,
       effects: [
         { text: "Unlocks the principal vault for this operation only." },
         isUpdate
@@ -488,11 +664,34 @@ export function Agents() {
         if (!ctx?.vaultSeed) {
           throw new Error("vault seed unavailable after keychain authorization");
         }
+        // SA-08-014. `args.principal` is a SIGNED term and it came from the
+        // vault catalog — plaintext, caller-writable, validated only for
+        // object-ness. Unlike the agent address there is no derivation problem
+        // here: this operation has just unlocked the principal vault, so the
+        // seed that is about to sign is in hand, and the term it commits to can
+        // be checked against what that seed actually derives. Both branches run
+        // it, because the update branch takes no agent key and would otherwise
+        // have no ownership check at all.
+        assertPrincipalMatchesSeed(ctx.vaultSeed, args.principal);
         let calldata: string;
         if (isUpdate) {
           // No-claim update: the principal amends its own existing policy.
           calldata = buildSetPolicyCalldata(args);
         } else {
+          // Ownership first. This path already unlocks the agent vault below,
+          // and `signClaimAsSubAccount` takes its public key and signature
+          // without ever asking what ADDRESS it derives — so the material for
+          // the check was in hand and thrown away. Proving here means the agent
+          // key cannot be made to sign a claim naming an address it does not own.
+          const proof = await proveAgentAddress(agent, agentPassword);
+          if (proof.kind === "mismatch") throw new Error(AGENT_MISMATCH_MESSAGE);
+          if (proof.kind !== "proved") {
+            throw new Error(
+              proof.kind === "wrong-password"
+                ? "Wrong agent vault password."
+                : proof.message,
+            );
+          }
           // Two-key dance: unlock the AGENT vault transiently to produce its
           // pubkey + signature over the claim-bound message. The principal
           // seed (ctx.vaultSeed) signs + submits the outer tx.
@@ -503,6 +702,7 @@ export function Agents() {
         const r = await submitSpendingPolicyTx({
           seed: ctx.vaultSeed,
           data: calldata,
+          resolvedFee: ctx.resolvedFee,
         });
         return {
           headline: isUpdate
@@ -517,15 +717,18 @@ export function Agents() {
   // Re-enable a previously-disabled policy (selector 0x5bfa1b68). Cheap toggle
   // — no claim payload, principal signs + submits. Mirrors the revoke path.
   const openEnable = (agent: AgentEntry) => {
+    if (!requireProvenAgent(agent)) return;
     ops.open({
       title: `Enable policy · ${agent.label}`,
       subtitle: "Re-enable the agent's disabled spending policy",
       auth: "keychain",
+      commitment: { subject: `Enable spending policy · ${agent.label}`, amount: null },
+      feePlan: POLICY_TOGGLE_FEE_PLAN,
       diff: [
         { k: "Agent", v: agent.bech32m },
         { k: "Action", v: "enable" },
-        { k: "Precompile", v: PRECOMPILE_LABEL },
       ],
+      details: POLICY_DETAILS,
       effects: [
         { text: "Unlocks the principal vault for this operation only." },
         { text: "Encodes enable(subAccount) via @monolythium/core-sdk; the retained policy slot becomes spendable again under its existing caps." },
@@ -543,6 +746,7 @@ export function Agents() {
           seed: ctx.vaultSeed,
           data: calldata,
           executionUnitLimit: POLICY_TOGGLE_LIMIT,
+          resolvedFee: ctx.resolvedFee,
         });
         return {
           headline: `Policy enabled for ${agent.label}`,
@@ -553,15 +757,25 @@ export function Agents() {
   };
 
   const openRevoke = (agent: AgentEntry) => {
+    // Revoking a substituted address is a NO-OP the user reads as success: the
+    // drawer reports "Policy revoked", and the real agent's allowance stays
+    // live. That is worse than refusing, so this is gated like the rest — the
+    // proof is per-session and reachable from Fund, so it strands nobody.
+    if (!requireProvenAgent(agent)) return;
     ops.open({
       title: `Revoke policy · ${agent.label}`,
       subtitle: "Disable the agent's spending policy (no spend authorised)",
       auth: "keychain",
+      commitment: { subject: `Revoke spending policy · ${agent.label}`, amount: null },
+      // ⚠ A PROTECTIVE OPERATION under a fail-closed fee gate. See §3 of the R10
+      // report: an operator that refuses to quote can stop a user withdrawing an
+      // authority. The safe direction is implemented; the trade is recorded.
+      feePlan: POLICY_TOGGLE_FEE_PLAN,
       diff: [
         { k: "Agent", v: agent.bech32m },
         { k: "Action", v: "disable" },
-        { k: "Precompile", v: PRECOMPILE_LABEL },
       ],
+      details: POLICY_DETAILS,
       effects: [
         { text: "Unlocks the principal vault for this operation only." },
         { text: "Encodes disable(subAccount) via @monolythium/core-sdk; the policy slot is retained but inert until re-enabled." },
@@ -579,6 +793,7 @@ export function Agents() {
           seed: ctx.vaultSeed,
           data: calldata,
           executionUnitLimit: POLICY_TOGGLE_LIMIT,
+          resolvedFee: ctx.resolvedFee,
         });
         return {
           headline: `Policy revoked for ${agent.label}`,
@@ -972,8 +1187,33 @@ export function Agents() {
               style={{ ...inputStyle, width: "100%", marginTop: 6 }}
             />
 
+            {/* Ownership proof. Shown only while the agent's address is still
+                unproved this session — right after creating an agent it is
+                already proved, so the ordinary path never sees this field. */}
+            {!isAgentAddressProven(fund.agent) && !fund.tampered ? (
+              <label style={{ display: "block", marginTop: 10 }}>
+                <span className="row-help">
+                  Agent vault password — confirms this address belongs to a vault
+                  you hold, rather than to whatever is written in this device's
+                  agent list
+                </span>
+                <PasswordInput
+                  autoComplete="current-password"
+                  ariaLabel="Agent vault password"
+                  value={fund.agentPassword}
+                  onChange={(v) =>
+                    setFund({ ...fund, agentPassword: v, error: null })
+                  }
+                />
+              </label>
+            ) : null}
+
             {fund.error ? (
-              <div className="row-help" style={{ color: "var(--err)", marginTop: 8 }}>
+              <div
+                className={fund.tampered ? "w-banner error" : "row-help"}
+                data-testid={fund.tampered ? "fund-tampered" : "fund-error"}
+                style={fund.tampered ? { marginTop: 8 } : { color: "var(--err)", marginTop: 8 }}
+              >
                 {fund.error}
               </div>
             ) : null}
@@ -993,17 +1233,22 @@ export function Agents() {
               >
                 Cancel
               </button>
+              {/* A tampered record has no "continue anyway". The balance-read
+                  failure above is an absence of evidence and earns a second
+                  deliberate click; this is evidence of the wrong kind. */}
               <button
                 type="button"
                 className="btn btn--sm btn--primary"
-                disabled={fund.busy}
+                disabled={fund.busy || fund.tampered}
                 onClick={() => void submitFund(fund.unverified !== null)}
               >
                 {fund.busy
-                  ? "Checking balance…"
-                  : fund.unverified !== null
-                    ? "Continue anyway"
-                    : "Review transfer"}
+                  ? "Checking…"
+                  : fund.tampered
+                    ? "Blocked"
+                    : fund.unverified !== null
+                      ? "Continue anyway"
+                      : "Review transfer"}
               </button>
             </div>
           </div>

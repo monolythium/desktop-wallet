@@ -1,6 +1,6 @@
 // Tauri-store-backed confirmed-row cache.
 //
-// A `@tauri-apps/plugin-store`-backed store (its own `activity.v1.json` file)
+// A wallet-store-backed store (its own `activity` store, resolved in Rust)
 // holding a per-(address, chain) map of confirmed-row cache entries, reusing the
 // singleton-store + in-memory-cache pattern of `notifications-store.ts`. The
 // root is additionally bound to the live block-0 hash: chain id stays 69420
@@ -11,7 +11,7 @@
 // live fetch. Best-effort — every store failure is swallowed so a cache hiccup
 // can never break the feed.
 
-import { Store } from "@tauri-apps/plugin-store";
+import { WalletStore } from "./wallet-store";
 import type { LiveAddressActivityRow } from "./live";
 import {
   ACTIVITY_ROLLING_WINDOW,
@@ -22,7 +22,7 @@ import {
 } from "./activity-cache";
 import { requireLiveGenesisIdentity } from "./chain-identity";
 
-export const STORE_FILE = "activity.v1.json";
+export const STORE_ID = "activity";
 const STATE_KEY = "state";
 
 /** On-disk root. `confirmed` maps each `activityCacheKey` to its cache entry.
@@ -33,12 +33,12 @@ interface ActivityCacheState {
   confirmed: Record<string, unknown>;
 }
 
-let storePromise: Promise<Store> | null = null;
+let storePromise: Promise<WalletStore> | null = null;
 let cache: ActivityCacheState | null = null;
 
-async function getStore(): Promise<Store> {
+async function getStore(): Promise<WalletStore> {
   if (!storePromise) {
-    storePromise = Store.load(STORE_FILE);
+    storePromise = WalletStore.load(STORE_ID);
   }
   return storePromise;
 }

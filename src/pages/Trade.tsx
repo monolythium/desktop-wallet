@@ -12,15 +12,42 @@ import type {
 } from "@monolythium/core-sdk";
 import { findOrderBookStreamTopic, marketListingKnowledge } from "../sdk/market";
 import { formatOutcome, loadLiveTradeStatus, type LiveTradeStatus } from "../sdk/live";
-import { cancelClobOrder, placeClobLimitOrder } from "../sdk/clob-trade";
+import {
+  CLOB_CANCEL_LIMIT,
+  SPOT_LIMIT_ORDER_LIMIT,
+  cancelClobOrder,
+  placeClobLimitOrder,
+} from "../sdk/clob-trade";
+import type { OperationFeePlan } from "../sdk/fee-quote";
 import {
   SPOT_DEFAULT_DECIMALS,
+  atomsToDecimal,
   atomPriceToHuman,
   humanPriceToAtoms,
   humanQuantityToAtoms,
   notionalQuoteAtoms,
 } from "../sdk/clob-units";
+import { PRECOMPILE_ADDRESSES } from "@monolythium/core-sdk";
 import { useOperations } from "../operations/context";
+
+/**
+ * The signed `to` for both CLOB writes, DERIVED from the same constant
+ * `clob-trade.ts` passes. Neither surface carried a target row of any kind —
+ * the address appeared only inside prose in the effects list, where it is not
+ * a value anything can check.
+ */
+const CLOB_DETAILS = [{ k: "Precompile (signed `to`)", v: PRECOMPILE_ADDRESSES.CLOB }];
+
+/** The two order writes price at different limits — a place may cross, escrow
+ *  and fill; a cancel refunds. Named from the seam's own constants. */
+const PLACE_FEE_PLAN: OperationFeePlan = {
+  feeClass: "transfer",
+  executionUnitLimit: SPOT_LIMIT_ORDER_LIMIT,
+};
+const CANCEL_FEE_PLAN: OperationFeePlan = {
+  feeClass: "transfer",
+  executionUnitLimit: CLOB_CANCEL_LIMIT,
+};
 
 export function Trade() {
   const [status, setStatus] = useState<LiveTradeStatus | null>(null);
@@ -324,6 +351,17 @@ function PlaceLimitOrderCard({
       title: `${side === "buy" ? "Buy" : "Sell"} ${qtyStr} @ ${priceStr}`,
       subtitle: "Native CLOB placeLimitOrder · canonical RPC gateway",
       auth: "keychain",
+      // The native transaction signs value = 0, but placing an order can move
+      // tokens into escrow or exchange them in an immediate fill. The password
+      // screen must describe that spend, rather than say no funds leave.
+      commitment: {
+        subject: `${side === "buy" ? "BUY" : "SELL"} ${qtyStr} base @ ${priceStr} quote/base`,
+        amount: side === "buy"
+          ? `Up to ${atomsToDecimal(notionalAtoms!, quoteDecimals)} quote tokens (fill or escrow)`
+          : `Up to ${atomsToDecimal(quantityAtoms, baseDecimals)} base tokens (fill or escrow)`,
+      },
+      feePlan: PLACE_FEE_PLAN,
+      details: CLOB_DETAILS,
       diff: [
         { k: "Side", v: side === "buy" ? "BUY" : "SELL" },
         { k: "Limit price", v: `${priceStr} quote / base` },
@@ -353,6 +391,7 @@ function PlaceLimitOrderCard({
           price: priceAtoms.toString(),
           quantity: quantityAtoms.toString(),
           expiresAtBlock: resolvedExpiry,
+          resolvedFee: ctx.resolvedFee,
         });
         return {
           headline: `Submitted ${side} @ ${priceStr}`,
@@ -503,6 +542,11 @@ function CancelOrderCard() {
       title: `Cancel order ${trimmed.slice(0, 18)}…`,
       subtitle: "Native CLOB cancelOrder · canonical RPC gateway",
       auth: "keychain",
+      commitment: { subject: `Cancel order ${trimmed}`, amount: null },
+      // ⚠ A PROTECTIVE OPERATION under a fail-closed fee gate — see §3 of the
+      // R10 report. Cancelling withdraws resting size from the book.
+      feePlan: CANCEL_FEE_PLAN,
+      details: CLOB_DETAILS,
       diff: [{ k: "Order id", v: trimmed }],
       effects: [
         { text: "Unlocks the local vault for this operation only." },
@@ -514,7 +558,11 @@ function CancelOrderCard() {
         if (!ctx?.vaultSeed) {
           throw new Error("vault seed unavailable after keychain authorization");
         }
-        const result = await cancelClobOrder({ seed: ctx.vaultSeed, orderIdHex: trimmed });
+        const result = await cancelClobOrder({
+          seed: ctx.vaultSeed,
+          orderIdHex: trimmed,
+          resolvedFee: ctx.resolvedFee,
+        });
         return {
           headline: `Submitted cancelOrder`,
           detail: `${result.txHash} · from ${result.from} · ${result.calldataBytes}B calldata`,

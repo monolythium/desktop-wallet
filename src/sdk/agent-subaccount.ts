@@ -17,12 +17,12 @@
 // the claim signature). Both paths zeroize the seed after use.
 
 import { addressToTypedBech32 } from "@monolythium/core-sdk";
-import { MlDsa65Backend } from "@monolythium/core-sdk/crypto";
+import { withSigningBackend } from "./signing-backend";
 import { createAndStoreVault } from "./keychain";
 import { mintVaultSlot } from "./vaultCatalog";
 import { sendNativeLyth } from "./native-send";
 import { composePolicyClaimMessage } from "./spending-policy";
-import type { SpendingPolicyArgs } from "@monolythium/core-sdk";
+import type { ResolvedExecutionFee, SpendingPolicyArgs } from "@monolythium/core-sdk";
 
 export interface CreateAgentSubAccountResult {
   /** Keychain slot the fresh agent vault lives under. */
@@ -62,6 +62,9 @@ export interface FundAgentSubAccountArgs {
   toBech32m: string;
   /** Whole-or-decimal LYTH amount to transfer. */
   amountLyth: string;
+  /** The fee the confirm surface RENDERED, signed verbatim (`shown == signed`).
+   *  Absent ⇒ `submitNativeTx` resolves its own, which is a second read. */
+  resolvedFee?: ResolvedExecutionFee;
 }
 
 /**
@@ -74,6 +77,7 @@ export async function fundAgentSubAccount(args: FundAgentSubAccountArgs) {
     seed: args.seed,
     to: args.toBech32m,
     amountLyth: args.amountLyth,
+    ...(args.resolvedFee === undefined ? {} : { resolvedFee: args.resolvedFee }),
   });
 }
 
@@ -98,11 +102,14 @@ export function signClaimAsSubAccount(
   args: SpendingPolicyArgs,
 ): SubAccountClaimSignature {
   try {
-    const backend = MlDsa65Backend.fromSeed(subAccountSeed);
-    const pubkey = backend.publicKey();
-    const message = composePolicyClaimMessage(args);
-    const sig = backend.sign(message);
-    return { pubkey, sig };
+    // The derived key is disposed as soon as the signature is produced —
+    // inside the helper's `finally`, so a throwing `sign()` wipes it too.
+    return withSigningBackend(subAccountSeed, (backend) => {
+      const pubkey = backend.publicKey();
+      const message = composePolicyClaimMessage(args);
+      const sig = backend.sign(message);
+      return { pubkey, sig };
+    });
   } finally {
     subAccountSeed.fill(0);
   }

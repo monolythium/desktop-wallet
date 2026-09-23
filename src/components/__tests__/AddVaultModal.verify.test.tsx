@@ -20,7 +20,10 @@ vi.mock("@monolythium/core-sdk/crypto", async (orig) => {
     ...actual,
     generateMnemonic: () => KNOWN,
     mnemonicToMlDsa65Seed: () => new Uint8Array(32),
-    MlDsa65Backend: { fromSeed: () => ({}) },
+    // The sanity check now runs through `withSigningBackend`, which disposes in
+    // a `finally` — the fake needs the method or the helper throws on the way
+    // out. A fake without it would also hide a real missing disposal.
+    MlDsa65Backend: { fromSeed: () => ({ dispose: () => {} }) },
   };
 });
 

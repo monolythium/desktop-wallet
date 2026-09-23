@@ -51,6 +51,21 @@ jobs:
       - name: Check version consistency
         run: node scripts/check-versions.mjs
 
+      # The SDK anchor runs BEFORE the build and on its own, deliberately.
+      #
+      # Every other tripwire for the SDK's constants runs under vitest, and
+      # vitest loads vite.config.ts, which imports the SDK at config-evaluation
+      # time — so those assertions run in a process the package under suspicion
+      # has already executed code in. This step is a bare `node` invocation that
+      # reads the installed bundle as TEXT and never imports it, so it inherits
+      # neither the test runner's environment nor the SDK's.
+      #
+      # Placed before `pnpm build` for the same reason: `vite build` also
+      # evaluates that config. Its position in this file is part of what it
+      # asserts.
+      - name: Verify the SDK anchor (no SDK code executed)
+        run: node scripts/verify-sdk-anchor.mjs
+
       # `pnpm build` is `tsc --noEmit && vite build` — typecheck + build in one,
       # and it produces ../dist which the Rust build script embeds, so it must
       # run before the cargo steps below.
@@ -63,13 +78,19 @@ jobs:
 
       # cargo check, NOT a full `tauri build` — bundling + signing belong to the
       # release pipeline; the PR gate stays fast and needs no signing secrets.
+      #
+      # `--locked` is the enforcing half of the exact pins in Cargo.toml: it
+      # refuses to build if Cargo.lock would have to change, so a dependency
+      # cannot resolve to anything the committed lockfile does not already
+      # record. Pins without `--locked` leave drift unenforced; `--locked`
+      # without pins leaves the manifest permissive. Neither half works alone.
       - name: Rust check
         working-directory: src-tauri
-        run: cargo check
+        run: cargo check --locked
 
       - name: Rust tests
         working-directory: src-tauri
-        run: cargo test
+        run: cargo test --locked
 
   audit:
     runs-on: ubuntu-latest
@@ -131,6 +152,13 @@ jobs:
       # outstanding Rust advisory". The alert list is a separate read:
       # `gh api repos/<owner>/<repo>/dependabot/alerts?state=open`. Treating
       # green here as the whole answer is what left an alert unexamined.
+      # No `--locked` here, deliberately: cargo-audit is a standalone binary and
+      # does not accept that flag (`cargo audit --help` lists no `--locked`), so
+      # adding it to "complete the set" would fail this job. It needs no such
+      # flag either — it READS Cargo.lock as its input rather than resolving a
+      # dependency graph, so there is nothing for it to drift against. The
+      # `--locked` on `cargo install cargo-audit` above pins the TOOL, not this
+      # project.
       - name: cargo audit (fail on vulnerabilities)
         working-directory: src-tauri
         run: cargo audit --ignore RUSTSEC-2024-0429

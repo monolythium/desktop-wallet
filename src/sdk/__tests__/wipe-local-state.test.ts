@@ -17,10 +17,10 @@ const clear = vi.hoisted(() => vi.fn(async () => {}));
 const save = vi.hoisted(() => vi.fn(async () => {}));
 const load = vi.hoisted(() => vi.fn(async (_file: string) => ({ clear, save })));
 
-vi.mock("@tauri-apps/plugin-store", () => ({ Store: { load } }));
+vi.mock("../wallet-store", () => ({ WalletStore: { load } }));
 
 import {
-  STORE_FILES,
+  STORE_IDS,
   WIPE_EXCEPT_KEYS,
   walletKeysToWipe,
   wipeAllLocalWalletState,
@@ -34,45 +34,52 @@ beforeEach(() => {
 });
 
 describe("W1 — every store is registered", () => {
-  it("names all ten store files", () => {
-    expect(STORE_FILES).toHaveLength(10);
+  // The list now holds store IDENTIFIERS rather than file names: the frontend
+  // no longer names a path, and Rust owns the identifier-to-file mapping (a
+  // Rust test pins that each identifier still resolves to the file already on
+  // disk). What this file guards is unchanged — a store absent from the list
+  // survives a reset — so every assertion below is the same assertion against
+  // the new vocabulary.
+  it("names all ten stores", () => {
+    expect(STORE_IDS).toHaveLength(10);
   });
 
   it("includes the five a literal reading of the spec would have missed", () => {
     // Each holds something a user would not want left behind.
-    expect(STORE_FILES).toContain("sent-recipients.v1.json"); // who was paid
-    expect(STORE_FILES).toContain("names.v1.json"); // counterparty identities
-    expect(STORE_FILES).toContain("pending-tx.v1.json"); // transaction history
-    expect(STORE_FILES).toContain("balance.v1.json"); // last-known balances
-    expect(STORE_FILES).toContain("agents.v1.json"); // agent sub-vaults
+    expect(STORE_IDS).toContain("sent-recipients"); // who was paid
+    expect(STORE_IDS).toContain("names"); // counterparty identities
+    expect(STORE_IDS).toContain("pending-tx"); // transaction history
+    expect(STORE_IDS).toContain("balance"); // last-known balances
+    expect(STORE_IDS).toContain("agents"); // agent sub-vaults
   });
 
   it("includes the four the spec did name", () => {
-    expect(STORE_FILES).toContain("addressbook.v1.json");
-    expect(STORE_FILES).toContain("notifications.v1.json");
-    expect(STORE_FILES).toContain("activity.v1.json");
-    expect(STORE_FILES).toContain("chain-health.v1.json");
+    expect(STORE_IDS).toContain("addressbook");
+    expect(STORE_IDS).toContain("notifications");
+    expect(STORE_IDS).toContain("activity");
+    expect(STORE_IDS).toContain("chain-health");
   });
 
   it("includes the vault catalog", () => {
-    expect(STORE_FILES).toContain("vaults.v1.json");
+    expect(STORE_IDS).toContain("vaults");
   });
 
-  it("registers each file exactly once", () => {
-    expect(new Set(STORE_FILES).size).toBe(STORE_FILES.length);
+  it("registers each store exactly once", () => {
+    expect(new Set(STORE_IDS).size).toBe(STORE_IDS.length);
   });
 
   it("clears every registered store", async () => {
     const out = await wipeAllLocalWalletState();
-    expect(load).toHaveBeenCalledTimes(STORE_FILES.length);
-    for (const file of STORE_FILES) {
-      expect(load).toHaveBeenCalledWith(file);
+    expect(load).toHaveBeenCalledTimes(STORE_IDS.length);
+    for (const id of STORE_IDS) {
+      expect(load).toHaveBeenCalledWith(id);
     }
-    expect(clear).toHaveBeenCalledTimes(STORE_FILES.length);
-    expect(save).toHaveBeenCalledTimes(STORE_FILES.length);
-    expect(out.storesCleared).toBe(STORE_FILES.length);
+    expect(clear).toHaveBeenCalledTimes(STORE_IDS.length);
+    expect(save).toHaveBeenCalledTimes(STORE_IDS.length);
+    expect(out.storesCleared).toBe(STORE_IDS.length);
     expect(out.storesFailed).toEqual([]);
   });
+
 });
 
 describe("the localStorage sweep", () => {
@@ -168,7 +175,7 @@ describe("the localStorage sweep", () => {
 
 describe("G4 — one failing store does not stop the rest", () => {
   it("keeps clearing after a store throws on load", async () => {
-    const failing = STORE_FILES[3]!;
+    const failing = STORE_IDS[3]!;
     load.mockImplementation(async (file: string) => {
       if (file === failing) throw new Error("store unavailable");
       return { clear, save };
@@ -177,13 +184,13 @@ describe("G4 — one failing store does not stop the rest", () => {
     const out = await wipeAllLocalWalletState();
 
     expect(out.storesFailed).toEqual([failing]);
-    expect(out.storesCleared).toBe(STORE_FILES.length - 1);
+    expect(out.storesCleared).toBe(STORE_IDS.length - 1);
     // Every other store was still attempted.
-    expect(load).toHaveBeenCalledTimes(STORE_FILES.length);
+    expect(load).toHaveBeenCalledTimes(STORE_IDS.length);
   });
 
   it("keeps going when a store throws on clear", async () => {
-    const failing = STORE_FILES[0]!;
+    const failing = STORE_IDS[0]!;
     load.mockImplementation(async (file: string) => ({
       clear:
         file === failing
@@ -196,13 +203,13 @@ describe("G4 — one failing store does not stop the rest", () => {
 
     const out = await wipeAllLocalWalletState();
     expect(out.storesFailed).toEqual([failing]);
-    expect(out.storesCleared).toBe(STORE_FILES.length - 1);
+    expect(out.storesCleared).toBe(STORE_IDS.length - 1);
   });
 
   it("still sweeps localStorage after a store failure", async () => {
     // The failure must not cost the second half of the wipe.
     load.mockImplementation(async (file: string) => {
-      if (file === STORE_FILES[0]) throw new Error("nope");
+      if (file === STORE_IDS[0]) throw new Error("nope");
       return { clear, save };
     });
     localStorage.setItem("wallet.route", "home");
@@ -218,7 +225,7 @@ describe("G4 — one failing store does not stop the rest", () => {
     });
     await expect(wipeAllLocalWalletState()).resolves.toEqual({
       storesCleared: 0,
-      storesFailed: [...STORE_FILES],
+      storesFailed: [...STORE_IDS],
       keysRemoved: 0,
     });
   });

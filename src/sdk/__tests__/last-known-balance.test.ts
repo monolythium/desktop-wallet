@@ -10,8 +10,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const backing = vi.hoisted(() => ({ data: new Map<string, unknown>(), failSave: false }));
-vi.mock("@tauri-apps/plugin-store", () => ({
-  Store: {
+vi.mock("../wallet-store", () => ({
+  WalletStore: {
     load: vi.fn(async () => ({
       get: vi.fn(async (k: string) => backing.data.get(k)),
       set: vi.fn(async (k: string, v: unknown) => {

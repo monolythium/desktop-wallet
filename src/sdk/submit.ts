@@ -28,6 +28,7 @@ import {
 } from "@monolythium/core-sdk";
 import type { ResolvedExecutionFee } from "@monolythium/core-sdk";
 import { postClampResolvedFee } from "./fee-model";
+import { withSigningBackendAsync } from "./signing-backend";
 import {
   MlDsa65Backend,
   buildPlaintextSubmission,
@@ -119,7 +120,20 @@ export interface SubmitNativeTxResult {
 export async function submitNativeTx(
   args: SubmitNativeTxArgs,
 ): Promise<SubmitNativeTxResult> {
-  const backend = MlDsa65Backend.fromSeed(args.seed);
+  // The derived signing key lives exactly as long as this submission and no
+  // longer. The body is delegated rather than wrapped inline so the submission
+  // logic keeps its shape: the last use of the key is the `sign` inside
+  // `buildPlaintextSubmission`, and the helper's `finally` also covers the
+  // rejection path below, which throws rather than returning.
+  return withSigningBackendAsync(args.seed, (backend) =>
+    submitNativeTxWithBackend(args, backend),
+  );
+}
+
+async function submitNativeTxWithBackend(
+  args: SubmitNativeTxArgs,
+  backend: MlDsa65Backend,
+): Promise<SubmitNativeTxResult> {
   // A fresh transport bound to the shared provider endpoint, matching the
   // prior per-seam behaviour (the SDK client is request-scoped, not pooled).
   // Fail-closed: `getProvider` throws when the active operator is untrusted, so

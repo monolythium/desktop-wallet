@@ -939,6 +939,41 @@ html[data-sidebar="collapsed"]:not([data-layout="topbar"]) .w-nav__item {
 }
 .w-tx__info .eyebrow .sep::before { content: "·"; }
 .w-tx__info .label { font-size: 13px; font-weight: 500; margin-top: 2px; }
+/* The address a label annotates. Full and VISIBLY full — a truncated address is
+   what a lookalike is ground to match, so every character has to survive to the
+   screen. `nowrap` + `overflow:hidden` would have clipped the tail silently in a
+   narrow row, which is strictly worse than an ellipsis: at least an ellipsis
+   admits that something was removed. It wraps instead. */
+.w-tx__addr {
+  font-family: var(--f-mono);
+  font-size: 10.5px;
+  letter-spacing: -0.02em;
+  color: var(--fg-400);
+  margin-top: 2px;
+  overflow-wrap: anywhere;
+  word-break: break-all;
+}
+/* An address this process has not derived. Deliberately quiet — it is a
+   statement about what the wallet knows, not an alarm about what it found. */
+.w-top__user__addr__unverified {
+  margin-left: 6px;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--warn);
+}
+/* Chain-verified marker. Only a quorum-resolved registered name reaches this. */
+.w-tx__chip {
+  margin-left: 6px;
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 1px 5px;
+  border-radius: 4px;
+  border: 1px solid rgba(var(--gold-glow), 0.5);
+  color: rgba(var(--gold-glow), 1);
+}
 .w-tx__right { text-align: right; }
 .w-tx__amt { font-size: 13px; }
 .w-tx__amt.in  { color: var(--ok); }

@@ -1,12 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// In-memory fake of @tauri-apps/plugin-store, shared by the notifications
-// store AND the tracked-tx store under test. JSON round-trip mirrors the real
+// In-memory fake of the wallet store seam, shared by the notifications
+// store AND the tracked-tx store under test. the JSON round-trip matches the real
 // plugin so the test stays honest about what survives a reload. (Same fake as
 // notifications-store.test.ts.)
 const backing = new Map<string, unknown>();
 
-vi.mock("@tauri-apps/plugin-store", () => {
+vi.mock("../wallet-store", () => {
   class FakeStore {
     constructor(private readonly file: string) {}
     static async load(file: string): Promise<FakeStore> {
@@ -23,7 +23,7 @@ vi.mock("@tauri-apps/plugin-store", () => {
       /* no-op */
     }
   }
-  return { Store: FakeStore };
+  return { WalletStore: FakeStore };
 });
 
 // Stub the OS-toast helper so we can assert the reconcile path fires it exactly
@@ -141,7 +141,7 @@ beforeEach(() => {
 });
 
 function seedActiveVault(): void {
-  backing.set("vaults.v1.json:state", {
+  backing.set("vaults:state", {
     version: 1,
     activeSlot: "kc:test",
     vaults: {

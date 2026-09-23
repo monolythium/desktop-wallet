@@ -69,6 +69,15 @@ function mockRpc(options: {
   const executionFee = options.executionFee ?? 25n;
   // The live chain's priority-tip floor is >= 1 gwei; it never returns 0.
   const priorityTip = options.priorityTip ?? 1_000_000_000n;
+  // `executionUnitPriceLythoshi` IS base + tip — that is what the field means
+  // (native-rpc.ts: "the summed per-unit price the max-fee default uses"), and a
+  // summed price BELOW the tip it contains cannot occur on a live node.
+  //
+  // This fixture used to answer the base for both fields, which made the summed
+  // price smaller than the tip. Nothing noticed while the tip was signed
+  // verbatim; the clamp reads them together (tip <= max price) and a shape the
+  // chain never produces immediately produced an answer the chain never would.
+  const summedPrice = executionFee + priorityTip;
 
   const fetchStub: typeof fetch = async (_url, init) => {
     if (typeof init?.body !== "string") {
@@ -94,7 +103,7 @@ function mockRpc(options: {
         break;
       case "lyth_executionUnitPrice":
         result = {
-          executionUnitPriceLythoshi: executionFee.toString(),
+          executionUnitPriceLythoshi: summedPrice.toString(),
           basePricePerExecutionUnitLythoshi: executionFee.toString(),
           priorityTipLythoshi: priorityTip.toString(),
           blockNumber: 1,
@@ -161,23 +170,24 @@ describe("MRV desktop-wallet SDK layer", () => {
       nonce: 7n,
       valueLythoshi: "1250000000000000000",
       executionUnitLimit: 100_000n,
-      maxExecutionFeeLythoshi: "25",
+      // base 25 + tip 1 gwei — the summed per-unit price the quote reports.
+      maxExecutionFeeLythoshi: "1000000025",
       // No explicit tip → SDK defaults to the 1 gwei mempool priority-tip floor
       // (fix #6/#7) so a no-tip deploy is admissible.
       priorityTipLythoshi: "1000000000",
     });
     expect(plan.feePreview).toEqual({
-      totalLythoshi: "25",
-      totalLyth: "0.000000000000000025",
+      totalLythoshi: "1000000025",
+      totalLyth: "0.000000001000000025",
       cyclesUsed: 100_000n,
       executionUnitLimit: 100_000n,
-      maxExecutionFeeLythoshi: "25",
+      maxExecutionFeeLythoshi: "1000000025",
       priorityTipLythoshi: "1000000000",
     });
     expect("tx" in plan).toBe(false);
     expect(appJson(plan)).not.toMatch(/\b(gas|gwei|wei)\b/i);
+    // No `eth_chainId` — see the call-plan test below.
     expect(calls.map((call) => call.method)).toEqual([
-      "eth_chainId",
       "lyth_getTransactionCount",
       "lyth_executionUnitPrice",
     ]);
@@ -207,8 +217,13 @@ describe("MRV desktop-wallet SDK layer", () => {
       input: [0x01, 0x02],
       valueLythoshi: "3",
       executionUnitLimit: 50_000n,
-      maxExecutionFeeLythoshi: "10",
-      priorityTipLythoshi: "1",
+      // A per-unit pair the chain would actually accept: the tip is at the
+      // mempool floor and the max price is above it. The previous 10/1 pair was
+      // two orders of magnitude below the floor — it exercised the address
+      // normalization this test is about, but only by carrying numbers no node
+      // would have returned and no mempool would have admitted.
+      maxExecutionFeeLythoshi: "2000000000",
+      priorityTipLythoshi: "1000000000",
     });
 
     expect(plan.kind).toBe("call");
@@ -216,22 +231,22 @@ describe("MRV desktop-wallet SDK layer", () => {
     expect(plan.request.contractAddress).toBe(plan.contractAddress);
     expect(plan.request.input).toBe("0x0102");
     expect(plan.valueLythoshi).toBe("3");
-    expect(plan.feePreview.totalLythoshi).toBe("10");
-    expect(plan.feePreview.totalLyth).toBe("0.00000000000000001");
+    expect(plan.feePreview.totalLythoshi).toBe("2000000000");
+    expect(plan.feePreview.totalLyth).toBe("0.000000002");
     expect(plan.nativeTx).toEqual({
       chainId: 69_420n,
       nonce: 11n,
       valueLythoshi: "3",
       executionUnitLimit: 50_000n,
-      maxExecutionFeeLythoshi: "10",
-      priorityTipLythoshi: "1",
+      maxExecutionFeeLythoshi: "2000000000",
+      priorityTipLythoshi: "1000000000",
     });
     expect("tx" in plan).toBe(false);
     expect(appJson(plan)).not.toMatch(/\b(gas|gwei|wei)\b/i);
-    expect(calls.map((call) => call.method)).toEqual([
-      "eth_chainId",
-      "lyth_getTransactionCount",
-    ]);
+    // No `eth_chainId`: the signed chain id is the pin the active operator was
+    // verified against, so this seam no longer asks the operator which chain it
+    // is on. Both fee fields were supplied, so no quote read either.
+    expect(calls.map((call) => call.method)).toEqual(["lyth_getTransactionCount"]);
   });
 
   it("rejects invalid artifact metadata before any RPC reads or signing", async () => {

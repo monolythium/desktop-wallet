@@ -1,4 +1,5 @@
 import type { ActivityDirection, ActivityKind } from "../sdk/activity-kind";
+import type { AddressLabel } from "../sdk/address-label";
 
 /** The coarse three-way category some call sites want. Derived from
  *  {@link ActivityKind} by `txBucketOf` — never classified independently. */
@@ -43,6 +44,15 @@ export interface Tx {
    *  directionless rather than being assumed outgoing. */
   direction: ActivityDirection;
   counterparty: string;
+  /** A delegation cluster's resolved name, when the row carries one. Travels on
+   *  the row rather than as a call-site prop because Home and TokenDetail render
+   *  `TxRow` with no label props, and a cluster row is exactly what they show.
+   *  It ANNOTATES {@link Tx.counterpartyAddress}; it never replaces it. */
+  clusterLabel?: AddressLabel;
+  /** The counterparty ADDRESS, when the row has one. Distinct from
+   *  {@link Tx.counterparty}, which is a display string that may be
+   *  `"Cluster #3"` or an em-dash. */
+  counterpartyAddress?: string | null;
   memo: string;
   /** The classified operation — the taxonomy value, from `activity-kind.ts`.
    *  This is what direction and the sign derive from. */

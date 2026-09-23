@@ -37,6 +37,7 @@ const FIAT_GLYPHS = /[$€£¥₹₩₺₫¢]/;
 function op(diff: OperationDescriptor["diff"]): OperationDescriptor {
   return {
     title: "Send 1 LYTH",
+    commitment: { subject: "mono1recipient", amount: "1 LYTH" },
     diff,
     effects: [],
     auth: "none",

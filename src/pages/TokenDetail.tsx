@@ -301,7 +301,10 @@ export function TokenDetail({ goto }: Props) {
         />
       ) : null}
       {receiveOpen && walletAddress ? (
-        <ReceiveModal address={walletAddress} onClose={() => setReceiveOpen(false)} />
+        <ReceiveModal
+          addressHex={wallet.status === "ready" ? wallet.addressHex : ""}
+          onClose={() => setReceiveOpen(false)}
+        />
       ) : null}
     </div>
   );

@@ -15,10 +15,10 @@
 // Contacts are labels for counterparties, not per-account data, so removing a
 // vault does NOT purge them.
 
-import { Store } from "@tauri-apps/plugin-store";
+import { WalletStore } from "./wallet-store";
 import { requireTypedUserAddress } from "./address";
 
-export const STORE_FILE = "addressbook.v1.json";
+export const STORE_ID = "addressbook";
 const STATE_KEY = "state";
 const BROWSER_KEY = "wallet.addressbook.v1";
 
@@ -65,15 +65,15 @@ interface AddressBookState {
 
 const EMPTY_STATE: AddressBookState = { version: 2, entries: {} };
 
-let storePromise: Promise<Store> | null = null;
+let storePromise: Promise<WalletStore> | null = null;
 let cache: AddressBookState | null = null;
 
 function isTauri(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
 
-async function getStore(): Promise<Store> {
-  if (!storePromise) storePromise = Store.load(STORE_FILE);
+async function getStore(): Promise<WalletStore> {
+  if (!storePromise) storePromise = WalletStore.load(STORE_ID);
   return storePromise;
 }
 

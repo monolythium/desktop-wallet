@@ -30,7 +30,9 @@ import {
   readLockoutState,
   recordWrongUnlockAttempt,
 } from "../sdk/unlock-lockout";
-import { MlDsa65Backend } from "@monolythium/core-sdk/crypto";
+import { withSigningBackend } from "../sdk/signing-backend";
+import { resolveOperationFee, type OperationFee } from "../sdk/fee-quote";
+import { markAddressDerived } from "../sdk/address-provenance";
 import {
   classifySendError,
   errorLinksOperators,
@@ -99,7 +101,36 @@ export function OperationsDrawer({ descriptor, onClose, onNavigate }: Props) {
   const [password, setPassword] = useState("");
   const [lockoutUntil, setLockoutUntil] = useState(0);
   const [now, setNow] = useState(() => Date.now());
+  // The ONE fee read for this operation. Resolved at preview, rendered from the
+  // same object, and handed to `execute` — so the number shown and the number
+  // signed are fields of one value rather than two reads of one function.
+  const [fee, setFee] = useState<OperationFee | null>(null);
+  const [feeError, setFeeError] = useState<string | null>(null);
   const { pauseTimer, resumeTimer } = useAutoLock();
+
+  useEffect(() => {
+    const plan = descriptor.feePlan;
+    if (plan === undefined) return;
+    let live = true;
+    setFee(null);
+    setFeeError(null);
+    resolveOperationFee(plan)
+      .then((r) => {
+        if (live) setFee(r);
+      })
+      .catch((cause) => {
+        if (live) setFeeError(cause instanceof Error ? cause.message : String(cause));
+      });
+    return () => {
+      live = false;
+    };
+  }, [descriptor]);
+
+  // Fail closed, and this clause is load-bearing. A surface that advances
+  // without a resolved fee hands control to `submitNativeTx`, which reads its
+  // own quote after the password — reintroducing exactly the divergence R1
+  // closed, silently. No fee, no signature.
+  const feePending = descriptor.feePlan !== undefined && fee === null;
 
   // Suspend the idle auto-lock timer while this drawer is open so a long
   // signing operation is never interrupted mid-action; resume on unmount.
@@ -155,6 +186,8 @@ export function OperationsDrawer({ descriptor, onClose, onNavigate }: Props) {
   }, [stage, password]);
 
   const advanceFromPreview = () => {
+    // Layer 1 of 2 on the fail-closed rule; the Continue button is disabled too.
+    if (feePending) return;
     if (descriptor.auth === "none") {
       void runExecute();
       return;
@@ -186,9 +219,17 @@ export function OperationsDrawer({ descriptor, onClose, onNavigate }: Props) {
         // legacy installs (catalog entry with addressHex: null) and any
         // future address-corruption recovery picks up the live answer.
         try {
-          const addressHex = MlDsa65Backend.fromSeed(vaultSeed)
-            .getAddress()
-            .toLowerCase();
+          // Address only — the derived key is disposed before the backfill is
+          // even dispatched, so it does not linger for the unlock's duration.
+          const addressHex = withSigningBackend(vaultSeed, (backend) =>
+            backend.getAddress().toLowerCase(),
+          );
+          // Record the derivation BEFORE the backfill is dispatched. The
+          // backfill is a fire-and-forget store write that may fail; the fact
+          // that this process derived the address is already true either way,
+          // and gating it on a disk write would make a store error look like a
+          // failed proof of ownership.
+          markAddressDerived(addressHex);
           void captureAddressOnUnlock(activeSlot, addressHex).catch(() => {});
         } catch {
           // Never let an address-backfill failure break the unlock path.
@@ -222,7 +263,9 @@ export function OperationsDrawer({ descriptor, onClose, onNavigate }: Props) {
       setAuthBusy(false);
       // Clear the password from state immediately on success.
       setPassword("");
-      void runExecute({ vaultSeed });
+      // The SAME object the preview rendered from. Not a re-resolve, not a
+      // second read — `runExecute` forwards it into `ctx.resolvedFee`.
+      void runExecute({ vaultSeed, ...(fee === null ? {} : { resolvedFee: fee.signed }) });
       return;
     }
     if (descriptor.auth === "passkey") {
@@ -313,10 +356,13 @@ export function OperationsDrawer({ descriptor, onClose, onNavigate }: Props) {
         <StageRail stage={stage} />
 
         <div className="w-drawer__body">
-          {stage === "preview" ? <PreviewPane descriptor={descriptor} /> : null}
+          {stage === "preview" ? (
+            <PreviewPane descriptor={descriptor} fee={fee} feeError={feeError} />
+          ) : null}
           {stage === "auth" ? (
             <AuthPane
               descriptor={descriptor}
+              fee={fee}
               authError={authError}
               password={password}
               setPassword={setPassword}
@@ -342,7 +388,15 @@ export function OperationsDrawer({ descriptor, onClose, onNavigate }: Props) {
           {stage === "preview" ? (
             <>
               <button className="btn btn--ghost" onClick={onClose}>Cancel</button>
-              <button className="btn btn--primary" style={{ marginLeft: "auto" }} onClick={advanceFromPreview}>
+              {/* Layer 2 of 2. A priced operation cannot leave preview until the
+                  price is in hand — the alternative is signing a fee nobody
+                  showed. */}
+              <button
+                className="btn btn--primary"
+                style={{ marginLeft: "auto" }}
+                onClick={advanceFromPreview}
+                disabled={feePending}
+              >
                 {descriptor.auth === "none" ? "Run" : "Continue"}
               </button>
             </>
@@ -419,7 +473,15 @@ function StageRail({ stage }: { stage: OperationStage }) {
   );
 }
 
-function PreviewPane({ descriptor }: { descriptor: OperationDescriptor }) {
+function PreviewPane({
+  descriptor,
+  fee,
+  feeError,
+}: {
+  descriptor: OperationDescriptor;
+  fee: OperationFee | null;
+  feeError: string | null;
+}) {
   return (
     <>
       <div className="w-card" style={{ padding: 0 }}>
@@ -450,8 +512,57 @@ function PreviewPane({ descriptor }: { descriptor: OperationDescriptor }) {
               </div>
             ))
           )}
+          {/* The one row the drawer injects. Before this the pane rendered
+              `descriptor.diff` and nothing else, which is why a surface with no
+              fee row simply had no fee — eighteen of them. It is here, and not
+              in each surface's own array, so that a surface CANNOT declare a
+              price and then forget to show it: one place resolves, one place
+              renders, and both read the same object. */}
+          {descriptor.feePlan !== undefined ? (
+            <div className="w-kv" data-testid="operation-fee">
+              <span className="k">Network fee (max)</span>
+              {fee !== null ? (
+                <span className="v mono">{fee.displayLyth} LYTH</span>
+              ) : (
+                <span className="v" style={{ color: feeError === null ? undefined : "var(--warn)" }}>
+                  {feeError === null ? "Reading the network fee…" : "Fee unavailable — cannot continue"}
+                </span>
+              )}
+            </div>
+          ) : null}
         </div>
       </div>
+
+      {/* The disclosure tier. Closed by default — a confirm screen nobody reads
+          is the failure this whole surface is written against, and a `<details>`
+          a user can open is a different object from a row they must scroll past.
+          `<details>` rather than the shared collapsible: that one hides with the
+          `hidden` attribute, so its content leaves the accessibility tree, and a
+          signed fact must stay reachable whether the section is open or not. */}
+      {descriptor.details && descriptor.details.length > 0 ? (
+        <div className="w-card" style={{ padding: 0 }}>
+          <div className="w-card__body">
+            <details data-testid="operation-details">
+              <summary style={{ fontSize: 11.5, color: "var(--w-text-3)", cursor: "pointer" }}>
+                Transaction details
+              </summary>
+              <div style={{ marginTop: 8 }}>
+                {descriptor.details.map((line, i) => (
+                  <div key={i} className="w-kv">
+                    <span className="k">{line.k}</span>
+                    <span
+                      className="v mono"
+                      style={{ overflowWrap: "anywhere", wordBreak: "break-all" }}
+                    >
+                      {line.v}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </details>
+          </div>
+        </div>
+      ) : null}
 
       {descriptor.effects.length > 0 ? (
         <div className="w-card" style={{ padding: 0 }}>
@@ -473,6 +584,10 @@ function PreviewPane({ descriptor }: { descriptor: OperationDescriptor }) {
 
 interface AuthPaneProps {
   descriptor: OperationDescriptor;
+  /** Present once the preview resolved one. It EXISTS at this stage only
+   *  because the read moved ahead of the password — before D2 the fee was
+   *  chosen inside `execute`, so there was nothing here to show. */
+  fee: OperationFee | null;
   authError: AuthError | null;
   password: string;
   setPassword: (next: string) => void;
@@ -484,6 +599,7 @@ interface AuthPaneProps {
 
 function AuthPane({
   descriptor,
+  fee,
   authError,
   password,
   setPassword,
@@ -504,6 +620,40 @@ function AuthPane({
   }
   return (
     <>
+      {/* The transaction, at the moment the key is released.
+          The diff stays at `preview` — this is a summary, not a second copy of
+          it — but the commitment travels, because a user who reads the facts on
+          one screen and commits on another has not read them at the moment that
+          matters. The two facts here are the two that carry a decision: who is
+          paid, and how much.
+          `overflow-wrap: anywhere` and not `text-overflow: clip`: clipping drops
+          an address's tail with no signal, which is worse than no address. */}
+      <div className="w-card" style={{ padding: 0, marginBottom: 12 }} data-testid="auth-commitment">
+        <div className="w-card__body">
+          <div className="w-kv">
+            <span className="k">To</span>
+            <span className="v" style={{ overflowWrap: "anywhere", wordBreak: "break-all" }}>
+              {descriptor.commitment.subject}
+            </span>
+          </div>
+          <div className="w-kv">
+            <span className="k">Amount</span>
+            <span className="v mono">
+              {descriptor.commitment.amount ?? "No funds leave this wallet"}
+            </span>
+          </div>
+          {/* Third row, and it is new information rather than repetition: until
+              D2 the fee did not EXIST at this stage — it was chosen inside
+              `execute`, after the seed was released. It is here now because the
+              read moved ahead of the password, which is the whole point. */}
+          {fee !== null ? (
+            <div className="w-kv" data-testid="auth-fee">
+              <span className="k">Network fee (max)</span>
+              <span className="v mono">{fee.displayLyth} LYTH</span>
+            </div>
+          ) : null}
+        </div>
+      </div>
       <div className="w-banner">
         Enter your wallet password. The vault decrypts in-process via
         Argon2id + XChaCha20-Poly1305; the password never touches disk.
