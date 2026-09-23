@@ -29,10 +29,17 @@ import type { OperationFeePlan } from "../sdk/fee-quote";
  * wallet where `gasLimit` is chosen rather than defaulted — so it rides in the
  * plan from the same normalized input the transaction is built from.
  */
-function mrvFeePlan(executionUnitLimit: string | undefined, fallback: bigint): OperationFeePlan {
+function mrvFeePlan(
+  executionUnitLimit: string | undefined,
+  maxExecutionFeeLythoshi: string | undefined,
+  fallback: bigint,
+): OperationFeePlan {
   return {
     feeClass: "mrv",
     executionUnitLimit: executionUnitLimit === undefined ? fallback : BigInt(executionUnitLimit),
+    ...(maxExecutionFeeLythoshi === undefined
+      ? {}
+      : { maxFeePerGas: BigInt(maxExecutionFeeLythoshi) }),
   };
 }
 
@@ -90,6 +97,7 @@ export function RiscvContracts({ goto }: RiscvContractsProps) {
       },
       feePlan: mrvFeePlan(
         normalized.executionUnitLimit,
+        normalized.maxExecutionFeeLythoshi,
         MRV_DEFAULT_DEPLOY_EXECUTION_UNIT_LIMIT,
       ),
       diff: [
@@ -154,7 +162,11 @@ export function RiscvContracts({ goto }: RiscvContractsProps) {
         subject: normalized.contractAddress,
         amount: normalized.valueLyth === "0" ? null : `${normalized.valueLyth} LYTH`,
       },
-      feePlan: mrvFeePlan(normalized.executionUnitLimit, MRV_DEFAULT_CALL_EXECUTION_UNIT_LIMIT),
+      feePlan: mrvFeePlan(
+        normalized.executionUnitLimit,
+        normalized.maxExecutionFeeLythoshi,
+        MRV_DEFAULT_CALL_EXECUTION_UNIT_LIMIT,
+      ),
       diff: [
         { k: "Contract", v: normalized.contractAddress },
         { k: "Input", v: byteSummary(normalized.input) },

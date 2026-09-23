@@ -67,6 +67,21 @@ describe("each class reproduces its seam's own fee", () => {
     expect(fee.signed.maxFeePerGas).not.toBe(BASE);
   });
 
+  it("mrv honors a user-entered fee cap in both the display and signed fields", async () => {
+    const c = client();
+    const cap = SUMMED + 100n;
+    const fee = await resolveOperationFee(
+      { feeClass: "mrv", executionUnitLimit: 100_000n, maxFeePerGas: cap },
+      c.rpc,
+    );
+    const { formatLyth } = await import("@monolythium/core-sdk");
+    expect(c.reads()).toBe(1);
+    expect(fee.signed.maxFeePerGas).toBe(cap);
+    expect(fee.displayLyth).toBe(
+      formatLyth((cap * fee.signed.gasLimit).toString(), { includeUnit: false }),
+    );
+  });
+
   it("reads the node exactly once, whichever class", async () => {
     for (const feeClass of ["transfer", "registry", "mrv"] as const) {
       const c = client();

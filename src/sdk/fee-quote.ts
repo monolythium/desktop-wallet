@@ -56,6 +56,9 @@ export interface OperationFeePlan {
    *  seam passes — never a second literal, which is how a shown/signed pair
    *  drifts back apart. */
   executionUnitLimit: bigint;
+  /** MRV's optional user-entered per-unit cap. The quoted tip is still read
+   *  once, and the displayed reservation uses the cap that will be signed. */
+  maxFeePerGas?: bigint;
 }
 
 /**
@@ -108,7 +111,7 @@ async function resolveSignedFee(
     // tip, then the shared clamp.
     const quote = await getExecutionUnitQuote(client);
     return postClampResolvedFee({
-      maxFeePerGas: quote.summedLythoshi,
+      maxFeePerGas: plan.maxFeePerGas ?? quote.summedLythoshi,
       maxPriorityFeePerGas: quote.suggestedTipLythoshi,
       gasLimit: plan.executionUnitLimit,
     });
