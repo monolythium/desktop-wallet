@@ -92,9 +92,13 @@ fn signed_file_name(signature_b64: &str) -> Option<String> {
     )
     .ok()?;
     let text = String::from_utf8(decoded).ok()?;
-    let comment = text
-        .lines()
-        .find_map(|l| l.strip_prefix("trusted comment:"))?;
+    // minisign-verify authenticates the THIRD line. Its parser does not check
+    // the first line's prefix, so searching for the first matching prefix
+    // would let an unsigned first line impersonate the authenticated comment.
+    let mut lines = text.lines();
+    lines.next()?; // untrusted comment
+    lines.next()?; // signature bytes
+    let comment = lines.next()?.strip_prefix("trusted comment: ")?;
     comment
         .split('\t')
         .find_map(|field| field.trim().strip_prefix("file:"))
@@ -340,6 +344,21 @@ mod tests {
                 "`{label}` was accepted; an unevaluable binding must refuse"
             );
         }
+    }
+
+    #[test]
+    fn an_untrusted_comment_cannot_spoof_the_signed_bundle_name() {
+        // minisign-verify accepts any first line but authenticates line three.
+        // A release host can change line one without invalidating the signature.
+        let body = format!(
+            "trusted comment: timestamp:1\tfile:Monolythium Wallet_999.0.0_amd64.AppImage\n\
+             AAAAAAAAAAAAAAAA\n\
+             trusted comment: timestamp:1\tfile:{REAL_LINUX_APPIMAGE}\n\
+             BBBBBBBBBBBBBBBB\n"
+        );
+        let sig = base64::engine::general_purpose::STANDARD.encode(body);
+        assert_eq!(signed_file_name(&sig).as_deref(), Some(REAL_LINUX_APPIMAGE));
+        assert!(assert_version_binding("999.0.0", &sig).is_err());
     }
 
     #[test]
